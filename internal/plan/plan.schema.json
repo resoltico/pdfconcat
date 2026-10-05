@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
+  "title": "PDFConcat plan",
+  "description": "An ordered assembly of PDFs and generated blank pages.",
+  "type": "object",
+  "required": ["version", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1, "description": "Plan format version." },
+    "output": { "type": "string", "minLength": 1, "description": "Output PDF path, relative to the plan file. Overridden by -o." },
+    "dir": { "type": "string", "description": "Directory that relative PDF paths resolve against, relative to the plan file. Default: the plan file's directory." },
+    "blank": { "$ref": "#/$defs/blankStyle", "description": "Defaults for every generated blank." },
+    "items": { "$ref": "#/$defs/items" }
+  },
+  "$defs": {
+    "items": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1, "description": "A PDF path." },
+          {
+            "type": "object",
+            "required": ["blank"],
+            "additionalProperties": false,
+            "properties": {
+              "blank": { "$ref": "#/$defs/blankStyle" },
+              "count": { "type": "integer", "minimum": 1, "default": 1, "description": "Number of consecutive blank pages." }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["dir", "items"],
+            "additionalProperties": false,
+            "properties": {
+              "dir": { "type": "string", "description": "Directory for the nested items, relative to the enclosing directory." },
+              "items": { "$ref": "#/$defs/items" }
+            }
+          }
+        ]
+      }
+    },
+    "length": {
+      "oneOf": [
+        { "type": "number", "description": "Points (1/72 inch)." },
+        { "type": "string", "pattern": "^\\s*-?[0-9]*\\.?[0-9]+\\s*(pt|mm|cm|in)?\\s*$", "description": "A number with optional unit: pt, mm, cm, in." }
+      ]
+    },
+    "color": { "type": "string", "pattern": "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$" },
+    "blankStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": { "type": "string", "description": "inherit (default), A3, A4, A5, B4, B5, Letter, Legal, Tabloid, or WIDTHxHEIGHT[unit] such as 210x297mm." },
+        "background": { "$ref": "#/$defs/color", "description": "Page fill color. Default: none." },
+        "text": { "$ref": "#/$defs/textStyle" }
+      }
+    },
+    "textStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string", "description": "Text to print; an empty string means no text. \\n starts a new line." },
+        "font": {
+          "enum": [
+            "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
+            "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
+            "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique"
+          ],
+          "default": "Helvetica"
+        },
+        "size": { "$ref": "#/$defs/length", "description": "Font size. Default 12pt." },
+        "color": { "$ref": "#/$defs/color", "description": "Text color. Default #000000." },
+        "anchor": {
+          "enum": ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"],
+          "default": "center",
+          "description": "Page point the text block attaches to."
+        },
+        "x": { "$ref": "#/$defs/length", "description": "Move the block right of its anchor (negative: left). Default 0." },
+        "y": { "$ref": "#/$defs/length", "description": "Move the block up from its anchor (negative: down). Default 0." },
+        "width": { "$ref": "#/$defs/length", "description": "Wrap width of the block. Default: page width minus 72pt." },
+        "align": { "enum": ["left", "center", "right", "justify"], "default": "center", "description": "Justification of lines within the block." },
+        "leading": { "type": "number", "minimum": 1, "maximum": 10, "default": 1.2, "description": "Line height as a multiple of the font size." }
+      }
+    }
+  }
+}

@@ -1,0 +1,364 @@
+# golangci-lint configuration — strictest mode.
+#
+# Policy
+#   * Every available linter is enabled (`default: all`). The golangci-lint version is pinned in
+#     tools/go.mod, so new linters arrive only through a deliberate version bump.
+#   * There are NO inline exceptions: `//nolint` directives are forbidden (enforced by
+#     internal/repopolicy) and nolintlint is enabled as a second guard.
+#   * Every exception lives in this file, in the REGISTRY below, with a comment that states why.
+#     An exception without a justification, or one that no longer matches anything
+#     (`exclusions.warn-unused`), is a defect.
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  sort-order: [file, linter, severity]
+
+linters:
+  default: all
+
+  # ---------------------------------------------------------------------------
+  # REGISTRY — linters that are disabled, and why.
+  # ---------------------------------------------------------------------------
+  disable:
+    # Deprecated aliases: superseded by the *_v5 / *_v2 entries, which stay enabled.
+    - wsl             # superseded by wsl_v5
+    - exhaustruct     # superseded by exhaustruct_v5
+    - gomodguard      # superseded by gomodguard_v2
+
+    # Contradicts the domain model: BlankStyle/TextStyle are deliberately partial structs whose
+    # unset fields are meaningful (layered configuration); requiring every field to be spelled
+    # out would bury intent in noise and obscure which values were actually chosen.
+    - exhaustruct_v5
+
+    # PDFConcat's errors are messages for humans on a terminal, and nothing branches on their
+    # identity. Declaring a sentinel per message would be speculative generality (CONTRIBUTING.md:
+    # simplicity). Where callers do need to discriminate, a typed error exists (cli.UsageError).
+    - err113
+
+    # Stylistic overlap: nlreturn and wsl_v5 both police blank lines before return/branch
+    # statements and would demand contradictory layouts; wsl_v5 is the stricter, configurable one.
+    - nlreturn
+
+    # Forbids the scoped-error idiom `if err := f(); err != nil`, which is Go's standard way to
+    # keep err from leaking into the rest of the function. Its autofixer also emitted code that
+    # did not compile when err was already declared. Shadowing risks are covered by govet's strict
+    # shadow analyzer instead.
+    - noinlineerr
+
+    # Revisit when Option[T] or another type needs mixed receivers; the project's value types are
+    # all value-receiver only, so the check currently has nothing to say.
+    - recvcheck
+
+    # Technology the project does not use. These linters cannot find anything here, and they
+    # are listed (rather than silently absent) so that adopting such a technology forces a
+    # deliberate decision to re-enable the matching linter.
+    - testifylint     # testify (tests use stdlib testing only; depguard forbids testify)
+    - ginkgolinter    # ginkgo/gomega
+    - zerologlint     # zerolog
+    - loggercheck     # logging libraries
+    - sloglint        # log/slog
+    - promlinter      # Prometheus
+    - protogetter     # protobuf
+    - spancheck       # OpenTelemetry/OpenCensus
+    - sqlclosecheck   # database/sql
+    - rowserrcheck    # database/sql
+    - arangolint      # ArangoDB
+    - clickhouselint  # ClickHouse
+    - unqueryvet      # SQL builders
+    - bodyclose       # HTTP clients (the product is offline by contract)
+    - canonicalheader # net/http headers
+    - noctx           # HTTP requests; context plumbing is covered by contextcheck
+
+  settings:
+    cyclop:
+      max-complexity: 12
+      package-average: 6
+    depguard:
+      rules:
+        engine-boundary:
+          # docs/ARCHITECTURE.md: pdfcpu details live in internal/pdfengine and never leak across the application.
+          list-mode: lax
+          files:
+            - "!**/internal/pdfengine/*.go"
+            - "!**/internal/pdfengine/**/*.go"
+          deny:
+            - pkg: github.com/pdfcpu/pdfcpu
+              desc: pdfcpu may only be imported by internal/pdfengine
+        platform-boundary:
+          list-mode: lax
+          files:
+            - "!**/internal/publish/*.go"
+          deny:
+            - pkg: golang.org/x/sys
+              desc: OS-specific syscalls are isolated in internal/publish behind build tags
+        stdlib-first:
+          list-mode: lax
+          files:
+            - $all
+          deny:
+            - pkg: github.com/pkg/errors
+              desc: use the standard library errors package
+            - pkg: github.com/spf13/cobra
+              desc: the ordered --blank grammar is deliberately parsed without a CLI framework
+            - pkg: github.com/stretchr/testify
+              desc: tests use the standard library only
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    exhaustive:
+      default-signifies-exhaustive: false
+      check:
+        - switch
+        - map
+    forbidigo:
+      forbid:
+        - pattern: ^(fmt\.Print(f|ln)?|print|println)$
+          msg: write to an injected io.Writer; only cmd/pdfconcat touches the process streams
+        - pattern: ^os\.(Stdout|Stderr|Stdin)$
+          msg: process streams are wired in cmd/pdfconcat and injected
+    funlen:
+      lines: 60
+      statements: 40
+    gocognit:
+      min-complexity: 15
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - unnamedResult # contradicts nonamedreturns, which forbids the names it asks for
+        - hugeParam    # the large values here are small immutable structs passed once per page, not hot paths
+        - ptrToRefParam # pointer-to-slice parameters are never used here; the check has nothing to find
+    godoclint:
+      # Exported-symbol documentation is enforced by revive's `exported` rule; godoclint adds the
+      # structural package-comment rules. Its max-len rule would duplicate lll (and at 77 columns
+      # fight gofumpt/golines), and requiring a doc on every test function adds noise, not signal.
+      default: none
+      enable:
+        - pkg-doc
+        - single-pkg-doc
+        - require-pkg-doc
+        - start-with-name
+        - deprecated
+        - no-unused-link
+    godot:
+      # Declaration comments must be full sentences. The licence header is a fixed template that
+      # goheader enforces, so file-level comments are deliberately out of this linter's scope.
+      scope: declarations
+      # capital stays off: doc comments on unexported identifiers legitimately begin with the
+      # lower-case identifier name, and an autofixer capitalizing it corrupts the comment.
+      capital: false
+    goheader:
+      template: |-
+        SPDX-License-Identifier: MPL-2.0
+        Copyright (c) 2026 Ervins
+    gomoddirectives:
+      replace-allow-list: []
+      retract-allow-no-explanation: false
+    gosec:
+      excludes: []
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment trades domain-ordered, readable field groups for a few bytes of padding.
+        # No struct here is allocated at a scale where padding matters (the largest sequences are
+        # thousands of items), and its autofixer reorders fields in ways that break unkeyed literals.
+        - fieldalignment
+      settings:
+        shadow:
+          strict: true
+    iface:
+      enable:
+        - identical
+        - unused
+        - opaque
+    interfacebloat:
+      max: 5
+    ireturn:
+      allow:
+        - error
+        - generic
+        - stdlib
+    lll:
+      line-length: 140
+      tab-width: 4
+    maintidx:
+      under: 25
+    mnd:
+      # The "assign" check is off: a literal assigned to a named field or variable is labelled by
+      # that name (e.g. paper-size tables, `Width: 210`), which is what the rule asks for.
+      checks:
+        - argument
+        - case
+        - condition
+        - operation
+        - return
+      ignored-functions:
+        - ^os\.WriteFile$
+        - ^os\.MkdirAll$
+        - ^os\.OpenFile$
+        - ^strconv\.ParseUint$
+        - ^strconv\.FormatFloat$
+        - ^context\.WithTimeout$
+    nakedret:
+      max-func-lines: 0
+    nestif:
+      min-complexity: 4
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+    paralleltest:
+      ignore-missing: false
+    perfsprint:
+      strconcat: true
+    prealloc:
+      simple: false
+      range-loops: true
+      for-loops: true
+    predeclared:
+      qualified-name: true
+    revive:
+      enable-all-rules: true
+      rules:
+        - {name: add-constant, disabled: true} # duplicates mnd and goconst, with weaker configuration
+        - {name: cognitive-complexity, disabled: true} # duplicates gocognit
+        - {name: cyclomatic, disabled: true} # duplicates cyclop and gocyclo
+        - {name: function-length, disabled: true} # duplicates funlen
+        - {name: line-length-limit, disabled: true} # duplicates lll
+        - {name: max-public-structs, disabled: true} # package-level struct counts are a poor proxy for design quality
+        - {name: file-length-limit, disabled: true} # CONTRIBUTING.md: split files by responsibility, not by arbitrary line counts
+        - {name: banned-characters, disabled: true} # needs a configured character list; asciicheck covers identifiers
+        - {name: package-comments, disabled: true} # duplicates godoclint
+        - {name: unused-receiver, disabled: true} # duplicates unparam for the cases that matter here
+        - {name: comment-spacings, disabled: true} # duplicates gofumpt and godot
+        - {name: nested-structs, disabled: true} # anonymous test-table structs are idiomatic
+        - {name: flag-parameter, disabled: true} # bool parameters here select between two reporting formats
+        - {name: unhandled-error, disabled: true} # duplicates errcheck (which is configured stricter)
+        - {name: import-shadowing, disabled: true} # duplicates govet shadow and predeclared
+        - {name: confusing-results, disabled: true} # named results are forbidden by nonamedreturns, which this rule presumes
+    staticcheck:
+      checks: ["all"]
+    tagliatelle:
+      case:
+        rules:
+          json: camel
+    testpackage:
+      skip-regexp: (export|internal)_test\.go
+    thelper:
+      test:
+        first: true
+        name: true
+        begin: true
+    unparam:
+      check-exported: true
+    usetesting:
+      os-temp-dir: true
+    varnamelen:
+      min-name-length: 2
+      ignore-decls:
+        - t testing.TB
+        - tb testing.TB
+        - b *testing.B
+        - i int
+        - ok bool
+      ignore-names:
+        - err
+        - ok
+        - id
+        - tt
+        - fs
+        - x
+        - y
+        - r
+        - g
+        - b
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/resoltico/pdfconcat/*
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
+
+  exclusions:
+    generated: strict
+    warn-unused: true
+    presets: []
+    rules:
+      # Registry of path-scoped exceptions. Each states why the rule does not apply there.
+
+      # Tests construct throwaway values, repeat literals for readability, use long table
+      # literals, and rely on t.Fatalf for control flow; production-grade size/duplication
+      # limits would only fragment them.
+      # cmd/pdfconcat is the single place that touches the process streams, so forbidigo's
+      # stream ban is lifted there (and only there).
+      - path: cmd/pdfconcat/main\.go
+        linters:
+          - forbidigo
+
+      # Release metadata (commit, commit date) is stamped into package-level variables by the
+      # linker (-X main.commit=...), which cannot target constants or fields.
+      - path: cmd/pdfconcat/main\.go
+        linters:
+          - gochecknoglobals
+
+      # gosec G304 (file inclusion via variable): opening user-named files is the product's
+      # purpose. Every such open validates the path first (regular file, destination policy).
+      - path: internal/(pdfengine/pdfcpu|app/resolve)\.go
+        text: G304
+        linters:
+          - gosec
+
+      # Tests read back files at paths they created themselves inside t.TempDir() (G304), and run
+      # the binary they just built with arguments they chose (G204), and walk the repository's own
+      # checked-out files (G122, G703).
+      - path: _test\.go
+        text: G122|G204|G304|G703
+        linters:
+          - gosec
+
+      - path: _test\.go
+        linters:
+          - funlen
+          - goconst
+          - dupl
+          - maintidx
+          - cyclop
+          - gocognit
+          - mnd
+          - lll
+          - varnamelen
+          - gochecknoglobals
+          - errcheck
+          - wrapcheck
+
+formatters:
+  enable:
+    - gofumpt
+    - gci
+    - goimports
+    - golines
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/resoltico/pdfconcat)
+      custom-order: true
+    gofumpt:
+      extra:
+        group-params: true
+    goimports:
+      local-prefixes:
+        - github.com/resoltico/pdfconcat
+    golines:
+      max-len: 140
+      tab-len: 4
+      shorten-comments: false

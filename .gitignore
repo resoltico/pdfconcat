@@ -1,0 +1,21 @@
+# Build output
+/dist/
+/bin/
+/pdfconcat
+/pdfconcat.exe
+
+# Coverage and profiles
+*.out
+*.prof
+coverage.*
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local scratch files
+*.tmp
+*.swp
+*.test

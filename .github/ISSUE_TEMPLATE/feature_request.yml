@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a focused extension to PDFConcat.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the assembly problem, not only a proposed flag.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Desired workflow
+      description: Show the human or agent command/plan you want to be able to express.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Why this belongs in PDFConcat
+      description: PDFConcat intentionally has a narrow assembly scope.
+    validations:
+      required: true

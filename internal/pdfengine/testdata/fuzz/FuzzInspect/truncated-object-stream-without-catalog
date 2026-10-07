@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("%PDF-1.0000000\n1 0 obj <<0/Type 4 0 R00endobj\n4 0 obj <<>>stream")

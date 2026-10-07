@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output": "Evidence.pdf",
+  "dir": "source",
+  "blank": { "size": "A4", "text": { "anchor": "top-left", "x": "25mm", "y": "-30mm", "width": "100mm", "align": "left" } },
+  "items": [
+    "cover.pdf",
+    { "blank": { "text": { "value": "Part 1" } } },
+    { "dir": "part-1", "items": ["01.pdf", "02.pdf"] },
+    { "blank": { "text": { "value": "Part 2" } } },
+    { "dir": "part-2", "items": ["01.pdf", "02.pdf"] }
+  ]
+}

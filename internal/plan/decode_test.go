@@ -4,171 +4,290 @@
 package plan_test
 
 import (
-	"path/filepath"
+	"bytes"
+	"context"
+	"errors"
+	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/plan"
 )
 
-func decode(t *testing.T, text string) (plan.Document, error) {
-	t.Helper()
-	return plan.Decode(strings.NewReader(text), filepath.Join(string(filepath.Separator), "base"))
+type (
+	// oneByteReader returns one byte per Read.
+	oneByteReader struct{ reader *bytes.Reader }
+
+	// failingReader fails every Read with err.
+	failingReader struct{ err error }
+
+	// flippingContext is a context that reports cancellation once Err has been called flipAfter times, which
+	// lets a sweep land a cancellation at every kind of checkpoint the decoder has.
+	flippingContext struct {
+		calls     atomic.Int64
+		flipAfter int64
+	}
+)
+
+var errBoom = errors.New("boom")
+
+func checkAccepted(tb testing.TB, row *corpusCase, job *assembly.Job) {
+	tb.Helper()
+
+	err := job.Validate()
+	if err != nil {
+		tb.Fatalf("%s: accepted job violates the domain invariants: %v", row.Name, err)
+	}
 }
 
-func abs(parts ...string) string {
-	return filepath.Join(append([]string{string(filepath.Separator), "base"}, parts...)...)
+func checkRejected(tb testing.TB, row *corpusCase, err error) {
+	tb.Helper()
+
+	planErr := codedError(tb, err, row.Code)
+
+	if row.Pointer != "" && planErr.Location.Pointer != row.Pointer {
+		tb.Fatalf("%s: pointer = %q, want %q", row.Name, planErr.Location.Pointer, row.Pointer)
+	}
+
+	if planErr.Stage == plan.StageRead || planErr.Location.Line < 1 || planErr.Location.Column < 1 {
+		tb.Fatalf("%s: diagnostic is not located: %+v", row.Name, planErr.Location)
+	}
+
+	if planErr.Location.Source != inputName || planErr.Message == "" || planErr.Error() == "" || planErr.Unwrap() != nil {
+		tb.Fatalf("%s: malformed diagnostic %+v", row.Name, planErr)
+	}
 }
 
-func TestDecodeFlattensGroupsAndResolvesPaths(t *testing.T) {
+func TestCorpusDecoder(t *testing.T) {
 	t.Parallel()
 
-	document, err := decode(t, `{
-		"version": 1,
-		"output": "out/book.pdf",
-		"dir": "src",
-		"items": [
-			"cover.pdf",
-			{"dir": "part1", "items": ["a.pdf", {"dir": "deep", "items": ["b.pdf"]}]},
-			{"blank": {}, "count": 3},
-			"/abs/c.pdf"
-		]
-	}`)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
+	rows := corpus()
+	if len(rows) < 80 {
+		t.Fatalf("the shared corpus has %d cases; want at least 80", len(rows))
 	}
 
-	if document.Output != abs("out", "book.pdf") {
-		t.Errorf("Output = %q", document.Output)
-	}
-
-	wantPaths := []string{
-		abs("src", "cover.pdf"),
-		abs("src", "part1", "a.pdf"),
-		abs("src", "part1", "deep", "b.pdf"),
-		"",
-		filepath.Clean("/abs/c.pdf"),
-	}
-
-	items := document.Sequence.Items
-	if len(items) != len(wantPaths) {
-		t.Fatalf("items = %d, want %d", len(items), len(wantPaths))
-	}
-
-	for index, want := range wantPaths {
-		if items[index].Path != want {
-			t.Errorf("item %d path = %q, want %q", index, items[index].Path, want)
-		}
-	}
-
-	if items[3].Kind != assembly.Blank || items[3].Count != 3 {
-		t.Errorf("blank item = %+v", items[3])
-	}
-}
-
-func TestDecodeReadsBlankStyles(t *testing.T) {
-	t.Parallel()
-
-	document, err := decode(t, "\xEF\xBB\xBF"+`{
-		"$schema": "https://example.invalid/schema.json",
-		"version": 1,
-		"blank": {
-			"size": "Letter",
-			"background": "#eee",
-			"text": {
-				"value": "Hi", "font": "courier", "size": "10mm", "color": "#123456",
-				"anchor": "Top-Right", "x": -5, "y": "1in", "width": 200, "align": "right", "leading": 1.5
-			}
-		},
-		"items": ["a.pdf", {"blank": {"text": {"value": ""}}}]
-	}`)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	spec, err := document.Blank.Resolve(assembly.PageDim{})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-
-	text := spec.Text
-	if spec.Dim.Width != 612 || spec.Background.OrElse(assembly.Color{}) != (assembly.Color{R: 0xEE, G: 0xEE, B: 0xEE}) {
-		t.Errorf("page = %+v", spec)
-	}
-
-	if text.Value != "Hi" || text.Font != "Courier" || text.Anchor != assembly.AnchorTopRight || text.Align != assembly.AlignRight ||
-		text.X != -5 || text.Y != 72 || text.Width != 200 || text.Leading != 1.5 || text.Color != (assembly.Color{R: 0x12, G: 0x34, B: 0x56}) {
-		t.Errorf("text = %+v", text)
-	}
-
-	if !document.Sequence.Items[1].Blank.Text.Value.IsSet() {
-		t.Error("explicit empty text value must be recorded as set")
-	}
-}
-
-func TestDecodeRejectsMalformedPlans(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		text string
-		want string
-	}{
-		{"not json", `{"version": 1,`, "line"},
-		{"syntax error position", "{\n  \"version\": 1,\n  items\n}", "line 3"},
-		{"trailing data", `{"version":1,"items":["a.pdf"]} {}`, "after the top-level"},
-		{"missing version", `{"items":["a.pdf"]}`, "version: required"},
-		{"future version", `{"version":2,"items":["a.pdf"]}`, "version: 2 is not supported"},
-		{"unknown field", `{"version":1,"itemz":[]}`, "itemz"},
-		{"unknown nested field", `{"version":1,"blank":{"text":{"colour":"#000"}},"items":[]}`, "colour"},
-		{"item is a number", `{"version":1,"items":[7]}`, "items[0]"},
-		{"empty path", `{"version":1,"items":[""]}`, "items[0]: empty PDF path"},
-		{"object with both", `{"version":1,"items":[{"blank":{},"dir":"x","items":[]}]}`, "items[0]"},
-		{"object with neither", `{"version":1,"items":[{}]}`, "items[0]"},
-		{"count without blank", `{"version":1,"items":[{"dir":"x","items":[],"count":2}]}`, "items[0]"},
-		{"zero count", `{"version":1,"items":[{"blank":{},"count":0}]}`, "items[0].count"},
-		{"absurd count", `{"version":1,"items":[{"blank":{},"count":2000000}]}`, "items[0].count"},
-		{"invalid UTF-8", "{\"version\":1,\"items\":[\"a\xff.pdf\"]}", "UTF-8"},
-		{"group without items", `{"version":1,"items":[{"dir":"x"}]}`, "needs \"items\""},
-		{"bad color path", `{"version":1,"items":["a.pdf",{"blank":{"text":{"color":"red"}}}]}`, "items[1].blank.text.color"},
-		{"bad default size", `{"version":1,"blank":{"size":"huge"},"items":[]}`, "blank.size"},
-		{
-			"bad nested group item",
-			`{"version":1,"items":[{"dir":"d","items":["a.pdf",{"blank":{"background":"#12"}}]}]}`,
-			"items[0].items[1].blank.background",
-		},
-		{"length type", `{"version":1,"blank":{"text":{"x":true}},"items":[]}`, "number of points"},
-		{"bad length unit", `{"version":1,"blank":{"text":{"x":"3px"}},"items":[]}`, "blank.text.x"},
-		{"bad font", `{"version":1,"blank":{"text":{"font":"Papyrus"}},"items":[]}`, "blank.text.font"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, row := range rows {
+		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := decode(t, test.text)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Decode() error = %v, want containing %q", err, test.want)
+			job, err := decodeString(t, row.Doc)
+			if row.Code == "" {
+				if err != nil {
+					t.Fatalf("want accept, got %v", err)
+				}
+
+				checkAccepted(t, &row, job)
+
+				return
 			}
+
+			checkRejected(t, &row, err)
 		})
 	}
 }
 
-func TestDecodeRejectsOversizedPlans(t *testing.T) {
+// Read returns one byte per call, to prove that no verdict or location depends on chunking.
+func (o oneByteReader) Read(buffer []byte) (int, error) {
+	length, err := o.reader.Read(buffer[:min(1, len(buffer))])
+	if err != nil {
+		return length, io.EOF // a bytes.Reader fails only at the end of its data
+	}
+
+	return length, nil
+}
+
+func TestVerdictsDoNotDependOnReadChunking(t *testing.T) {
 	t.Parallel()
 
-	reader := &endlessReader{}
-	if _, err := plan.Decode(reader, abs()); err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("Decode() error = %v, want size limit", err)
+	for _, row := range corpus() {
+		_, whole := decodeString(t, row.Doc)
+		_, split := plan.Decode(context.Background(), inputFor(), oneByteReader{bytes.NewReader([]byte(row.Doc))})
+
+		if (whole == nil) != (split == nil) {
+			t.Fatalf("%s: %v vs %v", row.Name, whole, split)
+		}
+
+		if whole == nil {
+			continue
+		}
+
+		wholeErr, wholeOK := errors.AsType[*plan.Error](whole)
+		splitErr, splitOK := errors.AsType[*plan.Error](split)
+
+		if !wholeOK || !splitOK || *wholeErr != *splitErr {
+			t.Fatalf("%s: %+v vs %+v", row.Name, whole, split)
+		}
 	}
 }
 
-type endlessReader struct{}
+func TestBOMEdgeCases(t *testing.T) {
+	t.Parallel()
 
-func (*endlessReader) Read(buffer []byte) (int, error) {
-	for index := range buffer {
-		buffer[index] = ' '
+	for document, want := range map[string]plan.Code{
+		"\xef\xbb\xbf":          plan.CodeEmpty,
+		"\xef\xbb":              plan.CodeSyntax,
+		"\xef\xbb\xbf \n":       plan.CodeEmpty,
+		"\xef\xbb\xbf[1]":       plan.CodeNotObject,
+		"\xef\xbb\xbf{\"x\":1}": plan.CodeUnknownMember,
+		"\xef":                  plan.CodeSyntax,
+	} {
+		_, err := decodeString(t, document)
+		wantCode(t, err, want)
+	}
+}
+
+func TestTrailingDataIsLocatedAfterABOM(t *testing.T) {
+	t.Parallel()
+
+	for _, tail := range []string{" xyz", ` "`, ` }`, " {}", "\n\n  x", "\x00", "// comment", ","} {
+		prefix := "\xef\xbb\xbf" + minimalPlan + "\n"
+		_, err := decodeString(t, prefix+tail)
+		planErr := codedError(t, err, plan.CodeTrailingData)
+
+		want := int64(len(prefix) + len(tail) - len(strings.TrimLeft(tail, " \n")))
+		if planErr.Location.Offset != want {
+			t.Fatalf("%q: offset %d, want %d", tail, planErr.Location.Offset, want)
+		}
+	}
+}
+
+func TestDuplicateMemberLocation(t *testing.T) {
+	t.Parallel()
+
+	_, err := decodeString(t, "\xef\xbb\xbf{\"version\":1,\n \"items\":[\"a\"],\n \"vers\\u0069on\":1}")
+	planErr := codedError(t, err, plan.CodeDuplicateMember)
+
+	if planErr.Location.Line != 3 || planErr.Location.Pointer != "/version" || planErr.Stage != plan.StageSyntax {
+		t.Fatalf(diagnosticFormat, planErr)
+	}
+}
+
+func TestSyntaxErrorLocationAndStableMessage(t *testing.T) {
+	t.Parallel()
+
+	_, err := decodeString(t, "{\n\"version\":1,\n\"items\":[\"a\",]}")
+	planErr := codedError(t, err, plan.CodeSyntax)
+
+	if planErr.Location.Line != 3 || strings.Contains(planErr.Message, "`") {
+		t.Fatalf(diagnosticFormat, planErr)
+	}
+}
+
+func TestUnknownMemberHintsCase(t *testing.T) {
+	t.Parallel()
+
+	_, err := decodeString(t, `{"VERSION":1}`)
+	planErr := codedError(t, err, plan.CodeUnknownMember)
+
+	if !strings.Contains(planErr.Message, `did you mean "version"`) {
+		t.Fatal(planErr.Message)
+	}
+}
+
+func (f failingReader) Read([]byte) (int, error) { return 0, f.err }
+
+func TestDecodeReportsReadFailures(t *testing.T) {
+	t.Parallel()
+
+	partial := io.MultiReader(strings.NewReader(`{"version":1,`), failingReader{errBoom})
+
+	_, err := plan.Decode(context.Background(), plan.Input{Name: "r"}, partial)
+	planErr := codedError(t, err, plan.CodeReadFailed)
+
+	if !errors.Is(err, errBoom) || planErr.Stage != plan.StageRead {
+		t.Fatalf(diagnosticFormat, planErr)
 	}
 
-	return len(buffer), nil
+	_, err = plan.Decode(context.Background(), plan.Input{Name: "r"}, failingReader{errBoom})
+	wantCode(t, err, plan.CodeReadFailed)
+
+	// A failure while scanning for trailing data is a read failure too.
+	_, err = plan.Decode(
+		context.Background(),
+		plan.Input{Name: "r"},
+		io.MultiReader(strings.NewReader(minimalPlan+"  "), failingReader{errBoom}),
+	)
+	wantCode(t, err, plan.CodeReadFailed)
+}
+
+func TestCancelledContextStopsDecoding(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := plan.Decode(ctx, plan.Input{Name: "c"}, strings.NewReader(minimalPlan))
+	wantCode(t, err, plan.CodeInterrupted)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal("the cause is lost")
+	}
+}
+
+// everyMemberPlan uses every member the format has.
+func everyMemberPlan() string {
+	return `{"$schema":"s","version":1,"output":"o.pdf","dir":"d","blank":{"size":"A4","background":"#fff","text":{"value":"v",` +
+		`"font":{"file":"f.ttf"},"size":1,"color":"#000","anchor":"top","x":1,"y":2,"width":3,` +
+		`"align":"left","leading":1.5,"overflow":"allow"}},` +
+		`"items":["a",{"blank":{"text":{"font":"default"}},"count":2},{"dir":"g","items":["b"]}]}`
+}
+
+// TestEveryTruncationIsRejected decodes every proper prefix of a document that uses every member: none may be
+// accepted, and none may panic. This walks the end-of-input path of every reader in the decoder.
+func TestEveryTruncationIsRejected(t *testing.T) {
+	t.Parallel()
+
+	document := everyMemberPlan()
+	mustDecode(t, document)
+
+	for length := range len(document) {
+		_, err := decodeString(t, document[:length])
+
+		planErr, ok := errors.AsType[*plan.Error](err)
+		if !ok || planErr == nil {
+			t.Fatalf("prefix of %d bytes: %v is not a *plan.Error", length, err)
+		}
+	}
+}
+
+func (*flippingContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (*flippingContext) Done() <-chan struct{} { return nil }
+
+func (*flippingContext) Value(any) any { return nil }
+
+func (f *flippingContext) Err() error {
+	if f.calls.Add(1) > f.flipAfter {
+		return context.Canceled
+	}
+
+	return nil
+}
+
+func TestCancellationAtEveryCheckpointIsReported(t *testing.T) {
+	t.Parallel()
+
+	document := repeated(sourceStringJSON, 20000)
+
+	interrupted, completed := 0, 0
+
+	for flipAfter := range int64(60) {
+		_, err := plan.Decode(&flippingContext{flipAfter: flipAfter}, plan.Input{Name: "c"}, strings.NewReader(document))
+		if err == nil {
+			completed++
+
+			continue
+		}
+
+		wantCode(t, err, plan.CodeInterrupted)
+
+		interrupted++
+	}
+
+	if interrupted == 0 || completed == 0 {
+		t.Fatalf("the sweep interrupted %d and completed %d decodes; it must cross the end of the work", interrupted, completed)
+	}
 }

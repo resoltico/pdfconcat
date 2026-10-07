@@ -5,21 +5,16 @@ updates:
     schedule:
       interval: weekly
     groups:
-      go-runtime-dependencies:
+      go-dependencies:
         patterns:
           - "*"
 
-  - package-ecosystem: gomod
-    directory: /tools
-    schedule:
-      interval: weekly
-    groups:
-      go-development-tools:
-        patterns:
-          - "*"
-
+  # Covers the workflows and the composite actions under .github/actions. Dependabot proposes a
+  # new commit SHA and updates the release-tag comment beside it.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     groups:

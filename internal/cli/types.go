@@ -1,71 +1,105 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins
 
-// Package cli defines and parses PDFConcat's public command-line grammar.
+// Package cli defines and parses PDFConcat's command-line grammar and describes it as structured help.
+// It performs no filesystem access and writes no output: Parse turns arguments into a typed Command or a
+// *UsageError, and Help returns the documentation of a command as data.
 package cli
 
-import (
-	"fmt"
+import "github.com/resoltico/pdfconcat/internal/assembly"
 
-	"github.com/resoltico/pdfconcat/internal/assembly"
+type (
+	// Name identifies a command.
+	Name string
+
+	// Format is the rendering of a command's standard output.
+	Format uint8
+
+	// PlanSource says where the instructions of a build or check come from.
+	PlanSource uint8
+
+	// Command is a parsed command line. Only the fields that apply to Name are set.
+	Command struct {
+		// Name is the command. A help request is NameHelp whatever way it was asked for.
+		Name Name
+		// PlanPath is the --plan file; set only for PlanFile.
+		PlanPath string
+		// PlanJSON is the --plan-json text; set only for PlanInline.
+		PlanJSON string
+		// BaseDir is --base-dir; set only for PlanStdin and PlanInline.
+		BaseDir string
+		// Output is -o/--output, relative to the working directory; empty when the plan names the output.
+		Output string
+		// ReportPath is --report for build and check, relative to the working directory.
+		ReportPath string
+		// ReportFile is the saved report that the report command reads.
+		ReportFile string
+		// Part is --part, the id of one contribution.
+		Part string
+		// View is --view: "parts" or "diagnostics".
+		View string
+		// SchemaName is the schema command's operand: "plan" or "report".
+		SchemaName string
+		// HelpFor is the command a help request is about; empty for the root help.
+		HelpFor Name
+		// Operands are the direct PDF paths and --blank directives in command-line order, for PlanOperands.
+		// Each Position is the operand's zero-based index in the arguments, excluding the executable.
+		Operands []assembly.Operand
+		// Page is --page, a 1-based output page; 0 means unset.
+		Page int64
+		// Offset and Limit page a View; HasOffset and HasLimit say whether they were given.
+		Offset int64
+		Limit  int64
+		// Jobs is --jobs; 0 means unset, and an explicit value is at least 1.
+		Jobs int
+		// Format is the rendering requested with --format; JSON unless a valid --format text was given.
+		Format Format
+		// PlanSource selects which of PlanPath, PlanJSON, and Operands carries the instructions.
+		PlanSource PlanSource
+		// Details is --details: the complete result for build and check, full records for report.
+		Details bool
+		// Overwrite is --overwrite.
+		Overwrite bool
+		// HasOffset and HasLimit distinguish a given 0 from an absent option.
+		HasOffset, HasLimit bool
+	}
 )
 
-// BuildInfo contains release metadata shown by --version.
-type BuildInfo struct {
-	Version    string
-	Commit     string
-	CommitDate string
-}
-
-// StdinPlan is the --plan value that reads the plan from standard input.
-const StdinPlan = "-"
-
-// Request is the typed assembly request produced by command-line parsing.
-type Request struct {
-	// Output is the destination from -o; empty when the plan names it.
-	Output string
-	// PlanPath is the --plan value, or empty for a direct sequence.
-	PlanPath string
-	// Sequence is the direct command-line sequence; empty when PlanPath is set.
-	Sequence assembly.Sequence
-	// Blank holds the run-wide blank-page defaults given by --blank-* options.
-	Blank assembly.BlankStyle
-	// Overwrite permits replacing an existing output.
-	Overwrite bool
-	// DryRun inspects and reports without creating output.
-	DryRun bool
-	// JSON selects machine-readable reporting.
-	JSON bool
-}
-
-// Action is what the process should do for a parsed command line.
-type Action uint8
-
-// Actions of a parsed command line.
 const (
-	ActionAssemble Action = iota + 1
-	ActionHelp
-	ActionVersion
-	ActionPrintSchema
+	// NameBuild assembles a PDF.
+	NameBuild Name = "build"
+	// NameCheck validates a job without creating a PDF.
+	NameCheck Name = "check"
+	// NameReport queries a saved report.
+	NameReport Name = "report"
+	// NameSchema prints a JSON Schema.
+	NameSchema Name = "schema"
+	// NameVersion prints version information.
+	NameVersion Name = "version"
+	// NameHelp prints help.
+	NameHelp Name = "help"
+
+	// rootContext is the position before a command is named; it accepts only --help, --version, and --format.
+	rootContext Name = ""
+
+	// FormatJSON is compact JSON, the default.
+	FormatJSON Format = 0
+	// FormatText is human-readable text.
+	FormatText Format = 1
+
+	// PlanNone is the absence of instructions: report, schema, version, and help commands.
+	PlanNone PlanSource = 0
+	// PlanFile is --plan FILE.
+	PlanFile PlanSource = 1
+	// PlanStdin is --plan -.
+	PlanStdin PlanSource = 2
+	// PlanInline is --plan-json JSON.
+	PlanInline PlanSource = 3
+	// PlanOperands is a direct sequence of PDF paths and --blank.
+	PlanOperands PlanSource = 4
+
+	// SchemaPlan is the schema command's name for the plan schema.
+	SchemaPlan = "plan"
+	// SchemaReport is the schema command's name for the saved-report schema.
+	SchemaReport = "report"
 )
-
-// Command is a parsed command line.
-type Command struct {
-	Action  Action
-	Request Request
-}
-
-// UsageError reports a malformed command line; the process exits with status 2.
-type UsageError struct {
-	Message string
-}
-
-// Error returns the message.
-func (e *UsageError) Error() string {
-	return e.Message
-}
-
-// Usagef formats a UsageError.
-func Usagef(format string, args ...any) *UsageError {
-	return &UsageError{Message: fmt.Sprintf(format, args...)}
-}

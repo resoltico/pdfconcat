@@ -8,71 +8,92 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 )
 
-// progressStep limits redraws: at most about 100 updates per phase.
-const progressStep = 100
-
-// progress renders a single self-overwriting status line; a nil writer disables it.
+// progress writes one self-overwriting status line to an interactive terminal. It never writes to
+// standard output, and a nil writer disables it. A write failure disables it as well: a broken terminal
+// must not fail the command.
 type progress struct {
-	out   io.Writer
-	label string
-	total int
-
-	mu    sync.Mutex
-	done  int
-	drawn int // Number of completed units at the last redraw.
-	width int // Widest line drawn so far, in characters.
+	out      io.Writer
+	now      func() time.Time
+	last     time.Time
+	stage    string
+	mutex    sync.Mutex
+	width    int
+	redraws  int
+	disabled bool
 }
 
-func newProgress(out io.Writer, label string, total int) *progress {
-	return &progress{out: out, label: label, total: total}
+const (
+	// minRedrawInterval is the shortest time between two redraws of a stage's counter.
+	minRedrawInterval = 100 * time.Millisecond
+	// maxRedraws bounds the counter redraws of a whole run; stage transitions are not counted.
+	maxRedraws = 600
+
+	// The stage names shown on the progress line.
+	stagePrepare = "prepare"
+	stageInspect = "inspect"
+	stageRender  = "render"
+	stageMerge   = "merge"
+	stagePersist = "publish"
+)
+
+func newProgress(out io.Writer, now func() time.Time) *progress {
+	return &progress{out: out, now: now, disabled: out == nil}
 }
 
-// advance records one completed unit and redraws at most about progressSteps times.
-func (p *progress) advance() {
-	if p.out == nil {
+// enter starts a stage and always draws its name.
+func (p *progress) enter(stage string) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	p.stage = stage
+	p.draw("pdfconcat: " + stage)
+	p.last = p.now()
+}
+
+// step shows how many of total units of the current stage are done. Redraws are limited in rate and in total.
+func (p *progress) step(done, total int) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.disabled || p.redraws >= maxRedraws || p.now().Sub(p.last) < minRedrawInterval {
 		return
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.done++
-
-	step := max(p.total/progressStep, 1)
-	if p.done == p.total || p.done-p.drawn >= step {
-		p.drawn = p.done
-		p.draw(fmt.Sprintf("%s %d/%d", p.label, p.done, p.total))
-	}
+	p.redraws++
+	p.last = p.now()
+	p.draw(fmt.Sprintf("pdfconcat: %s %d/%d", p.stage, done, total))
 }
 
-// finish erases the status line.
-func (p *progress) finish() {
-	if p.out == nil {
+// erase erases the status line.
+func (p *progress) erase() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.width == 0 {
 		return
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.width > 0 {
-		p.draw(strings.Repeat(" ", p.width))
-		p.draw("")
-	}
+	p.draw("")
+	p.width = 0
 }
 
-// draw rewrites the status line. A write failure disables further progress output,
-// since a broken progress stream must never fail the assembly itself.
+// draw rewrites the line, padding with spaces over what was there. The caller holds the mutex.
 func (p *progress) draw(text string) {
-	if p.out == nil {
+	if p.disabled {
+		return
+	}
+
+	padding := max(p.width-len(text), 0)
+
+	_, err := fmt.Fprintf(p.out, "\r%s%s\r%s", text, strings.Repeat(" ", padding), text)
+	if err != nil {
+		p.disabled = true
+
 		return
 	}
 
 	p.width = max(p.width, len(text))
-
-	_, err := fmt.Fprintf(p.out, "\r%s", text)
-	if err != nil {
-		p.out = nil
-	}
 }

@@ -1,109 +1,79 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins
 
-// Package main wires the pdfconcat command-line executable.
+// Package main is the pdfconcat executable: it connects the process (signals, streams, working directory,
+// build metadata) to internal/app and exits with the code the command decides.
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"github.com/resoltico/pdfconcat/internal/app"
-	"github.com/resoltico/pdfconcat/internal/cli"
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
-	"github.com/resoltico/pdfconcat/internal/plan"
 )
 
-// Process exit statuses.
-const (
-	exitOperationalFailure = 1
-	exitUsage              = 2
-)
-
-// Build metadata, populated by release ldflags.
-var (
-	version    = "dev"
-	commit     = "none"
-	commitDate = "unknown"
-)
+// Release or snapshot version, set at link time with -ldflags "-X main.version=...".
+// Ordinary builds use the project version; the toolchain supplies commit provenance (see app.ResolveBuild).
+var version string
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	// A write to a closed standard output must come back as an error the command can report, not end the
+	// process with SIGPIPE before it can say what it already did.
+	signal.Ignore(syscall.SIGPIPE)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := run(ctx, os.Args[1:])
+	defer stop()
 
-	stop()
-	os.Exit(code)
+	// After the first signal restore the default behavior, so a second one ends a command that is slow to stop.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	workingDir, err := os.Getwd()
+	if err != nil {
+		workingDir = "" // the command reports the missing working directory when it needs one
+	}
+
+	info, _ := debug.ReadBuildInfo()
+
+	env := app.Env{
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		Progress:   progressStream(),
+		WorkingDir: workingDir,
+		Build:      app.ResolveBuild(version, info),
+	}
+
+	return app.New(func() (app.Engine, error) {
+		engine, engineErr := pdfengine.New()
+		if engineErr != nil {
+			return nil, fmt.Errorf("create the PDF engine: %w", engineErr)
+		}
+
+		return engine, nil
+	}).Run(ctx, os.Args[1:], env)
 }
 
-func run(ctx context.Context, args []string) int {
-	command, err := cli.Parse(args)
-	if err != nil {
-		return reportFailure(err)
-	}
-
-	switch command.Action {
-	case cli.ActionHelp:
-		return printText(cli.HelpText())
-	case cli.ActionVersion:
-		return printText(cli.VersionText(cli.BuildInfo{Version: version, Commit: commit, CommitDate: commitDate}))
-	case cli.ActionPrintSchema:
-		return printText(plan.Schema())
-	case cli.ActionAssemble:
-		return assemble(ctx, &command.Request)
-	default:
-		return reportFailure(fmt.Errorf("internal error: unhandled command action %d", command.Action))
-	}
-}
-
-func assemble(ctx context.Context, request *cli.Request) int {
-	engine, err := pdfengine.NewPDFCPU()
-	if err != nil {
-		return reportFailure(fmt.Errorf("initialize PDF engine: %w", err))
-	}
-
-	runner := app.New(engine, app.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Progress: progressStream()})
-
-	err = runner.Run(ctx, *request)
-	if err != nil {
-		return reportFailure(err)
-	}
-
-	return 0
-}
-
-// progressStream returns stderr when it is an interactive terminal, so progress
-// never pollutes redirected logs.
+// progressStream returns standard error when it is an interactive terminal on any supported operating
+// system, so progress never reaches a redirected log or standard output.
 func progressStream() io.Writer {
-	info, err := os.Stderr.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-		return nil
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		return os.Stderr
 	}
 
-	return os.Stderr
-}
-
-func printText(text string) int {
-	if _, err := os.Stdout.WriteString(text); err != nil {
-		return exitOperationalFailure
-	}
-
-	return 0
-}
-
-func reportFailure(err error) int {
-	if usage, ok := errors.AsType[*cli.UsageError](err); ok {
-		fmt.Fprintln(os.Stderr, "pdfconcat:", usage)
-		fmt.Fprintln(os.Stderr, "Run 'pdfconcat --help' for usage.")
-
-		return exitUsage
-	}
-
-	fmt.Fprintln(os.Stderr, "pdfconcat:", err)
-
-	return exitOperationalFailure
+	return nil
 }

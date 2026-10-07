@@ -3,65 +3,225 @@
 
 package cli
 
-import "fmt"
+import (
+	"fmt"
+	"io"
+	"strings"
+)
 
-// HelpText returns the complete command-line help text.
-func HelpText() string {
-	return `PDFConcat assembles PDFs in an explicit order and inserts generated blank pages at explicit positions.
+type (
+	// HelpDoc is the structured help of the root or of one command. Rendered as JSON it is the default help
+	// output; RenderText gives the human form of the same content.
+	HelpDoc struct {
+		// Kind is always "help".
+		Kind string `json:"kind"`
+		// Command is the command described; absent for the root help.
+		Command Name   `json:"command,omitempty"`
+		Summary string `json:"summary"`
+		// Example is one exact command to run next.
+		Example string   `json:"example"`
+		Usage   []string `json:"usage"`
+		// Commands lists the commands; present only in the root help.
+		Commands []HelpCommand `json:"commands,omitempty"`
+		// Options lists exactly the options that apply.
+		Options []HelpOption `json:"options"`
+		Notes   []string     `json:"notes,omitempty"`
+	}
 
-Usage:
-  pdfconcat -o OUTPUT.pdf [options] ITEM...
-  pdfconcat [-o OUTPUT.pdf] [options] --plan PLAN.json
-  pdfconcat [-o OUTPUT.pdf] [options] --plan -        (plan from standard input)
+	// HelpCommand is one line of the root help's command list.
+	HelpCommand struct {
+		Name    Name   `json:"name"`
+		Summary string `json:"summary"`
+	}
 
-An ITEM is a PDF path or --blank. Items appear in the output in the order given.
-For more than a few dozen files, use a plan file: command lines are limited
-(about 32 KB on Windows) and shells differ in how they expand wildcards.
+	// HelpOption describes one option.
+	HelpOption struct {
+		Name    string `json:"name"`
+		Short   string `json:"short,omitempty"`
+		Value   string `json:"value,omitempty"`
+		Summary string `json:"summary"`
+	}
 
-Sequence:
-  --blank              Insert one generated blank page at this position.
-  --blank=TEXT         Insert one blank page printing TEXT (overrides --blank-text).
-  --                   Treat every later argument as a PDF path.
+	// helpEntry is the prose of one command's help.
+	helpEntry struct {
+		summary string
+		example string
+		usage   []string
+		notes   []string
+	}
+)
 
-Options:
-  -o, --output FILE    Output PDF path (required unless the plan names one).
-      --plan FILE      Read the sequence from a JSON plan file ('-' for stdin).
-      --overwrite      Replace an existing output once a verified result is ready.
-      --dry-run        Validate and report the assembly without creating output.
-      --json           Report the result (or dry-run) as JSON on stdout.
-      --print-schema   Print the JSON Schema of plan files and exit.
-  -h, --help           Show this help.
-      --version        Show build version information.
+// helpKind is the Kind of every help document.
+const helpKind = "help"
 
-Generated-blank defaults (apply to every blank; the plan can refine each one):
-      --blank-size SIZE         inherit (default), A4, Letter, ..., or 210x297mm
-      --blank-background COLOR  Page fill color, #RRGGBB or #RGB (default: none)
-      --blank-text TEXT         Text printed on the page (default: none)
-      --blank-font NAME         Standard font, e.g. Helvetica, Times-Roman, Courier
-      --blank-font-size LENGTH  Default 12pt
-      --blank-color COLOR       Text color, default #000000
-      --blank-anchor ANCHOR     top-left, top, top-right, left, center (default),
-                                right, bottom-left, bottom, bottom-right
-      --blank-x LENGTH          Move the text right of its anchor (negative: left)
-      --blank-y LENGTH          Move the text up from its anchor (negative: down)
-      --blank-width LENGTH      Text wraps at this width (default: page width - 72pt)
-      --blank-align ALIGN       left, center (default), right, justify
-      --blank-leading NUMBER    Line height as a multiple of font size, default 1.2
+// Help returns the structured help of a command, or of the root for an empty or unknown name.
+func Help(name Name) HelpDoc {
+	if _, found := commandNamed(string(name)); !found {
+		name = rootContext
+	}
 
-LENGTH is a number with optional unit: 12, 12pt, 20mm, 2cm, 0.5in (bare = points).
-Use --option=VALUE for a value that begins with '-'.
+	entry := helpContents()[name]
+	doc := HelpDoc{
+		Kind: helpKind, Command: name, Summary: entry.summary, Usage: entry.usage, Notes: entry.notes, Example: entry.example,
+	}
 
-Examples:
-  pdfconcat -o Annex.pdf 01.pdf 02.pdf --blank 03.pdf
-  pdfconcat -o Annex.pdf --blank-text "Intentionally left blank" a.pdf --blank b.pdf
-  pdfconcat --plan Annex.json --dry-run
-  jq -n '{version:1,items:$ARGS.positional}' --args *.pdf | pdfconcat -o all.pdf --plan -
+	specs := optionSpecs()
+	for i := range specs {
+		if specs[i].appliesTo(name) {
+			doc.Options = append(doc.Options,
+				HelpOption{Name: specs[i].name, Short: specs[i].short, Value: specs[i].value, Summary: specs[i].summary})
+		}
+	}
 
-Exit status: 0 success, 1 operational failure, 2 usage error.
-`
+	if name == rootContext {
+		for _, command := range commandNames() {
+			doc.Commands = append(doc.Commands, HelpCommand{Name: command, Summary: helpContents()[command].summary})
+		}
+	}
+
+	return doc
 }
 
-// VersionText formats release metadata for --version.
-func VersionText(build BuildInfo) string {
-	return fmt.Sprintf("pdfconcat %s\ncommit: %s\ncommit date: %s\n", build.Version, build.Commit, build.CommitDate)
+// helpContents holds the prose of each command's help.
+func helpContents() map[Name]helpEntry {
+	return map[Name]helpEntry{
+		NameBuild:  buildHelp(),
+		NameCheck:  checkHelp(),
+		NameReport: reportHelp(),
+		NameSchema: {
+			summary: "Print the JSON Schema of a plan or a saved report.",
+			usage:   []string{"pdfconcat schema plan|report"},
+			notes:   []string{"The schema is the whole output: raw JSON, never wrapped."},
+			example: "pdfconcat schema plan",
+		},
+		NameVersion: {
+			summary: "Print the version, commit, and commit date.",
+			usage:   []string{"pdfconcat version"},
+			example: "pdfconcat version",
+		},
+		NameHelp: {
+			summary: "Show help for a command.",
+			usage:   []string{"pdfconcat help [COMMAND]"},
+			example: "pdfconcat help build",
+		},
+		rootContext: {
+			summary: "Assemble PDFs in an explicit order and insert generated pages at explicit positions.",
+			usage:   []string{"pdfconcat COMMAND [options]"},
+			notes: []string{
+				"Standard output is compact JSON; --format text is a human rendering, not an interface to parse.",
+				"Exit status: 0 success, 2 invalid instructions, 1 I/O, backend, or publication failure, 130 interrupted.",
+				"Run pdfconcat help COMMAND for one command's options.",
+			},
+			example: "pdfconcat schema plan",
+		},
+	}
+}
+
+func buildHelp() helpEntry {
+	return helpEntry{
+		summary: "Assemble a PDF from a plan or from direct operands.",
+		usage: []string{
+			"pdfconcat build --plan FILE|- [-o FILE] [options]",
+			"pdfconcat build --plan-json JSON [-o FILE] [options]",
+			"pdfconcat build -o FILE [options] [--] PDF|--blank ...",
+		},
+		notes: []string{
+			"Give exactly one plan source: --plan, --plan-json, or direct operands (PDF paths and --blank, in output order).",
+			"After -- every argument is a path; write ./--blank for a file named --blank.",
+			"A value that starts with - needs the attached form, --name=value.",
+			"Default output is a bounded JSON summary; --report FILE keeps the complete result for pdfconcat report.",
+		},
+		example: "pdfconcat build --plan job.json",
+	}
+}
+
+func checkHelp() helpEntry {
+	return helpEntry{
+		summary: "Validate inputs and layout without creating a PDF.",
+		usage: []string{
+			"pdfconcat check --plan FILE|- [-o FILE] [options]",
+			"pdfconcat check --plan-json JSON [-o FILE] [options]",
+			"pdfconcat check [options] [--] PDF|--blank ...",
+		},
+		notes: []string{
+			"Plan sources and options are those of build; -o additionally checks the destination.",
+			"Snapshots of the inputs are scratch files; no PDF is published.",
+		},
+		example: "pdfconcat check --plan job.json --report job.report.json",
+	}
+}
+
+func reportHelp() helpEntry {
+	return helpEntry{
+		summary: "Query a saved report without reopening any PDF.",
+		usage:   []string{"pdfconcat report FILE [--part ID | --page N | --view parts|diagnostics] [--offset N] [--limit N] [--details]"},
+		notes: []string{
+			"Choose at most one of --part, --page, --view; --offset and --limit page a --view.",
+			"A negative number needs the attached form, --limit=-1, and is rejected.",
+		},
+		example: "pdfconcat report job.report.json --view diagnostics --limit 20",
+	}
+}
+
+// RenderText writes the help as human-readable text.
+func (d HelpDoc) RenderText(out io.Writer) error {
+	var text strings.Builder
+
+	title := "pdfconcat"
+	if d.Command != rootContext {
+		title += " " + string(d.Command)
+	}
+
+	fmt.Fprintf(&text, "%s: %s\n\nUsage:\n", title, d.Summary)
+
+	for _, line := range d.Usage {
+		fmt.Fprintf(&text, "  %s\n", line)
+	}
+
+	if len(d.Commands) > 0 {
+		rows := make([][2]string, len(d.Commands))
+		for i, command := range d.Commands {
+			rows[i] = [2]string{string(command.Name), command.Summary}
+		}
+
+		writeTable(&text, "Commands", rows)
+	}
+
+	rows := make([][2]string, len(d.Options))
+	for i, option := range d.Options {
+		rows[i] = [2]string{optionLabel(option.Name, option.Short, option.Value), option.Summary}
+	}
+
+	writeTable(&text, "Options", rows)
+
+	if len(d.Notes) > 0 {
+		text.WriteString("\nNotes:\n")
+
+		for _, note := range d.Notes {
+			fmt.Fprintf(&text, "  - %s\n", note)
+		}
+	}
+
+	fmt.Fprintf(&text, "\nNext step:\n  %s\n", d.Example)
+
+	_, err := io.WriteString(out, text.String())
+	if err != nil {
+		return fmt.Errorf("render help: %w", err)
+	}
+
+	return nil
+}
+
+// writeTable writes a titled two-column list with the second column aligned.
+func writeTable(text *strings.Builder, title string, rows [][2]string) {
+	width := 0
+	for _, row := range rows {
+		width = max(width, len(row[0]))
+	}
+
+	fmt.Fprintf(text, "\n%s:\n", title)
+
+	for _, row := range rows {
+		fmt.Fprintf(text, "  %-*s  %s\n", width, row[0], row[1])
+	}
 }

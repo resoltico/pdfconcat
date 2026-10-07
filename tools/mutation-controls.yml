@@ -1,0 +1,28 @@
+# Deliberate defects the test suite must detect (go run ./tools/qualitygate controls).
+#
+# Each control replaces one source line, found by its exact trimmed text, with a line that still
+# compiles but breaks a property the project promises. The package's tests must then fail. A control
+# whose anchor no longer occurs exactly once, or whose defect no longer compiles, is reported as broken:
+# update it to the current code (keep the property, change the anchor) when the code it targets moves.
+version: 1
+controls:
+  # Strict plan decoding rejects data after the top-level value.
+  - id: plan-accepts-trailing-data
+    package: ./internal/plan
+    file: internal/plan/decode.go
+    anchor: if !isJSONSpace(p.doc.data[position]) {
+    replacement: if false && !isJSONSpace(p.doc.data[position]) {
+
+  # Publication refuses to replace an existing destination without explicit authorization.
+  - id: publish-ignores-overwrite-policy
+    package: ./internal/publish
+    file: internal/publish/publish.go
+    anchor: "case existing == refuseExisting:"
+    replacement: "case false:"
+
+  # The output page order is the sequence order.
+  - id: layout-reorders-source-runs
+    package: ./internal/assembly
+    file: internal/assembly/layout.go
+    anchor: 'r.layout.Runs = append(r.layout.Runs, Run{Kind: RunSource, Index: contribution.File, FirstPage: 1, Count: pages})'
+    replacement: 'r.layout.Runs = append([]Run{{Kind: RunSource, Index: contribution.File, FirstPage: 1, Count: pages}}, r.layout.Runs...)'

@@ -4,60 +4,215 @@
 package repopolicy_test
 
 import (
+	"context"
+	"os"
 	"os/exec"
-	"regexp"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
-// linkedModules returns the third-party modules linked into the executable for each release OS.
-func linkedModules(t *testing.T, root string) map[string]bool {
+const ownModule = "github.com/resoltico/pdfconcat"
+
+// goroot asks the Go toolchain where its standard library, and its LICENSE, live.
+func goroot(t *testing.T) string {
 	t.Helper()
 
-	linked := map[string]bool{}
-
-	for _, goos := range []string{"darwin", "linux", "windows"} {
-		command := exec.Command("go", "list", "-deps", "-f", "{{with .Module}}{{.Path}}{{end}}", "./cmd/pdfconcat")
-		command.Dir = root
-		command.Env = append(command.Environ(), "GOOS="+goos)
-
-		output, err := command.Output()
-		if err != nil {
-			t.Fatalf("go list for %s: %v", goos, err)
-		}
-
-		for module := range strings.FieldsSeq(string(output)) {
-			if module != "github.com/resoltico/pdfconcat" {
-				linked[module] = true
-			}
-		}
+	output, err := exec.CommandContext(t.Context(), "go", "env", "GOROOT").Output()
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if len(linked) == 0 {
+	return strings.TrimSpace(string(output))
+}
+
+// TestNoticesMatchLinkedModules checks the real notices against the real release dependency graph:
+// every linked module has a row at the version go.mod selects, and the license texts shipped under
+// third_party reproduce the license files of the module versions that are linked.
+func TestNoticesMatchLinkedModules(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+
+	modules, err := repopolicy.LinkedModules(context.Background(), root, ownModule)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(modules) == 0 {
 		t.Fatal("no third-party modules found; the go list invocation has drifted")
 	}
 
-	return linked
+	problems, err := repopolicy.NoticeIssues(root, goroot(t), modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(problems) > 0 {
+		t.Fatalf("THIRD_PARTY_NOTICES.md does not match the linked modules:\n%s", strings.Join(problems, "\n"))
+	}
 }
 
-// TestNoticesListExactlyTheLinkedModules fails for a linked module without a notice, and for a notice
-// without a linked module.
-func TestNoticesListExactlyTheLinkedModules(t *testing.T) {
-	t.Parallel()
+// noticesFixture builds a repository root with one linked module and a Go toolchain directory.
+func noticesFixture(t *testing.T, mutate func(files map[string]string)) (string, string, []repopolicy.LinkedModule) {
+	t.Helper()
 
-	root := moduleRoot(t)
-	notices := readText(t, root, "THIRD_PARTY_NOTICES.md")
-	linked := linkedModules(t, root)
+	base := t.TempDir()
+	moduleDir := filepath.Join(base, "mod")
+	gorootDir := filepath.Join(base, "goroot")
 
-	for module := range linked {
-		if !strings.Contains(notices, "| `"+module+"` |") {
-			t.Errorf("module %s is linked but has no row in THIRD_PARTY_NOTICES.md", module)
+	files := map[string]string{
+		"root/go.mod":                       "module example.test/app\n\ngo 1.27.1\n",
+		"root/third_party/licenses/BSD.txt": "Copyright The Go Authors.\nRedistribution and use.\n",
+		"root/third_party/licenses/MIT.txt": "MIT License\nCopyright Example\n",
+		"mod/LICENSE":                       "MIT License\r\nCopyright Example  \r\n\r\n",
+		"goroot/LICENSE":                    "Copyright The Go Authors.\nRedistribution and use.\n",
+		"root/THIRD_PARTY_NOTICES.md": noticeTable(
+			"| `example.test/dep` | v1.2.3 | MIT | a dependency | `third_party/licenses/MIT.txt` |",
+		),
+	}
+
+	mutate(files)
+
+	for name, content := range files {
+		full := filepath.Join(base, filepath.FromSlash(name))
+
+		err := os.MkdirAll(filepath.Dir(full), 0o750)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = os.WriteFile(full, []byte(content), 0o600)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 
-	for _, match := range regexp.MustCompile("(?m)^\\| `([^`]+)` \\|").FindAllStringSubmatch(notices, -1) {
-		if !linked[match[1]] {
-			t.Errorf("THIRD_PARTY_NOTICES.md lists %s, which is not linked into any release binary", match[1])
-		}
+	return filepath.Join(base, "root"), gorootDir, []repopolicy.LinkedModule{{Path: "example.test/dep", Version: "v1.2.3", Dir: moduleDir}}
+}
+
+func noticeTable(rows ...string) string {
+	return "| Component | Version | License | Purpose | License copy |\n| --- | --- | --- | --- | --- |\n" +
+		"| Go standard library | Go 1.27.1 toolchain | BSD | runtime | `third_party/licenses/BSD.txt` |\n" +
+		strings.Join(rows, "\n") + "\n"
+}
+
+func TestNoticeIssuesAcceptsMatchingFixture(t *testing.T) {
+	t.Parallel()
+
+	root, gorootDir, modules := noticesFixture(t, func(map[string]string) {})
+
+	problems, err := repopolicy.NoticeIssues(root, gorootDir, modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(problems) != 0 {
+		t.Fatalf(unexpectedProblemsFormat, problems)
+	}
+}
+
+// TestNoticeIssuesRejectsModuleDrift is a negative control: a new dependency, a stale row and a
+// version change are each reported.
+func TestNoticeIssuesRejectsModuleDrift(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		modules func(modules []repopolicy.LinkedModule) []repopolicy.LinkedModule
+		name    string
+		want    string
+	}{
+		{
+			func(modules []repopolicy.LinkedModule) []repopolicy.LinkedModule {
+				return append(modules, repopolicy.LinkedModule{Path: "example.test/font", Version: "v0.1.0", Dir: modules[0].Dir})
+			},
+			"new module without row", "example.test/font is linked into a release binary but has no row",
+		},
+		{
+			func([]repopolicy.LinkedModule) []repopolicy.LinkedModule { return nil },
+			"row without linked module", "lists example.test/dep, which is not linked",
+		},
+		{
+			func(modules []repopolicy.LinkedModule) []repopolicy.LinkedModule {
+				modules[0].Version = "v1.3.0"
+
+				return modules
+			},
+			"version changed", "notices say v1.2.3, go.mod selects v1.3.0",
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root, gorootDir, modules := noticesFixture(t, func(map[string]string) {})
+
+			problems, err := repopolicy.NoticeIssues(root, gorootDir, test.modules(modules))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			requireContains(t, problems, test.want)
+		})
+	}
+}
+
+// TestNoticeIssuesRejectsFileDrift is a negative control: a license that no longer matches, a missing
+// copy, an orphan copy and a moved Go version are each reported.
+func TestNoticeIssuesRejectsFileDrift(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		mutate func(files map[string]string)
+		name   string
+		want   string
+	}{
+		{
+			func(files map[string]string) { files["mod/LICENSE"] = "MIT License\nCopyright Someone Else\n" },
+			"license text changed upstream", "no listed license copy reproduces the module's LICENSE",
+		},
+		{
+			func(files map[string]string) { files["mod/NOTICE"] = "Attribution required.\n" },
+			"module ships a second license file", "no listed license copy reproduces the module's NOTICE",
+		},
+		{func(files map[string]string) {
+			delete(files, "mod/LICENSE")
+
+			files["mod/README.md"] = "x"
+		}, "module ships no license", "ships no license file"},
+		{
+			func(files map[string]string) { delete(files, "root/third_party/licenses/MIT.txt") },
+			"copy file missing", "license copy third_party/licenses/MIT.txt",
+		},
+		{
+			func(files map[string]string) { files["root/third_party/licenses/Orphan.txt"] = "x" },
+			"orphan license copy", "third_party/licenses/Orphan.txt is not referenced",
+		},
+		{
+			func(files map[string]string) { files["root/go.mod"] = "module example.test/app\n\ngo 1.28.0\n" },
+			"go version moved", "does not require that Go version",
+		},
+		{
+			func(files map[string]string) { files["goroot/LICENSE"] = "Something else\n" },
+			"standard library license changed", "Go standard library: no listed license copy reproduces",
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root, gorootDir, modules := noticesFixture(t, test.mutate)
+
+			problems, err := repopolicy.NoticeIssues(root, gorootDir, modules)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			requireContains(t, problems, test.want)
+		})
 	}
 }

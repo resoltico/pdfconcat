@@ -7,7 +7,9 @@
 # Coverage and profiles
 *.out
 *.prof
-coverage.*
+coverage.out
+coverage.html
+coverage.txt
 
 # Editors and operating systems
 .DS_Store
@@ -19,3 +21,13 @@ Thumbs.db
 *.tmp
 *.swp
 *.test
+
+# Locally installed development tools (go run ./tools/installtools)
+/.tools/
+
+# Local credentials; example templates remain reviewable and secret-scanned.
+.env
+.env.*
+!.env.example
+!.env.sample
+.secrets/

@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Ervins
+
+package main_test
+
+// Fixture paths, markers and expected contract values shared by these tests.
+const (
+	jobsFlag              = "--jobs"
+	limitFlag             = "--limit"
+	offsetFlag            = "--offset"
+	partFlag              = "--part"
+	inlinePlanFlag        = "--plan-json"
+	blankOperand          = "@blank"
+	upperSourceName       = "A.PDF"
+	shortText             = "Fine"
+	sourceAMarker         = "a p1"
+	aliasPath             = "alias.pdf"
+	sourceBFirstMarker    = "b p1"
+	sourceBSecondMarker   = "b p2"
+	buildReportPath       = "build.report.json"
+	diagnosticsView       = "diagnostics"
+	failedReportPath      = "failed.json"
+	fixtureFolder         = "folder"
+	fontPlanPath          = "fonted.json"
+	fontsView             = "fonts"
+	planOutputPath        = "from-plan.pdf"
+	invalidPDFPath        = "garbage.pdf"
+	hardlinkPath          = "hardlink.pdf"
+	newOutputPath         = "new.pdf"
+	notesPath             = "notes.txt"
+	successfulReportPath  = "ok.json"
+	outputInvalidCode     = "output_destination_invalid"
+	partField             = "part"
+	pipePath              = "pipe"
+	planPath              = "plan.json"
+	planReportPath        = "plan.report.json"
+	plansDirectory        = "plans"
+	shortReportPath       = "r.json"
+	readOnlyReportPath    = "readonly/r.json"
+	stdinOutputPath       = "stdin.pdf"
+	stylesView            = "styles"
+	summaryFailureFormat  = "summary: %+v"
+	latvianText           = "Ģimenes dokumenti"
+	planSchemaName        = "plan"
+	keyStyle              = "style"
+	namedDiagnosticFormat = "%s: %+v"
+)

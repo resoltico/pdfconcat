@@ -2,21 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
   "title": "PDFConcat plan",
-  "description": "An ordered assembly of PDFs and generated blank pages.",
+  "description": "An ordered assembly of PDFs and generated blank pages (plan format version 1). Duplicate member names, invalid UTF-8, unpaired surrogate escapes, and unit-converted length bounds are enforced by the decoder, not by this schema.",
   "type": "object",
   "required": ["version", "items"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
     "version": { "const": 1, "description": "Plan format version." },
-    "output": { "type": "string", "minLength": 1, "description": "Output PDF path, relative to the plan file. Overridden by -o." },
-    "dir": { "type": "string", "description": "Directory that relative PDF paths resolve against, relative to the plan file. Default: the plan file's directory." },
-    "blank": { "$ref": "#/$defs/blankStyle", "description": "Defaults for every generated blank." },
+    "output": { "type": "string", "minLength": 1, "description": "Output PDF path, relative to the plan's base directory. The command line -o overrides it." },
+    "dir": { "type": "string", "description": "Directory that relative item paths resolve against, relative to the plan's base directory. Default: the base directory itself." },
+    "blank": { "$ref": "#/$defs/blank", "description": "Defaults for every generated blank. A default font file resolves against the plan's base directory, not against dir." },
     "items": { "$ref": "#/$defs/items" }
   },
   "$defs": {
     "items": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "oneOf": [
           { "type": "string", "minLength": 1, "description": "A PDF path." },
@@ -25,8 +26,8 @@
             "required": ["blank"],
             "additionalProperties": false,
             "properties": {
-              "blank": { "$ref": "#/$defs/blankStyle" },
-              "count": { "type": "integer", "minimum": 1, "default": 1, "description": "Number of consecutive blank pages." }
+              "blank": { "$ref": "#/$defs/blank" },
+              "count": { "type": "integer", "minimum": 1, "maximum": 1000000, "default": 1, "description": "Number of consecutive blank pages." }
             }
           },
           {
@@ -34,7 +35,7 @@
             "required": ["dir", "items"],
             "additionalProperties": false,
             "properties": {
-              "dir": { "type": "string", "description": "Directory for the nested items, relative to the enclosing directory." },
+              "dir": { "type": "string", "description": "Directory for the nested items, relative to the enclosing directory. Fonts declared inside the group resolve against it." },
               "items": { "$ref": "#/$defs/items" }
             }
           }
@@ -43,34 +44,53 @@
     },
     "length": {
       "oneOf": [
-        { "type": "number", "description": "Points (1/72 inch)." },
-        { "type": "string", "pattern": "^\\s*-?[0-9]*\\.?[0-9]+\\s*(pt|mm|cm|in)?\\s*$", "description": "A number with optional unit: pt, mm, cm, in." }
+        { "type": "number", "minimum": -14400, "maximum": 14400, "description": "Points (1/72 inch)." },
+        { "type": "string", "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$", "description": "A number with optional unit: pt, mm, cm, in. No spaces." }
       ]
     },
     "color": { "type": "string", "pattern": "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$" },
-    "blankStyle": {
+    "blank": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "size": { "type": "string", "description": "inherit (default), A3, A4, A5, B4, B5, Letter, Legal, Tabloid, or WIDTHxHEIGHT[unit] such as 210x297mm." },
-        "background": { "$ref": "#/$defs/color", "description": "Page fill color. Default: none." },
-        "text": { "$ref": "#/$defs/textStyle" }
+        "size": {
+          "oneOf": [
+            { "enum": ["inherit", "A3", "A4", "A5", "B4", "B5", "Letter", "Legal", "Tabloid"] },
+            { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|\\.[0-9]+)x([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$" }
+          ],
+          "description": "inherit (default), a paper name (portrait), or WIDTHxHEIGHT[unit] such as 210x297mm. Each side is 1 to 14400 points."
+        },
+        "background": {
+          "oneOf": [
+            { "$ref": "#/$defs/color" },
+            { "const": "none" }
+          ],
+          "description": "Page fill color, or none for an unpainted page (clears an inherited fill). Default: none."
+        },
+        "text": { "$ref": "#/$defs/text" }
       }
     },
-    "textStyle": {
+    "text": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "value": { "type": "string", "description": "Text to print; an empty string means no text. \\n starts a new line." },
+        "value": { "type": "string", "maxLength": 10000, "description": "Text to print; an empty string means no text. \\n starts a new line." },
         "font": {
-          "enum": [
-            "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
-            "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
-            "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique"
+          "oneOf": [
+            { "const": "default" },
+            {
+              "type": "object",
+              "required": ["file"],
+              "additionalProperties": false,
+              "properties": {
+                "file": { "type": "string", "minLength": 1, "description": "Path of a TrueType font file, relative to the directory of the scope that declares it." }
+              }
+            }
           ],
-          "default": "Helvetica"
+          "default": "default",
+          "description": "The built-in font, or a font file. One atomic choice."
         },
-        "size": { "$ref": "#/$defs/length", "description": "Font size. Default 12pt." },
+        "size": { "$ref": "#/$defs/length", "description": "Font size, 1 to 14400 points. Default 12pt." },
         "color": { "$ref": "#/$defs/color", "description": "Text color. Default #000000." },
         "anchor": {
           "enum": ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"],
@@ -79,9 +99,10 @@
         },
         "x": { "$ref": "#/$defs/length", "description": "Move the block right of its anchor (negative: left). Default 0." },
         "y": { "$ref": "#/$defs/length", "description": "Move the block up from its anchor (negative: down). Default 0." },
-        "width": { "$ref": "#/$defs/length", "description": "Wrap width of the block. Default: page width minus 72pt." },
+        "width": { "$ref": "#/$defs/length", "description": "Wrap width of the block, 1 to 14400 points. Default: page width minus 72pt." },
         "align": { "enum": ["left", "center", "right", "justify"], "default": "center", "description": "Justification of lines within the block." },
-        "leading": { "type": "number", "minimum": 1, "maximum": 10, "default": 1.2, "description": "Line height as a multiple of the font size." }
+        "leading": { "type": "number", "minimum": 1, "maximum": 10, "default": 1.2, "description": "Line height as a multiple of the font size." },
+        "overflow": { "enum": ["error", "allow"], "default": "error", "description": "error rejects text that does not fit its box or the page; allow places it as specified." }
       }
     }
   }

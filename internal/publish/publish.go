@@ -1,30 +1,124 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins
 
-// Package publish enforces output policy and final same-filesystem publication.
+// Package publish enforces output policy and final same-filesystem publication of the PDF and
+// of the report.
+//
+// Atomic visibility: a destination is made visible by one native rename, so a reader sees the
+// old file or the complete new one, never a partial file. Without overwrite the rename is the
+// platform's no-clobber primitive (renameat2 RENAME_NOREPLACE on Linux, renamex_np RENAME_EXCL on
+// macOS, MoveFileEx without MOVEFILE_REPLACE_EXISTING on Windows); there is no weaker fallback.
+//
+// Crash durability: staged file contents are flushed with fsync before the rename and the parent
+// directory is flushed after it (macOS fsync issues F_FULLFSYNC; Windows uses MOVEFILE_WRITE_THROUGH
+// instead of a directory flush, and filesystems that cannot flush a directory are tolerated).
+// That is everything claimed: the operating system and storage hardware decide what survives a
+// power loss, and nothing stronger than the platform's flush semantics is promised.
 package publish
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-// File exposes a verified staged file using platform-native rename semantics.
-func File(staged, destination string, overwrite bool) error {
-	if staged == "" || destination == "" {
-		return errors.New("staged and destination paths are required")
+type (
+	// DestinationError reports a destination or its directory that the output policy refuses.
+	DestinationError struct {
+		// Subject names what was inspected, such as "output" or "output directory".
+		Subject string
+		// Path is the inspected path.
+		Path string
+		// Reason says why the path is refused.
+		Reason string
 	}
 
-	err := ensureDestinationPolicy(destination, overwrite)
+	// DurabilityError reports that the destination was published (the rename completed and the file
+	// is visible) but the parent directory could not be flushed, so the entry may not survive a crash.
+	DurabilityError struct {
+		// Err is the flush failure.
+		Err error
+		// Path is the published destination.
+		Path string
+	}
+)
+
+// outputSubject names the destination file in a DestinationError.
+const (
+	outputSubject            = "output"
+	publicationFailureFormat = "publish %q: %w"
+)
+
+var (
+	// ErrPathRequired is returned when a staged or destination path is empty.
+	ErrPathRequired = errors.New("staged and destination paths are required")
+	// ErrOutputPathEmpty is returned when the output path is empty.
+	ErrOutputPathEmpty = errors.New("output path is empty")
+)
+
+// Error names the subject, the path and the reason.
+func (e *DestinationError) Error() string {
+	return fmt.Sprintf("%s %q %s", e.Subject, e.Path, e.Reason)
+}
+
+// Error states both facts so a caller never describes the output as untouched.
+func (e *DurabilityError) Error() string {
+	return fmt.Sprintf("published %q, but flushing its directory failed: %v", e.Path, e.Err)
+}
+
+// Unwrap exposes the flush failure.
+func (e *DurabilityError) Unwrap() error { return e.Err }
+
+// File exposes a verified staged file using platform-native rename semantics. The staged file is
+// flushed first and the destination's directory afterwards. A *DurabilityError means the file is
+// published.
+func File(staged, destination string, overwrite bool) error {
+	return commitFile(realOperations(), staged, destination, Policy{Overwrite: overwrite}.existing())
+}
+
+func commitFile(ops operations, staged, destination string, existing existingFile) error {
+	return commitFileChecked(context.Background(), ops, staged, destination, existing, nil)
+}
+
+func commitFileChecked(ctx context.Context, ops operations, staged, destination string, existing existingFile, verify func() error) error {
+	if staged == "" || destination == "" {
+		return ErrPathRequired
+	}
+
+	err := ensureDestinationPolicy(destination, existing)
 	if err != nil {
 		return err
 	}
 
-	err = replaceFile(staged, destination, overwrite)
+	err = ops.syncFile(staged)
 	if err != nil {
-		return fmt.Errorf("publish %q: %w", destination, err)
+		return fmt.Errorf("flush staged %q: %w", staged, err)
+	}
+
+	if verify != nil {
+		if err = verify(); err != nil {
+			return fmt.Errorf("verify publication: %w", err)
+		}
+	}
+
+	if policyErr := ensureDestinationPolicy(destination, existing); policyErr != nil {
+		return policyErr
+	}
+
+	if err = ctx.Err(); err != nil {
+		return fmt.Errorf(publicationFailureFormat, destination, err)
+	}
+
+	err = ops.replace(staged, destination, existing)
+	if err != nil {
+		return fmt.Errorf(publicationFailureFormat, destination, err)
+	}
+
+	err = ops.syncDirectory(filepath.Dir(destination))
+	if err != nil {
+		return &DurabilityError{Path: destination, Err: err}
 	}
 
 	return nil
@@ -32,8 +126,12 @@ func File(staged, destination string, overwrite bool) error {
 
 // CheckDestination validates the destination directory and current overwrite policy.
 func CheckDestination(destination string, overwrite bool) error {
+	return validateDestination(destination, Policy{Overwrite: overwrite}.existing())
+}
+
+func validateDestination(destination string, existing existingFile) error {
 	if destination == "" {
-		return errors.New("output path is empty")
+		return ErrOutputPathEmpty
 	}
 
 	dir := filepath.Dir(destination)
@@ -44,13 +142,13 @@ func CheckDestination(destination string, overwrite bool) error {
 	}
 
 	if !info.IsDir() {
-		return fmt.Errorf("output directory %q is not a directory", dir)
+		return &DestinationError{Subject: "output directory", Path: dir, Reason: "is not a directory"}
 	}
 
-	return ensureDestinationPolicy(destination, overwrite)
+	return ensureDestinationPolicy(destination, existing)
 }
 
-func ensureDestinationPolicy(destination string, overwrite bool) error {
+func ensureDestinationPolicy(destination string, existing existingFile) error {
 	info, err := os.Lstat(destination)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -60,20 +158,20 @@ func ensureDestinationPolicy(destination string, overwrite bool) error {
 		return fmt.Errorf("inspect output %q: %w", destination, err)
 	}
 
-	return checkExistingDestination(destination, info, overwrite)
+	return checkExistingDestination(destination, info, existing)
 }
 
 // checkExistingDestination decides whether an existing destination may be replaced.
-func checkExistingDestination(destination string, info os.FileInfo, overwrite bool) error {
+func checkExistingDestination(destination string, info os.FileInfo, existing existingFile) error {
 	switch {
 	case info.Mode()&os.ModeSymlink != 0:
-		return fmt.Errorf("output %q is a symbolic link; choose a regular-file path", destination)
+		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "is a symbolic link; choose a regular-file path"}
 	case info.IsDir():
-		return fmt.Errorf("output %q is a directory", destination)
+		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "is a directory"}
 	case !info.Mode().IsRegular():
-		return fmt.Errorf("output %q is not a regular file", destination)
-	case !overwrite:
-		return fmt.Errorf("output %q already exists; use --overwrite to replace it", destination)
+		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "is not a regular file"}
+	case existing == refuseExisting:
+		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "already exists; use --overwrite to replace it"}
 	default:
 		return nil
 	}

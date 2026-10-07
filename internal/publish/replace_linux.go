@@ -12,8 +12,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func replaceFile(staged, destination string, overwrite bool) error {
-	if overwrite {
+func replaceFile(staged, destination string, existing existingFile) error {
+	if existing == replaceExisting {
 		err := os.Rename(staged, destination)
 		if err != nil {
 			return fmt.Errorf("rename over existing destination: %w", err)

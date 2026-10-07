@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"version\":1,\"blank\":{\"text\":{\"font\":{\"file\":\"a\"},\"overflow\":\"allow\"},\"background\":\"none\"},\"items\":[\"a\"]}")

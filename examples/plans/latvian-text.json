@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "output": "Pielikums.pdf",
+  "blank": { "background": "#F4EFE6", "text": { "size": 20, "leading": 1.5 } },
+  "items": [
+    "01.pdf",
+    {
+      "blank": {
+        "text": { "value": "Pielikums\nĀ ļ ķ š ž, ā ļ; Ελληνικά; Кириллица" }
+      }
+    },
+    "02.pdf"
+  ]
+}

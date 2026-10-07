@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "output": "Dividers.pdf",
+  "blank": { "size": "A4", "text": { "color": "#FFFFFF", "size": 36 } },
+  "items": [
+    { "blank": { "background": "#1F3A5F", "text": { "value": "Section one" } } },
+    { "blank": { "background": "#7A2E2E", "text": { "value": "Section two" } } },
+    { "blank": { "background": "none", "text": { "value": "" } }, "count": 3 }
+  ]
+}

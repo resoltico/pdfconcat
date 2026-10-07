@@ -1,0 +1,117 @@
+name: Verification campaigns
+
+# Long and mutation verification is explicitly dispatched by an authorized operator.
+# Ordinary CI and source-only release verification never invoke this workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PDFCONCAT_REQUIRE_QA_TOOLS: "1"
+
+concurrency:
+  group: verification-campaigns-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Bounded smoke fuzzing: every Fuzz target discovered with `go test -list`, 30 seconds each. The
+  # job fails when it finds none. Longer runs: CONTRIBUTING.md.
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+        with:
+          cache: "false"
+      - uses: ./.github/actions/qa-tools
+      - run: go run ./tools/qualitygate fuzz -time 30s
+      - name: Keep failing inputs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-failing-inputs
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore
+
+  # Mutation testing runs in a snapshot copied out of this clean checkout, never over the working tree.
+  mutation:
+    name: Mutation testing (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+        with:
+          tools: gremlins golangci-lint
+          cache: "false"
+      - uses: ./.github/actions/qa-tools
+      - run: go run ./tools/qualitygate mutation -max-duration=2h -workers=2 -report "${{ runner.temp }}/mutation-report.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mutation-report-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/mutation-report.json
+            ${{ runner.temp }}/mutation-report.json.discovery.json
+            ${{ runner.temp }}/mutation-report.json.executions/**
+            ${{ runner.temp }}/mutation-report.json.discovery.json.executions/**
+          if-no-files-found: error
+
+  # The deliberate defects in tools/mutation-controls.yml must each make the tests fail.
+  mutation-controls:
+    name: Mutation negative controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+        with:
+          cache: "false"
+      - uses: ./.github/actions/qa-tools
+      - run: go run ./tools/qualitygate controls
+
+  # ./test/scale defines TestScaleAcceptance. The job fails if the package or the test does not exist, or if the test
+  # skips. It runs on ubuntu-latest, which has four cores on public repositories; the declared
+  # budgets are meaningful only on a runner with four cores or more.
+  scale:
+    name: Scale acceptance
+    runs-on: ubuntu-latest
+    env:
+      PDFCONCAT_SCALE: "1"
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+        with:
+          cache: "false"
+      - uses: ./.github/actions/qa-tools
+      - run: >-
+          go run ./tools/qualitygate test -events "${{ runner.temp }}/test-events.json"
+          -run '^TestScaleAcceptance$' -require TestScaleAcceptance -timeout 30m ./test/scale
+        env:
+          PDFCONCAT_SCALE_RESULTS: ${{ runner.temp }}/scale-results.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: scale-results
+          path: |
+            ${{ runner.temp }}/scale-results.json
+            ${{ runner.temp }}/test-events.json
+            ${{ runner.temp }}/test-events.json.stderr
+          if-no-files-found: error

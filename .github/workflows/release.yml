@@ -1,15 +1,18 @@
-name: Release
+name: Source release
 
+# Publishes the tagged source and CHANGELOG notes only. Binary packages, their attestations,
+# and manually triggered campaigns are separate work and are not claimed by this workflow.
 on:
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
-  artifact-metadata: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -17,22 +20,48 @@ jobs:
     permissions:
       contents: read
 
-  release:
+  publish:
+    name: Publish tagged source and changelog notes
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
         with:
-          go-version-file: tools/go.mod
-          cache-dependency-path: |
-            go.sum
-            tools/go.sum
-      - run: go tool -modfile=tools/go.mod goreleaser release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-checksums: dist/checksums.txt
+          cache: "false"
+      - name: Require the source tag to match the configured version
+        run: go run ./tools/qualitygate release-version -tag "$TAG"
+      - name: Extract exact nonempty changelog notes
+        run: go run ./tools/qualitygate release-notes -tag "$TAG" -output "$RUNNER_TEMP/release-notes.md"
+      - name: Require the remote tag to still identify this verified commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          reference=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object | [.type, .sha] | @tsv')
+          IFS=$'\t' read -r object_type object_sha <<< "$reference"
+          if [ "$object_type" = tag ]; then
+            reference=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" --jq '.object | [.type, .sha] | @tsv')
+            IFS=$'\t' read -r object_type object_sha <<< "$reference"
+          fi
+          test "$object_type" = commit
+          test "$object_sha" = "$GITHUB_SHA"
+      - name: Publish source-only release
+        shell: bash
+        run: |
+          set -euo pipefail
+          classification=()
+          case "$TAG" in
+            *-*) classification+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "PDFConcat ${TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md" \
+            "${classification[@]}"

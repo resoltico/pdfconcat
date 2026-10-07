@@ -1,0 +1,37 @@
+name: Prepare toolchain
+description: >-
+  Installs the Go toolchain declared by go.mod, exports the development tool versions pinned in
+  tools/versions.env, and optionally installs verified tools into .tools/bin.
+
+inputs:
+  tools:
+    description: >-
+      Space-separated names for `go run ./tools/installtools`, including the reviewed source-patched
+      golangci-lint build. Leave empty to install none.
+    default: ""
+  cache:
+    description: >-
+      Whether setup-go restores and saves the module and build caches. Release and attestation jobs
+      turn it off so that no artifact depends on cache contents.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache: ${{ inputs.cache }}
+
+    - name: Export pinned tool versions
+      shell: bash
+      run: cat tools/versions.env >> "$GITHUB_ENV"
+
+    - name: Install development tools
+      if: inputs.tools != ''
+      shell: bash
+      env:
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        go run ./tools/installtools $TOOLS
+        echo "$GITHUB_WORKSPACE/.tools/bin" >> "$GITHUB_PATH"

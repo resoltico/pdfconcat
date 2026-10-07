@@ -1,0 +1,1209 @@
+# The one registry of exceptions to the project's automated quality gates: golangci-lint, statement
+# coverage, and mutation testing. Nothing is excepted anywhere else: no inline `//nolint`, no
+# exclusion lists in .golangci.yml of its own, no hand-written coverage or mutation skip lists.
+#
+# Every entry carries
+#   id                 a stable, meaningful identifier (lower-case words joined by hyphens)
+#   tool               golangci-lint, coverage, or mutation
+#   kind               why the exception is legitimate (the allowed kinds depend on the tool)
+#   retained_property  what stays protected despite the exception
+# plus the fields its tool needs, and a YAML comment immediately above the entry that says why
+# repairing the code or the rule is inappropriate. That comment is the rationale; it is checked
+# for presence, and it is the only place the rationale is written.
+#
+# Enforcement (see CONTRIBUTING.md, "Exceptions"):
+#   go run ./tools/qualitygate lint-config   .golangci.yml must carry exactly these lint exceptions
+#   go run ./tools/qualitygate lint-stale    each lint diagnostic exclusion must still match a real diagnostic
+#   go run ./tools/qualitygate coverage      applies the coverage entries and the threshold below
+#   go run ./tools/qualitygate mutation      applies the mutation entries
+version: 1
+
+# Require every reachable statement in packages linked into the executable. The denominator merges
+# uncached unit tests and instrumented subprocess execution; only exact, defended entries below may
+# exclude an unreachable or native-platform statement. Report raw coverage separately.
+coverage_threshold_percent: 100
+
+exceptions:
+  # golangci-lint ships both an old and a replacement linter under similar names and marks the old
+  # ones deprecated: running them duplicates the replacement's findings and prints deprecation
+  # warnings. The replacements (exhaustruct_v5, gomodguard_v2, wsl_v5) stay enabled or are
+  # accounted for below. The staleness gate fails if golangci-lint stops marking a linter deprecated.
+  - id: lint-disable-exhaustruct
+    tool: golangci-lint
+    kind: deprecated-rule
+    effect: disable-linter
+    linter: exhaustruct
+    retained_property: struct-literal completeness is the replacement linter's concern (see lint-disable-exhaustruct-v5)
+
+  # Same reason as lint-disable-exhaustruct: gomodguard_v2 is the maintained successor and is enabled.
+  - id: lint-disable-gomodguard
+    tool: golangci-lint
+    kind: deprecated-rule
+    effect: disable-linter
+    linter: gomodguard
+    retained_property: module allow/block policy is enforced by gomodguard_v2 and depguard
+
+  # Same reason as lint-disable-exhaustruct: wsl_v5 is the maintained successor and is enabled.
+  - id: lint-disable-wsl
+    tool: golangci-lint
+    kind: deprecated-rule
+    effect: disable-linter
+    linter: wsl
+    retained_property: whitespace and cuddling rules are enforced by wsl_v5 and nlreturn
+
+  # The domain model layers partial values on purpose: BlankStyle and TextStyle leave fields unset so that
+  # an unset field inherits from the plan default and then from the built-in. A literal that names only
+  # the fields it overrides is the intended, readable form; demanding every field would turn each
+  # override into a full restatement and hide which value was actually chosen. Where completeness does
+  # matter (resolved, fully populated values), construction goes through functions that tests cover.
+  - id: lint-disable-exhaustruct-v5
+    tool: golangci-lint
+    kind: design-incompatible
+    effect: disable-linter
+    linter: exhaustruct_v5
+    retained_property: unset-versus-set field semantics of layered style values
+
+  # revive's unhandled-error flags every discarded error unless callers list the functions to ignore.
+  # errcheck, configured stricter than its default (type assertions and blank assignments), owns this
+  # property. Its default exclusions are disabled; the exact infallible functions defended here are
+  # the only dismissals. A second, differently configured copy would duplicate error checking.
+  - id: lint-revive-disable-unhandled-error
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [unhandled-error]
+    superseded_by: [errcheck]
+    retained_property: every error return is checked or explicitly handled, by errcheck
+
+  # revive's add-constant overlaps mnd (magic numbers) and goconst (repeated strings) with a cruder
+  # model that forbids every literal beyond a short allow-list. Those two linters are configured and
+  # enabled, and report the same defects with more precise rules.
+  - id: lint-revive-disable-add-constant
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [add-constant]
+    superseded_by: [mnd, goconst]
+    retained_property: magic numbers and repeated string literals are rejected, by mnd and goconst
+
+  # confusing-results demands names for adjacent unnamed results of one type. nonamedreturns, enabled,
+  # forbids named results, so the two cannot both be satisfied. Unnamed results with documented
+  # meaning in the doc comment are the project's convention.
+  - id: lint-revive-disable-confusing-results
+    tool: golangci-lint
+    kind: incompatible-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [confusing-results]
+    conflicts_with: [nonamedreturns]
+    retained_property: named results stay forbidden by nonamedreturns
+
+  # gocritic's unnamedResult makes the same demand as revive's confusing-results and is contradictory
+  # with nonamedreturns for the same reason.
+  - id: lint-gocritic-disable-unnamed-result
+    tool: golangci-lint
+    kind: incompatible-rule
+    effect: setting-item
+    setting: linters.settings.gocritic.disabled-checks
+    values: [unnamedResult]
+    conflicts_with: [nonamedreturns]
+    retained_property: named results stay forbidden by nonamedreturns
+
+  # godoclint's require-doc demands a doc comment on every exported symbol including TestXxx
+  # functions, whose names already state the behavior under test. revive's exported rule, enabled,
+  # requires documentation of the exported symbols that are product API.
+  - id: lint-godoclint-disable-require-doc
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.godoclint.disable
+    values: [require-doc]
+    superseded_by: [revive]
+    retained_property: exported production symbols are documented, by revive's exported rule
+
+  # testpackage requires external test packages (package x_test) to keep tests on the public API.
+  # export_test.go is the standard Go idiom for exposing an unexported symbol to those tests, and
+  # internal_test.go is the one conventional file name for the few tests of unexported algorithms
+  # (layout arithmetic, binary parsers) that need package scope; any other internal test file is flagged.
+  - id: lint-testpackage-allow-export-test-file
+    tool: golangci-lint
+    kind: ignored-value
+    effect: setting-item
+    setting: linters.settings.testpackage.skip-regexp
+    values: ['(export|internal)_test\.go']
+    retained_property: all other tests live in external test packages
+
+  # Each of the four revive rules below re-implements a dedicated linter that is enabled with the same
+  # threshold (lll, cyclop and gocyclo, gocognit, funlen). Running both reports every finding twice and
+  # lets the two thresholds drift apart; the dedicated linter owns the property.
+  - id: lint-revive-disable-line-length-limit
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [line-length-limit]
+    superseded_by: [lll]
+    retained_property: lines longer than 140 characters are rejected, by lll
+
+  # revive's cyclomatic duplicates cyclop and gocyclo, both enabled at the same limit; reporting each finding three times adds noise, not coverage.
+  - id: lint-revive-disable-cyclomatic
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [cyclomatic]
+    superseded_by: [cyclop, gocyclo]
+    retained_property: cyclomatic complexity above 12 is rejected, by cyclop and gocyclo
+
+  # revive's cognitive-complexity duplicates gocognit, enabled at the same limit; the dedicated linter owns the property and one report per finding is enough.
+  - id: lint-revive-disable-cognitive-complexity
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [cognitive-complexity]
+    superseded_by: [gocognit]
+    retained_property: cognitive complexity above 15 is rejected, by gocognit
+
+  # revive's function-length duplicates funlen, enabled with the same line and statement limits; the dedicated linter owns the property and one report suffices.
+  - id: lint-revive-disable-function-length
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [function-length]
+    superseded_by: [funlen]
+    retained_property: functions above 60 lines or 40 statements are rejected, by funlen
+
+  # noinlineerr forbids `if err := f(); err != nil`, Go's standard way to keep err scoped to the
+  # statement that produced it, and its autofixer has produced code that does not compile when err
+  # was already declared. The project's owner policy is to keep the idiom available; shadowing is
+  # covered by govet's strict shadow analyzer, which stays enabled.
+  - id: lint-disable-noinlineerr
+    tool: golangci-lint
+    kind: design-incompatible
+    effect: disable-linter
+    linter: noinlineerr
+    retained_property: err variables do not leak or shadow, checked by govet shadow in strict mode
+
+  # nlreturn and wsl_v5 both police blank lines before return and branch statements with separately
+  # configured block sizes; keeping both means every such statement must satisfy two differently
+  # parameterized rules, and their autofixers disagree. wsl_v5 is the configurable one and stays.
+  - id: lint-disable-nlreturn
+    tool: golangci-lint
+    kind: incompatible-rule
+    effect: disable-linter
+    linter: nlreturn
+    conflicts_with: [wsl_v5]
+    retained_property: blank-line discipline before returns and branches stays enforced by wsl_v5
+
+  # Short names are conventional for test-table loop variables (tc, tt) and for identifiers that are
+  # the whole subject of a small scope. max-distance in .golangci.yml still requires descriptive names
+  # beyond 15 lines of use; these names are exempt at any distance because their meaning never changes.
+  - id: lint-varnamelen-ignore-conventional-names
+    tool: golangci-lint
+    kind: ignored-value
+    effect: setting-item
+    setting: linters.settings.varnamelen.ignore-names
+    values: [tc, tt, id]
+    retained_property: other short names are rejected once their scope exceeds 15 lines
+
+  # The receiver-style names of the standard interfaces and the testing handles are universal Go
+  # idiom and carry no information that a longer name would add.
+  - id: lint-varnamelen-ignore-conventional-declarations
+    tool: golangci-lint
+    kind: ignored-value
+    effect: setting-item
+    setting: linters.settings.varnamelen.ignore-decls
+    values: [t *testing.T, b *testing.B, f *testing.F, tb testing.TB, w io.Writer, r io.Reader]
+    retained_property: other short declarations are rejected once their scope exceeds 15 lines
+
+  # The literal 2 is halving, pairing and indexing a key/value pair; naming it (half, two) reads worse
+  # than the arithmetic. Every other number still needs a name.
+  - id: lint-mnd-ignore-two
+    tool: golangci-lint
+    kind: ignored-value
+    effect: setting-item
+    setting: linters.settings.mnd.ignored-numbers
+    values: ["2"]
+    retained_property: every other magic number must be a named constant
+
+  # wrapcheck demands wrapping errors that cross package boundaries. Errors from this module's own
+  # packages are already wrapped with their operation where they are created, and re-wrapping them at
+  # every layer would only repeat the same context in the message.
+  - id: lint-wrapcheck-ignore-own-packages
+    tool: golangci-lint
+    kind: ignored-value
+    effect: setting-item
+    setting: linters.settings.wrapcheck.ignore-package-globs
+    values: ['github.com/resoltico/pdfconcat/*']
+    retained_property: errors from the standard library and third-party packages are wrapped with context
+
+  # gosec G204 flags every exec.CommandContext whose arguments are not string literals. Running the
+  # tools the gates drive (go, git, golangci-lint, gremlins, the extracted executable) with computed
+  # arguments is this helper's whole purpose. The arguments come from the repository's own checked-in
+  # files and flags, never from untrusted input, and the helper never goes through a shell.
+  - id: lint-gosec-g204-qualitygate-process
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/qualitygate/process.go
+    message: "G204: Subprocess launched with a potential tainted input"
+    source: exec\.CommandContext\(ctx, c\.name, c\.args\.\.\.\)
+    retained_property: child processes are started directly, without a shell, from repository-controlled arguments
+
+  # The installer runs `go install <module>@<version>` with the module and version read from the
+  # checked-in tools/versions.env and its own tool table. Both are repository-controlled and the
+  # command is started directly, without a shell; the Go checksum database verifies what it builds.
+  - id: lint-gosec-g204-installtools-go-install
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/installtools/main.go
+    message: "G204: Subprocess launched with a potential tainted input"
+    source: exec\.CommandContext\(ctx, "go", "install"
+    retained_property: tool versions come only from the checked-in tools/versions.env and are verified by the Go checksum database
+
+  # The attestation check runs the GitHub CLI against the path of the archive the installer just
+  # downloaded into a private temporary directory, with the tag and repository from its own tool
+  # table. Nothing in the arguments is attacker-controlled, and no shell is involved.
+  - id: lint-gosec-g204-installtools-attestation
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/installtools/main.go
+    message: "G204: Subprocess launched with variable"
+    source: exec\.CommandContext\(ctx, github, "release", "verify-asset"
+    retained_property: only archives whose digest matches the release checksums reach the attestation check
+
+  # exectest exists to run the freshly built executable (and `go build` to produce it) from tests, so
+  # its command paths and arguments are necessarily variables. They are chosen by the test code in
+  # this repository, and the commands are started directly, never through a shell.
+  - id: lint-gosec-g204-exectest-build
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: internal/exectest/exectest.go
+    message: "G204: Subprocess launched with a potential tainted input"
+    source: exec\.CommandContext\(tb\.Context\(\), "go"
+    retained_property: tests run only executables they built themselves
+
+  # Same property as lint-gosec-g204-exectest-build, reported by gosec's taint analysis as G702.
+  - id: lint-gosec-g702-exectest-build
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: internal/exectest/exectest.go
+    message: "G702: Command injection via taint analysis"
+    source: exec\.CommandContext\(tb\.Context\(\), "go"
+    retained_property: tests run only executables they built themselves
+
+  # Command runs the executable that Build compiled; its path is a variable by construction.
+  - id: lint-gosec-g204-exectest-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: internal/exectest/exectest.go
+    message: "G204: Subprocess launched with variable"
+    source: exec\.CommandContext\(ctx, path, args\.\.\.\)
+    retained_property: tests run only executables they built themselves
+
+  # One executable is built per test process, not per test, because compiling it dominates the cost
+  # of executable tests. That requires process-wide state, which cannot be a local variable. It is
+  # guarded by a mutex and reset by Cleanup.
+  - id: lint-gochecknoglobals-exectest-cache
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gochecknoglobals
+    path: internal/exectest/exectest.go
+    message: cache is a global variable
+    retained_property: no other package-level mutable state exists in the project
+
+  # tb\\.TempDir is removed when the test that first called Build ends, which would delete the
+  # executable under every later test. The directory must outlive any single test, so Build creates
+  # it with os.MkdirTemp and Cleanup removes it from TestMain.
+  - id: lint-usetesting-exectest-shared-directory
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: usetesting
+    path: internal/exectest/exectest.go
+    message: "os\\.MkdirTemp\\(\\) could be replaced by tb\\.TempDir\\(\\)"
+    source: os\.MkdirTemp\("", "exectest-"\)
+    retained_property: temporary directories created by tests are removed
+
+  # The documentation test syntax-checks the recipe scripts that docs/CLI.md ships by running the
+  # interpreter (python3, found on PATH) on them with `-m py_compile`. Running the interpreter is the
+  # test's purpose; the script path is a temporary file the test wrote itself and no shell is involved.
+  - id: lint-gosec-g204-doccontract-python-recipes
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: internal/doccontract/examples_test.go
+    message: "G204: Subprocess launched with variable"
+    source: exec\.CommandContext\(t\.Context\(\), interpreter, "-m", "py_compile", script\)
+    retained_property: only scripts the test itself extracted are executed by the interpreter
+
+  # cmd/pdfconcat/main.go is the one place the project's process streams are touched: it wires stdin,
+  # stdout and stderr into the application, which receives them as injected readers and writers. The
+  # forbidigo rule exists to keep every other package free of global streams.
+  - id: lint-forbidigo-main-stdin
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: cmd/pdfconcat/main.go
+    message: use of `os\.Stdin` forbidden
+    source: Stdin:\s+os\.Stdin
+    retained_property: no package except cmd/pdfconcat reads the process's standard input directly
+
+  # Same reason as lint-forbidigo-main-stdin: main wires standard output into the application as an injected writer.
+  - id: lint-forbidigo-main-stdout
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: cmd/pdfconcat/main.go
+    message: use of `os\.Stdout` forbidden
+    source: Stdout:\s+os\.Stdout
+    retained_property: no package except cmd/pdfconcat writes the process's standard output directly
+
+  # Same reason as lint-forbidigo-main-stdin, for standard error: the injected stream and the
+  # terminal check that decides whether progress may be drawn on it.
+  - id: lint-forbidigo-main-stderr
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: cmd/pdfconcat/main.go
+    message: use of `os\.Stderr` forbidden
+    source: os\.Stderr
+    retained_property: no package except cmd/pdfconcat writes the process's standard error directly
+
+  # The oracle runs the independent QA tools (qpdf, Poppler) found on PATH with LookPath. They are
+  # trusted development tools chosen by the test harness, the arguments are files the tests wrote,
+  # no shell is involved, and the oracle is test infrastructure that never ships.
+  - id: lint-gosec-g204-pdforacle-qa-tools
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: internal/pdforacle/tools.go
+    message: "G204: Subprocess launched with variable"
+    source: exec\.CommandContext\(context\.Background\(\), program, args\.\.\.\)
+    retained_property: only tools resolved from PATH by name, with test-written arguments, are executed
+
+  # golang.org/x/sys/windows has no wrapper for GetProcessHandleCount, so the scale harness calls the
+  # kernel32 procedure directly and passes a pointer to a local counter. The unsafe use is one pointer
+  # conversion of a stack variable for the duration of the call, in measurement code that never ships.
+  - id: lint-gosec-g103-scale-handle-count
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: test/scale/measure_windows.go
+    message: "G103: Use of unsafe calls should be audited"
+    source: GetProcessHandleCount
+    goos: windows
+    retained_property: unsafe is confined to measurement code, one stack pointer per call
+
+  # Same reason as lint-gosec-g103-scale-handle-count, for GetProcessMemoryInfo, which fills a local
+  # PROCESS_MEMORY_COUNTERS structure whose address is passed to psapi.
+  - id: lint-gosec-g103-scale-memory-info
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: test/scale/measure_windows.go
+    message: "G103: Use of unsafe calls should be audited"
+    source: Call\(uintptr\(s\.handle\), uintptr\(unsafe\.Pointer\(&counters\)\), uintptr\(counters\.Cb\)\)
+    goos: windows
+    retained_property: unsafe is confined to measurement code, one stack pointer per call
+
+  # pdfengine.New fails only when pdfcpu cannot load its built-in stateless configuration, which no
+  # input can influence; the same constructor failure is covered through pdfengine's own tests of New.
+  - id: coverage-main-engine-construction-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: cmd/pdfconcat/main.go
+    function: run
+    anchor: 'return nil, fmt.Errorf("create the PDF engine: %w", engineErr)'
+    retained_property: the constructor failure is wrapped with the operation that failed
+
+  # LoadDefaultFont parses only the fixed embedded NotoSans asset, whose digest and real parsing
+  # are verified by typeset tests. No application input mutates those embedded bytes; malformed user
+  # fonts use the separately tested LoadFont boundary. Retain this guard for a future invalid asset.
+  - id: coverage-app-default-font-load-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/app/inventory.go
+    function: pipeline.loadFonts
+    anchor: 'return p.stop(stageInput, err)'
+    retained_property: a font failure would stop the job before any PDF is read
+
+  # On Unix identityOfOpen reads the device and inode from the Stat result the line above obtained
+  # from a real file, so errIdentityUnavailable (a FileInfo without syscall data) cannot occur for an
+  # os.File.
+  - id: coverage-capture-identity-of-open
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/capture/snapshot.go
+    function: Workspace.snapshotOpen
+    anchor: 'return Captured{}, &SourceError{Path: path, Operation: "identify source", Err: err}'
+    retained_property: an unavailable identity is reported as a source error naming the path
+
+  # fsync on a regular file this package just opened read-write fails only on a device or filesystem
+  # fault; the injected-operations tests cover the surrounding error handling, and a real failing
+  # fsync cannot be arranged portably.
+  - id: coverage-publish-sync-file-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/publish/operations.go
+    function: syncFile
+    anchor: 'err = fmt.Errorf("sync file: %w", err)'
+    retained_property: a failed flush stops publication before the rename
+
+  # fsync on a directory handle that was just opened fails with something other than EINVAL or ENOTSUP
+  # only on a device fault, which no test can provoke; the unsupported-filesystem case is covered and
+  # treated as success by design.
+  - id: coverage-publish-sync-directory-failure-darwin
+    tool: coverage
+    kind: unreachable-branch
+    goos: darwin
+    path: internal/publish/sync_unix.go
+    function: syncDirectory
+    anchor: 'err = fmt.Errorf("sync directory: %w", err)'
+    retained_property: only genuine directory flush failures are reported; unsupported filesystems are not
+
+  # fsync on a directory handle that was just opened fails with something other than EINVAL or ENOTSUP
+  # only on a device fault, which no test can provoke; the unsupported-filesystem case is covered and
+  # treated as success by design.
+  - id: coverage-publish-sync-directory-failure-linux
+    tool: coverage
+    kind: unreachable-branch
+    goos: linux
+    path: internal/publish/sync_unix.go
+    function: syncDirectory
+    anchor: 'err = fmt.Errorf("sync directory: %w", err)'
+    retained_property: only genuine directory flush failures are reported; unsupported filesystems are not
+
+  # api.LoadConfiguration in stateless mode reads no files and has no failing input; it is an error
+  # return of the library's signature that the built-in configuration never takes.
+  - id: coverage-pdfengine-new-configuration-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/engine.go
+    function: New
+    anchor: 'return nil, fmt.Errorf("load stateless pdfcpu configuration: %w", err)'
+    retained_property: a configuration failure would be reported with its cause
+
+  # Close on a read-only regular file after a successful read fails only on a filesystem fault; the
+  # read, stat and open failure paths are all covered.
+  - id: coverage-pdfengine-close-after-read-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/engine.go
+    function: Engine.readContext
+    anchor: 'return nil, newError(CodeUnreadable, source, path, closeErr)'
+    retained_property: a failed close is reported as an unreadable source
+
+  # Every stage ends a failure with stop, stopWith or stopAll, which record the diagnostics and return
+  # errStopped, so no stage can return any other error today; the branch is the guard that keeps a future
+  # stage which returns a bare error from ending the run with status ok. A real stage cannot be made to
+  # break the contract, and a stub that breaks it would test the stub.
+  - id: coverage-app-stage-breaks-stop-contract
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/app/pipeline.go
+    function: pipeline.run
+    anchor: 'found := classify(stageInput, err)'
+    retained_property: a stage that fails without recording its failure still ends the run as a failure
+
+  # reorder rereads the page-tree root the compile step just built and fails only if that root
+  # vanished from the pool, an internal inconsistency no input can create.
+  - id: coverage-pdfengine-reorder-after-compile
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/assemble.go
+    function: Engine.writePool
+    anchor: 'return assemblyError(ctx, NoSource, req.Destination, reorderErr)'
+    retained_property: an inconsistent pool is reported as an assembly error
+
+  # readContext and inspectContext return only *Error values by construction, so the fallback for a
+  # foreign error type is defensive and cannot be reached through them.
+  - id: coverage-pdfengine-output-failure-non-engine-error
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/assemble.go
+    function: asOutputFailure
+    anchor: 'return err'
+    retained_property: foreign errors would pass through unchanged
+
+  # shapeRun fails only when the shaping engine returns glyph clusters that contradict its own text
+  # indexes, a bug in the third-party library that no input text can trigger; inputs the shaper cannot
+  # handle are rejected earlier as TextError values, which are tested.
+  - id: coverage-typeset-shape-run-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/typeset/shape.go
+    function: Shaper.shapeChecked
+    anchor: 'return nil, err'
+    retained_property: an inconsistent shaping result is reported instead of laid out
+
+  # Reader failures arrive as *Error from the plan reader and malformed JSON as jsontext syntactic
+  # errors; a third error type would be a new failure mode of the standard library's decoder, so the
+  # generic read-failed fallback has no input.
+  - id: coverage-plan-syntax-error-fallback
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/plan/decode.go
+    function: parser.syntaxError
+    anchor: 'return p.fail(StageRead, CodeReadFailed, p.absolute(), "", "cannot read the plan: %v", err)'
+    retained_property: an unclassified decoder error is reported as a read failure
+
+  # The compressor writes exclusively to bytes.Buffer, whose Write cannot return an error.
+  # Discarding this impossible result avoids propagating unreachable error branches to every caller;
+  # writing the actual PDF to its output sink still checks every error.
+  - id: lint-genpage-buffer-compress-write
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: errcheck
+    path: internal/genpage/write.go
+    message: Error return value of `d\.flate\.Write` is not checked
+    source: _, _ = d\.flate\.Write\(data\)
+    retained_property: every actual output sink error remains checked
+
+  # Closing the compressor flushes only to bytes.Buffer, which cannot fail. The actual PDF sink
+  # retains checked writes, so this exact dismissal removes unreachable compression plumbing.
+  - id: lint-genpage-buffer-compress-close
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: errcheck
+    path: internal/genpage/write.go
+    message: Error return value of `d\.flate\.Close` is not checked
+    source: _ = d\.flate\.Close\(\)
+    retained_property: every actual output sink error remains checked
+
+  # os.Executable returns this running test binary's pathname from the operating system, not user
+  # input. Reading those exact bytes is the real native executable-header oracle; substituting a
+  # fake or header-only file would weaken the test's claim.
+  - id: lint-archive-test-native-executable
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/qualitygate/archives_internal_test.go
+    message: 'G304: Potential file inclusion via variable'
+    source: data, err := os\.ReadFile\(executable\)
+    retained_property: the native executable header is inspected from its actual bytes
+
+  # The embedded TextSettings must come first to satisfy embeddedstructfieldcheck and flatten the
+  # standard JSON shape without bespoke serializers. Native Go measurements show identical object
+  # sizes before and after reordering; fieldalignment saves only 40 bytes of pointer-scan extent.
+  # Bounded detail queries and the declared distinct-style envelope keep that scan cost explicit.
+  - id: lint-report-text-embedding-alignment
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: govet
+    path: internal/report/model.go
+    message: 'fieldalignment: Text has 152 leading bytes of pointer data but optimal value is 112'
+    source: 'Text struct \{'
+    retained_property: standard flattened JSON and idiomatic embedding retain measured object sizes
+
+  # The embedded TextSettings must come first to satisfy embeddedstructfieldcheck and flatten the
+  # standard JSON shape without bespoke serializers. Native Go measurements show identical object
+  # sizes before and after reordering; fieldalignment saves only 40 bytes of pointer-scan extent.
+  # Bounded detail queries and the declared distinct-style envelope keep that scan cost explicit.
+  - id: lint-report-text-detail-embedding-alignment
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: govet
+    path: internal/report/query.go
+    message: 'fieldalignment: TextDetail has 200 leading bytes of pointer data but optimal value is 160'
+    source: 'TextDetail struct \{'
+    retained_property: standard flattened JSON and idiomatic embedding retain measured object sizes
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-background
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field background is unused'
+    source: 'background\s+string'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-size
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field size is unused'
+    source: 'size\s+PageSize'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-bounds
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field bounds is unused'
+    source: 'bounds, inkBounds Rect'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-ink-bounds
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field inkBounds is unused'
+    source: 'bounds, inkBounds Rect'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-has-bounds
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field hasBounds is unused'
+    source: 'hasBounds, hasInk bool'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-has-ink
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field hasInk is unused'
+    source: 'hasBounds, hasInk bool'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-has-text
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field hasText is unused'
+    source: 'hasText\s+bool'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
+  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
+  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
+  - id: lint-unused-style-key-font
+    tool: golangci-lint
+    kind: false-positive
+    effect: exclude-diagnostic
+    linter: unused
+    path: internal/report/builder.go
+    message: 'field font is unused'
+    source: 'font\s+int'
+    retained_property: style interning distinguishes this field through native map-key equality
+
+  # The pinned unused analyzer reports the blank identifier and descriptive names in interface and
+  # function-type signatures as unused variables when this option is false. Those are not unused
+  # runtime arguments. Unparam, with check-exported true, independently rejects actual unused
+  # behavior parameters; the real lint negative control defends that replacement.
+  - id: lint-unused-parameter-contracts
+    tool: golangci-lint
+    kind: duplicate-rule
+    effect: setting-item
+    setting: linters.settings.unused.parameters-are-used
+    values: ["true"]
+    superseded_by: [unparam]
+    retained_property: real unused behavior parameters remain rejected by unparam
+
+  # These concrete standard-library methods return nil for every error result. The fmt scopes match
+  # only statically concrete buffer arguments; the selected SDK verifies Fprintf returns solely their
+  # Write error. Arbitrary io.Writer and os.File calls remain checked by real negative controls. A gate reads
+  # the selected Go SDK implementations and rejects any non-nil error return, so a changed contract
+  # cannot silently inherit this exception. Fallible Writer interfaces remain fully checked.
+  - id: lint-errcheck-infallible-buffer-methods
+    tool: golangci-lint
+    kind: ignored-value
+    effect: setting-item
+    setting: linters.settings.errcheck.exclude-functions
+    values:
+      - (*strings.Builder).WriteRune
+      - (*strings.Builder).WriteString
+      - (*bytes.Buffer).Write
+      - (*bytes.Buffer).WriteString
+      - fmt.Fprintf(*strings.Builder)
+      - fmt.Fprintf(*bytes.Buffer)
+    retained_property: error returns are checked for every potentially fallible sink
+
+  # The byte fixture is an explicitly supplied italic font for the independent right-bearing raster
+  # regression. Production font/shaping calls remain behind typeset; moving this existing font byte
+  # fixture through another package would add a test-only boundary without protecting runtime code.
+  - id: lint-genpage-supplied-italic-byte-fixture
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    path: internal/genpage/ink_test.go
+    message: "import 'golang\\.org/x/image/font/gofont/goitalic' is not allowed from list 'typesetting-boundary': golang\\.org/x/image may only be imported by internal/typeset"
+    source: '"golang\.org/x/image/font/gofont/goitalic"'
+    retained_property: production font and shaping operations remain confined to typeset
+
+  # Creating a real no-writer FIFO is the source-opening regression's kernel boundary, not a mock.
+  # This test invokes only Mkfifo to prepare the fixture; runtime native reads remain in capture.
+  - id: lint-pdfengine-real-fifo-fixture
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    path: internal/pdfengine/input_unix_test.go
+    message: "import 'golang\\.org/x/sys/unix' is not allowed from list 'platform-boundary': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness"
+    source: '"golang\.org/x/sys/unix"'
+    retained_property: public engine input opening is verified against a real kernel FIFO
+
+  # A real no-writer FIFO proves the retained execution-evidence reader rejects substituted
+  # nonregular artifacts without blocking. This test-only import prepares the kernel fixture;
+  # production quality-gate reads reuse capture.OpenRegular rather than native syscall code.
+  - id: lint-mutation-evidence-real-fifo-fixture
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    path: tools/qualitygate/mutation_evidence_reader_unix_test.go
+    message: "import 'golang\\.org/x/sys/unix' is not allowed from list 'platform-boundary': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness"
+    source: '"golang\.org/x/sys/unix"'
+    retained_property: retained mutation evidence rejects real kernel FIFOs without blocking
+
+  # The decoder fixture is a separate executable that owns its marker output and blocked stdin.
+  # Those real process streams are the integration boundary being tested; product process streams
+  # remain wired exclusively by cmd/pdfconcat, and every fixture marker write checks errors.
+  - id: lint-decoder-fixture-marker-output
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: internal/plan/testdata/decodecmd/main.go
+    message: 'use of `os\.Stdout` forbidden'
+    source: 'output := os\.Stdout'
+    retained_property: marker writes are checked and decoded independently by executable tests
+
+  # The decoder fixture deliberately receives a real pipe without EOF to prove interruption at the
+  # public reader boundary. A mock or in-memory reader would not establish blocked process behavior.
+  - id: lint-decoder-fixture-blocked-input
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: internal/plan/testdata/decodecmd/main.go
+    message: 'use of `os\.Stdin` forbidden'
+    source: 'input := announcingReader\{Reader: os\.Stdin, output: output\}'
+    retained_property: blocked stdin cancellation is verified through the actual process pipe
+
+  # The Windows cancellation integration uses a newly isolated child console and the native control
+  # event APIs. These test-only calls cannot be replaced by a mock and still prove blocked-reader
+  # cancellation; product raw filesystem operations remain in their existing native boundaries.
+  - id: lint-plan-windows-interrupt-test-api
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    goos: windows
+    path: internal/plan/interrupt_windows_test.go
+    message: "import 'golang\\.org/x/sys/windows' is not allowed from list 'platform-boundary': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness"
+    source: '"golang\.org/x/sys/windows"'
+    retained_property: real cancellation uses an isolated native console without touching the parent
+
+  # The Windows cancellation integration uses a newly isolated child console and the native control
+  # event APIs. These test-only calls cannot be replaced by a mock and still prove blocked-reader
+  # cancellation; product raw filesystem operations remain in their existing native boundaries.
+  - id: lint-plan-windows-console-fixture-api
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    goos: windows
+    path: internal/plan/testdata/decodecmd/control_windows.go
+    message: "import 'golang\\.org/x/sys/windows' is not allowed from list 'platform-boundary': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness"
+    source: '"golang\.org/x/sys/windows"'
+    retained_property: real cancellation uses an isolated native console without touching the parent
+
+  # GetConsoleProcessList receives a fixed two-DWORD buffer only for the synchronous OS call. Its
+  # returned count and exact target/sender membership must match before any group-zero broadcast;
+  # extra members, truncation and target=self are rejected by the console isolation controls.
+  - id: lint-console-fixture-process-list-buffer
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    goos: windows
+    path: internal/plan/testdata/decodecmd/control_windows.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'procedure\.Call\(uintptr\(unsafe\.Pointer\(&processes\[0\]\)\), uintptr\(len\(processes\)\)\)'
+    retained_property: only the verified isolated target and sender receive the native event
+
+  # Whitespace's multiline-condition option demands an initial blank line that revive empty-lines and
+  # wsl_v5 leading-whitespace reject. The real paired fixtures prove each alternative fails one side.
+  # The other whitespace checks remain enabled; enabled formatting/block checks own this layout.
+  - id: lint-whitespace-multi-if-conflict
+    tool: golangci-lint
+    kind: incompatible-rule
+    effect: setting-item
+    setting: linters.settings.whitespace.multi-if
+    values: ["false"]
+    conflicts_with: [revive, wsl_v5]
+    retained_property: all other whitespace and enabled block-layout checks remain enforced
+
+  # Whitespace's multiline-signature option demands an initial blank line that revive empty-lines and
+  # wsl_v5 leading-whitespace reject. The real paired fixtures prove each alternative fails one side.
+  # The other whitespace checks remain enabled; enabled formatting/block checks own this layout.
+  - id: lint-whitespace-multi-func-conflict
+    tool: golangci-lint
+    kind: incompatible-rule
+    effect: setting-item
+    setting: linters.settings.whitespace.multi-func
+    values: ["false"]
+    conflicts_with: [revive, wsl_v5]
+    retained_property: all other whitespace and enabled block-layout checks remain enforced
+
+  # The branch returns the Windows path style when GOOS is windows, which a run on this operating
+  # system cannot execute; the Windows job measures it, and the style itself is tested on every OS
+  # through its explicit constructors.
+  - id: coverage-assembly-host-path-style-windows-darwin
+    tool: coverage
+    kind: unreachable-platform-branch
+    goos: darwin
+    path: internal/assembly/path.go
+    function: HostPathStyle
+    anchor: 'return PathStyleWindows'
+    retained_property: the host path style matches the running operating system
+
+  # The branch returns the Windows path style when GOOS is windows, which a run on this operating
+  # system cannot execute; the Windows job measures it, and the style itself is tested on every OS
+  # through its explicit constructors.
+  - id: coverage-assembly-host-path-style-windows-linux
+    tool: coverage
+    kind: unreachable-platform-branch
+    goos: linux
+    path: internal/assembly/path.go
+    function: HostPathStyle
+    anchor: 'return PathStyleWindows'
+    retained_property: the host path style matches the running operating system
+
+  # Flatten constructs styles and consumer declarations from the same effective layers. Unset Value
+  # resolves to the built-in empty text, whose static validation succeeds, so a nonnil constraint
+  # cannot select this unset-Value fallback. Retain the fallback for manually inconsistent Flat values.
+  - id: coverage-layout-unset-value-constraint-fallback
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/layout/layout.go
+    function: contributionDeclaration
+    anchor: 'return contribution.Origin, textValuePointer'
+    retained_property: inconsistent intermediate declarations still have a diagnostic location
+
+  # Flatten's unset Value resolves to empty text, which has no block or overflow finding. Therefore
+  # overflowing real text must name Value, Anchor or Size before this defensive location fallback.
+  - id: coverage-layout-empty-placement-fallback
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/layout/layout.go
+    function: lateDeclarations
+    anchor: 'return []placementDeclaration{{origin: fallback, member: "/blank"}}'
+    retained_property: inconsistent intermediate placement still has a diagnostic location
+
+  # Both Place and ValidateText reject unsupported scripts, bidi R/AL and direction controls before
+  # segmentation. Segmenter input therefore contains only supported left-to-right scripts; this
+  # late check defends against future shaping-library disagreement with that established boundary.
+  - id: coverage-typeset-segment-direction-disagreement
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/typeset/shape.go
+    function: Shaper.shapeChecked
+    anchor: 'return nil, &TextError{Problems: []Problem{{'
+    retained_property: a segmenter direction or script disagreement fails rather than mislays text
+
+  # This real child helper deliberately writes oversized stdout and independent stderr so the parent
+  # can prove complete process-stream capture. It checks both write errors; replacing process streams
+  # with an injected buffer would omit the operating-system boundary this regression must verify.
+  - id: lint-test-evidence-child-stdout
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: tools/qualitygate/testevidence_internal_test.go
+    message: 'use of `os\.Stdout` forbidden'
+    source: 'fmt\.Fprint\(os\.Stdout, strings\.Repeat\("x", bufferMax\+1\), evidencePanicTail\)'
+    retained_property: actual child stdout is captured without truncation
+
+  # The same child helper separately exercises process stderr; every write error remains checked.
+  - id: lint-test-evidence-child-stderr
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: tools/qualitygate/testevidence_internal_test.go
+    message: 'use of `os\.Stderr` forbidden'
+    source: 'fmt\.Fprint\(os\.Stderr, "complete process stderr\\n"\)'
+    retained_property: actual child stderr is captured separately from JSON events
+
+  # Raw ReadContext materializes the xref/catalog, and the first rendering scan rejects all unsupported
+  # states before validation. Pinned pdfcpu validation consumes/deletes these states but never creates
+  # them (optional-state creation belongs to unrelated stamping APIs). Retain the second scan to
+  # reject a future validator that starts introducing rendering state after the established boundary.
+  - id: coverage-pdfengine-validation-creates-rendering-state
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/engine.go
+    function: Engine.readContext
+    anchor: 'return nil, newError(CodeUnsupportedRendering, source, path, renderingErr)'
+    retained_property: post-validation rendering state cannot silently enter assembled output
+
+  # Every real Stage either returns a live owner or an error; a retained pre-rename failure transfers
+  # that owner into Commit's Result before producing ReportPublishError. The app reaches this check
+  # only through that Result. Retain the nil check for future or inconsistent result construction.
+  - id: coverage-app-recovery-owner-transfer-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/app/recovery.go
+    function: pipeline.verifyRetainedRecovery
+    anchor: 'return errRecoveryIdentityChanged'
+    retained_property: recovery without a transferred live owner is never asserted safe
+
+  # The app owns a successfully opened, verified read-only metadata lease and releases it once after
+  # recovery verification/refresh; no Job input exposes or closes its handle. Underlying syscall
+  # Close can still fail from a host/environment fault (it is not an infallible API). Preserve the
+  # warning for that native fault rather than fabricating early handle release in the normal chain.
+  - id: coverage-app-native-recovery-lease-close-fault
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/app/recovery.go
+    function: pipeline.reportCommitFailure
+    anchor: 'p.warnings = append(p.warnings, closeErr.Error())'
+    retained_property: native lease-release faults remain visible after committed publication
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field Time. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-time
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Time' want 'time'"
+    source: 'Time\s+string `json:"Time"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field Path. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-path
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Path' want 'path'"
+    source: 'Path\s+string `json:"Path"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names Version in both download and module-info records. Preserve the exact upstream wire tag.
+  - id: lint-go-module-wire-source-version
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Version' want 'version'"
+    source: 'Version\s+string `json:"Version"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field Sum. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-sum
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Sum' want 'sum'"
+    source: 'Sum\s+string `json:"Sum"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field GoModSum. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-gomodsum
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'GoModSum' want 'go_mod_sum'"
+    source: 'GoModSum\s+string `json:"GoModSum"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field Zip. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-zip
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Zip' want 'zip'"
+    source: 'Zip\s+string `json:"Zip"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field Info. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-info
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Info' want 'info'"
+    source: 'Info\s+string `json:"Info"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # This decoder follows Go's documented go mod download/module-info JSON wire protocol, which
+  # names this field Error. Preserve the exact upstream tag rather than invent a different schema.
+  - id: lint-go-module-wire-source-error
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: tagliatelle
+    path: tools/installtools/module_source.go
+    message: "json\\(snake\\): got 'Error' want 'error'"
+    source: 'Error\s+string `json:"Error"`'
+    retained_property: upstream module identity fields retain their exact wire names
+
+  # The executable is the selected Go SDK. Arguments are reviewed source-verification/test/build
+  # commands, with the upstream module/version and digest pins validated before invocation; no
+  # user-controlled shell is involved. Real installer controls reject invalid source and patch data.
+  - id: lint-verified-tool-source-build
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/installtools/source_build.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'exec\.CommandContext\(ctx, "go", args\.\.\.\)'
+    retained_property: only verified upstream source and reviewed build flags reach the selected SDK
+
+  # The executable is the selected Go SDK. Arguments are reviewed source-verification/test/build
+  # commands, with the upstream module/version and digest pins validated before invocation; no
+  # user-controlled shell is involved. Real installer controls reject invalid source and patch data.
+  - id: lint-verified-tool-source-download
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/installtools/module_source.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'exec\.CommandContext\(ctx, "go", sourceModVerb, sourceDownloadVerb, "-json", module\+"@"\+versions\[prefix\+"_VERSION"\]\)'
+    retained_property: only verified upstream source and reviewed build flags reach the selected SDK
+
+  # This native queue fault control checks a raw descriptor after closing it. Running package tests
+  # concurrently could reuse that descriptor and close a foreign resource or invalidate the EBADF
+  # assertion. Sequential top-level execution preserves the real cleanup-failure observation.
+  - id: lint-paralleltest-scale-closed-queue-cleanup
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: test/scale/measure_collector_darwin_internal_test.go
+    message: Function TestOwnedExitObserverClosedQueueFailsAndPreservesCleanupError missing the call to method parallel
+    source: func TestOwnedExitObserverClosedQueueFailsAndPreservesCleanupError\(t \*testing\.T\) \{
+    goos: darwin
+    retained_property: native closed-descriptor and cleanup-error controls run without concurrent descriptor reuse
+
+  # This native queue fault control checks a raw descriptor after closing it. Running package tests
+  # concurrently could reuse that descriptor and close a foreign resource or invalidate the EBADF
+  # assertion. Sequential top-level execution preserves the real cleanup-failure observation.
+  - id: lint-paralleltest-scale-released-queue-descriptor
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: test/scale/measure_collector_darwin_internal_test.go
+    message: Function TestOwnedExitObserverReleasesNonInheritedQueue missing the call to method parallel
+    source: func TestOwnedExitObserverReleasesNonInheritedQueue\(t \*testing\.T\) \{
+    goos: darwin
+    retained_property: native closed-descriptor and cleanup-error controls run without concurrent descriptor reuse
+
+  # This native queue fault control checks a raw descriptor after closing it. Running package tests
+  # concurrently could reuse that descriptor and close a foreign resource or invalidate the EBADF
+  # assertion. Sequential top-level execution preserves the real cleanup-failure observation.
+  - id: lint-paralleltest-scale-scratch-collector-cleanup
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: test/scale/measure_collector_darwin_internal_test.go
+    message: Function TestScratchAndCollectorCleanupFailuresBothRemainVisible missing the call to method parallel
+    source: func TestScratchAndCollectorCleanupFailuresBothRemainVisible\(t \*testing\.T\) \{
+    goos: darwin
+    retained_property: native closed-descriptor and cleanup-error controls run without concurrent descriptor reuse
+
+  # This native in-flight collector control closes the raw exit queue, then requires the successful
+  # collector reply to remain invalid and cleanup to expose EBADF. Parallel tests could reuse the
+  # numeric descriptor before cleanup and close a foreign resource. Run this exact control sequentially.
+  - id: lint-paralleltest-scale-successful-closed-queue
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: test/scale/measure_identity_darwin_internal_test.go
+    message: Function TestSuccessfulCollectorReplyCannotHideClosedExitQueue missing the call to method parallel
+    source: func TestSuccessfulCollectorReplyCannotHideClosedExitQueue\(t \*testing\.T\) \{
+    goos: darwin
+    retained_property: successful collector output cannot mask native exit-observer and cleanup failures
+
+  # This private launcher runs only the identity-verified Gremlins tool and the selected SDK fixtures
+  # used by its real deadline controls. Its callers own exact argument arrays and regular output files;
+  # no shell or product input chooses the executable. Cancellation waits for owned cleanup and evidence.
+  - id: lint-verified-mutation-launch
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/qualitygate/mutation_launch.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'exec\.CommandContext\(ctx, c\.name, args\.\.\.\)'
+    retained_property: only verified tool and SDK invocations reach the owned deadline launcher

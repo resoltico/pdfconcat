@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "output": "Annex.pdf",
+  "blank": { "text": { "value": "This page intentionally left blank", "anchor": "bottom", "y": "20mm" } },
+  "items": [
+    "cover.pdf",
+    { "blank": {} },
+    { "dir": "sections", "items": ["01.pdf", "02.pdf"] },
+    { "blank": { "text": { "value": "Appendix", "size": 24 } }, "count": 2 },
+    "appendix.pdf"
+  ]
+}

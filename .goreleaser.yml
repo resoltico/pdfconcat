@@ -3,6 +3,15 @@ version: 2
 
 project_name: PDFConcat
 
+report_sizes: true
+
+before:
+  hooks:
+    - go run ./tools/qualitygate release-version -tag={{ .Tag }} -snapshot={{ .IsSnapshot }}
+
+snapshot:
+  version_template: '{{ mustReadFile "internal/app/version.txt" | trim }}-SNAPSHOT-{{ .ShortCommit }}'
+
 builds:
   - id: pdfconcat
     main: ./cmd/pdfconcat
@@ -16,18 +25,11 @@ builds:
     goarch:
       - amd64
       - arm64
-    flags:
-      - -trimpath
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - >-
         -s -w
         -X main.version={{ .Version }}
-        -X main.commit={{ .Commit }}
-        -X main.commitDate={{ .CommitDate }}
-
-gomod:
-  proxy: true
 
 archives:
   - id: default
@@ -45,6 +47,16 @@ archives:
       - THIRD_PARTY_NOTICES.md
       - src: third_party/licenses/*
         dst: third_party/licenses
+        strip_parent: true
+      - src: docs/CLI.md
+        dst: docs/CLI.md
+      - src: docs/PLAN.md
+        dst: docs/PLAN.md
+      - src: docs/BLANK_PAGES.md
+        dst: docs/BLANK_PAGES.md
+      - src: internal/**/*.schema.json
+        dst: schemas
+        strip_parent: true
 
 checksum:
   name_template: checksums.txt
@@ -52,8 +64,11 @@ checksum:
 changelog:
   use: github-native
 
+# The release is staged as a draft. .github/workflows/release.yml verifies the archives and their
+# provenance attestation, and only then publishes the draft.
 release:
-  draft: false
+  draft: true
+  replace_existing_draft: true
   prerelease: auto
   preflight:
     fail_on_error: true

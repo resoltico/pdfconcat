@@ -3,3 +3,8 @@
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 *.pdf binary
+*.ttf binary
+*.otf binary
+*.woff2 binary
+*.gz binary
+*.zip binary

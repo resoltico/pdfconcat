@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func replaceFile(staged, destination string, overwrite bool) error {
+func replaceFile(staged, destination string, existing existingFile) error {
 	from, err := windows.UTF16PtrFromString(staged)
 	if err != nil {
 		return fmt.Errorf("encode staged path: %w", err)
@@ -23,7 +23,7 @@ func replaceFile(staged, destination string, overwrite bool) error {
 	}
 
 	flags := uint32(windows.MOVEFILE_WRITE_THROUGH)
-	if overwrite {
+	if existing == replaceExisting {
 		flags |= windows.MOVEFILE_REPLACE_EXISTING
 	}
 

@@ -1,53 +1,40 @@
 # Releasing
 
-PDFConcat uses tagged GitHub releases and GoReleaser.
+PDFConcat currently publishes source-only GitHub releases. `v0.1.0` has no uploaded executables, binary archives, package checksums, or binary provenance attestations. GitHub supplies the source ZIP and tar.gz for the tag. Binary distribution is deferred to later versions; the retained GoReleaser configuration is packaging machinery, not the current publication path.
 
-## Version source
+## Before tagging
 
-Release version, commit, and commit date are injected into `cmd/pdfconcat` by GoReleaser ldflags. Local builds report `dev`, `none`, and `unknown` unless equivalent ldflags are supplied.
+1. Set the intended version in `internal/app/version.txt` and add its dated section to `CHANGELOG.md`, retaining `Unreleased`. Describe the net release outcome rather than implementation history.
+2. Run the baseline checks in [`CONTRIBUTING.md`](../CONTRIBUTING.md#gates), including the secret scan. Review the staged inventory so ignored build outputs, local credentials, work bills and execution evidence do not enter the source commit.
+3. Run `go run ./tools/qualitygate release-version -tag vX.Y.Z` and extract notes with `go run ./tools/qualitygate release-notes -tag vX.Y.Z -output /outside/checkout/release-notes.md`. The output path must be new. Check the actual notes; the matching changelog section must exist exactly once and contain release content.
+4. Push the final candidate commit and wait for its baseline CI to pass. Workflow configuration alone is not hosted execution evidence. Fuzzing, mutation testing, mutation negative controls and scale acceptance are separate manually dispatched campaigns; their deferral must not be described as passing them.
+5. Confirm notices and license texts are current and that the release tag will remain available as corresponding source.
 
-The release build uses `-trimpath`, the source commit timestamp for archive metadata, the commit date for embedded version metadata, and GoReleaser's module-proxy mode. These settings are intended to reduce build-path/time variability and keep dependency acquisition verifiable.
+## Tagging and publication
 
-## Pre-release expectations
+The version file contains a canonical Semantic Version without a `v` prefix or build metadata; a prerelease suffix is allowed. Major, minor and patch fit unsigned 64-bit integers, matching the packaging parser. The source version is limited to 175 ASCII characters so a snapshot archive name fits a 255-byte filename component even with the longest target suffix and a 40-character Git abbreviation. Its producer identity also fits the report format.
 
-Before tagging a release on a development machine or CI environment:
+The file lives beside the application code so ordinary `go build` can embed it directly. Release tooling reads the same file. A general project configuration adds parsing without another required setting; a root version file requires a separate embedding package because Go cannot embed a parent path.
 
-1. review `CHANGELOG.md` and make the release narrative cumulative from the preceding normal release;
-2. run the checks listed in [`CONTRIBUTING.md`](../CONTRIBUTING.md#checks) and commit any `go.mod`/`go.sum`/`tools` module changes they require;
-3. verify macOS, Linux, and Windows CI is green;
-4. verify `.goreleaser.yml` with the pinned GoReleaser tool (`goreleaser check` runs in CI);
-5. confirm dependency/license notices still match the tidied application module graph and shipped binary obligations; and
-6. confirm the release tag will remain available as corresponding source for the MPL-2.0 executable release.
-
-Do not advertise unfinished or prerelease-only behavior as released capability.
-
-## Tagging
-
-Use semantic version tags:
+Create an annotated tag on the verified candidate; use `-s` instead of `-a` when a signing key is configured:
 
 ```text
-git tag -s vX.Y.Z -m "PDFConcat vX.Y.Z"
+git tag -a vX.Y.Z -m "PDFConcat vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The release workflow first calls the repository CI workflow as a release gate. Only after those checks pass does it invoke GoReleaser for macOS, Linux, and Windows amd64/arm64 artifacts and publish `checksums.txt`. GitHub's attestation action then consumes that checksum manifest so the released archive subjects receive build-provenance attestations.
+The tag workflow runs baseline CI on the triggering commit, validates the tag against the version file, and extracts the release notes from `CHANGELOG.md`. Before publishing, it checks that the remote tag still resolves to that same commit. It creates the release with `--verify-tag` and `--notes-file`, without asset arguments. It does not invoke GoReleaser or upload application packages. Only the publication job needs `contents: write`; checks use read permissions and checkout does not persist credentials. No personal access token is stored as a repository secret.
+
+The notes are the matching version section of `CHANGELOG.md`, not GitHub-generated commit notes or a separate maintained release narrative. The extractor rejects missing or duplicate sections and empty notes.
+
+## Version metadata
+
+Ordinary source builds embed `internal/app/version.txt` and retain the Go toolchain's VCS revision, commit time and dirty-tree marker. `pdfconcat version` prints this metadata. A plain source archive without `.git` has unknown commit provenance; that is expected and does not change the configured application version. Module pseudo-versions do not replace the application version.
+
+GoReleaser snapshots derive their version from the same file and append `-SNAPSHOT-` plus Git's short commit. The packaging build sets `main.version` at link time and retains recorded linker arguments; it deliberately omits `-trimpath` because Go otherwise suppresses those arguments. Executables can contain compiler source/build paths, so byte reproducibility also requires a stable checkout path.
+
+`qualitygate archives` inspects all six packaging targets, checks checksums and the explicit runtime-content inventory, executable headers, source/toolchain/module metadata and the consumed linker version. It executes only the native host target. `qualitygate release-bytes` can compare a binary draft's actual remote bytes with verified local artifacts. These retained controls do not establish binary release verification for this source-only release, and must be exercised against the final candidate before any future binary publication.
 
 ## Corresponding source
 
-PDFConcat is MPL-2.0. For every published executable release, the matching Git tag in `https://github.com/resoltico/pdfconcat` is the corresponding Source Code Form. Release notes and packaged `README.md` must continue to identify how recipients can obtain that source.
-
-Do not delete or move a release tag/source in a way that would make the corresponding source unavailable to recipients of the executable release.
-
-## Release contents
-
-Each archive contains:
-
-- the `pdfconcat` executable;
-- `README.md`;
-- `LICENSE`;
-- `THIRD_PARTY_NOTICES.md`; and
-- runtime third-party license texts.
-
-Windows archives are ZIP; other targets use tar.gz.
-
-The checksum manifest is published alongside the archives rather than embedded inside each archive.
+The application is MPL-2.0; third-party runtime components and development tooling retain their own licenses. Keep `LICENSE`, `THIRD_PARTY_NOTICES.md`, `third_party/licenses/` and development-tool license notices available in the source repository. A published executable must identify the matching source tag at `https://github.com/resoltico/pdfconcat`; do not delete or move published source tags.

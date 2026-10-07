@@ -1,0 +1,54 @@
+name: Install independent PDF QA tools
+description: >-
+  Installs qpdf and Poppler, the independent validator, renderer and text extractor that tests use
+  as oracles, and checks their versions. They are development and CI tools only; PDFConcat never
+  runs them. Windows installs the exact versions pinned in tools/versions.env from Chocolatey;
+  Linux installs the distribution's packages and macOS Homebrew's current formulae, neither of
+  which can be pinned to an exact version, so every platform enforces the minimum versions the
+  tests were written against and prints what was installed.
+
+runs:
+  using: composite
+  steps:
+    - name: Install (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends --yes qpdf poppler-utils
+
+    - name: Install (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install qpdf poppler
+
+    - name: Install (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        . tools/versions.env
+        choco install qpdf --yes --no-progress --version "$CHOCO_QPDF_VERSION"
+        choco install poppler --yes --no-progress --version "$CHOCO_POPPLER_VERSION"
+        echo "C:/ProgramData/chocolatey/bin" >> "$GITHUB_PATH"
+
+    - name: Verify versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        . tools/versions.env
+        qpdf_version="$(qpdf --version | head -n 1 | awk '{print $3}')"
+        poppler_version="$(pdftotext -v 2>&1 | head -n 1 | awk '{print $3}')"
+        echo "qpdf $qpdf_version, poppler $poppler_version"
+        {
+          echo "### Independent PDF QA tools (${RUNNER_OS} ${RUNNER_ARCH})"
+          echo "- qpdf ${qpdf_version} (minimum ${QA_QPDF_MIN_VERSION})"
+          echo "- poppler ${poppler_version} (minimum ${QA_POPPLER_MIN_VERSION})"
+        } >> "$GITHUB_STEP_SUMMARY"
+        at_least() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]; }
+        at_least "$qpdf_version" "$QA_QPDF_MIN_VERSION" || { echo "qpdf $qpdf_version is older than $QA_QPDF_MIN_VERSION"; exit 1; }
+        at_least "$poppler_version" "$QA_POPPLER_MIN_VERSION" || { echo "poppler $poppler_version is older than $QA_POPPLER_MIN_VERSION"; exit 1; }
+
+    - name: Missing required QA tools must fail, not skip
+      shell: bash
+      run: go test -count=1 -run '^TestRequiredToolsRejectMissingPrerequisite$' ./internal/pdforacle

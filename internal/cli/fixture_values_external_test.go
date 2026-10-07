@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Ervins
+
+package cli_test
+
+// Fixture paths, markers and expected contract values shared by these tests.
+const (
+	planUsageSyntax   = "--plan FILE|-"
+	argVersion        = "--version"
+	argView           = "--view"
+	sourceAPath       = "a.pdf"
+	unknownOptionLine = "build --bogus"
+)

@@ -1,85 +1,387 @@
-# golangci-lint configuration — strictest mode.
+# golangci-lint configuration: every linter, strict settings, no hidden exceptions.
 #
-# Policy
-#   * Every available linter is enabled (`default: all`). The golangci-lint version is pinned in
-#     tools/go.mod, so new linters arrive only through a deliberate version bump.
-#   * There are NO inline exceptions: `//nolint` directives are forbidden (enforced by
-#     internal/repopolicy) and nolintlint is enabled as a second guard.
-#   * Every exception lives in this file, in the REGISTRY below, with a comment that states why.
-#     An exception without a justification, or one that no longer matches anything
-#     (`exclusions.warn-unused`), is a defect.
+# This file holds the strictness settings. Every exception (a disabled linter, a disabled check,
+# an ignore list, a diagnostic exclusion) is written down once, with its rationale, in
+# .quality-exceptions.yml. `go run ./tools/qualitygate lint-config` fails when this file carries an
+# exception the registry does not list, or lacks one it does. Exceptions are never written
+# next to the code: `//nolint` and its siblings are rejected by internal/repopolicy.
+#
+# Numeric thresholds are settings, not exceptions. Each states the readability argument for its
+# number; there is no universal strictest value.
 version: "2"
 
 run:
   timeout: 10m
   tests: true
+  issues-exit-code: 1
   modules-download-mode: readonly
 
 output:
   sort-order: [file, linter, severity]
 
+issues:
+  # Report everything: by default golangci-lint truncates after 50 issues per linter and 3 identical
+  # messages, and merges multiple issues on one line.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+  new: false
+  new-from-rev: ""
+  new-from-patch: ""
+  new-from-merge-base: ""
+
 linters:
   default: all
 
-  # ---------------------------------------------------------------------------
-  # REGISTRY — linters that are disabled, and why.
-  # ---------------------------------------------------------------------------
+  # Exceptions are listed in .quality-exceptions.yml.
   disable:
-    # Deprecated aliases: superseded by the *_v5 / *_v2 entries, which stay enabled.
-    - wsl             # superseded by wsl_v5
-    - exhaustruct     # superseded by exhaustruct_v5
-    - gomodguard      # superseded by gomodguard_v2
-
-    # Contradicts the domain model: BlankStyle/TextStyle are deliberately partial structs whose
-    # unset fields are meaningful (layered configuration); requiring every field to be spelled
-    # out would bury intent in noise and obscure which values were actually chosen.
+    - exhaustruct
     - exhaustruct_v5
-
-    # PDFConcat's errors are messages for humans on a terminal, and nothing branches on their
-    # identity. Declaring a sentinel per message would be speculative generality (CONTRIBUTING.md:
-    # simplicity). Where callers do need to discriminate, a typed error exists (cli.UsageError).
-    - err113
-
-    # Stylistic overlap: nlreturn and wsl_v5 both police blank lines before return/branch
-    # statements and would demand contradictory layouts; wsl_v5 is the stricter, configurable one.
+    - gomodguard
     - nlreturn
-
-    # Forbids the scoped-error idiom `if err := f(); err != nil`, which is Go's standard way to
-    # keep err from leaking into the rest of the function. Its autofixer also emitted code that
-    # did not compile when err was already declared. Shadowing risks are covered by govet's strict
-    # shadow analyzer instead.
     - noinlineerr
-
-    # Revisit when Option[T] or another type needs mixed receivers; the project's value types are
-    # all value-receiver only, so the check currently has nothing to say.
-    - recvcheck
-
-    # Technology the project does not use. These linters cannot find anything here, and they
-    # are listed (rather than silently absent) so that adopting such a technology forces a
-    # deliberate decision to re-enable the matching linter.
-    - testifylint     # testify (tests use stdlib testing only; depguard forbids testify)
-    - ginkgolinter    # ginkgo/gomega
-    - zerologlint     # zerolog
-    - loggercheck     # logging libraries
-    - sloglint        # log/slog
-    - promlinter      # Prometheus
-    - protogetter     # protobuf
-    - spancheck       # OpenTelemetry/OpenCensus
-    - sqlclosecheck   # database/sql
-    - rowserrcheck    # database/sql
-    - arangolint      # ArangoDB
-    - clickhouselint  # ClickHouse
-    - unqueryvet      # SQL builders
-    - bodyclose       # HTTP clients (the product is offline by contract)
-    - canonicalheader # net/http headers
-    - noctx           # HTTP requests; context plumbing is covered by contextcheck
+    - wsl
 
   settings:
+    asasalint:
+      use-builtin-exclusions: false
     cyclop:
+      # McCabe's classic limit is 10; 12 leaves room for a flat switch over the small enums here.
       max-complexity: 12
+      # A package averaging more than 6 paths per function is tangled even if no function is.
       package-average: 6
+    decorder:
+      disable-dec-order-check: false
+      disable-init-func-first-check: false
+      disable-dec-num-check: false
+      disable-type-dec-num-check: false
+      disable-const-dec-num-check: false
+      disable-var-dec-num-check: false
     depguard:
       rules:
+        allowed-imports:
+          # Anything outside this list is a dependency decision: add it here together with go.mod,
+          # THIRD_PARTY_NOTICES.md and a license copy, and give it a boundary rule below if it belongs to one package.
+          list-mode: strict
+          files:
+            - $all
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat
+            - github.com/pdfcpu/pdfcpu
+            - github.com/go-text/typesetting
+            - github.com/santhosh-tekuri/jsonschema/v6
+            - go.yaml.in/yaml/v3
+            - golang.org/x/image
+            - golang.org/x/sys
+            - golang.org/x/term
+            - golang.org/x/text/unicode/bidi
+            - golang.org/x/text
+            - golang.org/x/text/cases
+            - golang.org/x/text/unicode/norm
+            # depguard mis-resolves go/* standard-library imports once an allowed module path begins with
+            # "go."; naming the go/* packages the project uses keeps them recognised.
+            - go/ast
+            - go/parser
+            - go/token
+        # Production ownership uses exact directory selectors and exact imported-package permissions.
+        # More-specific allows override the module denial within this same native depguard rule.
+        # Independent _test.go internal imports are deliberately unrestricted; the $all external
+        # allowlist and library ownership checks still apply. Non-test support files are classified
+        # explicitly below, and runtime owners cannot import them.
+        production-assembly:
+          list-mode: lax
+          files:
+            - "**/internal/assembly/*.go"
+            - "!$test"
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-typeset:
+          list-mode: lax
+          files:
+            - "**/internal/typeset/*.go"
+            - "!$test"
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-capture:
+          list-mode: lax
+          files:
+            - "**/internal/capture/*.go"
+            - "!$test"
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-plan:
+          list-mode: lax
+          files:
+            - "**/internal/plan/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/assembly$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-layout:
+          list-mode: lax
+          files:
+            - "**/internal/layout/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/assembly$
+            - github.com/resoltico/pdfconcat/internal/typeset$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-genpage:
+          list-mode: lax
+          files:
+            - "**/internal/genpage/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/typeset$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-pdfengine:
+          list-mode: lax
+          files:
+            - "**/internal/pdfengine/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/capture$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-publish:
+          list-mode: lax
+          files:
+            - "**/internal/publish/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/capture$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-report:
+          list-mode: lax
+          files:
+            - "**/internal/report/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/assembly$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-cli:
+          list-mode: lax
+          files:
+            - "**/internal/cli/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/assembly$
+            - github.com/resoltico/pdfconcat/internal/report$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+        production-app:
+          list-mode: lax
+          files:
+            - "**/internal/app/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/assembly$
+            - github.com/resoltico/pdfconcat/internal/capture$
+            - github.com/resoltico/pdfconcat/internal/cli$
+            - github.com/resoltico/pdfconcat/internal/genpage$
+            - github.com/resoltico/pdfconcat/internal/layout$
+            - github.com/resoltico/pdfconcat/internal/pdfengine$
+            - github.com/resoltico/pdfconcat/internal/plan$
+            - github.com/resoltico/pdfconcat/internal/publish$
+            - github.com/resoltico/pdfconcat/internal/report$
+            - github.com/resoltico/pdfconcat/internal/typeset$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-command:
+          list-mode: lax
+          files:
+            - "**/cmd/pdfconcat/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/app$
+            - github.com/resoltico/pdfconcat/internal/pdfengine$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-support:
+          list-mode: lax
+          files:
+            - "**/internal/exectest/*.go"
+            - "**/internal/pdffixture/*.go"
+            - "**/internal/pdforacle/*.go"
+            - "**/internal/permissiontest/*.go"
+            - "**/internal/repopolicy/*.go"
+            - "!$test"
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-installtools:
+          list-mode: lax
+          files:
+            - "**/tools/installtools/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/repopolicy$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-qualitygate:
+          list-mode: lax
+          files:
+            - "**/tools/qualitygate/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/repopolicy$
+            - github.com/resoltico/pdfconcat/internal/capture$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-scale:
+          list-mode: lax
+          files:
+            - "**/test/scale/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/exectest$
+            - github.com/resoltico/pdfconcat/internal/pdffixture$
+            - github.com/resoltico/pdfconcat/internal/pdforacle$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        production-decoder-fixture:
+          list-mode: lax
+          files:
+            - "**/internal/plan/testdata/decodecmd/*.go"
+            - "!$test"
+          allow:
+            - github.com/resoltico/pdfconcat/internal/plan$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: internal imports must follow this production owner
+        bidi-boundary:
+          list-mode: lax
+          files:
+            - "!**/internal/typeset/*.go"
+          deny:
+            - pkg: golang.org/x/text/unicode/bidi
+              desc: Unicode direction classification belongs to typeset
+        terminal-boundary:
+          list-mode: lax
+          files:
+            - "!**/cmd/pdfconcat/*.go"
+          deny:
+            - pkg: golang.org/x/term
+              desc: terminal detection belongs to cmd/pdfconcat
+        process-effects-boundary:
+          list-mode: lax
+          files:
+            - "!$test"
+            - "!**/cmd/pdfconcat/*.go"
+            - "!**/tools/installtools/*.go"
+            - "!**/tools/qualitygate/*.go"
+            - "!**/internal/exectest/*.go"
+            - "!**/internal/plan/testdata/decodecmd/*.go"
+          deny:
+            - pkg: log
+              desc: default process logging belongs to executable wiring or explicit test tooling
+            - pkg: os/signal
+              desc: process signals belong to executable wiring or explicit test tooling
         engine-boundary:
           # docs/ARCHITECTURE.md: pdfcpu details live in internal/pdfengine and never leak across the application.
           list-mode: lax
@@ -89,25 +391,55 @@ linters:
           deny:
             - pkg: github.com/pdfcpu/pdfcpu
               desc: pdfcpu may only be imported by internal/pdfengine
+        typesetting-boundary:
+          # Text shaping is internal/typeset's concern; other packages use its API.
+          list-mode: lax
+          files:
+            - "!**/internal/typeset/*.go"
+          deny:
+            - pkg: github.com/go-text/typesetting
+              desc: the shaping library may only be imported by internal/typeset
+            - pkg: golang.org/x/image
+              desc: golang.org/x/image may only be imported by internal/typeset
         platform-boundary:
+          # Raw OS interfaces: file publication, source capture, the process shell and the scale harness.
           list-mode: lax
           files:
             - "!**/internal/publish/*.go"
+            - "!**/internal/capture/*.go"
+            - "!**/internal/app/*.go"
+            - "!**/internal/permissiontest/*.go"
+            - "!**/cmd/pdfconcat/*.go"
+            - "!**/test/scale/*.go"
           deny:
             - pkg: golang.org/x/sys
-              desc: OS-specific syscalls are isolated in internal/publish behind build tags
-        stdlib-first:
+              desc: OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness
+        schema-validator-tests-only:
+          # The JSON Schema validator is an independent oracle for tests, never runtime code.
           list-mode: lax
           files:
-            - $all
+            - "!$test"
           deny:
-            - pkg: github.com/pkg/errors
-              desc: use the standard library errors package
-            - pkg: github.com/spf13/cobra
-              desc: the ordered --blank grammar is deliberately parsed without a CLI framework
-            - pkg: github.com/stretchr/testify
-              desc: tests use the standard library only
+            - pkg: github.com/santhosh-tekuri/jsonschema
+              desc: the JSON Schema validator may only be imported by tests
+        policy-tooling:
+          # The YAML reader exists for the quality-policy tooling only; the product reads JSON.
+          list-mode: lax
+          files:
+            - "!**/internal/repopolicy/*.go"
+            - "!**/tools/**/*.go"
+          deny:
+            - pkg: go.yaml.in/yaml/v3
+              desc: YAML is read only by internal/repopolicy and tools/
     errcheck:
+      disable-default-exclusions: true
+      exclude-functions:
+        - (*strings.Builder).WriteRune
+        - (*strings.Builder).WriteString
+        - (*bytes.Buffer).Write
+        - (*bytes.Buffer).WriteString
+        - fmt.Fprintf(*strings.Builder)
+        - fmt.Fprintf(*bytes.Buffer)
       check-type-assertions: true
       check-blank: true
     exhaustive:
@@ -116,44 +448,49 @@ linters:
         - switch
         - map
     forbidigo:
+      analyze-types: true
+      exclude-godoc-examples: false
       forbid:
         - pattern: ^(fmt\.Print(f|ln)?|print|println)$
           msg: write to an injected io.Writer; only cmd/pdfconcat touches the process streams
         - pattern: ^os\.(Stdout|Stderr|Stdin)$
           msg: process streams are wired in cmd/pdfconcat and injected
     funlen:
+      # Roughly one screen; the defaults of 60 lines and 40 statements.
       lines: 60
       statements: 40
+    gochecksumtype:
+      default-signifies-exhaustive: false
     gocognit:
+      # SonarSource's recommended ceiling for cognitive complexity.
       min-complexity: 15
     goconst:
+      ignore-calls: false
+      exclude-types: []
       min-len: 3
       min-occurrences: 3
     gocritic:
       enable-all: true
       disabled-checks:
-        - unnamedResult # contradicts nonamedreturns, which forbids the names it asks for
-        - hugeParam    # the large values here are small immutable structs passed once per page, not hot paths
-        - ptrToRefParam # pointer-to-slice parameters are never used here; the check has nothing to find
+        - unnamedResult
+      settings:
+        hugeParam:
+          # Copying up to 256 bytes (four cache lines) is negligible next to the PDF work done per call.
+          sizeThreshold: 256
+    gocyclo:
+      min-complexity: 12
     godoclint:
-      # Exported-symbol documentation is enforced by revive's `exported` rule; godoclint adds the
-      # structural package-comment rules. Its max-len rule would duplicate lll (and at 77 columns
-      # fight gofumpt/golines), and requiring a doc on every test function adds noise, not signal.
-      default: none
-      enable:
-        - pkg-doc
-        - single-pkg-doc
-        - require-pkg-doc
-        - start-with-name
-        - deprecated
-        - no-unused-link
+      default: all
+      disable:
+        - require-doc
+      options:
+        max-len:
+          # Matches lll and golines, so the formatter and the linters agree.
+          length: 140
     godot:
       # Declaration comments must be full sentences. The licence header is a fixed template that
-      # goheader enforces, so file-level comments are deliberately out of this linter's scope.
+      # goheader enforces, so file-level comments are deliberately outside this linter's scope.
       scope: declarations
-      # capital stays off: doc comments on unexported identifiers legitimately begin with the
-      # lower-case identifier name, and an autofixer capitalizing it corrupts the comment.
-      capital: false
     goheader:
       template: |-
         SPDX-License-Identifier: MPL-2.0
@@ -162,14 +499,10 @@ linters:
       replace-allow-list: []
       retract-allow-no-explanation: false
     gosec:
-      excludes: []
+      severity: low
+      confidence: low
     govet:
       enable-all: true
-      disable:
-        # fieldalignment trades domain-ordered, readable field groups for a few bytes of padding.
-        # No struct here is allocated at a scale where padding matters (the largest sequences are
-        # thousands of items), and its autofixer reorders fields in ways that break unkeyed literals.
-        - fieldalignment
       settings:
         shadow:
           strict: true
@@ -180,32 +513,15 @@ linters:
         - opaque
     interfacebloat:
       max: 5
-    ireturn:
-      allow:
-        - error
-        - generic
-        - stdlib
     lll:
+      # Matches golines' max-len below, so the formatter and the linter agree.
       line-length: 140
       tab-width: 4
     maintidx:
       under: 25
     mnd:
-      # The "assign" check is off: a literal assigned to a named field or variable is labelled by
-      # that name (e.g. paper-size tables, `Width: 210`), which is what the rule asks for.
-      checks:
-        - argument
-        - case
-        - condition
-        - operation
-        - return
-      ignored-functions:
-        - ^os\.WriteFile$
-        - ^os\.MkdirAll$
-        - ^os\.OpenFile$
-        - ^strconv\.ParseUint$
-        - ^strconv\.FormatFloat$
-        - ^context\.WithTimeout$
+      ignored-numbers:
+        - "2"
     nakedret:
       max-func-lines: 0
     nestif:
@@ -216,6 +532,7 @@ linters:
       require-specific: true
     paralleltest:
       ignore-missing: false
+      ignore-missing-subtests: false
     perfsprint:
       strconcat: true
     prealloc:
@@ -225,30 +542,39 @@ linters:
     predeclared:
       qualified-name: true
     revive:
+      confidence: 0
       enable-all-rules: true
       rules:
-        - {name: add-constant, disabled: true} # duplicates mnd and goconst, with weaker configuration
-        - {name: cognitive-complexity, disabled: true} # duplicates gocognit
-        - {name: cyclomatic, disabled: true} # duplicates cyclop and gocyclo
-        - {name: function-length, disabled: true} # duplicates funlen
-        - {name: line-length-limit, disabled: true} # duplicates lll
-        - {name: max-public-structs, disabled: true} # package-level struct counts are a poor proxy for design quality
-        - {name: file-length-limit, disabled: true} # CONTRIBUTING.md: split files by responsibility, not by arbitrary line counts
-        - {name: banned-characters, disabled: true} # needs a configured character list; asciicheck covers identifiers
-        - {name: package-comments, disabled: true} # duplicates godoclint
-        - {name: unused-receiver, disabled: true} # duplicates unparam for the cases that matter here
-        - {name: comment-spacings, disabled: true} # duplicates gofumpt and godot
-        - {name: nested-structs, disabled: true} # anonymous test-table structs are idiomatic
-        - {name: flag-parameter, disabled: true} # bool parameters here select between two reporting formats
-        - {name: unhandled-error, disabled: true} # duplicates errcheck (which is configured stricter)
-        - {name: import-shadowing, disabled: true} # duplicates govet shadow and predeclared
-        - {name: confusing-results, disabled: true} # named results are forbidden by nonamedreturns, which this rule presumes
+        - name: cognitive-complexity
+          disabled: true
+        - name: cyclomatic
+          disabled: true
+        - name: function-length
+          disabled: true
+        - name: line-length-limit
+          disabled: true
+        - name: file-length-limit
+          arguments:
+            - max: 1000
+              skipComments: true
+              skipBlankLines: true
+        - name: max-public-structs
+          arguments: [20]
+        - name: banned-characters
+          arguments: [" ", "﻿", "​"]
+        - name: add-constant
+          disabled: true
+        - name: confusing-results
+          disabled: true
+        - name: unhandled-error
+          disabled: true
     staticcheck:
       checks: ["all"]
     tagliatelle:
       case:
         rules:
-          json: camel
+          json: snake
+          yaml: snake
     testpackage:
       skip-regexp: (export|internal)_test\.go
     thelper:
@@ -258,27 +584,45 @@ linters:
         begin: true
     unparam:
       check-exported: true
+    unused:
+      parameters-are-used: true
+      field-writes-are-uses: false
+      post-statements-are-reads: false
+      exported-fields-are-used: false
+      local-variables-are-used: false
+      generated-is-used: false
+    usestdlibvars:
+      http-method: true
+      http-status-code: true
+      time-weekday: true
+      time-month: true
+      time-layout: true
+      crypto-hash: true
+      default-rpc-path: true
+      sql-isolation-level: true
+      tls-signature-scheme: true
+      constant-kind: true
     usetesting:
       os-temp-dir: true
     varnamelen:
-      min-name-length: 2
-      ignore-decls:
-        - t testing.TB
-        - tb testing.TB
-        - b *testing.B
-        - i int
-        - ok bool
+      min-name-length: 3
+      # A short name is clear while its declaration is in view; beyond 15 lines (a quarter of funlen's
+      # 60-line limit) it needs a descriptive one.
+      max-distance: 15
       ignore-names:
-        - err
-        - ok
-        - id
+        - tc
         - tt
-        - fs
-        - x
-        - y
-        - r
-        - g
-        - b
+        - id
+      ignore-decls:
+        - t *testing.T
+        - b *testing.B
+        - f *testing.F
+        - tb testing.TB
+        - w io.Writer
+        - r io.Reader
+    whitespace:
+      multi-if: false
+      multi-func: false
     wrapcheck:
       ignore-package-globs:
         - github.com/resoltico/pdfconcat/*
@@ -288,63 +632,285 @@ linters:
       branch-max-lines: 2
 
   exclusions:
-    generated: strict
+    # Nothing is excluded implicitly: no presets, and generated files are linted like any other.
+    generated: disable
     warn-unused: true
     presets: []
     rules:
-      # Registry of path-scoped exceptions. Each states why the rule does not apply there.
-
-      # Tests construct throwaway values, repeat literals for readability, use long table
-      # literals, and rely on t.Fatalf for control flow; production-grade size/duplication
-      # limits would only fragment them.
-      # cmd/pdfconcat is the single place that touches the process streams, so forbidigo's
-      # stream ban is lifted there (and only there).
-      - path: cmd/pdfconcat/main\.go
-        linters:
+      - linters:
+          - gosec
+        path: ^tools/qualitygate/process\.go$
+        source: exec\.CommandContext\(ctx, c\.name, c\.args\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input'
+      - linters:
+          - gosec
+        path: ^tools/installtools/main\.go$
+        source: exec\.CommandContext\(ctx, "go", "install"
+        text: 'G204: Subprocess launched with a potential tainted input'
+      - linters:
+          - gosec
+        path: ^tools/installtools/main\.go$
+        source: exec\.CommandContext\(ctx, github, "release", "verify-asset"
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^internal/exectest/exectest\.go$
+        source: exec\.CommandContext\(tb\.Context\(\), "go"
+        text: 'G204: Subprocess launched with a potential tainted input'
+      - linters:
+          - gosec
+        path: ^internal/exectest/exectest\.go$
+        source: exec\.CommandContext\(tb\.Context\(\), "go"
+        text: 'G702: Command injection via taint analysis'
+      - linters:
+          - gosec
+        path: ^internal/exectest/exectest\.go$
+        source: exec\.CommandContext\(ctx, path, args\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gochecknoglobals
+        path: ^internal/exectest/exectest\.go$
+        text: cache is a global variable
+      - linters:
+          - usetesting
+        path: ^internal/exectest/exectest\.go$
+        source: os\.MkdirTemp\("", "exectest-"\)
+        text: os\.MkdirTemp\(\) could be replaced by tb\.TempDir\(\)
+      - linters:
+          - gosec
+        path: ^internal/doccontract/examples_test\.go$
+        source: exec\.CommandContext\(t\.Context\(\), interpreter, "-m", "py_compile", script\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
           - forbidigo
-
-      # Release metadata (commit, commit date) is stamped into package-level variables by the
-      # linker (-X main.commit=...), which cannot target constants or fields.
-      - path: cmd/pdfconcat/main\.go
-        linters:
-          - gochecknoglobals
-
-      # gosec G304 (file inclusion via variable): opening user-named files is the product's
-      # purpose. Every such open validates the path first (regular file, destination policy).
-      - path: internal/(pdfengine/pdfcpu|app/resolve)\.go
-        text: G304
-        linters:
+        path: ^cmd/pdfconcat/main\.go$
+        source: Stdin:\s+os\.Stdin
+        text: use of `os\.Stdin` forbidden
+      - linters:
+          - forbidigo
+        path: ^cmd/pdfconcat/main\.go$
+        source: Stdout:\s+os\.Stdout
+        text: use of `os\.Stdout` forbidden
+      - linters:
+          - forbidigo
+        path: ^cmd/pdfconcat/main\.go$
+        source: os\.Stderr
+        text: use of `os\.Stderr` forbidden
+      - linters:
           - gosec
-
-      # Tests read back files at paths they created themselves inside t.TempDir() (G304), and run
-      # the binary they just built with arguments they chose (G204), and walk the repository's own
-      # checked-out files (G122, G703).
-      - path: _test\.go
-        text: G122|G204|G304|G703
-        linters:
+        path: ^internal/pdforacle/tools\.go$
+        source: exec\.CommandContext\(context\.Background\(\), program, args\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
           - gosec
-
-      - path: _test\.go
-        linters:
-          - funlen
-          - goconst
-          - dupl
-          - maintidx
-          - cyclop
-          - gocognit
-          - mnd
-          - lll
-          - varnamelen
-          - gochecknoglobals
+        path: ^test/scale/measure_windows\.go$
+        source: GetProcessHandleCount
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^test/scale/measure_windows\.go$
+        source: Call\(uintptr\(s\.handle\), uintptr\(unsafe\.Pointer\(&counters\)\), uintptr\(counters\.Cb\)\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
           - errcheck
-          - wrapcheck
+        path: ^internal/genpage/write\.go$
+        source: _, _ = d\.flate\.Write\(data\)
+        text: Error return value of `d\.flate\.Write` is not checked
+      - linters:
+          - errcheck
+        path: ^internal/genpage/write\.go$
+        source: _ = d\.flate\.Close\(\)
+        text: Error return value of `d\.flate\.Close` is not checked
+      - linters:
+          - gosec
+        path: ^tools/qualitygate/archives_internal_test\.go$
+        source: data, err := os\.ReadFile\(executable\)
+        text: 'G304: Potential file inclusion via variable'
+      - linters:
+          - govet
+        path: ^internal/report/model\.go$
+        source: Text struct \{
+        text: 'fieldalignment: Text has 152 leading bytes of pointer data but optimal value is 112'
+      - linters:
+          - govet
+        path: ^internal/report/query\.go$
+        source: TextDetail struct \{
+        text: 'fieldalignment: TextDetail has 200 leading bytes of pointer data but optimal value is 160'
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: background\s+string
+        text: field background is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: size\s+PageSize
+        text: field size is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: bounds, inkBounds Rect
+        text: field bounds is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: bounds, inkBounds Rect
+        text: field inkBounds is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: hasBounds, hasInk bool
+        text: field hasBounds is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: hasBounds, hasInk bool
+        text: field hasInk is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: hasText\s+bool
+        text: field hasText is unused
+      - linters:
+          - unused
+        path: ^internal/report/builder\.go$
+        source: font\s+int
+        text: field font is unused
+      - linters:
+          - depguard
+        path: ^internal/genpage/ink_test\.go$
+        source: '"golang\.org/x/image/font/gofont/goitalic"'
+        text: 'import ''golang\.org/x/image/font/gofont/goitalic'' is not allowed from list ''typesetting-boundary'': golang\.org/x/image may only be imported by internal/typeset'
+      - linters:
+          - depguard
+        path: ^internal/pdfengine/input_unix_test\.go$
+        source: '"golang\.org/x/sys/unix"'
+        text: 'import ''golang\.org/x/sys/unix'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - depguard
+        path: ^tools/qualitygate/mutation_evidence_reader_unix_test\.go$
+        source: '"golang\.org/x/sys/unix"'
+        text: 'import ''golang\.org/x/sys/unix'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - forbidigo
+        path: ^internal/plan/testdata/decodecmd/main\.go$
+        source: output := os\.Stdout
+        text: use of `os\.Stdout` forbidden
+      - linters:
+          - forbidigo
+        path: ^internal/plan/testdata/decodecmd/main\.go$
+        source: 'input := announcingReader\{Reader: os\.Stdin, output: output\}'
+        text: use of `os\.Stdin` forbidden
+      - linters:
+          - depguard
+        path: ^internal/plan/interrupt_windows_test\.go$
+        source: '"golang\.org/x/sys/windows"'
+        text: 'import ''golang\.org/x/sys/windows'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - depguard
+        path: ^internal/plan/testdata/decodecmd/control_windows\.go$
+        source: '"golang\.org/x/sys/windows"'
+        text: 'import ''golang\.org/x/sys/windows'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - gosec
+        path: ^internal/plan/testdata/decodecmd/control_windows\.go$
+        source: procedure\.Call\(uintptr\(unsafe\.Pointer\(&processes\[0\]\)\), uintptr\(len\(processes\)\)\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - forbidigo
+        path: ^tools/qualitygate/testevidence_internal_test\.go$
+        source: fmt\.Fprint\(os\.Stdout, strings\.Repeat\("x", bufferMax\+1\), evidencePanicTail\)
+        text: use of `os\.Stdout` forbidden
+      - linters:
+          - forbidigo
+        path: ^tools/qualitygate/testevidence_internal_test\.go$
+        source: fmt\.Fprint\(os\.Stderr, "complete process stderr\\n"\)
+        text: use of `os\.Stderr` forbidden
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Time\s+string `json:"Time"`
+        text: 'json\(snake\): got ''Time'' want ''time'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Path\s+string `json:"Path"`
+        text: 'json\(snake\): got ''Path'' want ''path'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Version\s+string `json:"Version"`
+        text: 'json\(snake\): got ''Version'' want ''version'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Sum\s+string `json:"Sum"`
+        text: 'json\(snake\): got ''Sum'' want ''sum'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: GoModSum\s+string `json:"GoModSum"`
+        text: 'json\(snake\): got ''GoModSum'' want ''go_mod_sum'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Zip\s+string `json:"Zip"`
+        text: 'json\(snake\): got ''Zip'' want ''zip'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Info\s+string `json:"Info"`
+        text: 'json\(snake\): got ''Info'' want ''info'''
+      - linters:
+          - tagliatelle
+        path: ^tools/installtools/module_source\.go$
+        source: Error\s+string `json:"Error"`
+        text: 'json\(snake\): got ''Error'' want ''error'''
+      - linters:
+          - gosec
+        path: ^tools/installtools/source_build\.go$
+        source: exec\.CommandContext\(ctx, "go", args\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^tools/installtools/module_source\.go$
+        source: exec\.CommandContext\(ctx, "go", sourceModVerb, sourceDownloadVerb, "-json", module\+"@"\+versions\[prefix\+"_VERSION"\]\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - paralleltest
+        path: ^test/scale/measure_collector_darwin_internal_test\.go$
+        source: func TestOwnedExitObserverClosedQueueFailsAndPreservesCleanupError\(t \*testing\.T\) \{
+        text: Function TestOwnedExitObserverClosedQueueFailsAndPreservesCleanupError missing the call to method parallel
+      - linters:
+          - paralleltest
+        path: ^test/scale/measure_collector_darwin_internal_test\.go$
+        source: func TestOwnedExitObserverReleasesNonInheritedQueue\(t \*testing\.T\) \{
+        text: Function TestOwnedExitObserverReleasesNonInheritedQueue missing the call to method parallel
+      - linters:
+          - paralleltest
+        path: ^test/scale/measure_collector_darwin_internal_test\.go$
+        source: func TestScratchAndCollectorCleanupFailuresBothRemainVisible\(t \*testing\.T\) \{
+        text: Function TestScratchAndCollectorCleanupFailuresBothRemainVisible missing the call to method parallel
+      - linters:
+          - paralleltest
+        path: ^test/scale/measure_identity_darwin_internal_test\.go$
+        source: func TestSuccessfulCollectorReplyCannotHideClosedExitQueue\(t \*testing\.T\) \{
+        text: Function TestSuccessfulCollectorReplyCannotHideClosedExitQueue missing the call to method parallel
+      - linters:
+          - gosec
+        path: ^tools/qualitygate/mutation_launch\.go$
+        source: exec\.CommandContext\(ctx, c\.name, args\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
 
 formatters:
   enable:
-    - gofumpt
     - gci
+    - gofmt
+    - gofumpt
     - goimports
     - golines
+  exclusions:
+    generated: disable
   settings:
     gci:
       sections:

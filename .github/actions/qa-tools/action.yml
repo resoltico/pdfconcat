@@ -37,6 +37,10 @@ runs:
       run: |
         set -euo pipefail
         . tools/versions.env
+        # Git Bash prepends its bundled Xpdf ahead of GITHUB_PATH; use the installed QA shims first.
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          export PATH="$(cygpath -u 'C:/ProgramData/chocolatey/bin'):$PATH"
+        fi
         type -a qpdf pdftotext
         if qpdf_output="$(qpdf --version 2>&1)"; then qpdf_status=0; else qpdf_status=$?; fi
         if poppler_output="$(pdftotext -v 2>&1)"; then poppler_status=0; else poppler_status=$?; fi

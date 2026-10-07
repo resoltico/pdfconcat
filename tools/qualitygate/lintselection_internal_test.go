@@ -59,7 +59,7 @@ func TestActiveDiagnosticStalenessStillFailsAndExcludedUnixIsNotAdjudicated(t *t
 		},
 	}
 
-	selected, problems := selectDiagnosticEntries(entries, targets, selectionWindowsTarget)
+	selected, problems := selectDiagnosticEntries(entries, targets, targets[selectionWindowsTarget])
 	if len(problems) != 0 || len(selected) != 1 || selected[0].ID != activeSelectionID {
 		t.Fatalf("native Windows selection: %v/%v", selected, problems)
 	}
@@ -81,14 +81,14 @@ func TestNeverSelectedAndContradictoryDiagnosticScopesFail(t *testing.T) {
 		entries,
 		&repopolicy.Entry{ID: "never", Tool: repopolicy.ToolLint, Effect: repopolicy.EffectExcludeDiagnostic, Path: "never_test.go"},
 	)
-	if _, problems := selectDiagnosticEntries(entries, targets, selectionWindowsTarget); len(problems) != 1 {
+	if _, problems := selectDiagnosticEntries(entries, targets, targets[selectionWindowsTarget]); len(problems) != 1 {
 		t.Fatalf("never-selected exclusion escaped: %v", problems)
 	}
 
 	entries = entries[:2]
 
 	entries[1].GOOS = "windows"
-	if _, problems := selectDiagnosticEntries(entries, targets, selectionWindowsTarget); len(problems) != 1 {
+	if _, problems := selectDiagnosticEntries(entries, targets, targets[selectionWindowsTarget]); len(problems) != 1 {
 		t.Fatalf("contradictory explicit scope escaped: %v", problems)
 	}
 }

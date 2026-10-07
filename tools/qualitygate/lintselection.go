@@ -74,7 +74,7 @@ func applicableDiagnosticEntries(ctx context.Context, root string, entries []*re
 		return nil, err
 	}
 
-	selected, problems := selectDiagnosticEntries(entries, targets, runtime.GOOS+"/"+runtime.GOARCH)
+	selected, problems := selectDiagnosticEntries(entries, targets, targets[runtime.GOOS+"/"+runtime.GOARCH])
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("%w: %s", errGate, strings.Join(problems, "; "))
 	}
@@ -92,7 +92,7 @@ func applicableDiagnosticEntries(ctx context.Context, root string, entries []*re
 func selectDiagnosticEntries(
 	entries []*repopolicy.Entry,
 	targets map[string]map[string]bool,
-	native string,
+	nativeFiles map[string]bool,
 ) ([]*repopolicy.Entry, []string) {
 	var (
 		selected []*repopolicy.Entry
@@ -118,7 +118,7 @@ func selectDiagnosticEntries(
 			problems = append(problems, entry.ID+": diagnostic source is not compiled on any applicable supported target")
 		}
 
-		if targets[native][entry.Path] {
+		if nativeFiles[entry.Path] {
 			selected = append(selected, entry)
 		}
 	}

@@ -100,10 +100,11 @@ func binary(tb testing.TB) string {
 func start(tb testing.TB, dir string, args ...string) *exec.Cmd {
 	tb.Helper()
 
+	path := binary(tb)
 	ctx, cancel := context.WithTimeout(tb.Context(), commandTimeout)
 	tb.Cleanup(cancel)
 
-	command := exectest.Command(ctx, binary(tb), args...)
+	command := exectest.Command(ctx, path, args...)
 	command.Dir = dir
 
 	tmp := tb.TempDir()

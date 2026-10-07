@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unsafe"
@@ -19,7 +20,18 @@ import (
 
 func TestOverwritePreservesPinnedOldObjectAndPublishesUnicodeName(t *testing.T) {
 	t.Parallel()
-	destination := filepath.Join(t.TempDir(), "atgūšana-α-😀.json")
+
+	for _, padding := range []int{0, 1, 3, 7, 15, 31} {
+		t.Run(strconv.Itoa(padding), func(t *testing.T) {
+			t.Parallel()
+			destination := filepath.Join(t.TempDir(), strings.Repeat("x", padding)+"atgūšana-α-😀.json")
+			checkPinnedReplacement(t, destination)
+		})
+	}
+}
+
+func checkPinnedReplacement(t *testing.T, destination string) {
+	t.Helper()
 	put(t, destination, reportContent)
 
 	lease, leaseErr := openReportLease(destination)
@@ -104,7 +116,18 @@ func TestNoClobberPreservesPinnedDestination(t *testing.T) {
 
 func TestRenameInformationPreservesUTF16NameAndNativeAlignment(t *testing.T) {
 	t.Parallel()
-	destination := filepath.Join(t.TempDir(), "α😀.json")
+
+	for _, padding := range []int{0, 1, 3, 7, 15, 31} {
+		t.Run(strconv.Itoa(padding), func(t *testing.T) {
+			t.Parallel()
+			destination := filepath.Join(t.TempDir(), strings.Repeat("x", padding)+"α😀.json")
+			checkRenameBuffer(t, destination)
+		})
+	}
+}
+
+func checkRenameBuffer(t *testing.T, destination string) {
+	t.Helper()
 
 	buffer, bufferErr := renameInformationBuffer(destination)
 	if bufferErr != nil {
@@ -115,6 +138,10 @@ func TestRenameInformationPreservesUTF16NameAndNativeAlignment(t *testing.T) {
 
 	offset := int(unsafe.Offsetof(header.FileName))
 	nameBytes := int(binary.LittleEndian.Uint32(buffer[unsafe.Offsetof(header.FileNameLength):]))
+
+	if len(buffer) < offset+nameBytes+2 || binary.LittleEndian.Uint16(buffer[offset+nameBytes:]) != 0 {
+		t.Fatal("native path has no in-buffer terminating NUL")
+	}
 
 	units := make([]uint16, nameBytes/2)
 	for index := range units {

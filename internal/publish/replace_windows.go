@@ -108,11 +108,11 @@ func renameInformationBuffer(destination string) ([]byte, error) {
 	}
 
 	offset := int(unsafe.Offsetof(header.FileName))
-	buffer := make([]byte, max(int(unsafe.Sizeof(header)), offset+nameBytes))
+	buffer := make([]byte, max(int(unsafe.Sizeof(header)), offset+nameBytes+2))
 	binary.LittleEndian.PutUint32(buffer, windows.FILE_RENAME_REPLACE_IF_EXISTS|windows.FILE_RENAME_POSIX_SEMANTICS)
 	binary.LittleEndian.PutUint32(buffer[unsafe.Offsetof(header.FileNameLength):], uint32(nameBytes))
 
-	for index, value := range name[:len(name)-1] {
+	for index, value := range name {
 		binary.LittleEndian.PutUint16(buffer[offset+index*2:], value)
 	}
 

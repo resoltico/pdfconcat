@@ -106,11 +106,11 @@ func TestAFailureReportMayReplaceAFileOnlyOnceEveryInputIsKnown(t *testing.T) {
 	// Every input is known when the second source cannot be inspected, so --overwrite governs the report.
 	writeFile(t, filepath.Join(dir, reportFile), previousReportContent)
 
-	res := execute(t.Context(), t, runner, dir, commandCheck, overwriteFlag, reportFlag, reportFile, sourceA, "corrupt.pdf")
+	res := execute(t.Context(), t, runner, dir, commandCheck, overwriteFlag, reportFlag, reportFile, detailsFlag, sourceA, "corrupt.pdf")
 	parsed := res.requireCode(t, 1, "")
 
-	if parsed.Publication.ReportStatus != reportWritten || parsed.DiagnosticCount != 1 {
-		t.Errorf(publicationDiagnosticsFormat, parsed.Publication, parsed.DiagnosticCount)
+	if parsed.Publication.ReportStatus != reportWritten || len(parsed.Diagnostics) != 1 {
+		t.Errorf("publication %+v, diagnostics %+v; command outcome: %s", parsed.Publication, parsed.Diagnostics, res.stdout)
 	}
 
 	if saved := readFile(t, filepath.Join(dir, reportFile)); !strings.Contains(saved, `"kind":"report"`) {

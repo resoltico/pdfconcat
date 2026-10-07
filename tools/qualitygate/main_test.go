@@ -114,8 +114,8 @@ func TestOperatorFlagsEnableEveryOperator(t *testing.T) {
 	}
 }
 
-// fixtureTargets are the archives the fixture contains: four targets, but never the host's, whose
-// fake executable the inspection would otherwise try to run.
+// fixtureTargets selects nonhost archives from the Darwin and Linux target set, so inspection
+// never tries to run the fixture's fake executable.
 func fixtureTargets() []string {
 	var targets []string
 
@@ -299,9 +299,15 @@ func TestArchiveProblemsRejectsChecksumMismatch(t *testing.T) {
 	t.Parallel()
 
 	fixture := newArchiveFixture(t, nil)
+
+	archive := filepath.Join(fixture.dist, "PDFConcat_1.0.0_"+fixtureTargets()[0]+".tar.gz")
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatal(err)
+	}
+
 	write(
 		t,
-		filepath.Join(fixture.dist, "PDFConcat_1.0.0_linux_amd64.tar.gz"),
+		archive,
 		tarball(t, map[string]string{archiveExecutableName: "x"}, nil),
 	)
 

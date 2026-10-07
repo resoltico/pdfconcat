@@ -37,15 +37,17 @@ runs:
       run: |
         set -euo pipefail
         . tools/versions.env
-        qpdf_version="$(qpdf --version | head -n 1 | awk '{print $3}')"
-        poppler_version="$(pdftotext -v 2>&1 | head -n 1 | awk '{print $3}')"
+        qpdf_output="$(qpdf --version)"
+        poppler_output="$(pdftotext -v 2>&1)"
+        qpdf_version="$(printf '%s\n' "$qpdf_output" | awk 'NR == 1 {print $3}')"
+        poppler_version="$(printf '%s\n' "$poppler_output" | awk 'NR == 1 {print $3}')"
         echo "qpdf $qpdf_version, poppler $poppler_version"
         {
           echo "### Independent PDF QA tools (${RUNNER_OS} ${RUNNER_ARCH})"
           echo "- qpdf ${qpdf_version} (minimum ${QA_QPDF_MIN_VERSION})"
           echo "- poppler ${poppler_version} (minimum ${QA_POPPLER_MIN_VERSION})"
         } >> "$GITHUB_STEP_SUMMARY"
-        at_least() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]; }
+        at_least() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | awk 'NR == 1 {print}')" = "$2" ]; }
         at_least "$qpdf_version" "$QA_QPDF_MIN_VERSION" || { echo "qpdf $qpdf_version is older than $QA_QPDF_MIN_VERSION"; exit 1; }
         at_least "$poppler_version" "$QA_POPPLER_MIN_VERSION" || { echo "poppler $poppler_version is older than $QA_POPPLER_MIN_VERSION"; exit 1; }
 

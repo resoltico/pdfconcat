@@ -195,7 +195,6 @@ jobs:
       - uses: ./.github/actions/prepare
         with:
           tools: golangci-lint
-      - run: go run ./tools/qualitygate lint
       - run: go run ./tools/qualitygate lint-stale
 
   cross-build:

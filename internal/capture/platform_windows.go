@@ -47,9 +47,15 @@ func identityOfOpen(file *os.File, _ fs.FileInfo) (Identity, error) {
 
 // IdentityOf returns the identity of the object path resolves to, following symbolic links.
 func IdentityOf(path string) (Identity, error) {
+	identity, _, err := inspectIdentity(path)
+	return identity, err
+}
+
+// inspectIdentity derives identity and directory kind from the same checked native handle.
+func inspectIdentity(path string) (Identity, bool, error) {
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
-		return Identity{}, fmt.Errorf("encode path: %w", err)
+		return Identity{}, false, fmt.Errorf("encode path: %w", err)
 	}
 
 	handle, err := windows.CreateFile(
@@ -62,25 +68,30 @@ func IdentityOf(path string) (Identity, error) {
 		0,
 	)
 	if err != nil {
-		return Identity{}, fmt.Errorf("inspect: %w", err)
+		return Identity{}, false, fmt.Errorf("inspect: %w", err)
 	}
 
-	identity, err := identityOfHandle(handle)
+	identity, isDirectory, err := inspectHandleIdentity(handle)
 
 	closeErr := windows.CloseHandle(handle)
 	if closeErr != nil {
-		return Identity{}, errors.Join(err, fmt.Errorf("close file handle: %w", closeErr))
+		return Identity{}, false, errors.Join(err, fmt.Errorf("close file handle: %w", closeErr))
 	}
 
-	return identity, err
+	return identity, isDirectory, err
 }
 
 func identityOfHandle(handle windows.Handle) (Identity, error) {
+	identity, _, err := inspectHandleIdentity(handle)
+	return identity, err
+}
+
+func inspectHandleIdentity(handle windows.Handle) (Identity, bool, error) {
 	var info windows.ByHandleFileInformation
 
 	err := windows.GetFileInformationByHandle(handle, &info)
 	if err != nil {
-		return Identity{}, fmt.Errorf("read file identity: %w", err)
+		return Identity{}, false, fmt.Errorf("read file identity: %w", err)
 	}
 
 	const highShift = 32
@@ -88,5 +99,5 @@ func identityOfHandle(handle windows.Handle) (Identity, error) {
 	return Identity{
 		volume: uint64(info.VolumeSerialNumber),
 		index:  uint64(info.FileIndexHigh)<<highShift | uint64(info.FileIndexLow),
-	}, nil
+	}, info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0, nil
 }

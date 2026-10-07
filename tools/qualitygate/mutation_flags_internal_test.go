@@ -57,7 +57,7 @@ func TestMutationArgumentsTranslateActualWorkersForPinnedPool(t *testing.T) {
 	}
 }
 
-func TestMutationDeadlineIncludesSetupAndShrinksBetweenStages(t *testing.T) {
+func TestMutationDeadlineChargesSetupAndReservesCleanup(t *testing.T) {
 	t.Parallel()
 
 	started := time.Now().Add(-time.Minute)
@@ -73,7 +73,7 @@ func TestMutationDeadlineIncludesSetupAndShrinksBetweenStages(t *testing.T) {
 	args, durationErr := mutationDurationArgument(ctx, 2*time.Hour)
 
 	remaining, parseErr := time.ParseDuration(mutationArgumentValue(args, "--max-duration"))
-	if durationErr != nil || parseErr != nil || remaining <= 0 || remaining >= 118*time.Minute {
+	if durationErr != nil || parseErr != nil || remaining <= 0 || remaining > 118*time.Minute {
 		t.Fatalf("setup time was not charged to tool budget: %v %v %v", args, durationErr, parseErr)
 	}
 

@@ -41,8 +41,8 @@ type (
 		Target string
 	}
 
-	// Staged is complete, flushed, private (mode 0600) content waiting beside its target. Exactly one
-	// of Publish, Discard or a retained recovery file ends its life; Discard after any of them is
+	// Staged is complete, flushed, owner-only content (0600 on Unix; protected owner ACL on Windows)
+	// waiting beside its target. Publish, Discard or a retained recovery file ends its life; Discard after any is
 	// safe.
 	Staged struct {
 		// Verify checks protected identities immediately before publication.

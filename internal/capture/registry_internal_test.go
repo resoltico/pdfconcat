@@ -101,7 +101,8 @@ func TestRegistryRejectsOneFileInTwoRoles(t *testing.T) {
 			_, err = registry.Add(test.second, test.secondPath)
 
 			var alias *AliasError
-			if !errors.As(err, &alias) || alias.OtherRole != test.first || !strings.Contains(err.Error(), test.secondPath) {
+			if !errors.As(err, &alias) || alias.OtherRole != test.first || alias.Path != test.secondPath ||
+				alias.OtherPath != test.firstPath {
 				t.Fatalf("Add() = %v", err)
 			}
 		})
@@ -201,8 +202,13 @@ func TestRegistryRejectsMissingInputsAndEmptyPaths(t *testing.T) {
 	} {
 		_, err := registry.Add(test.role, test.path)
 
+		wantPath := test.path
+		if test.role == RoleOutput {
+			wantPath = filepath.Dir(test.path)
+		}
+
 		sourceErr, isSource := errors.AsType[*SourceError](err)
-		if !isSource || sourceErr.Operation == "" {
+		if !isSource || sourceErr.Operation == "" || sourceErr.Path != wantPath {
 			t.Errorf("Add(%v, %q) = %v", test.role, test.path, err)
 		}
 	}
@@ -276,4 +282,25 @@ func TestRegistryIsSafeForConcurrentUse(t *testing.T) {
 	}
 
 	group.Wait()
+}
+
+func TestNewArtifactRejectsRegularParentAndPreservesItsBytes(t *testing.T) {
+	t.Parallel()
+
+	parent := filepath.Join(t.TempDir(), "regular-parent")
+	writeTestFile(t, parent, []byte("parent bytes"))
+
+	registry := NewRegistry()
+
+	// This is the new-artifact boundary reached when the native child lookup reports not-exist.
+	err := registry.addNewArtifact(RoleOutput, filepath.Join(parent, "output.pdf"))
+
+	targetErr, isTarget := errors.AsType[*ArtifactTargetError](err)
+	if !isTarget || targetErr.Path != parent || targetErr.Role != RoleOutput {
+		t.Fatalf("regular parent was not rejected with its artifact role: %v", err)
+	}
+
+	if string(readTestFile(t, parent)) != "parent bytes" {
+		t.Fatal("rejected artifact changed its regular parent")
+	}
 }

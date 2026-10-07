@@ -573,8 +573,8 @@ func TestResourceSinkFailureCannotCompleteLayoutOrReachMerge(t *testing.T) {
 
 	assertFailedResource(t, current, engine)
 
-	if _, statErr := file.Stat(); !errors.Is(statErr, fs.ErrClosed) {
-		t.Fatalf("resource handle left open: %v", statErr)
+	if _, readErr := file.Read(make([]byte, 1)); !errors.Is(readErr, fs.ErrClosed) {
+		t.Fatalf("resource handle left open: %v", readErr)
 	}
 
 	data, err := os.ReadFile(filepath.Clean(path))

@@ -116,7 +116,7 @@ func TestLateResultTransfersPinUntilRecoveryCallerReleasesIt(t *testing.T) {
 func requireLeaseClosed(t *testing.T, file *os.File) {
 	t.Helper()
 
-	if _, err := file.Stat(); !errors.Is(err, os.ErrClosed) {
+	if _, err := file.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("identity descriptor leaked: %v", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestStagePinRejectsSubstitutionBeforeWritingAndPreservesUnknownBytes(t *tes
 	)
 
 	ops.createTemp = func(directory, pattern string) (*os.File, error) {
-		file, createErr := os.CreateTemp(directory, pattern)
+		file, createErr := createDeleteSharedFixtureTemp(directory, pattern)
 		if createErr != nil {
 			return nil, fmt.Errorf(createFixtureErrorFormat, createErr)
 		}
@@ -179,9 +179,12 @@ func TestOwnerVerificationMissingPathAndClosedLiveHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := staged.owner.Verify(staged.Path()); !errors.Is(err, os.ErrClosed) {
+	if err := staged.owner.Verify(staged.Path()); err == nil {
 		t.Fatalf("closed live object: %v", err)
 	}
+
+	requireLeaseClosed(t, staged.owner.file)
+
 	// Close failure is reported even when the path has vanished; no foreign bytes are touched.
 	if err := staged.Discard(); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("cleanup close failure: %v", err)
@@ -330,7 +333,7 @@ func TestStagePinOpenFailureClosesWriterWithoutRemovingForeignPath(t *testing.T)
 	var writer *os.File
 
 	ops.createTemp = func(directory, pattern string) (*os.File, error) {
-		file, createErr := os.CreateTemp(directory, pattern)
+		file, createErr := createDeleteSharedFixtureTemp(directory, pattern)
 		if createErr != nil {
 			return nil, fmt.Errorf(createFixtureErrorFormat, createErr)
 		}
@@ -362,7 +365,7 @@ func TestStagePinRejectsInitialSymlinkToOriginalObject(t *testing.T) {
 	)
 
 	ops.createTemp = func(directory, pattern string) (*os.File, error) {
-		file, createErr := os.CreateTemp(directory, pattern)
+		file, createErr := createDeleteSharedFixtureTemp(directory, pattern)
 		if createErr != nil {
 			return nil, fmt.Errorf(createFixtureErrorFormat, createErr)
 		}

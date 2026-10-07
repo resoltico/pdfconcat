@@ -14,8 +14,9 @@ import (
 
 // Directory-specific access bits from WinNT.h (the x/sys package names only FILE_WRITE_DATA for bit2).
 const (
-	directoryAddFile     windows.ACCESS_MASK = 0x0002
-	directoryDeleteChild windows.ACCESS_MASK = 0x0040
+	directoryAddFile         windows.ACCESS_MASK = 0x0002
+	directoryAddSubdirectory windows.ACCESS_MASK = 0x0004
+	directoryDeleteChild     windows.ACCESS_MASK = 0x0040
 )
 
 // RequireEnforcement rejects missing prerequisites in the native denial operation itself.
@@ -66,7 +67,7 @@ func namespaceDenyACL(tb testing.TB, original *windows.ACL) *windows.ACL {
 
 	deny, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{
 		{
-			AccessPermissions: directoryAddFile | directoryDeleteChild | windows.DELETE,
+			AccessPermissions: directoryAddFile | directoryAddSubdirectory | directoryDeleteChild | windows.DELETE,
 			AccessMode:        windows.DENY_ACCESS,
 			Inheritance:       windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 			Trustee: windows.TRUSTEE{

@@ -6,6 +6,7 @@ package assembly_test
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
@@ -92,12 +93,10 @@ func checkContributionPaths(t *testing.T, flat *assembly.Flattened) {
 		t.Fatalf("contributions %v, want %v", got, want)
 	}
 
-	volume := filepath.VolumeName(hostPath("/"))
-
 	for index := range want {
 		wantPath := want[index]
-		if volume != "" && len(wantPath) > 4 {
-			wantPath = wantPath[:4] + volume + wantPath[4:] // C:/cwd on Windows
+		if path, isPDF := strings.CutPrefix(wantPath, "pdf:"); isPDF {
+			wantPath = "pdf:" + filepath.ToSlash(hostPath(path))
 		}
 
 		if got[index] != wantPath {

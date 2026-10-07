@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/resoltico/pdfconcat/internal/capture"
 )
 
 type (
@@ -43,7 +45,7 @@ func realOperations() operations {
 		replace:       replaceFile,
 		syncFile:      syncFile,
 		syncDirectory: syncDirectory,
-		createTemp:    os.CreateTemp,
+		createTemp:    capture.CreatePrivateTemp,
 		writeChunk:    writeChunk,
 	}
 }

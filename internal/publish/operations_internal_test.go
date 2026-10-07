@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/permissiontest"
@@ -387,9 +386,11 @@ func TestStageContentAndPrivacy(t *testing.T) {
 	}
 
 	beside := filepath.Dir(staged.Path()) == dir && staged.Target() == destination
-	if !beside || staged.Size() != 5 || get(t, staged.Path()) != "12345" || info.Mode().Perm() != modeOwnerOnly {
+	if !beside || staged.Size() != 5 || get(t, staged.Path()) != "12345" {
 		t.Fatalf("staged %+v, mode %v", staged, info.Mode())
 	}
+
+	permissiontest.RequirePrivateFile(t, staged.Path())
 
 	err = staged.Discard()
 	if err != nil || len(names(t, dir)) != 0 {
@@ -480,12 +481,12 @@ func TestStageDiskFullPermissionAndFlushFailures(t *testing.T) {
 	destination := filepath.Join(dir, reportPath)
 
 	full := realOperations()
-	full.writeChunk = func(io.Writer, []byte) error { return syscall.ENOSPC }
+	full.writeChunk = func(io.Writer, []byte) error { return errDiskFull }
 
 	_, err := stageWith(context.Background(), full, destination, strings.NewReader("x"), 5)
 
 	var stageErr *StageError
-	if !errors.As(err, &stageErr) || !strings.Contains(err.Error(), "volume is full") || !errors.Is(err, syscall.ENOSPC) {
+	if !errors.As(err, &stageErr) || !strings.Contains(err.Error(), "volume is full") || !errors.Is(err, errDiskFull) {
 		t.Fatalf("disk full = %v", err)
 	}
 

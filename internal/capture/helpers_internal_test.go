@@ -123,3 +123,12 @@ func scratchEntries(t *testing.T, workspace *Workspace) int {
 
 	return len(entries)
 }
+
+// requireTestFileClosed uses Read's portable closed-file contract, not platform Stat errno.
+func requireTestFileClosed(t *testing.T, file *os.File) {
+	t.Helper()
+
+	if _, err := file.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("owned file handle remains usable: %v", err)
+	}
+}

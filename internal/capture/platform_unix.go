@@ -42,12 +42,20 @@ func identityOfOpen(_ *os.File, info fs.FileInfo) (Identity, error) {
 // IdentityOf returns the identity of the object path resolves to, following symbolic links.
 // It never opens the path, so it cannot block on a FIFO or device.
 func IdentityOf(path string) (Identity, error) {
+	identity, _, err := inspectIdentity(path)
+	return identity, err
+}
+
+// inspectIdentity derives identity and directory kind from one native observation.
+func inspectIdentity(path string) (Identity, bool, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return Identity{}, fmt.Errorf("inspect: %w", err)
+		return Identity{}, false, fmt.Errorf("inspect: %w", err)
 	}
 
-	return identityOfInfo(info)
+	identity, identityErr := identityOfInfo(info)
+
+	return identity, info.IsDir(), identityErr
 }
 
 func identityOfInfo(info fs.FileInfo) (Identity, error) {

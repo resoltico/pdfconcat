@@ -4,6 +4,7 @@
 package publish
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,9 @@ func TestDestinationInspectionFailureIsReported(t *testing.T) {
 	}
 
 	err = File(file, filepath.Join(file, "child"), true)
-	if err == nil || !strings.Contains(err.Error(), "inspect output") {
+
+	failure, isDestination := errors.AsType[*DestinationError](err)
+	if !isDestination || failure.Subject != "output directory" || failure.Path != file {
 		t.Fatalf("File() = %v", err)
 	}
 }
@@ -94,5 +97,26 @@ func TestReplaceFileRefusesPathsTheSystemCannotAddressAndLeavesBothFilesAlone(t 
 				t.Fatalf("the failed replacements changed the directory: %v", names(t, dir))
 			}
 		})
+	}
+}
+
+func TestDestinationInspectionRejectsUnaddressableNameAndPreservesStage(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	staged := filepath.Join(dir, "staged")
+	put(t, staged, stagedContent)
+
+	destination := dir + string(filepath.Separator) + "invalid-output\x00"
+
+	err := File(staged, destination, true)
+
+	pathErr, isPath := errors.AsType[*os.PathError](err)
+	if !isPath || pathErr.Path != destination || !strings.Contains(err.Error(), "inspect output") {
+		t.Fatalf("unaddressable destination lost its cause or path: %v", err)
+	}
+
+	if get(t, staged) != stagedContent || len(names(t, dir)) != 1 {
+		t.Fatal("destination inspection failure changed staged bytes or namespace")
 	}
 }

@@ -87,7 +87,7 @@ func commitFileChecked(ctx context.Context, ops operations, staged, destination 
 		return ErrPathRequired
 	}
 
-	err := ensureDestinationPolicy(destination, existing)
+	err := validateDestination(destination, existing)
 	if err != nil {
 		return err
 	}

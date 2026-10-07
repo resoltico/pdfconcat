@@ -69,7 +69,7 @@ func pdfAt(ref assembly.Ref, path string) assembly.Item {
 }
 
 func argumentJob(items ...assembly.Item) *assembly.Job {
-	return &assembly.Job{Source: assembly.ArgumentSource{}, Base: workingDirectory, Items: items}
+	return &assembly.Job{Source: assembly.ArgumentSource{}, Base: hostPath(workingDirectory), Items: items}
 }
 
 func contains(text, part string) bool { return strings.Contains(text, part) }

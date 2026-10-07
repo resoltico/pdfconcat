@@ -42,7 +42,7 @@ func TestLateAliasRecoveryRecordsFailedPublicationAndQueriesWithoutUnsafeNext(t 
 		t.Fatal("no complete recovery file")
 	}
 
-	assertCurrentRecovery(t, path)
+	assertCurrentRecovery(t, path, res.stdout)
 
 	assertArtifactTypes(t, output, path)
 
@@ -76,13 +76,13 @@ func decodeRecoverySummary(t *testing.T, data string, target *report.Summary) {
 	}
 }
 
-func assertCurrentRecovery(t *testing.T, path string) {
+func assertCurrentRecovery(t *testing.T, path, outcome string) {
 	t.Helper()
 	saved := readCompleteIdentityReport(t, path)
 
 	current := saved.Status == report.StatusFailed && saved.Publication.ReportStatus == report.ReportFailed &&
 		saved.Publication.RecoveryState == report.RecoveryCurrent && saved.Publication.RecoveryReport == path
 	if !current {
-		t.Fatalf("recovery publication is not current: %+v", saved.Publication)
+		t.Fatalf("recovery publication is not current: %+v; command outcome: %s", saved.Publication, outcome)
 	}
 }

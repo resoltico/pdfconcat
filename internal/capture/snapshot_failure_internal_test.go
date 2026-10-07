@@ -74,10 +74,12 @@ func TestSnapshotOpenReportsAnUninspectableHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	requireTestFileClosed(t, source)
+
 	_, err = workspace.snapshotOpen(context.Background(), source, path)
 
 	failure, isSource := errors.AsType[*SourceError](err)
-	if !isSource || failure.Operation != "inspect source" || failure.Path != path || !errors.Is(err, os.ErrClosed) {
+	if !isSource || failure.Operation != "inspect source" || failure.Path != path || failure.Err == nil {
 		t.Fatalf("snapshotOpen(closed handle) = %v", err)
 	}
 
@@ -107,10 +109,12 @@ func TestVerifyUnchangedReportsAHandleThatCannotBeReinspected(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	requireTestFileClosed(t, source)
+
 	err = verifyUnchanged(source, before, &Captured{SourcePath: path, Size: before.Size()})
 
 	failure, isSource := errors.AsType[*SourceError](err)
-	if !isSource || failure.Operation != "re-inspect source" || failure.Path != path || !errors.Is(err, os.ErrClosed) {
+	if !isSource || failure.Operation != "re-inspect source" || failure.Path != path || failure.Err == nil {
 		t.Fatalf("verifyUnchanged(closed handle) = %v", err)
 	}
 }

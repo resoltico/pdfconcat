@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/permissiontest"
@@ -32,14 +31,7 @@ func TestWorkspaceBesideIsPrivateAndRemovedOnClose(t *testing.T) {
 		t.Fatalf("workspace %q is not beside the destination in %q", workspace.Dir(), parent)
 	}
 
-	info, err := os.Stat(workspace.Dir())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if info.Mode().Perm() != 0o700 {
-		t.Fatalf("workspace mode = %v, want 0700", info.Mode().Perm())
-	}
+	permissiontest.RequirePrivateDirectory(t, workspace.Dir())
 
 	writeTestFile(t, workspace.NewPath(pdfExtension), []byte("x"))
 
@@ -152,7 +144,7 @@ func TestCloseReportsUnremovableWorkspace(t *testing.T) {
 func TestScratchAdviceByFailureKind(t *testing.T) {
 	t.Parallel()
 
-	full := &ScratchError{Dir: "d", Operation: "copy", Err: fmt.Errorf("write: %w", syscall.ENOSPC)}
+	full := &ScratchError{Dir: "d", Operation: "copy", Err: fmt.Errorf("write: %w", errDiskFull)}
 	if !strings.Contains(full.Error(), "volume is full") || !IsDiskFull(full) {
 		t.Fatalf("disk-full error = %v", full)
 	}

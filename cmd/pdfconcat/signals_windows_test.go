@@ -34,7 +34,7 @@ func TestWindowsConsoleInterruptBlockedStdinPreservesOutput(t *testing.T) {
 	command.Stdout, command.Stderr = &stdout, &stderr
 	input, err := command.StdinPipe()
 	ensure(t, err)
-	t.Cleanup(func() { ensure(t, input.Close()) })
+	registerConsoleInputClose(t, input)
 	ensure(t, command.Start())
 
 	waited := false
@@ -97,6 +97,16 @@ func registerConsoleChildReap(t *testing.T, command *exec.Cmd, waitOwned *bool) 
 		waitErr := command.Wait()
 		if waitErr != nil {
 			t.Logf("reap Windows CLI: %v", waitErr)
+		}
+	})
+}
+
+// Cmd.Wait closes StdinPipe; early failure still owns its cleanup here.
+func registerConsoleInputClose(t *testing.T, input io.Closer) {
+	t.Helper()
+	t.Cleanup(func() {
+		if closeErr := input.Close(); closeErr != nil && !errors.Is(closeErr, os.ErrClosed) {
+			t.Error(closeErr)
 		}
 	})
 }

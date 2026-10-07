@@ -23,17 +23,37 @@ func TestOwnedDirectoryDACLActuallyRejectsNamespaceChangesAndRestores(t *testing
 	}
 
 	restore := permissiontest.DenyDirectoryChanges(t, dir)
+	assertDeniedDirectoryNamespace(t, dir, existing)
+
+	restore()
+
+	assertRestoredDirectoryNamespace(t, dir, existing)
+}
+
+func assertDeniedDirectoryNamespace(t *testing.T, dir, existing string) {
+	t.Helper()
+
 	if err := os.WriteFile(filepath.Join(dir, "blocked"), []byte("x"), 0o600); !os.IsPermission(err) {
 		t.Fatalf("FILE_ADD_FILE denial did not reject creation: %v", err)
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "blocked-directory"), 0o700); !os.IsPermission(err) {
+		t.Fatalf("FILE_ADD_SUBDIRECTORY denial did not reject creation: %v", err)
 	}
 
 	if err := os.Remove(existing); !os.IsPermission(err) {
 		t.Fatalf("directory deletion denial did not preserve existing child: %v", err)
 	}
+}
 
-	restore()
+func assertRestoredDirectoryNamespace(t *testing.T, dir, existing string) {
+	t.Helper()
 
 	if err := os.WriteFile(filepath.Join(dir, "allowed"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "allowed-directory"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 

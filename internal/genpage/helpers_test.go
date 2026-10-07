@@ -147,7 +147,7 @@ func qpdfCheck(tb testing.TB, path string) int {
 func extractRaw(tb testing.TB, path string) []string {
 	tb.Helper()
 
-	out := string(run(tb, "pdftotext", "-raw", "-enc", "UTF-8", path, "-"))
+	out := string(run(tb, "pdftotext", "-raw", "-enc", "UTF-8", "-eol", "unix", path, "-"))
 	pages := strings.Split(out, "\f")
 
 	return pages[:len(pages)-1]

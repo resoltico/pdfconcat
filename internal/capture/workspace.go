@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 )
 
-// Workspace is the private directory (mode 0700) that owns every scratch file of one job:
+// Workspace is the owner-only private directory (0700 on Unix; protected owner DACL on Windows) that owns every scratch file of one job:
 // snapshots of sources and fonts, and staged output. Close removes everything it owns.
 // A Workspace is safe for concurrent use.
 type Workspace struct {
@@ -44,7 +44,7 @@ func NewTemporaryWorkspace() (*Workspace, error) {
 }
 
 func newWorkspace(parent, pattern string) (*Workspace, error) {
-	dir, err := os.MkdirTemp(parent, pattern)
+	dir, err := createWorkspaceDirectory(parent, pattern)
 	if err != nil {
 		location := parent
 		if location == "" {

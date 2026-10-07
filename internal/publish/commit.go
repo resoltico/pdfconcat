@@ -10,6 +10,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/resoltico/pdfconcat/internal/capture"
 )
 
 type (
@@ -205,8 +207,8 @@ func rejectArtifactAlias(output, target string) error {
 		return &DestinationError{Subject: "report", Path: target, Reason: "aliases the output PDF"}
 	}
 
-	pdfInfo, pdfErr := os.Stat(output)
-	reportInfo, reportErr := os.Stat(target)
+	pdfIdentity, pdfErr := capture.IdentityOf(output)
+	reportIdentity, reportErr := capture.IdentityOf(target)
 
 	if pdfErr != nil && !errors.Is(pdfErr, os.ErrNotExist) {
 		return fmt.Errorf("inspect protected PDF %q: %w", output, pdfErr)
@@ -216,7 +218,7 @@ func rejectArtifactAlias(output, target string) error {
 		return fmt.Errorf("inspect report target %q: %w", target, reportErr)
 	}
 
-	if pdfErr == nil && reportErr == nil && os.SameFile(pdfInfo, reportInfo) {
+	if pdfErr == nil && reportErr == nil && pdfIdentity == reportIdentity {
 		return &DestinationError{Subject: "report", Path: target, Reason: "aliases the output PDF"}
 	}
 

@@ -165,19 +165,21 @@ func (r *Registry) addArtifact(role Role, path string) (Identity, error) {
 func (r *Registry) addNewArtifact(role Role, path string) error {
 	dir := filepath.Dir(path)
 
-	// The caller already saw the path does not exist, so its parent exists as a directory
-	// unless the parent itself is missing, which IdentityOf reports.
-	dirIdentity, err := IdentityOf(dir)
+	identity, isDirectory, err := inspectIdentity(dir)
 	if err != nil {
 		return &SourceError{Path: dir, Operation: "identify directory of " + role.String(), Err: err}
 	}
 
+	if !isDirectory {
+		return &ArtifactTargetError{Path: dir, Role: role, Problem: "is not a directory for the artifact"}
+	}
+
 	name := cases.Fold().String(norm.NFC.String(filepath.Base(path)))
 
-	names := r.byName[dirIdentity]
+	names := r.byName[identity]
 	if names == nil {
 		names = make(map[string]claim)
-		r.byName[dirIdentity] = names
+		r.byName[identity] = names
 	}
 
 	other, found := names[name]

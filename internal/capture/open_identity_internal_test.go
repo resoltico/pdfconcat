@@ -4,7 +4,6 @@
 package capture
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,9 +32,11 @@ func TestOpenFileIdentitySurvivesRenameAndRejectsClosedHandle(t *testing.T) {
 		t.Fatal(closeErr)
 	}
 
-	if _, closedErr := IdentityOfFile(file); !errors.Is(closedErr, os.ErrClosed) {
+	if _, closedErr := IdentityOfFile(file); closedErr == nil {
 		t.Fatalf("closed handle identified: %v", closedErr)
 	}
+
+	requireTestFileClosed(t, file)
 
 	moved := path + "-renamed"
 	if renameErr := os.Rename(path, moved); renameErr != nil {

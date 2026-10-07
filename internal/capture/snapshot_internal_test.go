@@ -121,7 +121,7 @@ func TestSnapshotRejectsDanglingSymbolicLinkAndMissingFile(t *testing.T) {
 		_, err = workspace.Snapshot(context.Background(), path)
 
 		var sourceErr *SourceError
-		if !errors.As(err, &sourceErr) || !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), path) {
+		if !errors.As(err, &sourceErr) || !errors.Is(err, fs.ErrNotExist) || sourceErr.Path != path {
 			t.Fatalf("Snapshot(%q) = %v", path, err)
 		}
 	}
@@ -201,7 +201,7 @@ func TestSnapshotDetectsChangeDuringCapture(t *testing.T) {
 			_, err := workspace.Snapshot(context.Background(), source)
 
 			var changedErr *SourceChangedError
-			if !errors.As(err, &changedErr) || !strings.Contains(err.Error(), source) {
+			if !errors.As(err, &changedErr) || changedErr.Path != source {
 				t.Fatalf(snapshotFailureFormat, err)
 			}
 
@@ -273,7 +273,7 @@ func TestSnapshotReportsScratchFailures(t *testing.T) {
 		scratch failingScratch
 		want    string
 	}{
-		"disk full":    {failingScratch{writeErr: syscall.ENOSPC, closeErr: nil}, "volume is full"},
+		"disk full":    {failingScratch{writeErr: errDiskFull, closeErr: nil}, "volume is full"},
 		"close failed": {failingScratch{writeErr: nil, closeErr: syscall.EIO}, "healthy"},
 	}
 	for name, test := range tests {

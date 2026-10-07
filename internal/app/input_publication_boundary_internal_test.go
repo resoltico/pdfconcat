@@ -46,8 +46,8 @@ func TestNamedInputCancellationAfterInitialCheckReturnsNoOpenFile(t *testing.T) 
 		t.Fatal("the regular file did not actually open")
 	}
 
-	if _, statErr := opened.Stat(); !errors.Is(statErr, os.ErrClosed) {
-		t.Fatalf("canceled open leaked its owned handle: %v", statErr)
+	if _, readErr := opened.Read(make([]byte, 1)); !errors.Is(readErr, os.ErrClosed) {
+		t.Fatalf("canceled open leaked its owned handle: %v", readErr)
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/report"
 )
 
-func TestCommittedReportCleanupWarningPreservesPublishedStateAndIndependentDurabilityWarning(t *testing.T) {
+func TestCommittedReportCleanupWarningPreservesPublishedStateAndIndependentFinalizationWarning(t *testing.T) {
 	t.Parallel()
 
 	file, createErr := os.CreateTemp(t.TempDir(), "cleanup-*")
@@ -34,8 +34,8 @@ func TestCommittedReportCleanupWarningPreservesPublishedStateAndIndependentDurab
 	current := &pipeline{output: filepath.Join(t.TempDir(), "output.pdf"), reportPath: filepath.Join(t.TempDir(), "report.json")}
 	result := &publish.Result{PDFPublished: true, ReportPublished: true, ReportCleanupError: closeErr}
 
-	durability := &publish.DurabilityError{Path: current.reportPath, Err: os.ErrPermission}
-	if err := current.afterCommit(t.Context(), result, durability); err != nil {
+	finalization := &publish.FinalizationError{Path: current.reportPath, Err: os.ErrPermission}
+	if err := current.afterCommit(t.Context(), result, finalization); err != nil {
 		t.Fatal(err)
 	}
 
@@ -44,7 +44,7 @@ func TestCommittedReportCleanupWarningPreservesPublishedStateAndIndependentDurab
 	}
 
 	if len(current.warnings) != 2 || current.warnings[0] != closeErr.Error() ||
-		!strings.Contains(current.warnings[1], "may not survive a crash") {
+		!strings.Contains(current.warnings[1], "finalizing publication failed") {
 		t.Fatalf("independent warnings lost: %v", current.warnings)
 	}
 }

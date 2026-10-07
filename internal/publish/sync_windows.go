@@ -5,7 +5,6 @@
 
 package publish
 
-// syncDirectory does nothing on Windows: directories cannot be flushed through a handle, and
-// MoveFileEx is called with MOVEFILE_WRITE_THROUGH so the rename itself is flushed before it
-// returns.
+// syncDirectory is a no-op on Windows: file contents are flushed before rename,
+// but directory-entry crash durability is not established by the selected APIs.
 func syncDirectory(string) error { return nil }

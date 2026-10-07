@@ -257,8 +257,8 @@ func TestDirectoryFlushFailuresAfterCommitKeepPublishedState(t *testing.T) {
 
 	result, err := commitWith(context.Background(), ops, fixture.pdf(), fixture.reportStage, Policy{})
 
-	var durability *DurabilityError
-	if !errors.As(err, &durability) || result != (Result{PDFPublished: true, ReportPublished: true}) {
+	var finalization *FinalizationError
+	if !errors.As(err, &finalization) || result != (Result{PDFPublished: true, ReportPublished: true}) {
 		t.Fatalf("commit() = %+v, %v", result, err)
 	}
 
@@ -310,5 +310,34 @@ func TestCommitWithoutAReportPublishesNothingWhenTheContextHasEnded(t *testing.T
 	result, err = Commit(t.Context(), fixture.pdf(), nil, Policy{})
 	if err == nil || result.PDFPublished {
 		t.Errorf("Commit() onto a directory = %+v, %v", result, err)
+	}
+}
+
+func TestRenameFinalizationFailureKeepsPublishedState(t *testing.T) {
+	t.Parallel()
+
+	ops := realOperations()
+	fixture := newCommitFixture(t, ops)
+	ops.replace = func(staged, target string, existing existingFile) error {
+		if err := replaceFile(staged, target, existing); err != nil {
+			return err
+		}
+
+		if target == fixture.pdfTarget {
+			return &FinalizationError{Path: target, Err: errInjected}
+		}
+
+		return nil
+	}
+	fixture.reportStage.ops = ops
+	result, err := commitWith(t.Context(), ops, fixture.pdf(), fixture.reportStage, Policy{})
+
+	var finalization *FinalizationError
+	if !errors.As(err, &finalization) || !errors.Is(err, errInjected) || !result.PDFPublished || !result.ReportPublished {
+		t.Fatalf("postrename failure lost committed state: %+v, %v", result, err)
+	}
+
+	if get(t, fixture.pdfTarget) != pdfContent || get(t, fixture.reportPath) != reportContent {
+		t.Fatal("committed bytes lost")
 	}
 }

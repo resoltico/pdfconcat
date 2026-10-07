@@ -172,8 +172,8 @@ func TestFileReportsPublishedFileWhenDirectoryFlushFails(t *testing.T) {
 
 	err := commitFile(ops, staged, destination, refuseExisting)
 
-	var durability *DurabilityError
-	if !errors.As(err, &durability) || !errors.Is(err, errInjected) || get(t, destination) != replacementContent {
+	var finalization *FinalizationError
+	if !errors.As(err, &finalization) || !errors.Is(err, errInjected) || get(t, destination) != replacementContent {
 		t.Fatalf("err %v", err)
 	}
 
@@ -490,10 +490,10 @@ func TestStageDiskFullPermissionAndFlushFailures(t *testing.T) {
 		t.Fatalf("disk full = %v", err)
 	}
 
-	unflushed := realOperations()
-	unflushed.syncFile = func(string) error { return errInjected }
+	finalizationFailed := realOperations()
+	finalizationFailed.syncFile = func(string) error { return errInjected }
 
-	_, err = stageWith(context.Background(), unflushed, destination, strings.NewReader("x"), 5)
+	_, err = stageWith(context.Background(), finalizationFailed, destination, strings.NewReader("x"), 5)
 	if !errors.Is(err, errInjected) {
 		t.Fatalf("flush failure = %v", err)
 	}

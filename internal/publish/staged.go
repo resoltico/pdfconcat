@@ -284,9 +284,9 @@ func (s *Staged) publishRetainingContext(ctx context.Context, policy Policy) (bo
 	}
 	err := commitFileChecked(ctx, s.ops, s.path, s.target, policy.existing(), guard)
 
-	var durability *DurabilityError
+	var finalization *FinalizationError
 
-	renamed := errors.As(err, &durability)
+	renamed := errors.As(err, &finalization)
 	if err == nil || renamed {
 		s.settled = true
 

@@ -10,8 +10,9 @@
 // macOS, MoveFileEx without MOVEFILE_REPLACE_EXISTING on Windows); there is no weaker fallback.
 //
 // Crash durability: staged file contents are flushed with fsync before the rename and the parent
-// directory is flushed after it (macOS fsync issues F_FULLFSYNC; Windows uses MOVEFILE_WRITE_THROUGH
-// instead of a directory flush, and filesystems that cannot flush a directory are tolerated).
+// directory is flushed after it on Linux/macOS (macOS fsync issues F_FULLFSYNC). Windows
+// flushes file contents but does not establish directory-entry crash durability. Filesystems
+// that cannot flush a directory are tolerated.
 // That is everything claimed: the operating system and storage hardware decide what survives a
 // power loss, and nothing stronger than the platform's flush semantics is promised.
 package publish
@@ -35,10 +36,10 @@ type (
 		Reason string
 	}
 
-	// DurabilityError reports that the destination was published (the rename completed and the file
-	// is visible) but the parent directory could not be flushed, so the entry may not survive a crash.
-	DurabilityError struct {
-		// Err is the flush failure.
+	// FinalizationError reports successful publication followed by a flush or owned-handle release failure.
+	// The visible destination must never be described as untouched.
+	FinalizationError struct {
+		// Err is the operation-specific finalization failure.
 		Err error
 		// Path is the published destination.
 		Path string
@@ -64,15 +65,15 @@ func (e *DestinationError) Error() string {
 }
 
 // Error states both facts so a caller never describes the output as untouched.
-func (e *DurabilityError) Error() string {
-	return fmt.Sprintf("published %q, but flushing its directory failed: %v", e.Path, e.Err)
+func (e *FinalizationError) Error() string {
+	return fmt.Sprintf("published %q, but finalizing publication failed: %v", e.Path, e.Err)
 }
 
-// Unwrap exposes the flush failure.
-func (e *DurabilityError) Unwrap() error { return e.Err }
+// Unwrap exposes the operation-specific finalization failure.
+func (e *FinalizationError) Unwrap() error { return e.Err }
 
 // File exposes a verified staged file using platform-native rename semantics. The staged file is
-// flushed first and the destination's directory afterwards. A *DurabilityError means the file is
+// flushed first; Linux/macOS also flush the destination directory afterwards. A *FinalizationError means the file is
 // published.
 func File(staged, destination string, overwrite bool) error {
 	return commitFile(realOperations(), staged, destination, Policy{Overwrite: overwrite}.existing())
@@ -118,7 +119,7 @@ func commitFileChecked(ctx context.Context, ops operations, staged, destination 
 
 	err = ops.syncDirectory(filepath.Dir(destination))
 	if err != nil {
-		return &DurabilityError{Path: destination, Err: err}
+		return &FinalizationError{Path: destination, Err: fmt.Errorf("flush publication directory: %w", err)}
 	}
 
 	return nil

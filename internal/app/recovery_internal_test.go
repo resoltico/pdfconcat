@@ -26,9 +26,9 @@ func TestRecoveryRefreshPublicationResultKeepsCommittedMetadataCurrent(t *testin
 		t.Fatalf("lost ordinary publication failure: %v warnings=%v", err, current.warnings)
 	}
 
-	durability := fmt.Errorf("refresh: %w", &publish.DurabilityError{Path: "/recovery.json", Err: errInjected})
+	finalization := fmt.Errorf("refresh: %w", &publish.FinalizationError{Path: "/recovery.json", Err: errInjected})
 
-	refreshErr := current.finishRecoveryRefresh(durability)
+	refreshErr := current.finishRecoveryRefresh(finalization)
 	if refreshErr != nil || current.publication.RecoveryState != report.RecoveryCurrent ||
 		len(current.warnings) != 1 {
 		t.Fatalf(
@@ -40,8 +40,7 @@ func TestRecoveryRefreshPublicationResultKeepsCommittedMetadataCurrent(t *testin
 	}
 
 	warning := current.warnings[0]
-	if !strings.Contains(warning, errInjected.Error()) || !strings.Contains(warning, "recovery metadata is visible") ||
-		!strings.Contains(warning, "directory durability was not established") {
-		t.Fatalf("lost committed visibility or durability caveat: %s", warning)
+	if !strings.Contains(warning, errInjected.Error()) || !strings.Contains(warning, "recovery metadata is visible") {
+		t.Fatalf("lost committed visibility or finalization caveat: %s", warning)
 	}
 }

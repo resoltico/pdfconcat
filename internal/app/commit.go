@@ -265,9 +265,9 @@ func (p *pipeline) afterCommit(ctx context.Context, result *publish.Result, err 
 		return p.reportCommitFailure(context.WithoutCancel(ctx), result, reportErr)
 	}
 
-	durability, unflushed := errors.AsType[*publish.DurabilityError](err)
-	if unflushed {
-		p.warnings = append(p.warnings, durability.Error()+"; the output is visible but may not survive a crash")
+	finalization, finalizationFailed := errors.AsType[*publish.FinalizationError](err)
+	if finalizationFailed {
+		p.warnings = append(p.warnings, finalization.Error()+"; the output is visible")
 	}
 
 	return nil

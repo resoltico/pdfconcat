@@ -71,11 +71,11 @@ func (p *pipeline) refreshRecovery(ctx context.Context, owner *publish.RecoveryO
 	return p.finishRecoveryRefresh(err)
 }
 
-// finishRecoveryRefresh distinguishes committed metadata with uncertain durability from failed publication.
+// finishRecoveryRefresh distinguishes visible metadata with a finalization failure from failed publication.
 func (p *pipeline) finishRecoveryRefresh(err error) error {
-	durability, unflushed := errors.AsType[*publish.DurabilityError](err)
-	if unflushed {
-		p.warnings = append(p.warnings, durability.Error()+"; recovery metadata is visible but directory durability was not established")
+	finalization, finalizationFailed := errors.AsType[*publish.FinalizationError](err)
+	if finalizationFailed {
+		p.warnings = append(p.warnings, finalization.Error()+"; recovery metadata is visible")
 		return nil
 	}
 

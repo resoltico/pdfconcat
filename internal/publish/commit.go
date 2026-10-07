@@ -94,9 +94,9 @@ func commitWith(ctx context.Context, ops operations, pdf PDF, report *Staged, po
 
 	pdfErr := commitFileChecked(ctx, ops, pdf.Staged, pdf.Destination, pdf.existing(), pdf.Verify)
 
-	var durability *DurabilityError
+	var finalization *FinalizationError
 
-	result.PDFPublished = pdfErr == nil || errors.As(pdfErr, &durability)
+	result.PDFPublished = pdfErr == nil || errors.As(pdfErr, &finalization)
 	if !result.PDFPublished {
 		return result, errors.Join(pdfErr, discard(report))
 	}

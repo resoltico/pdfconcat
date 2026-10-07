@@ -477,13 +477,13 @@ func TestAnUnflushedDirectoryIsAWarningNotAFailure(t *testing.T) {
 	err := current.afterCommit(
 		t.Context(),
 		&publish.Result{PDFPublished: true},
-		&publish.DurabilityError{Path: "/out.pdf", Err: errInjected},
+		&publish.FinalizationError{Path: "/out.pdf", Err: errInjected},
 	)
 	if err != nil || len(current.warnings) != 1 || !current.publication.Published || current.status != report.StatusOK {
 		t.Fatalf("%v %v %+v", err, current.warnings, current.publication)
 	}
 
-	if !strings.Contains(current.warnings[0], "may not survive a crash") {
+	if !strings.Contains(current.warnings[0], "finalizing publication failed") {
 		t.Errorf("warning %q", current.warnings[0])
 	}
 }

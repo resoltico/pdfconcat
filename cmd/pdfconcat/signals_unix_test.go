@@ -141,8 +141,10 @@ func TestNamedFIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
 		dir := tempDir(t)
 		ensure(t, syscall.Mkfifo(filepath.Join(dir, pipePath), 0o600))
 
+		// Building the executable is setup; the deadline measures its FIFO rejection.
+		command := start(t, dir, args...)
 		began := time.Now()
-		res := run(t, dir, "", args...)
+		res := finish(t, command)
 		requireExit(t, res, 1)
 
 		if time.Since(began) > 5*time.Second {

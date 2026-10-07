@@ -41,7 +41,6 @@ go run ./tools/qualitygate lint-config           # .golangci.yml agrees exactly 
 go run ./tools/qualitygate lint-stale            # every diagnostic exclusion still matches a real diagnostic
 go run ./tools/qualitygate coverage              # unit + executable coverage, merged, threshold enforced
 go run ./tools/qualitygate fuzz -time 30s        # every Fuzz target found by `go test -list`
-go run ./tools/qualitygate secrets               # intended source and reachable history, redacted
 go run ./tools/qualitygate mutation              # gremlins in a clean snapshot (slow)
 go run ./tools/qualitygate controls              # deliberate defects the tests must detect
 govulncheck ./...

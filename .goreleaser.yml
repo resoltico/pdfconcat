@@ -64,8 +64,8 @@ checksum:
 changelog:
   use: github-native
 
-# The release is staged as a draft. .github/workflows/release.yml verifies the archives and their
-# provenance attestation, and only then publishes the draft.
+# Retained configuration for future binary releases stages packages as a draft.
+# The current source-only release workflow publishes changelog notes without invoking GoReleaser.
 release:
   draft: true
   replace_existing_draft: true

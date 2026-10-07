@@ -2,7 +2,7 @@
 
 PDFConcat application code is licensed under the Mozilla Public License 2.0. The development-only tool patches retain their upstream licenses as described below. The compiled program also incorporates Go standard-library code and may incorporate code from modules in the application module graph under separate licenses. Those components are not relicensed under MPL-2.0.
 
-This inventory lists the modules linked into the release binaries for macOS, Linux, and Windows. A test fails if a linked module is missing from it, if it lists a module that is not linked, if a version differs from the one `go.mod` selects, or if a listed license copy does not reproduce the license files of the linked module version. Development tools (pinned in `tools/versions.env`) are not part of this runtime inventory.
+This inventory lists the modules linked into application executables for macOS, Linux, and Windows. A test fails if a linked module is missing from it, if it lists a module that is not linked, if a version differs from the one `go.mod` selects, or if a listed license copy does not reproduce the license files of the linked module version. Development tools (pinned in `tools/versions.env`) are not part of this runtime inventory.
 
 | Component | Version | License | Purpose / relationship | License copy |
 | --- | --- | --- | --- | --- |

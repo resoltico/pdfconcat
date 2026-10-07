@@ -39,7 +39,7 @@ func exerciseArtifactPair(t *testing.T, pair [2]string, scenario artifactScenari
 		distinct = populateArtifactPair(t, output, reportPath, source)
 	}
 
-	args := []string{commandBuild, outputFlag, pair[0], reportFlag, pair[1], sourceA}
+	args := []string{commandBuild, outputFlag, pair[0], reportFlag, pair[1], detailsFlag, sourceA}
 	if scenario.overwrite {
 		args = append(args, overwriteFlag)
 	}

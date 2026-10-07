@@ -225,7 +225,7 @@ func (o outcome) requireCode(tb testing.TB, code int, diagnostic string) summary
 
 	parsed := o.summary(tb)
 	if o.code != code {
-		tb.Fatalf("exit %d, want %d\nstdout: %.600s\nstderr: %s", o.code, code, o.stdout, o.stderr)
+		tb.Fatalf("exit %d, want %d\ndiagnostics: %+v\nstdout: %.600s\nstderr: %s", o.code, code, parsed.Diagnostics, o.stdout, o.stderr)
 	}
 
 	if diagnostic == "" {

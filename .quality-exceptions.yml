@@ -1221,3 +1221,55 @@ exceptions:
     message: 'G204: Subprocess launched with variable'
     source: 'exec\.CommandContext\(t\.Context\(\), workflowBash, "-e", "-o", "pipefail", "-c", script\)'
     retained_property: the actual checked-in workflow exporter is tested at its native Bash boundary
+
+  # After a successful Lstat of a regular artifact, Unix IdentityOf obtains device/inode metadata
+  # from a second Stat. Stable supported files cannot make only that observation fail; namespace
+  # substitution/removal or a native filesystem fault can. Keep the fail-closed error for those
+  # ambient events; real invalid-parent, invalid-entry and failed-refresh controls remain required.
+  - id: coverage-capture-artifact-identity-observation-darwin
+    tool: coverage
+    kind: unreachable-branch
+    goos: darwin
+    path: internal/capture/registry.go
+    function: inspectArtifact
+    anchor: 'return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}'
+    retained_property: a failed native artifact identity observation stops registration before any claims change
+
+  # The app resolves and validates reportPath as absolute before publication. Unix filepath.Abs
+  # returns an already absolute path without querying the current directory, so RetireReport
+  # cannot fail for that app invariant. Public relative-path Add/RetireReport failures are covered
+  # by real isolated-child cwd controls. Windows still calls a native path API and is not exempted.
+  - id: coverage-app-retire-absolute-report-darwin
+    tool: coverage
+    kind: unreachable-branch
+    goos: darwin
+    path: internal/app/recovery.go
+    function: pipeline.refreshRecovery
+    anchor: 'return fmt.Errorf("retire failed report target: %w", err)'
+    retained_property: a failure to retire the abandoned report destination prevents recovery publication
+
+  # After a successful Lstat of a regular artifact, Unix IdentityOf obtains device/inode metadata
+  # from a second Stat. Stable supported files cannot make only that observation fail; namespace
+  # substitution/removal or a native filesystem fault can. Keep the fail-closed error for those
+  # ambient events; real invalid-parent, invalid-entry and failed-refresh controls remain required.
+  - id: coverage-capture-artifact-identity-observation-linux
+    tool: coverage
+    kind: unreachable-branch
+    goos: linux
+    path: internal/capture/registry.go
+    function: inspectArtifact
+    anchor: 'return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}'
+    retained_property: a failed native artifact identity observation stops registration before any claims change
+
+  # The app resolves and validates reportPath as absolute before publication. Unix filepath.Abs
+  # returns an already absolute path without querying the current directory, so RetireReport
+  # cannot fail for that app invariant. Public relative-path Add/RetireReport failures are covered
+  # by real isolated-child cwd controls. Windows still calls a native path API and is not exempted.
+  - id: coverage-app-retire-absolute-report-linux
+    tool: coverage
+    kind: unreachable-branch
+    goos: linux
+    path: internal/app/recovery.go
+    function: pipeline.refreshRecovery
+    anchor: 'return fmt.Errorf("retire failed report target: %w", err)'
+    retained_property: a failure to retire the abandoned report destination prevents recovery publication

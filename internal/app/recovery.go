@@ -52,6 +52,11 @@ func (p *pipeline) reportCommitFailure(ctx context.Context, result *publish.Resu
 
 // refreshRecovery stages first and replaces only the still-owned retained file, after verifying identities.
 func (p *pipeline) refreshRecovery(ctx context.Context, owner *publish.RecoveryOwner, diagnostic report.Diagnostic) error {
+	// The failed report target is abandoned; recovery is guarded as a distinct destination.
+	if err := p.registry.RetireReport(p.reportPath); err != nil {
+		return fmt.Errorf("retire failed report target: %w", err)
+	}
+
 	if err := p.verifyRetainedRecovery(owner); err != nil {
 		return err
 	}

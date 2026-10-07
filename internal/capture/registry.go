@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,6 +42,11 @@ type (
 		Role Role
 	}
 
+	artifactBinding struct {
+		path string
+		role Role
+	}
+
 	claim struct {
 		path string
 		role Role
@@ -50,12 +56,14 @@ type (
 	// are matched by filesystem Identity, so hard links, symbolic links (resolved for every role but
 	// output and report, which may not be symbolic links) and case aliases collide; files that do not
 	// exist yet are conservatively matched by their directory identity and Unicode-normalized,
-	// case-folded basename, including on case-sensitive filesystems. Lookup cost is one map access per resource, never all pairs.
+	// case-folded basename, including on case-sensitive filesystems. Input lookup uses one identity-map access.
+	// Artifact registration refreshes the small artifact-path set to account for replacement, without scanning inputs.
 	// A Registry is safe for concurrent use.
 	Registry struct {
-		byIdentity map[Identity]claim
-		byName     map[Identity]map[string]claim
-		mu         sync.Mutex
+		byIdentity       map[Identity]claim
+		artifactBindings map[artifactBinding]Identity
+		byName           map[Identity]map[string]claim
+		mu               sync.Mutex
 	}
 )
 
@@ -110,8 +118,9 @@ func (e *ArtifactTargetError) Error() string {
 // NewRegistry returns an empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		byIdentity: make(map[Identity]claim),
-		byName:     make(map[Identity]map[string]claim),
+		byIdentity:       make(map[Identity]claim),
+		artifactBindings: make(map[artifactBinding]Identity),
+		byName:           make(map[Identity]map[string]claim),
 	}
 }
 
@@ -119,6 +128,8 @@ func NewRegistry() *Registry {
 // symbolic links. Output and report paths may be new, but an existing one must be a regular file,
 // not a symbolic link. Adding a file already recorded under a different role returns an
 // *AliasError; repeating a role for the same file is allowed (sources are repeated by design).
+// Re-registering an artifact path updates its object identity after replacement; independently
+// registered artifact aliases and input identities remain protected.
 // It returns the file's Identity when it exists and the zero Identity for a new file.
 func (r *Registry) Add(role Role, path string) (Identity, error) {
 	if path == "" {
@@ -132,7 +143,43 @@ func (r *Registry) Add(role Role, path string) (Identity, error) {
 		return r.addInput(role, path)
 	}
 
-	return r.addArtifact(role, path)
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return Identity{}, &SourceError{Path: path, Operation: "resolve " + role.String(), Err: err}
+	}
+
+	return r.registerArtifact(artifactBinding{role: role, path: absolute})
+}
+
+// RetireReport abandons one failed report destination before publishing a distinct recovery file.
+// Inputs, other artifact paths and conservative name reservations remain protected.
+func (r *Registry) RetireReport(path string) error {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return &SourceError{Path: path, Operation: "resolve retired report", Err: err}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	binding := artifactBinding{role: RoleReport, path: absolute}
+	next := make(map[artifactBinding]Identity, len(r.artifactBindings))
+
+	claims := make(map[Identity]claim, len(r.artifactBindings))
+	for current, identity := range r.artifactBindings {
+		if current == binding {
+			continue
+		}
+
+		next[current] = identity
+		if identity != (Identity{}) {
+			claims[identity] = claim(current)
+		}
+	}
+
+	r.commitArtifactBindings(next, claims)
+
+	return nil
 }
 
 func (r *Registry) addInput(role Role, path string) (Identity, error) {
@@ -144,12 +191,12 @@ func (r *Registry) addInput(role Role, path string) (Identity, error) {
 	return identity, r.claimIdentity(role, path, identity)
 }
 
-func (r *Registry) addArtifact(role Role, path string) (Identity, error) {
+func inspectArtifact(role Role, path string) (Identity, error) {
 	info, err := os.Lstat(path)
 
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return Identity{}, r.addNewArtifact(role, path)
+		return Identity{}, nil
 	case err != nil:
 		return Identity{}, &SourceError{Path: path, Operation: "inspect " + role.String(), Err: err}
 	}
@@ -159,7 +206,12 @@ func (r *Registry) addArtifact(role Role, path string) (Identity, error) {
 		return Identity{}, &ArtifactTargetError{Path: path, Role: role, Problem: problem}
 	}
 
-	return r.addInput(role, path)
+	identity, err := IdentityOf(path)
+	if err != nil {
+		return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}
+	}
+
+	return identity, nil
 }
 
 func (r *Registry) addNewArtifact(role Role, path string) error {
@@ -220,4 +272,103 @@ func artifactProblem(mode fs.FileMode) string {
 	default:
 		return ""
 	}
+}
+
+// registerArtifact refreshes only the small artifact set, never the immutable input inventory.
+// Inspection and conflict checks complete before any existing claim is changed.
+func (r *Registry) registerArtifact(binding artifactBinding) (Identity, error) {
+	next, err := r.refreshArtifactBindings(binding)
+	if err != nil {
+		return Identity{}, err
+	}
+
+	claims, err := r.validateArtifactBindings(next, binding)
+	if err != nil {
+		return Identity{}, err
+	}
+
+	identity := next[binding]
+	if identity == (Identity{}) {
+		if reservationErr := r.addNewArtifact(binding.role, binding.path); reservationErr != nil {
+			return Identity{}, reservationErr
+		}
+	}
+
+	r.commitArtifactBindings(next, claims)
+
+	return identity, nil
+}
+
+func (r *Registry) refreshArtifactBindings(binding artifactBinding) (map[artifactBinding]Identity, error) {
+	next := make(map[artifactBinding]Identity, len(r.artifactBindings)+1)
+	for current := range r.artifactBindings {
+		if current == binding {
+			continue
+		}
+
+		identity, err := inspectArtifact(current.role, current.path)
+		if err != nil {
+			return nil, err
+		}
+
+		next[current] = identity
+	}
+
+	identity, err := inspectArtifact(binding.role, binding.path)
+	if err != nil {
+		return nil, err
+	}
+
+	next[binding] = identity
+
+	return next, nil
+}
+
+func (r *Registry) validateArtifactBindings(bindings map[artifactBinding]Identity, candidate artifactBinding) (map[Identity]claim, error) {
+	claims := make(map[Identity]claim, len(bindings))
+	for binding, identity := range bindings {
+		if binding == candidate {
+			continue
+		}
+
+		if err := r.checkArtifactIdentity(claims, binding, identity); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := r.checkArtifactIdentity(claims, candidate, bindings[candidate]); err != nil {
+		return nil, err
+	}
+
+	return claims, nil
+}
+
+func (r *Registry) checkArtifactIdentity(claims map[Identity]claim, binding artifactBinding, identity Identity) error {
+	if identity == (Identity{}) {
+		return nil
+	}
+
+	if other, found := r.byIdentity[identity]; found && !other.role.isArtifact() {
+		return &AliasError{Path: binding.path, Role: binding.role, OtherPath: other.path, OtherRole: other.role}
+	}
+
+	if other, found := claims[identity]; found && other.role != binding.role {
+		return &AliasError{Path: binding.path, Role: binding.role, OtherPath: other.path, OtherRole: other.role}
+	}
+
+	claims[identity] = claim(binding)
+
+	return nil
+}
+
+func (r *Registry) commitArtifactBindings(bindings map[artifactBinding]Identity, claims map[Identity]claim) {
+	for _, identity := range r.artifactBindings {
+		if other, found := r.byIdentity[identity]; found && other.role.isArtifact() {
+			delete(r.byIdentity, identity)
+		}
+	}
+
+	maps.Copy(r.byIdentity, claims)
+
+	r.artifactBindings = bindings
 }

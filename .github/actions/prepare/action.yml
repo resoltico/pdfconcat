@@ -25,7 +25,26 @@ runs:
 
     - name: Export pinned tool versions
       shell: bash
-      run: cat tools/versions.env >> "$GITHUB_ENV"
+      run: |
+        set -euo pipefail
+        awk '
+          {
+            line = $0
+            sub(/^[[:space:]]+/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            if (line == "" || line ~ /^#/) next
+            equal = index(line, "=")
+            key = substr(line, 1, equal - 1)
+            setting = substr(line, equal + 1)
+            if (!equal || key !~ /^[A-Z_][A-Z0-9_]*$/ || setting == "" || seen[key]++) {
+              print "tools/versions.env: invalid or duplicate assignment at line " NR > "/dev/stderr"
+              invalid = 1
+              exit 1
+            }
+            output = output key "=" setting "\n"
+          }
+          END { if (!invalid) printf "%s", output }
+        ' tools/versions.env >> "$GITHUB_ENV"
 
     - name: Install development tools
       if: inputs.tools != ''

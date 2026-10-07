@@ -215,6 +215,12 @@ func TestParseToolVersionsRejectsMalformedLines(t *testing.T) {
 		t.Fatal("malformed line accepted")
 	}
 
+	for _, content := range []string{"KEY=one\nKEY=two\n", "bad-key=value\n", "KEY =value\n", "KEY=\n"} {
+		if _, parseErr := repopolicy.ParseToolVersions(content); !errors.Is(parseErr, repopolicy.ErrToolVersions) {
+			t.Fatalf("invalid environment accepted: %q: %v", content, parseErr)
+		}
+	}
+
 	versions, err := repopolicy.ParseToolVersions("# comment\n\nKEY=v1.2.3\n")
 	if err != nil || versions["KEY"] != "v1.2.3" {
 		t.Fatalf("got %v, %v", versions, err)

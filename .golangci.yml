@@ -901,6 +901,11 @@ linters:
         path: ^tools/qualitygate/mutation_launch\.go$
         source: exec\.CommandContext\(ctx, c\.name, args\.\.\.\)
         text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^internal/repopolicy/toolenv_action_test\.go$
+        source: exec\.CommandContext\(t\.Context\(\), workflowBash, "-e", "-o", "pipefail", "-c", script\)
+        text: 'G204: Subprocess launched with variable'
 
 formatters:
   enable:

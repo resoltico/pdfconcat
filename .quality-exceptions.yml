@@ -1207,3 +1207,17 @@ exceptions:
     message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
     source: 'exec\.CommandContext\(ctx, c\.name, args\.\.\.\)'
     retained_property: only verified tool and SDK invocations reach the owned deadline launcher
+
+  # This integration test executes the exact trusted Bash export step read from the checked-in
+  # prepare action, rather than maintaining a second script. Fixture pin contents are AWK data,
+  # not executable shell text; GITHUB_ENV is an isolated temporary file. The real interpreter
+  # boundary proves malformed or duplicate input cannot append a partial environment export.
+  - id: lint-prepare-environment-native-script
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: internal/repopolicy/toolenv_action_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'exec\.CommandContext\(t\.Context\(\), workflowBash, "-e", "-o", "pipefail", "-c", script\)'
+    retained_property: the actual checked-in workflow exporter is tested at its native Bash boundary

@@ -18,9 +18,10 @@ var (
 	// ErrToolVersions reports a malformed tools/versions.env.
 	ErrToolVersions = errors.New("tool versions")
 
-	commitPin      = regexp.MustCompile(`^[^@\s]+@[0-9a-f]{40}$`)
-	literalVersion = regexp.MustCompile(`@v\d+\.\d+`)
-	exactVersion   = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	commitPin          = regexp.MustCompile(`^[^@\s]+@[0-9a-f]{40}$`)
+	literalVersion     = regexp.MustCompile(`@v\d+\.\d+`)
+	exactVersion       = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	toolEnvironmentKey = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 )
 
 // WorkflowIssues checks the properties of GitHub workflow files that review would otherwise have to
@@ -194,8 +195,12 @@ func ParseToolVersions(content string) (map[string]string, error) {
 		}
 
 		key, setting, found := strings.Cut(line, "=")
-		if !found || key == "" || setting == "" {
+		if !found || !toolEnvironmentKey.MatchString(key) || setting == "" {
 			return nil, fmt.Errorf("%w: line %d: want KEY=VALUE, got %q", ErrToolVersions, number+1, line)
+		}
+
+		if _, duplicate := versions[key]; duplicate {
+			return nil, fmt.Errorf("%w: line %d: duplicate key %s", ErrToolVersions, number+1, key)
 		}
 
 		versions[key] = setting

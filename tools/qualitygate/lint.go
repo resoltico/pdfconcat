@@ -169,6 +169,11 @@ func lintStale(ctx context.Context, args []string) error {
 		return fmt.Errorf(loadRegistryError, err)
 	}
 
+	applicable, selectionErr := applicableDiagnosticEntries(ctx, root, registry.Exceptions)
+	if selectionErr != nil {
+		return selectionErr
+	}
+
 	data, err := unexcludedReport(ctx, root)
 	if err != nil {
 		return err
@@ -186,7 +191,7 @@ func lintStale(ctx context.Context, args []string) error {
 		}
 	}
 
-	stale := repopolicy.StaleDiagnosticEntries(registry.Exceptions, issues, runtime.GOOS)
+	stale := repopolicy.StaleDiagnosticEntries(applicable, issues, runtime.GOOS)
 	problems := make([]string, 0, len(stale))
 
 	for _, entry := range stale {
@@ -197,7 +202,7 @@ func lintStale(ctx context.Context, args []string) error {
 	return report(
 		lintStaleCommand,
 		problems,
-		fmt.Sprintf("every diagnostic exclusion matches (%d diagnostics seen on %s)", len(issues), runtime.GOOS),
+		fmt.Sprintf("every applicable native-compiled diagnostic exclusion matches (%d diagnostics seen on %s)", len(issues), runtime.GOOS),
 	)
 }
 

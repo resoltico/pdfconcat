@@ -37,8 +37,13 @@ runs:
       run: |
         set -euo pipefail
         . tools/versions.env
-        qpdf_output="$(qpdf --version)"
-        poppler_output="$(pdftotext -v 2>&1)"
+        type -a qpdf pdftotext
+        if qpdf_output="$(qpdf --version 2>&1)"; then qpdf_status=0; else qpdf_status=$?; fi
+        if poppler_output="$(pdftotext -v 2>&1)"; then poppler_status=0; else poppler_status=$?; fi
+        printf 'qpdf version command exit=%s\n%s\n' "$qpdf_status" "$qpdf_output"
+        printf 'pdftotext version command exit=%s\n%s\n' "$poppler_status" "$poppler_output"
+        if [ "$qpdf_status" -ne 0 ]; then exit "$qpdf_status"; fi
+        if [ "$poppler_status" -ne 0 ]; then exit "$poppler_status"; fi
         qpdf_version="$(printf '%s\n' "$qpdf_output" | awk 'NR == 1 {print $3}')"
         poppler_version="$(printf '%s\n' "$poppler_output" | awk 'NR == 1 {print $3}')"
         echo "qpdf $qpdf_version, poppler $poppler_version"

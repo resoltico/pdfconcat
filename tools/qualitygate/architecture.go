@@ -142,7 +142,7 @@ func collectArchitectureFiles(output, module string, compiled map[string]bool) e
 		}
 
 		dir := strings.TrimPrefix(pattern, "./")
-		for _, file := range append(pkg.GoFiles, pkg.CgoFiles...) {
+		for _, file := range compiledPackageFiles(&pkg) {
 			compiled[path.Join(dir, file)] = true
 		}
 	}
@@ -208,4 +208,12 @@ func architectureImports(ctx context.Context, root, binary string) error {
 	}
 
 	return nil
+}
+
+func compiledPackageFiles(pkg *discoveredPackage) []string {
+	files := append([]string(nil), pkg.GoFiles...)
+	files = append(files, pkg.CgoFiles...)
+	files = append(files, pkg.TestGoFiles...)
+
+	return append(files, pkg.XTestGoFiles...)
 }

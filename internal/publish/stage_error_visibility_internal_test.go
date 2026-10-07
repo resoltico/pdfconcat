@@ -46,7 +46,7 @@ func TestStagingSizeLimitRetainsOwnershipCleanupFailure(t *testing.T) {
 
 	var path string
 
-	original := ops.createTemp
+	original := createDeleteSharedFixtureTemp
 	ops.createTemp = func(directory, pattern string) (*os.File, error) {
 		file, err := original(directory, pattern)
 		if err == nil {

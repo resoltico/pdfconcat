@@ -30,7 +30,7 @@ func TestLateAliasRecoveryRecordsFailedPublicationAndQueriesWithoutUnsafeNext(t 
 
 		cancel()
 	})
-	res := execute(ctx, t, runner, dir, commandBuild, outputFlag, outputFile, reportFlag, reportFile, "--overwrite", sourceA)
+	res := execute(ctx, t, runner, dir, commandBuild, outputFlag, outputFile, reportFlag, reportFile, "--overwrite", detailsFlag, sourceA)
 
 	parsed := res.requireCode(t, 1, reportPublishFailureCode)
 	if !parsed.Publication.Published || parsed.Publication.ReportStatus != failedState {

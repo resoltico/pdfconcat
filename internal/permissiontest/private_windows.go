@@ -31,19 +31,41 @@ func requirePrivateACL(tb testing.TB, path string) string {
 		tb.Fatalf("private object DACL is not protected: %v", err)
 	}
 
+	sddl := descriptor.String()
+
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		tb.Fatal(err)
 	}
 
-	sddl := descriptor.String()
-
-	sid := user.User.Sid.String()
-	if strings.Count(sddl, "(") != 1 || !strings.Contains(sddl, "(A;") || !strings.Contains(sddl, ";;;"+sid+")") {
+	if !aclNamesOwner(sddl, user.User.Sid) {
 		tb.Fatalf("private object permits another principal: %s", sddl)
 	}
 
 	return sddl
+}
+
+// aclNamesOwner resolves SDK aliases such as LA and compares actual SID identities.
+func aclNamesOwner(sddl string, owner *windows.SID) bool {
+	if strings.Count(sddl, "(") != 1 || !strings.Contains(sddl, "(A;") {
+		return false
+	}
+
+	_, principal, found := strings.Cut(sddl, ";;;")
+
+	principal, terminated := strings.CutSuffix(principal, ")")
+	if !found || !terminated {
+		return false
+	}
+
+	descriptor, err := windows.SecurityDescriptorFromString("O:" + principal)
+	if err != nil {
+		return false
+	}
+
+	actual, defaulted, err := descriptor.Owner()
+
+	return err == nil && !defaulted && actual != nil && actual.Equals(owner)
 }
 
 // RequirePrivateDirectory requires owner-only inheritable access to an actual directory.

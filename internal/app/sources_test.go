@@ -120,7 +120,7 @@ func TestAFailureReportMayReplaceAFileOnlyOnceEveryInputIsKnown(t *testing.T) {
 	// An invalid plan is found before the inputs are known: the report may only be a new file.
 	writeFile(t, filepath.Join(dir, reportFile), previousReportContent)
 
-	res = execute(t.Context(), t, runner, dir, commandCheck, overwriteFlag, reportFlag, reportFile, inlinePlanFlag, "{", "--details")
+	res = execute(t.Context(), t, runner, dir, commandCheck, overwriteFlag, reportFlag, reportFile, inlinePlanFlag, "{", detailsFlag)
 	parsed = res.requireCode(t, 2, "")
 
 	if parsed.Publication.ReportStatus != failedState || len(parsed.Diagnostics) != 2 {
@@ -159,7 +159,7 @@ func TestAFailureReportCannotReplaceTheFileItDescribes(t *testing.T) {
 		reportFlag,
 		planFile,
 		overwriteFlag,
-		"--details",
+		detailsFlag,
 	)
 	parsed := res.requireCode(t, 2, codeAlias)
 

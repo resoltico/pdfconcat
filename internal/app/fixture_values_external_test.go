@@ -11,6 +11,7 @@ const (
 	namedFailureFormat           = "%s: %+v"
 	baseDirectoryFlag            = "--base-dir"
 	inlinePlanFlag               = "--plan-json"
+	detailsFlag                  = "--details"
 	pdfExtension                 = ".pdf"
 	sourceAMarker                = "a p1"
 	sourceCPath                  = "c.pdf"

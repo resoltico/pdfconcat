@@ -89,6 +89,7 @@ const (
 	formatText         = "text"
 	reportWritten      = "written"
 	reportFile         = "r.json"
+	phaseComplete      = "complete"
 	phaseIncomplete    = "incomplete"
 	outcomeInterrupted = "interrupted"
 )

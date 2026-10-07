@@ -75,7 +75,7 @@ func TestEverySourceIsRegisteredAndProblemsAreOrderedAliasesFirst(t *testing.T) 
 			2,
 		},
 		"a missing source": {
-			"complete", phaseIncomplete, []string{codeUnreadable}, []string{commandCheck, sourceA, "missing.pdf"}, 1,
+			phaseComplete, phaseIncomplete, []string{codeUnreadable}, []string{commandCheck, sourceA, "missing.pdf"}, 1,
 		},
 		"an alias and a missing source": {
 			phaseIncomplete, stateNotRun,

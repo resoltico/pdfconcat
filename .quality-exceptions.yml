@@ -451,9 +451,10 @@ exceptions:
     anchor: 'return p.stop(stageInput, err)'
     retained_property: a font failure would stop the job before any PDF is read
 
-  # On Unix identityOfOpen reads the device and inode from the Stat result the line above obtained
-  # from a real file, so errIdentityUnavailable (a FileInfo without syscall data) cannot occur for an
-  # os.File.
+  # Unix identityOfOpen reads device/inode data from the preceding real-file Stat, so a FileInfo
+  # without syscall metadata cannot occur. Windows queries that successfully opened, privately
+  # owned source handle again; a later query failure is a native filesystem/handle fault. Real
+  # source open, permission, change and close controls remain required on each native platform.
   - id: coverage-capture-identity-of-open
     tool: coverage
     kind: unreachable-branch
@@ -1273,3 +1274,209 @@ exceptions:
     function: pipeline.refreshRecovery
     anchor: 'return fmt.Errorf("retire failed report target: %w", err)'
     retained_property: a failure to retire the abandoned report destination prevents recovery publication
+
+  # This check opens a private regular-file metadata handle with delete sharing, then immediately
+  # reads its file information and closes it. A failed Stat or Close at that boundary requires a
+  # native filesystem/handle fault, not a supported input value. Real disappearing-namespace and
+  # changed-object controls exercise the surrounding refusal; neither native error is discarded.
+  - id: coverage-publish-report-metadata-handle-fault-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/publish/owner_windows.go
+    function: checkReportNamespace
+    anchor: 'return fmt.Errorf("identify current report namespace: %w", errors.Join(statErr, closeErr))'
+    retained_property: failed native metadata or handle cleanup prevents the identity guard from approving publication
+
+  # The DELETE handle was opened successfully here, is private to this operation, and has no
+  # concurrent closer. CloseHandle failure after successful rename is a native handle fault.
+  # A real-rename finalization control proves that the propagated error preserves visible PDF
+  # and report state; never misclassify this failure as an untouched destination.
+  - id: coverage-publish-rename-handle-close-fault-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/publish/replace_windows.go
+    function: replaceOpenFile
+    anchor: 'return &FinalizationError{Path: destination, Err: fmt.Errorf("release renamed file handle: %w", closeErr)}'
+    retained_property: a postrename handle failure remains visible and the destination stays classified as published
+
+  # Supported Windows file names are bounded by the native Unicode namespace, at most 32767
+  # UTF16 units. A checked destination cannot yield a FILE_RENAME_INFO buffer exceeding a DWORD.
+  # Retain the explicit conversion bound instead of allocating a fictitious multi-gigabyte path;
+  # native Unicode, surrogate, alignment and terminating-NUL controls remain required.
+  - id: coverage-publish-rename-buffer-dword-bound-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/publish/replace_windows.go
+    function: replaceOpenFile
+    anchor: 'return errRenameInformationTooLarge'
+    retained_property: native buffer lengths are checked before the DWORD conversion and never silently truncate
+
+  # The same supported native-path bound applies to the encoded name byte count. A path above
+  # a DWORD is outside the Windows namespace contract; constructing one just to hit this guard
+  # would spend gigabytes without exercising a supported filename. Keep the defensive bound.
+  - id: coverage-publish-rename-name-dword-bound-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/publish/replace_windows.go
+    function: renameInformationBuffer
+    anchor: 'return nil, errRenameInformationTooLarge'
+    retained_property: the UTF16 filename byte count cannot overflow the native DWORD field
+
+  # Windows filepath.Abs calls FullPath, which first rejects NUL through UTF16PtrFromString and
+  # decodes the returned native path with UTF16ToString. A successful result therefore cannot
+  # contain the embedded NUL that could make this subsequent UTF16FromString call fail. Real
+  # malformed-path controls exercise the earlier native rejection; retain this defensive return.
+  - id: coverage-publish-rename-absolute-path-encoding-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/publish/replace_windows.go
+    function: renameInformationBuffer
+    anchor: 'return nil, fmt.Errorf("encode rename destination: %w", err)'
+    retained_property: even an unexpected native path encoding fault prevents a rename with an invalid buffer
+
+  # The app has already resolved, encoded and preflighted this absolute report destination before
+  # postcommit refresh. Windows Abs reissues GetFullPathNameW; an error here is a residual native
+  # host fault, not an invalid report argument. Keep the propagation and fail closed. Public
+  # RetireReport malformed-NUL and Unix relative-path/cwd failure controls remain required.
+  - id: coverage-app-retire-absolute-report-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/app/recovery.go
+    function: pipeline.refreshRecovery
+    anchor: 'return fmt.Errorf("retire failed report target: %w", err)'
+    retained_property: failed retirement prevents a recovery refresh without misdescribing an abandoned destination
+
+  # inspectIdentity has just opened its private metadata handle and owns its only CloseHandle.
+  # No job input exposes that raw handle or can duplicate its close. A native close fault stays
+  # joined with a metadata-query error and prevents an identity claim; invalid paths and native
+  # non-filesystem objects are covered at their actual boundaries.
+  - id: coverage-capture-windows-identity-handle-close
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/capture/platform_windows.go
+    function: inspectIdentity
+    anchor: 'return Identity{}, false, errors.Join(err, fmt.Errorf("close file handle: %w", closeErr))'
+    retained_property: native identity-handle cleanup faults remain visible and prevent registration
+
+  # The security helper receives only fixed OICI inheritance and the current process owner.
+  # Its failure is the native token/descriptor fault defended by the exact helper entries below.
+  # Propagate it before creating any directory; do not fabricate a job-supplied descriptor.
+  - id: coverage-capture-windows-private-directory-security-failure
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/capture/privacy_windows.go
+    function: createPrivateWindowsDirectory
+    anchor: 'return err'
+    retained_property: unavailable owner-only security prevents directory creation
+
+  # This caller supplies only fixed empty inheritance and the current process owner. Its helper
+  # fault is retained before a file or any sensitive bytes exist. Real protected owner-only ACL
+  # and permissive-parent inheritance controls establish the supported creation contract.
+  - id: coverage-capture-windows-private-file-security-failure
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/capture/privacy_windows.go
+    function: createPrivateWindowsFile
+    anchor: 'return nil, err'
+    retained_property: unavailable owner-only security prevents private file creation
+
+  # GetCurrentProcessToken is the pinned SDK's current-process pseudo token with TOKEN_QUERY
+  # access; GetTokenUser uses TokenUser and the SDK sizes/retries its buffer. Jobs choose neither
+  # token handle nor information class. Native query/allocation faults remain errors, not a claim
+  # that Windows token APIs can never fail, and private creation fails closed.
+  - id: coverage-capture-windows-current-process-owner-query-failure
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/capture/privacy_windows.go
+    function: privateSecurityAttributes
+    anchor: 'return nil, fmt.Errorf("identify private object owner: %w", err)'
+    retained_property: a failed current-owner query cannot create an object with weaker privacy
+
+  # Sole callers supply fixed OICI or empty inheritance, a numeric SID returned by TokenUser,
+  # and the pinned SDDL revision/API. No job-supplied ACL, SID or descriptor reaches conversion.
+  # A native allocation/conversion fault remains visible. Actual owner-only birth/inheritance
+  # and exact SID controls independently prove both supported descriptors on the native host.
+  - id: coverage-capture-windows-fixed-owner-descriptor-failure
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/capture/privacy_windows.go
+    function: privateSecurityAttributes
+    anchor: 'return nil, fmt.Errorf("create private object descriptor: %w", err)'
+    retained_property: a failed fixed owner descriptor prevents creation before privacy could be weakened
+
+  # A successful Lstat has established a regular artifact. A subsequent shared native metadata
+  # observation fails only after namespace interference or a native filesystem/metadata fault.
+  # Keep that failure and transaction rollback. Real malformed paths, failed inspections,
+  # replacement, refreshed conflicts and immutable-source protections remain required.
+  - id: coverage-capture-windows-artifact-identity-observation
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: internal/capture/registry.go
+    function: inspectArtifact
+    anchor: 'return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}'
+    retained_property: failed native artifact identity observation stops registration before any claims change
+
+  # GOOS is a compile-time platform constant. The native Windows build selects the Windows path
+  # style before this POSIX fallback; Linux/macOS execute the fallback and explicit style tests
+  # exercise both grammars. No caller can mutate runtime.GOOS to reach this line on Windows.
+  - id: coverage-assembly-host-path-posix-fallback-windows
+    tool: coverage
+    kind: unreachable-platform-branch
+    goos: windows
+    path: internal/assembly/path.go
+    function: HostPathStyle
+    anchor: 'return PathStylePOSIX'
+    retained_property: native path-style selection stays correct while both explicit path grammars remain tested
+
+  # Go's Windows Getwd calls GetCurrentDirectory, which reads process current-directory state.
+  # Unlike Unix lookup, chmod/deleting a working directory does not force this native process-state
+  # query to fail. The app neither replaces that state nor supplies a handle/buffer; residual native
+  # query failures remain guarded. Real Unix cwd-denial controls cover lookup failures.
+  - id: coverage-main-current-directory-query-fault-windows
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/main.go
+    function: run
+    anchor: 'workingDir = "" // the command reports the missing working directory when it needs one'
+    retained_property: a native working-directory failure prevents path-resolving actions and remains a diagnostic
+
+  # This one native test replaces the process stderr variable and may allocate an owned console.
+  # Parallel execution would race every progressStream user and the process console lifecycle.
+  # Keep it sequential; all unrelated CLI tests retain the mandatory parallel-test rule.
+  - id: lint-cli-windows-progress-console-sequential
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    goos: windows
+    path: cmd/pdfconcat/progress_windows_internal_test.go
+    message: 'Function TestProgressUsesWindowsConsoleAndRejectsPipe missing the call to method parallel'
+    source: 'func TestProgressUsesWindowsConsoleAndRejectsPipe\(t \*testing\.T\) \{'
+    retained_property: real console-versus-pipe progress detection is tested without racing process-global streams
+
+  # The sole test in this exact file installs and restores real console/pipe stderr handles for
+  # progressStream, whose product boundary intentionally examines os.Stderr. An injected writer
+  # would not prove native terminal detection. Production stream access remains confined to wiring.
+  - id: lint-cli-windows-progress-real-stderr
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    goos: windows
+    path: cmd/pdfconcat/progress_windows_internal_test.go
+    message: 'use of `os\.Stderr` forbidden because "process streams are wired in cmd/pdfconcat and injected"'
+    source: 'os\.Stderr'
+    retained_property: native progress goes to an actual terminal and is refused for an actual redirected pipe

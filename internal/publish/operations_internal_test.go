@@ -531,3 +531,43 @@ func TestStageErrorsAndSizeLimitUnwrapAndDescribe(t *testing.T) {
 		t.Fatal("size limit not in message")
 	}
 }
+
+func TestSyncFileReportsMissingFile(t *testing.T) {
+	t.Parallel()
+
+	err := syncFile(filepath.Join(t.TempDir(), missingPath))
+	if err == nil {
+		t.Fatal("syncFile() accepted a missing file")
+	}
+}
+
+func TestExistingDestinationRefusesActualPipeMetadata(t *testing.T) {
+	t.Parallel()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+
+		if closeErr := writer.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+
+	info, statErr := reader.Stat()
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+
+	policyErr := checkExistingDestination("pipe destination", info, replaceExisting)
+
+	var destination *DestinationError
+	if !errors.As(policyErr, &destination) || destination.Reason != "is not a regular file" {
+		t.Fatalf("actual pipe metadata accepted: %v", policyErr)
+	}
+}

@@ -906,6 +906,16 @@ linters:
         path: ^internal/repopolicy/toolenv_action_test\.go$
         source: exec\.CommandContext\(t\.Context\(\), workflowBash, "-e", "-o", "pipefail", "-c", script\)
         text: 'G204: Subprocess launched with variable'
+      - linters:
+          - paralleltest
+        path: ^cmd/pdfconcat/progress_windows_internal_test\.go$
+        source: func TestProgressUsesWindowsConsoleAndRejectsPipe\(t \*testing\.T\) \{
+        text: Function TestProgressUsesWindowsConsoleAndRejectsPipe missing the call to method parallel
+      - linters:
+          - forbidigo
+        path: ^cmd/pdfconcat/progress_windows_internal_test\.go$
+        source: os\.Stderr
+        text: use of `os\.Stderr` forbidden because "process streams are wired in cmd/pdfconcat and injected"
 
 formatters:
   enable:

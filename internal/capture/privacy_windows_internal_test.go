@@ -6,6 +6,7 @@
 package capture
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,4 +106,44 @@ func broadPrivacyParent(t *testing.T) string {
 	}
 
 	return parent
+}
+
+func TestWindowsPrivateCreatorsRejectNULWithoutChangingNamespace(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	sentinel := filepath.Join(parent, "sentinel")
+	writeTestFile(t, sentinel, []byte("unchanged"))
+
+	invalid := parent + string(filepath.Separator) + "invalid\x00directory"
+
+	workspace, workspaceErr := NewWorkspaceBeside(filepath.Join(invalid, outputPath))
+	if workspace != nil {
+		closeWorkspace(t, workspace)
+	}
+
+	failure, isScratch := errors.AsType[*ScratchError](workspaceErr)
+	if !isScratch || failure.Dir != invalid || workspace != nil {
+		t.Fatalf("unrepresentable workspace accepted or lost its path: %v", workspaceErr)
+	}
+
+	file, fileErr := CreatePrivateTemp(invalid, privateFixturePattern)
+	if file != nil {
+		if closeErr := file.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	}
+
+	if fileErr == nil || file != nil {
+		t.Fatal("unrepresentable private file accepted")
+	}
+
+	if string(readTestFile(t, sentinel)) != "unchanged" {
+		t.Fatal("rejected private creation changed existing bytes")
+	}
+
+	entries, readErr := os.ReadDir(parent)
+	if readErr != nil || len(entries) != 1 {
+		t.Fatalf("rejected private creation changed namespace: %v %v", entries, readErr)
+	}
 }

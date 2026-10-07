@@ -39,15 +39,6 @@ func TestDirectorySyncUnsupportedOnlyForUnsupportedErrors(t *testing.T) {
 	}
 }
 
-func TestSyncFileReportsMissingFile(t *testing.T) {
-	t.Parallel()
-
-	err := syncFile(filepath.Join(t.TempDir(), missingPath))
-	if err == nil {
-		t.Fatal("syncFile() accepted a missing file")
-	}
-}
-
 func TestFileRefusesNamedPipeDestination(t *testing.T) {
 	t.Parallel()
 

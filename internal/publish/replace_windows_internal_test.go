@@ -212,3 +212,57 @@ func refusedRenameArguments(t *testing.T, scenario, staged, destination string) 
 
 	return sourceArg, targetArg
 }
+
+func TestReportPinRejectsNULInsteadOfOpeningValidPrefix(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), reportPath)
+	put(t, path, reportContent)
+
+	lease, err := openReportLease(path + "\x00suffix")
+	if lease != nil {
+		if closeErr := lease.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+
+		t.Fatal("invalid native pin path opened its prefix")
+	}
+
+	if err == nil || !strings.Contains(err.Error(), "encode report pin path") {
+		t.Fatalf("native pin encoding failure lost: %v", err)
+	}
+}
+
+func TestReportNamespaceGuardPreservesDisappearanceAfterLstat(t *testing.T) {
+	t.Parallel()
+
+	staged, stageErr := Stage(t.Context(), filepath.Join(t.TempDir(), reportPath), strings.NewReader(reportContent), 1000)
+	if stageErr != nil {
+		t.Fatal(stageErr)
+	}
+
+	t.Cleanup(func() {
+		if discardErr := staged.Discard(); discardErr != nil {
+			t.Error(discardErr)
+		}
+	})
+
+	live, statErr := staged.owner.file.Stat()
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+
+	current, lstatErr := os.Lstat(staged.Path())
+	if lstatErr != nil {
+		t.Fatal(lstatErr)
+	}
+
+	if removeErr := os.Remove(staged.Path()); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+
+	err := checkReportNamespace(live, current, staged.Path())
+	if err == nil || !strings.Contains(err.Error(), "open report identity pin") {
+		t.Fatalf("native disappearance was not propagated: %v", err)
+	}
+}

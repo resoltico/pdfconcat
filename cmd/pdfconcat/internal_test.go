@@ -51,3 +51,20 @@ func TestRunChecksASourceInProcess(t *testing.T) {
 		t.Errorf("saved report status %q (%v)", parsed.Status, err)
 	}
 }
+
+func TestUsableExecutableRejectsPathReturnedWithError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pdfconcat")
+
+	if got := usableExecutable(path, nil); got != path {
+		t.Fatalf("successful executable path: %q", got)
+	}
+
+	if got := usableExecutable("relative/pdfconcat", os.ErrNotExist); got != "" {
+		t.Fatalf("failed lookup supplied continuation authority: %q", got)
+	}
+
+	if got := usableExecutable(string([]byte{0xff})+"/pdfconcat", nil); got != "" {
+		t.Fatalf("invalid UTF-8 path supplied lossy continuation authority: %q", got)
+	}
+}

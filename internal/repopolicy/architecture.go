@@ -106,14 +106,18 @@ func deniesProject(rule map[string]any, module string) bool {
 	return false
 }
 
-// ProductionClassificationIssues requires every owned production file to have one configured owner
-// and to be selected by the compiler for at least one supported target. Tests retain native depguard's separate policy.
+// ProductionClassificationIssues requires every owned file to compile for at least one supported target
+// and each production file to have one configured owner. Tests retain native depguard's separate import policy.
 func ProductionClassificationIssues(owners map[string]string, files []string, compiled map[string]bool) []string {
 	var problems []string
 
 	production := 0
 
 	for _, file := range files {
+		if !compiled[file] {
+			problems = append(problems, "owned file is excluded from every supported target: "+file)
+		}
+
 		if strings.HasSuffix(file, "_test.go") {
 			continue
 		}
@@ -122,10 +126,6 @@ func ProductionClassificationIssues(owners map[string]string, files []string, co
 
 		if owners[path.Dir(file)] == "" {
 			problems = append(problems, "unclassified production file: "+file)
-		}
-
-		if !compiled[file] {
-			problems = append(problems, "production file is excluded from every supported target: "+file)
 		}
 	}
 

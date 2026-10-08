@@ -19,7 +19,7 @@ func TestReportProducerAndDigestRejectInvalidIdentity(t *testing.T) {
 		saved.Producer = &report.Producer{
 			Tool:     value,
 			Version:  "devel",
-			Commit:   unknownProducerCommit,
+			Commit:   unknownMetadataValue,
 			Go:       "go1.27.1",
 			Platform: "darwin/arm64",
 		}
@@ -33,7 +33,7 @@ func TestReportProducerAndDigestRejectInvalidIdentity(t *testing.T) {
 	saved.Producer = &report.Producer{
 		Tool:     strings.Repeat("ā", 256),
 		Version:  "devel",
-		Commit:   unknownProducerCommit,
+		Commit:   unknownMetadataValue,
 		Go:       "go1.27.1",
 		Platform: "darwin/arm64",
 	}

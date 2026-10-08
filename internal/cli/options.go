@@ -29,23 +29,24 @@ type (
 )
 
 const (
-	optPlan      = "--plan"
-	optPlanJSON  = "--plan-json"
-	optBaseDir   = "--base-dir"
-	optOutput    = "--output"
-	optOverwrite = "--overwrite"
-	optReport    = "--report"
-	optDetails   = "--details"
-	optJobs      = "--jobs"
-	optFormat    = "--format"
-	optPart      = "--part"
-	optPage      = "--page"
-	optView      = "--view"
-	optOffset    = "--offset"
-	optLimit     = "--limit"
-	optBlank     = "--blank"
-	optHelp      = "--help"
-	optVersion   = "--version"
+	optExpectAttempt = "--expect-attempt"
+	optPlan          = "--plan"
+	optPlanJSON      = "--plan-json"
+	optBaseDir       = "--base-dir"
+	optOutput        = "--output"
+	optOverwrite     = "--overwrite"
+	optReport        = "--report"
+	optDetails       = "--details"
+	optJobs          = "--jobs"
+	optFormat        = "--format"
+	optPart          = "--part"
+	optPage          = "--page"
+	optView          = "--view"
+	optOffset        = "--offset"
+	optLimit         = "--limit"
+	optBlank         = "--blank"
+	optHelp          = "--help"
+	optVersion       = "--version"
 
 	shortOutput = "-o"
 	shortHelp   = "-h"
@@ -66,11 +67,6 @@ const (
 // appliesTo reports whether the option is valid for the command context.
 func (s *optionSpec) appliesTo(context Name) bool {
 	return slices.Contains(s.commands, context)
-}
-
-// label is the option as help shows it: "-o, --output FILE".
-func (s *optionSpec) label() string {
-	return optionLabel(s.name, s.short, s.value)
 }
 
 // optionLabel joins an option's spellings and value placeholder.
@@ -151,6 +147,13 @@ func reportOptions() []optionSpec {
 	reporting := []Name{NameReport}
 
 	return []optionSpec{
+		{
+			name:     optExpectAttempt,
+			value:    "ID",
+			commands: reporting,
+			summary:  "Reject a report from a different attempt (correlation only).",
+			apply:    func(p *parser, _ int, value string) error { p.cmd.ExpectAttempt = value; return nil },
+		},
 		{
 			name: optPart, value: "ID", commands: reporting, apply: (*parser).setPart,
 			summary: "Show one contribution by id, such as /items/42 or argv:3.",

@@ -36,6 +36,10 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 		return mutationOptions{}, fmt.Errorf("%w: workers must be between 1 and %d", errGate, maxMutationWorkers)
 	}
 
+	if *coefficient < 1 {
+		return mutationOptions{}, fmt.Errorf("%w: timeout-coefficient must be positive", errGate)
+	}
+
 	if *duration < 0 || (*duration > 0 && *duration <= mutationCleanupReserve) {
 		return mutationOptions{}, fmt.Errorf("%w: max-duration must be zero or greater than %s", errGate, mutationCleanupReserve)
 	}

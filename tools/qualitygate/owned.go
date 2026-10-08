@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
@@ -17,14 +18,18 @@ import (
 
 type (
 	discoveredPackage struct {
-		DepsErrors     []discoveryError `json:"depserrors"`
-		Error          *discoveryError  `json:"error"`
-		ImportPath     string           `json:"importpath"`
-		GoFiles        []string         `json:"gofiles"`
-		CgoFiles       []string         `json:"cgofiles"`
-		TestGoFiles    []string         `json:"testgofiles"`
-		XTestGoFiles   []string         `json:"xtestgofiles"`
-		IgnoredGoFiles []string         `json:"ignoredgofiles"`
+		DepsErrors      []discoveryError `json:"depserrors"`
+		Error           *discoveryError  `json:"error"`
+		ImportPath      string           `json:"importpath"`
+		Dir             string           `json:"dir"`
+		GoFiles         []string         `json:"gofiles"`
+		CgoFiles        []string         `json:"cgofiles"`
+		TestGoFiles     []string         `json:"testgofiles"`
+		XTestGoFiles    []string         `json:"xtestgofiles"`
+		IgnoredGoFiles  []string         `json:"ignoredgofiles"`
+		EmbedFiles      []string         `json:"embedfiles"`
+		TestEmbedFiles  []string         `json:"testembedfiles"`
+		XTestEmbedFiles []string         `json:"xtestembedfiles"`
 	}
 
 	discoveryError struct {
@@ -109,6 +114,10 @@ func lintOwned(ctx context.Context, args []string) error {
 		return versionErr
 	}
 
+	if limitErr := sourceLimits(root); limitErr != nil {
+		return limitErr
+	}
+
 	packages, err := ownedPackages(ctx, root)
 	if err != nil {
 		return err
@@ -122,7 +131,10 @@ func lintOwned(ctx context.Context, args []string) error {
 	log.Printf("lint: %d owned compiled packages, including fixtures", len(packages))
 
 	err = (&command{
-		dir: root, name: binary, args: append([]string{runVerb, serialLintRunners}, packages...),
+		dir: root, name: binary,
+		args: append([]string{
+			runVerb, serialLintRunners, lintNoFixFlag, configFlag, filepath.Join(root, lintConfigFileName),
+		}, packages...),
 		stdout: log.Writer(), stderr: log.Writer(),
 	}).run(ctx)
 	if err != nil {
@@ -152,7 +164,10 @@ func formatOwned(ctx context.Context, args []string) error {
 		return err
 	}
 
-	output, err := (&command{dir: root, name: binary, args: append([]string{"fmt", "--diff"}, dirs...)}).output(ctx)
+	output, err := (&command{
+		dir: root, name: binary,
+		args: append([]string{"fmt", "--diff", configFlag, filepath.Join(root, lintConfigFileName)}, dirs...),
+	}).output(ctx)
 	if err != nil {
 		return fmt.Errorf("owned formatting: %w\n%s", err, output)
 	}
@@ -187,4 +202,13 @@ func hostOwnedPattern(pkg *discoveredPackage, module string) (string, error) {
 	}
 
 	return "", fmt.Errorf("%w: owned directory resolved outside module: %s", errGate, pkg.ImportPath)
+}
+
+func sourceLimits(root string) error {
+	problems, err := repopolicy.ScanSourceLimits(root)
+	if err != nil {
+		return err
+	}
+
+	return report("source-limits", problems, "every owned physical source file satisfies size and exported-type limits")
 }

@@ -4,6 +4,8 @@
 package report
 
 import (
+	"cmp"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"slices"
@@ -22,13 +24,11 @@ type (
 		sources     []sourceKey
 		report      Report
 		mutex       sync.Mutex
-		arrival     int
 	}
 
 	orderedDiagnostic struct {
 		diagnostic Diagnostic
 		order      int
-		arrival    int
 	}
 
 	// sourceKey is a Source with its optional size held by value, so identical sources intern to one entry.
@@ -58,7 +58,8 @@ func NewBuilder(command string) *Builder {
 		sourceIndex: map[sourceKey]int{},
 		fontIndex:   map[Font]int{},
 		report: Report{
-			ReportVersion: Version,
+			FormatVersion: Version,
+			AttemptID:     rand.Text(),
 			Kind:          KindReport,
 			Command:       command,
 			Publication:   Publication{ReportStatus: ReportNotRequested},
@@ -135,14 +136,13 @@ func HexDigest(sum [sha256.Size]byte) string {
 }
 
 // AddDiagnostic records a diagnostic. order is the stage's input-order key (for example a contribution
-// or distinct-source ordinal); Build sorts by order and then by arrival. Locations carry the original
-// declaration independently of this private sorting key.
+// or distinct-source ordinal); Build sorts stably by order, retaining append order for equal keys.
+// Locations carry the original declaration independently of this private sorting key.
 func (b *Builder) AddDiagnostic(order int, d Diagnostic) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	b.ordered = append(b.ordered, orderedDiagnostic{diagnostic: cloneDiagnostic(d), order: order, arrival: b.arrival})
-	b.arrival++
+	b.ordered = append(b.ordered, orderedDiagnostic{diagnostic: cloneDiagnostic(d), order: order})
 }
 
 // SetPhases records how far each phase got.
@@ -241,7 +241,7 @@ func tableOf[K, V any](keys []K, build func(K) V) []V {
 	return table
 }
 
-// Build returns the report with the given status and the diagnostics sorted by input order. The builder can
+// Build returns the report with the given status and the diagnostics sorted stably by input order. The builder can
 // keep being used afterwards; the result does not share its diagnostics slice.
 func (b *Builder) Build(status Status) *Report {
 	b.mutex.Lock()
@@ -249,11 +249,7 @@ func (b *Builder) Build(status Status) *Report {
 
 	sorted := slices.Clone(b.ordered)
 	slices.SortStableFunc(sorted, func(x, y orderedDiagnostic) int {
-		if x.order != y.order {
-			return x.order - y.order
-		}
-
-		return x.arrival - y.arrival
+		return cmp.Compare(x.order, y.order)
 	})
 
 	out := b.report
@@ -269,23 +265,35 @@ func (b *Builder) Build(status Status) *Report {
 	return &out
 }
 
-// NewErrorReport is the structured result of a command that failed before it produced a layout: the one
-// error shape for usage errors, I/O failures, and interruption. The instruction phase is incomplete and
-// the others did not run, so no count or range is claimed.
-func NewErrorReport(command string, status Status, diagnostics ...Diagnostic) *Report {
-	b := NewBuilder(command)
-	b.SetPhases(Phases{
-		Instructions: PhaseIncomplete, InputInspection: PhaseNotRun, Layout: PhaseNotRun, OutputVerification: PhaseNotRun,
-	})
-
-	for i, d := range diagnostics {
-		b.AddDiagnostic(i, d)
-	}
-
-	return b.Build(status)
-}
-
 func cloneDiagnostic(diagnostic Diagnostic) Diagnostic {
 	diagnostic.Consumers = slices.Clone(diagnostic.Consumers)
+	diagnostic.Location = cloneLocation(diagnostic.Location)
+
+	diagnostic.Recovery = clonePointer(diagnostic.Recovery)
+	if diagnostic.Recovery != nil {
+		diagnostic.Recovery.Location = cloneLocation(diagnostic.Recovery.Location)
+	}
+
 	return diagnostic
+}
+
+// clonePointer copies an optional scalar or value before another owner can mutate it.
+func clonePointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+
+	copyValue := *value
+
+	return &copyValue
+}
+
+func cloneLocation(location *Location) *Location {
+	copyLocation := clonePointer(location)
+	if copyLocation != nil {
+		copyLocation.ArgvIndex = clonePointer(location.ArgvIndex)
+		copyLocation.Offset = clonePointer(location.Offset)
+	}
+
+	return copyLocation
 }

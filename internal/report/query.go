@@ -86,7 +86,7 @@ type (
 	PartResponse struct {
 		Kind          string   `json:"kind"`
 		Part          PartView `json:"part"`
-		ReportVersion int      `json:"report_version"`
+		FormatVersion int      `json:"format_version"`
 	}
 
 	// PageResponse answers a page query: the part covering the page, and the page's 1-based position in it.
@@ -95,7 +95,7 @@ type (
 		Part          PartView `json:"part"`
 		Page          int64    `json:"page"`
 		PageInPart    int64    `json:"page_in_part"`
-		ReportVersion int      `json:"report_version"`
+		FormatVersion int      `json:"format_version"`
 	}
 
 	// ViewResponse is one page of a paged view. NextOffset is null after the last record.
@@ -109,7 +109,7 @@ type (
 		Offset          int64 `json:"offset"`
 		Total           int   `json:"total"`
 		Returned        int   `json:"returned"`
-		ReportVersion   int   `json:"report_version"`
+		FormatVersion   int   `json:"format_version"`
 	}
 )
 
@@ -268,7 +268,7 @@ func (r *Report) part(id string, details bool) (*PartResponse, error) {
 		return nil, usage(CodePartNotFound, "no part has id %q; list ids with --view parts", id)
 	}
 
-	return &PartResponse{ReportVersion: Version, Kind: kindPart, Part: r.partView(index, details)}, nil
+	return &PartResponse{FormatVersion: Version, Kind: kindPart, Part: r.partView(index, details)}, nil
 }
 
 func (r *Report) page(page int64, details bool) (*PageResponse, error) {
@@ -283,7 +283,7 @@ func (r *Report) page(page int64, details bool) (*PageResponse, error) {
 	}
 
 	return &PageResponse{
-		ReportVersion: Version, Kind: kindPage, Page: page, PageInPart: page - r.Parts[index].Range.Start + 1,
+		FormatVersion: Version, Kind: kindPage, Page: page, PageInPart: page - r.Parts[index].Range.Start + 1,
 		Part: r.partView(index, details),
 	}, nil
 }
@@ -344,7 +344,7 @@ func pageOf[T any](view string, total int, req Request, record func(int) T) (*Vi
 	}
 
 	response := &ViewResponse[T]{
-		ReportVersion: Version, Kind: kindView, View: view, Total: total, Offset: offset, Records: []T{},
+		FormatVersion: Version, Kind: kindView, View: view, Total: total, Offset: offset, Records: []T{},
 	}
 
 	if offset >= int64(total) {

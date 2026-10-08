@@ -43,6 +43,12 @@ func snapshotTree(ctx context.Context, root string) (string, error) {
 		return "", fmt.Errorf("%w: the snapshot is empty: git listed no files", errGate)
 	}
 
+	if inputErr := validateSnapshotInputs(ctx, root, target); inputErr != nil {
+		removeAll(target)
+
+		return "", inputErr
+	}
+
 	return target, nil
 }
 
@@ -92,7 +98,7 @@ func copyFile(from, dest *os.Root, name string) error {
 	}
 
 	if !info.Mode().IsRegular() {
-		return nil
+		return fmt.Errorf("%w: snapshot input is not a regular file: %s", errGate, name)
 	}
 
 	content, err := from.ReadFile(name)

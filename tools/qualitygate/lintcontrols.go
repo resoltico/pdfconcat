@@ -13,6 +13,8 @@ import (
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
+const reviveLinter = "revive"
+
 // lintBoundaryControls proves the pinned binary enforces security and file-responsibility settings.
 // The fixtures use the actual project configuration, with only the two relevant analyzers enabled
 // to keep unrelated diagnostics from concealing whether each oracle found its deliberate defect.
@@ -51,16 +53,12 @@ func lintBoundaryControls(ctx context.Context, root, binary string) ([]string, e
 
 	problems := securityControlProblems(positive, suppressed, violations)
 
-	oversized, err := lintControlIssues(ctx, scratch, binary, oversizedSource())
-	if err != nil {
-		return nil, err
+	limits, limitErr := sourceLimitControls(ctx, scratch, binary)
+	if limitErr != nil {
+		return nil, limitErr
 	}
 
-	for _, rule := range []string{"file-length-limit", "max-public-structs"} {
-		if !hasLintIssue(oversized, "revive", rule) {
-			problems = append(problems, "real lint did not reject "+rule+" negative control")
-		}
-	}
+	problems = append(problems, limits...)
 
 	extra, err := parameterAndWriterControls(ctx, scratch, binary)
 	if err != nil {
@@ -93,7 +91,7 @@ func lintSelectedIssues(ctx context.Context, scratch, binary, source, linters st
 	}
 
 	output, runErr := (&command{dir: scratch, name: binary, args: []string{
-		runVerb, serialLintRunners, configFlag, filepath.Join(scratch, scratchLintConfigName),
+		runVerb, serialLintRunners, lintNoFixFlag, configFlag, filepath.Join(scratch, scratchLintConfigName),
 		enableOnlyFlag, linters,
 		"--output.json.path=" + reportFile, allPackages,
 	}}).output(ctx)
@@ -256,7 +254,7 @@ func whitespaceControls(ctx context.Context, scratch, binary string) ([]string, 
 		problems = append(problems, "multiline condition/signature whitespace controls were not rejected")
 	}
 
-	if !hasLintIssue(extra, "wsl_v5", "leading-whitespace") || !hasLintIssue(extra, "revive", "empty-lines") {
+	if !hasLintIssue(extra, "wsl_v5", "leading-whitespace") || !hasLintIssue(extra, reviveLinter, "empty-lines") {
 		problems = append(problems, "inserted multiline blanks did not demonstrate the incompatible block checks")
 	}
 
@@ -273,4 +271,57 @@ func countLintIssues(issues []repopolicy.Issue, linter, message string) int {
 	}
 
 	return count
+}
+
+func sourceLimitControls(ctx context.Context, scratch, binary string) ([]string, error) {
+	var problems []string
+
+	oversized, err := lintControlIssues(ctx, scratch, binary, oversizedSource())
+	if err != nil {
+		return nil, err
+	}
+
+	for _, rule := range []string{"file-length-limit", "max-public-structs"} {
+		if hasLintIssue(oversized, reviveLinter, rule) {
+			problems = append(problems, "replaced native algorithm remains active: "+rule)
+		}
+	}
+
+	limits, scanErr := repopolicy.ScanSourceLimits(scratch)
+	if scanErr != nil {
+		return nil, scanErr
+	}
+
+	if len(limits) != 2 {
+		problems = append(problems, "owned-source scan did not reject both source-limit negative controls")
+	}
+
+	var unexported strings.Builder
+	unexported.WriteString("// Package lintcontrols exercises lowercase Unicode type names.\npackage lintcontrols\n")
+
+	for index := range 21 {
+		fmt.Fprintf(&unexported, "type σhape%d struct{}\n", index)
+	}
+
+	positive, positiveErr := lintControlIssues(ctx, scratch, binary, unexported.String())
+	if positiveErr != nil {
+		return nil, positiveErr
+	}
+
+	for _, rule := range []string{"file-length-limit", "max-public-structs"} {
+		if hasLintIssue(positive, reviveLinter, rule) {
+			problems = append(problems, "native source-limit false positive: "+rule)
+		}
+	}
+
+	limits, scanErr = repopolicy.ScanSourceLimits(scratch)
+	if scanErr != nil {
+		return nil, scanErr
+	}
+
+	if len(limits) != 0 {
+		problems = append(problems, "lowercase Unicode types rejected by owned-source scan")
+	}
+
+	return problems, nil
 }

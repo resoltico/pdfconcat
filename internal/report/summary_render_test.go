@@ -19,9 +19,10 @@ func TestSummaryPointsAtTheSavedReportsPartsWhenThereIsNothingToFix(t *testing.T
 	t.Parallel()
 
 	summary := mustDecode(t, completeCheck).Summary()
+	summary.BindContinuation(programName, fixtureReportPath, originalReportReference)
 
-	want := []string{programName, commandReport, "/w/r.json", "--view", report.ViewParts}
-	if !slices.Equal(summary.Next, want) {
+	want := []string{programName, commandReport, "/w/r.json", "--expect-attempt", fixtureAttemptID, "--view", report.ViewParts}
+	if !slices.Equal(nextArguments(summary.Next), want) {
 		t.Errorf("next = %v, want %v", summary.Next, want)
 	}
 }
@@ -29,13 +30,21 @@ func TestSummaryPointsAtTheSavedReportsPartsWhenThereIsNothingToFix(t *testing.T
 func TestSummaryNamesTheSavedReportOnlyWhenItWasWritten(t *testing.T) {
 	t.Parallel()
 
-	text := renderQuery(t, mustDecode(t, completeCheck), report.Request{})
-	if !strings.Contains(text, "more: [pdfconcat report /w/r.json --view parts]\n") {
-		t.Errorf("a summary of a saved report says how to read the rest:\n%s", text)
+	summary := mustDecode(t, completeCheck).Summary()
+	summary.BindContinuation(programName, fixtureReportPath, originalReportReference)
+
+	var output strings.Builder
+	if err := summary.RenderText(&output); err != nil {
+		t.Fatal(err)
+	}
+
+	text := output.String()
+	if !strings.Contains(text, "--expect-attempt AAAAAAAAAAAAAAAAAAAAAAAAAA --view parts") {
+		t.Errorf("missing bound navigation: %s", text)
 	}
 
 	unsaved := mustDecode(t, failedCheck)
-	if len(unsaved.Summary().Next) != 0 {
+	if len(nextArguments(unsaved.Summary().Next)) != 0 {
 		t.Errorf("next = %v for a report that was not requested", unsaved.Summary().Next)
 	}
 

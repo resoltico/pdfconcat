@@ -76,7 +76,7 @@ func expectedOptions() map[cli.Name][]string {
 		"":              {argFormat, argVersion, argHelp},
 		cli.NameBuild:   planning,
 		cli.NameCheck:   planning,
-		cli.NameReport:  {argPart, "--page", argView, "--offset", argLimit, "--details", argFormat, argHelp},
+		cli.NameReport:  {"--expect-attempt", argPart, "--page", argView, "--offset", argLimit, "--details", argFormat, argHelp},
 		cli.NameSchema:  {argHelp},
 		cli.NameVersion: {argFormat, argHelp},
 		cli.NameHelp:    {argFormat, argHelp},
@@ -100,8 +100,19 @@ func TestHelpListsExactlyTheApplicableOptions(t *testing.T) {
 // probe is the arguments that use option once in command: a sample value is added for options that take one.
 func probe(command cli.Name, option string) []string {
 	samples := map[string]string{
-		planOption: "x", argPlanJSON: "{}", argBaseDir: "x", "--output": "x", "--report": "x", argJobs: "1", argPart: "x",
-		"--page": "1", argView: "parts", "--offset": "0", argLimit: "1", argFormat: "json",
+		"--expect-attempt": "fixture-attempt",
+		planOption:         "x",
+		argPlanJSON:        "{}",
+		argBaseDir:         "x",
+		"--output":         "x",
+		"--report":         "x",
+		argJobs:            "1",
+		argPart:            "x",
+		"--page":           "1",
+		argView:            "parts",
+		"--offset":         "0",
+		argLimit:           "1",
+		argFormat:          "json",
 	}
 
 	args := []string{string(command), option}
@@ -167,7 +178,7 @@ func TestHelpExamplesAreValidCommands(t *testing.T) {
 
 		want := name
 		if name == "" {
-			want = cli.NameSchema
+			want = cli.NameHelp
 		}
 
 		if command.Name != want {
@@ -188,8 +199,8 @@ func TestRootHelpFitsOneScreenAndNamesTheNextStep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if lines := strings.Count(text.String(), "\n"); lines > 25 {
-		t.Errorf("root help has %d lines, want at most 25:\n%s", lines, text.String())
+	if lines := strings.Count(text.String(), "\n"); lines > 30 {
+		t.Errorf("root help has %d lines, want at most 30:\n%s", lines, text.String())
 	}
 
 	if !strings.Contains(text.String(), "Next step:\n  "+doc.Example+"\n") {

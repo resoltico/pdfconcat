@@ -23,15 +23,18 @@ type command struct {
 	name   string
 	env    []string
 	args   []string
+	// fuzzLifecycle owns the Go fuzz runner and its inheriting descendants through cancellation.
+	fuzzLifecycle bool
 }
 
 // run executes the command and returns its error; output goes to the configured writers.
 func (c *command) run(ctx context.Context) error {
+	if c.fuzzLifecycle {
+		return c.runFuzzProcess(ctx)
+	}
+
 	process := exec.CommandContext(ctx, c.name, c.args...)
-	process.Dir = c.dir
-	process.Env = append(os.Environ(), c.env...)
-	process.Stdout = c.stdout
-	process.Stderr = c.stderr
+	c.configure(process)
 
 	err := process.Run()
 	if err != nil {
@@ -39,6 +42,13 @@ func (c *command) run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (c *command) configure(process *exec.Cmd) {
+	process.Dir = c.dir
+	process.Env = append(os.Environ(), c.env...)
+	process.Stdout = c.stdout
+	process.Stderr = c.stderr
 }
 
 // output runs the command and returns its standard output; a failure carries the standard error text.

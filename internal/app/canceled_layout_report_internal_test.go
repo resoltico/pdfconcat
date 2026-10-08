@@ -90,12 +90,15 @@ func assertCanceledResolvedLayout(t *testing.T, command cli.Name) {
 func assertSerializedCanceledLayout(t *testing.T, current *pipeline) {
 	t.Helper()
 
+	ctx, cancel := context.WithTimeout(t.Context(), OperationTestTimeout)
+	defer cancel()
+
 	var saved bytes.Buffer
 	if _, writeErr := report.Write(&saved, current.snapshot(current.status), report.MaxReportBytes); writeErr != nil {
 		t.Fatal(writeErr)
 	}
 
-	decoded, err := report.Decode(t.Context(), "canceled.json", &saved)
+	decoded, err := report.Decode(ctx, "canceled.json", &saved)
 	if err != nil {
 		t.Fatal(err)
 	}

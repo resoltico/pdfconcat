@@ -5,7 +5,6 @@ package report
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"io"
 	"maps"
@@ -38,7 +37,7 @@ func nodeSamples() []*Report {
 	argvLocation := &Location{File: "argv", ArgvIndex: &argv}
 
 	full := &Report{
-		ReportVersion: Version, Kind: KindReport, Status: StatusFailed, Command: "build",
+		FormatVersion: Version, AttemptID: "AAAAAAAAAAAAAAAAAAAAAAAAAA", Kind: KindReport, Status: StatusFailed, Command: "build",
 		Phases: Phases{PhaseComplete, PhaseComplete, PhaseComplete, PhaseComplete},
 		Counts: Counts{SourcePages: &count, GeneratedPages: &count, TotalPages: new(int64(2))},
 		Publication: Publication{
@@ -82,8 +81,8 @@ func nodeSamples() []*Report {
 
 	return []*Report{
 		full,
-		NewErrorReport("report", StatusInvalid, Diagnostic{Stage: "usage", Code: "x", Message: "m"}),
-		NewBuilder("check").Build(StatusInvalid),
+		failedReportFixture("report", StatusInvalid, Diagnostic{Stage: "usage", Code: "x", Message: "m"}),
+		NewBuilder(commandCheck).Build(StatusInvalid),
 	}
 }
 
@@ -108,14 +107,14 @@ func TestNodeCountMatchesTheDecoder(t *testing.T) {
 		limits := DefaultLimits()
 		limits.MaxNodes = nodes
 
-		_, err = DecodeLimited(context.Background(), "s", bytes.NewReader(out.Bytes()), limits)
+		_, err = DecodeLimited(DecoderTestContext(t.Context(), t), "s", ReaderRequiringStorage(bytes.NewReader(out.Bytes())), limits)
 		if err != nil {
 			t.Errorf("sample %d: %d nodes should be accepted: %v", index, nodes, err)
 		}
 
 		limits.MaxNodes = nodes - 1
 
-		_, err = DecodeLimited(context.Background(), "s", bytes.NewReader(out.Bytes()), limits)
+		_, err = DecodeLimited(DecoderTestContext(t.Context(), t), "s", ReaderRequiringStorage(bytes.NewReader(out.Bytes())), limits)
 
 		if found, ok := AsError(err); !ok || found.Diagnostic.Code != CodeLimitNodes {
 			t.Errorf("sample %d: %d nodes should be refused: %v", index, nodes-1, err)
@@ -174,7 +173,7 @@ func TestResponseReportsAnEncoderThatCannotTakeIt(t *testing.T) {
 // singleFeatureSamples adds one optional feature to it, so every counting condition of the writer is
 // evaluated exactly once per sample and a miscount cannot be cancelled by an opposite one.
 func singleFeatureReport(edit func(r *Report)) *Report {
-	built := NewBuilder("check")
+	built := NewBuilder(commandCheck)
 	built.AddDiagnostic(0, Diagnostic{Stage: "a", Code: "b", Message: "m"})
 
 	r := built.Build(StatusFailed)
@@ -196,6 +195,18 @@ func diagnosticFeatureSamples() map[string]*Report {
 			r.Parts = []Part{{ID: featureID, Kind: PartBlank, Origin: Position{File: featureFile}, Pages: new(int64(1))}}
 			r.Diagnostics[0].Consumers = []string{featureID}
 		}),
+		"diagnostic cause": withDiagnostic(func(d *Diagnostic) { d.Cause = "original IO fault" }),
+		"diagnostic recovery": withDiagnostic(func(d *Diagnostic) {
+			d.Recovery = &Recovery{
+				Action:       "edit_input",
+				Command:      commandCheck,
+				LocationFrom: "original_argv",
+				Replacement:  "--blank",
+				ReportFrom:   "unused_report_target",
+				RecoveryFrom: "publication.recovery_report",
+				Location:     &Location{File: featureArgv, ArgvIndex: &argv},
+			}
+		}),
 		"diagnostic path": withDiagnostic(func(d *Diagnostic) { d.Path = featureFile }),
 		"pointer location": withDiagnostic(func(d *Diagnostic) {
 			d.Location = &Location{File: internalFile, Offset: &offset, Line: 1, Column: 6, Pointer: featurePointer}
@@ -211,7 +222,26 @@ func publicationFeatureSamples() map[string]*Report {
 	}
 
 	return map[string]*Report{
-		"output":      publish(Publication{ReportStatus: ReportNotRequested, Output: featureFile}),
+		"producer": singleFeatureReport(func(r *Report) {
+			r.Producer = &Producer{
+				Tool:     "pdfconcat",
+				Version:  "devel",
+				Commit:   unknownMetadataValue,
+				Go:       "go1.27.1",
+				Platform: "darwin/arm64",
+			}
+		}),
+		"report target observation": publish(
+			Publication{ReportStatus: ReportNotRequested, ReportTargetObservation: "absent_when_observed"},
+		),
+		"report write": publish(Publication{ReportStatus: ReportWritten, ReportPath: featureFile, ReportWrite: "written"}),
+		"output":       publish(Publication{ReportStatus: ReportNotRequested, Output: featureFile}),
+		"unresolved report argument": publish(Publication{
+			ReportStatus:            ReportFailed,
+			ReportFrom:              jobReportReference,
+			ReportWrite:             attemptNotWritten,
+			ReportTargetObservation: unknownMetadataValue,
+		}),
 		"report path": publish(Publication{ReportStatus: ReportWritten, ReportPath: featureFile}),
 		"recovery report": publish(Publication{
 			Output:         featureFile,
@@ -260,7 +290,13 @@ func tableFeatureSamples() map[string]*Report {
 
 	return map[string]*Report{
 		"producer identity": singleFeatureReport(func(r *Report) {
-			r.Producer = &Producer{Tool: "pdfconcat", Version: "devel", Commit: "unknown", Go: "go1.27.1", Platform: "darwin/arm64"}
+			r.Producer = &Producer{
+				Tool:     "pdfconcat",
+				Version:  "devel",
+				Commit:   unknownMetadataValue,
+				Go:       "go1.27.1",
+				Platform: "darwin/arm64",
+			}
 		}),
 		"output digest": singleFeatureReport(func(r *Report) { r.Publication.OutputDigest = internalDigest }),
 		"source digest": singleFeatureReport(func(r *Report) {
@@ -274,6 +310,12 @@ func tableFeatureSamples() map[string]*Report {
 			r.Fonts = []Font{font}
 			copyText := *text
 			copyText.Findings = []TextFinding{{Kind: "outside-page-horizontal", Line: -1, Detail: "off page"}}
+			r.Styles = []Style{{Background: BackgroundNone, Size: size, Text: &copyText}}
+		}),
+		"style with ink bounds": singleFeatureReport(func(r *Report) {
+			r.Fonts = []Font{font}
+			copyText := *text
+			copyText.InkBounds = &Rect{X: 1, Y: 1, Width: 2, Height: 3}
 			r.Styles = []Style{{Background: BackgroundNone, Size: size, Text: &copyText}}
 		}),
 		"style with text": singleFeatureReport(func(r *Report) {
@@ -316,16 +358,29 @@ func TestNodeCountOfEachFeatureMatchesTheDecoder(t *testing.T) {
 		limits := DefaultLimits()
 		limits.MaxNodes = nodes
 
-		_, err = DecodeLimited(context.Background(), name, bytes.NewReader(out.Bytes()), limits)
+		_, err = DecodeLimited(DecoderTestContext(t.Context(), t), name, ReaderRequiringStorage(bytes.NewReader(out.Bytes())), limits)
 		if err != nil {
 			t.Errorf("%s: %d nodes should be accepted: %v", name, nodes, err)
 		}
 
 		limits.MaxNodes = nodes - 1
 
-		_, err = DecodeLimited(context.Background(), name, bytes.NewReader(out.Bytes()), limits)
+		_, err = DecodeLimited(DecoderTestContext(t.Context(), t), name, ReaderRequiringStorage(bytes.NewReader(out.Bytes())), limits)
 		if found, ok := AsError(err); !ok || found.Diagnostic.Code != CodeLimitNodes {
 			t.Errorf("%s: %d nodes should be refused: %v", name, nodes-1, err)
 		}
 	}
+}
+
+func failedReportFixture(command string, status Status, diagnostics ...Diagnostic) *Report {
+	builder := NewBuilder(command)
+	builder.SetPhases(Phases{
+		Instructions: PhaseIncomplete, InputInspection: PhaseNotRun, Layout: PhaseNotRun, OutputVerification: PhaseNotRun,
+	})
+
+	for index, diagnostic := range diagnostics {
+		builder.AddDiagnostic(index, diagnostic)
+	}
+
+	return builder.Build(status)
 }

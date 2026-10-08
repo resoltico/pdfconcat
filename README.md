@@ -65,7 +65,7 @@ A passing `check` is advisory: files can change before the `build`, and `build` 
 
 Other ways to give the same job: a plan on standard input, `pdfconcat build --plan - --base-dir /project -o out.pdf < generated.json`; the whole plan inline, `pdfconcat build --plan-json '{"version":1,"items":["a.pdf",{"blank":{}},"b.pdf"]}' -o out.pdf`; or the direct operands shown above. All four are compiled to the same job. A file literally named `--blank` is written `./--blank`. Arguments, filenames, and the working directory must use valid Unicode text; raw byte filenames outside UTF-8 are rejected.
 
-The first command to run is `pdfconcat --help`: it prints one screen and ends with the next command to try. `pdfconcat schema plan` and `pdfconcat schema report` print the JSON Schemas.
+The first command to run is `pdfconcat --help`: it prints one screen and ends with the next command to try. `pdfconcat schema plan`, `pdfconcat schema report`, and `pdfconcat schema response` print the JSON Schemas. Plans remain version 1; JSON responses and saved reports use format 2.
 
 ## Exit status
 

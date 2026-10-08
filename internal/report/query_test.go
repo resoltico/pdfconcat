@@ -231,6 +231,8 @@ func TestFailureSummaryDoesNotGrowWithDiagnostics(t *testing.T) {
 	failed, _ := syntheticFailure()
 
 	failure := queryAs[report.Summary](t, failed, report.Request{})
+	failure.BindContinuation(programName, failed.Publication.ReportPath, originalReportReference)
+
 	if failure.DiagnosticCount != syntheticDiags || len(failure.Diagnostics) > report.PreviewDiagnostics ||
 		failure.DiagnosticsOmitted != syntheticDiags-len(failure.Diagnostics) {
 		t.Errorf("failure summary shows %d of %d", len(failure.Diagnostics), failure.DiagnosticCount)
@@ -244,8 +246,16 @@ func TestFailureSummaryDoesNotGrowWithDiagnostics(t *testing.T) {
 		t.Errorf("a failure summary is %d bytes; it must not grow with the diagnostic count", size)
 	}
 
-	want := []string{"pdfconcat", commandReport, "/work/job.report.json", "--view", report.ViewDiagnostics}
-	if !slices.Equal(failure.Next, want) {
+	want := []string{
+		"pdfconcat",
+		commandReport,
+		"/work/job.report.json",
+		"--expect-attempt",
+		failed.AttemptID,
+		"--view",
+		report.ViewDiagnostics,
+	}
+	if !slices.Equal(nextArguments(failure.Next), want) {
 		t.Errorf("next = %v", failure.Next)
 	}
 }

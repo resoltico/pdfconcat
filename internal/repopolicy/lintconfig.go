@@ -63,9 +63,17 @@ type (
 )
 
 const (
-	allChecks        = "all"
-	maxSourceLines   = 1000
-	maxPublicStructs = 20
+	allChecks                  = "all"
+	maxSourceLines             = 1000
+	maxExportedTypes           = 20
+	maxFunctionLines           = 60
+	maxFunctionStatements      = 40
+	maxCyclomaticComplexity    = 12
+	maxPackageComplexity       = 6
+	maxCognitiveComplexity     = 15
+	minimumMaintainability     = 25
+	nestedIfReportingThreshold = 4
+	maxInterfaceMethods        = 5
 
 	// pairWidth is the number of nodes a YAML mapping spends on one key and its value.
 	pairWidth = 2
@@ -95,6 +103,15 @@ var (
 // line cannot silently weaken the linters. Each is a setting, not an exception.
 func requiredSettings() map[string]any {
 	return map[string]any{
+		"linters.settings.funlen.lines":                                maxFunctionLines,
+		"linters.settings.funlen.statements":                           maxFunctionStatements,
+		"linters.settings.cyclop.max-complexity":                       maxCyclomaticComplexity,
+		"linters.settings.cyclop.package-average":                      maxPackageComplexity,
+		"linters.settings.gocognit.min-complexity":                     maxCognitiveComplexity,
+		"linters.settings.gocyclo.min-complexity":                      maxCyclomaticComplexity,
+		"linters.settings.maintidx.under":                              minimumMaintainability,
+		"linters.settings.nestif.min-complexity":                       nestedIfReportingThreshold,
+		"linters.settings.interfacebloat.max":                          maxInterfaceMethods,
 		"run.issues-exit-code":                                         1,
 		"issues.new":                                                   false,
 		"issues.new-from-rev":                                          "",
@@ -187,7 +204,10 @@ func LintConfigIssues(entries []*Entry, config []byte) ([]string, error) {
 		}
 	}
 
-	return append(problems, requiredSettingProblems(document)...), nil
+	problems = append(problems, requiredSettingProblems(document)...)
+	problems = append(problems, requiredFormatterProblems(document)...)
+
+	return append(problems, lintActionProblems(document)...), nil
 }
 
 // expectedKeys renders the canonical form of each configuration item a registry entry stands for.
@@ -246,9 +266,9 @@ func AnchoredPath(file string) string {
 }
 
 func ruleKey(pathPattern, linter, text, source string) string {
-	key := fmt.Sprintf("linters.exclusions.rules: path=%s linter=%s text=%s", pathPattern, linter, text)
+	key := fmt.Sprintf("linters.exclusions.rules: path=%s linter=%s text=%q", pathPattern, linter, text)
 	if source != "" {
-		key += " source=" + source
+		key += fmt.Sprintf(" source=%q", source)
 	}
 
 	return key
@@ -275,7 +295,7 @@ func effectiveExceptions(document map[string]any) (map[string]bool, []string) {
 	}
 
 	for _, section := range []string{"linters.settings", "formatters.settings"} {
-		collectSectionSuppressions(section, asMap(lookup(document, section)), found)
+		problems = append(problems, collectSectionSuppressions(section, asMap(lookup(document, section)), found)...)
 	}
 
 	return found, problems
@@ -283,12 +303,16 @@ func effectiveExceptions(document map[string]any) (map[string]bool, []string) {
 
 // collectSectionSuppressions records the suppressions of every linter or formatter in a settings section.
 // depguard's allow and deny lists are its policy, checked by the depguard linter itself, not exceptions.
-func collectSectionSuppressions(section string, settings map[string]any, found map[string]bool) {
+func collectSectionSuppressions(section string, settings map[string]any, found map[string]bool) []string {
+	var problems []string
+
 	for _, name := range slices.Sorted(maps.Keys(settings)) {
 		if name != "depguard" {
-			collectSuppressions(section+"."+name, settings[name], found)
+			problems = append(problems, collectSuppressions(section+"."+name, settings[name], found)...)
 		}
 	}
+
+	return problems
 }
 
 // collectLists records the items of the disable list and of the exclusion path and preset lists.
@@ -331,10 +355,12 @@ func ruleFromConfig(raw any) (string, string) {
 }
 
 // collectSuppressions walks one linter's settings and records every active suppression item.
-func collectSuppressions(prefix string, node any, found map[string]bool) {
+func collectSuppressions(prefix string, node any, found map[string]bool) []string {
+	var problems []string
+
 	table, isMap := node.(map[string]any)
 	if !isMap {
-		return
+		return nil
 	}
 
 	for _, key := range slices.Sorted(maps.Keys(table)) {
@@ -345,20 +371,21 @@ func collectSuppressions(prefix string, node any, found map[string]bool) {
 			collectDisabledRules(location, table[key], found)
 		case key == "checks" && strings.HasSuffix(prefix, ".staticcheck"):
 			collectDisabledChecks(location, table[key], found)
-		case disabledLayoutSetting(prefix, key):
+		case falseSuppressionSetting(prefix, key):
 			collectDisabledSetting(location, table[key], found)
-		case suppressionSetting(key):
+		case suppressionSetting(key) || explicitSuppressionSetting(location):
 			if requiredAnalysisSetting(location, key) {
 				continue
 			}
 
-			for _, item := range activeItems(table[key]) {
-				found[location+": "+item] = true
-			}
+			problems = append(problems, collectSuppressionItems(location, table[key], found)...)
+
 		default:
-			collectSuppressions(location, table[key], found)
+			problems = append(problems, collectSuppressions(location, table[key], found)...)
 		}
 	}
+
+	return problems
 }
 
 // collectDisabledChecks records staticcheck check patterns that start with "-".
@@ -703,12 +730,12 @@ func looksLikeExclusionRules(sequence *yaml.Node) bool {
 	return len(sequence.Content) == 0
 }
 
-// requiredReviveRuleProblems protects the declared file-responsibility and public-surface limits.
-// These thresholds remain settings; disabling either rule is a central-registry exception.
+// requiredReviveRuleProblems protects the retained configuration thresholds of the two native
+// algorithms replaced by mandatory owned-source limits. The disable copies remain registry entries.
 func requiredReviveRuleProblems(document map[string]any) []string {
 	required := map[string][]any{
 		"file-length-limit":  {map[string]any{"max": maxSourceLines, "skipComments": true, "skipBlankLines": true}},
-		"max-public-structs": {maxPublicStructs},
+		"max-public-structs": {maxExportedTypes},
 	}
 	rules := map[string]map[string]any{}
 
@@ -721,8 +748,11 @@ func requiredReviveRuleProblems(document map[string]any) []string {
 
 	for name, arguments := range required {
 		rule := rules[name]
-		if rule == nil || asBool(rule["disabled"]) || !reflect.DeepEqual(rule["arguments"], arguments) {
-			problems = append(problems, fmt.Sprintf("strict revive rule %s must remain enabled with arguments %v", name, arguments))
+		if rule == nil || !asBool(rule["disabled"]) || !reflect.DeepEqual(rule["arguments"], arguments) {
+			problems = append(
+				problems,
+				fmt.Sprintf("strict revive rule %s must remain replaced by the owned-source scan with arguments %v", name, arguments),
+			)
 		}
 	}
 
@@ -742,7 +772,8 @@ func requiredAnalysisSetting(location, key string) bool {
 }
 
 func suppressionSetting(key string) bool {
-	return suppressionKey.MatchString(key) || selectiveSetting(key) || key == "parameters-are-used"
+	return suppressionKey.MatchString(key) || selectiveSetting(key) || key == "parameters-are-used" ||
+		slices.Contains([]string{"allowed-errors", "allowed-errors-wildcard"}, key)
 }
 
 func collectDisabledSetting(location string, value any, found map[string]bool) {
@@ -751,8 +782,18 @@ func collectDisabledSetting(location string, value any, found map[string]bool) {
 	}
 }
 
-func disabledLayoutSetting(prefix, key string) bool {
-	return prefix == "linters.settings.whitespace" && slices.Contains([]string{"multi-if", "multi-func"}, key)
+// falseSuppressionSetting covers reviewed switches whose false value disables an enabled check.
+// Errorlint's four checks default to true in the pinned upstream; optional default-false checks
+// are not inferred to be exceptions merely because their setting has an analysis-oriented name.
+func falseSuppressionSetting(prefix, key string) bool {
+	switch prefix {
+	case "linters.settings.whitespace":
+		return slices.Contains([]string{"multi-if", "multi-func"}, key)
+	case "linters.settings.errorlint":
+		return slices.Contains([]string{"errorf", "errorf-multi", "asserts", "comparison"}, key)
+	default:
+		return false
+	}
 }
 
 func decodeLintConfig(config []byte) (map[string]any, error) {
@@ -773,4 +814,84 @@ func decodeLintConfig(config []byte) (map[string]any, error) {
 	}
 
 	return document, nil
+}
+
+// invalidSuppressionShape rejects values that the registry's scalar setting items cannot express.
+func invalidSuppressionShape(value any) bool {
+	switch typed := value.(type) {
+	case nil, string, bool, int, float64:
+		return false
+	case []any:
+		for _, item := range typed {
+			switch item.(type) {
+			case string, bool, int, float64:
+			default:
+				return true
+			}
+		}
+
+		return false
+	default:
+		return true
+	}
+}
+
+func collectSuppressionItems(location string, value any, found map[string]bool) []string {
+	if invalidSuppressionShape(value) {
+		return []string{location + ": active structured suppression cannot be represented by registry scalar values"}
+	}
+
+	for _, item := range activeItems(value) {
+		found[location+": "+item] = true
+	}
+
+	return nil
+}
+
+// requiredFormatterProblems protects the complete formatter contract independently of YAML order.
+// The pinned native formatter schedules its own fixed order, so reordering this list is harmless.
+func requiredFormatterProblems(document map[string]any) []string {
+	want := []string{"gci", "gofmt", "gofumpt", "goimports", "golines"}
+	got := stringList(lookup(document, "formatters.enable"))
+	slices.Sort(got)
+
+	if !slices.Equal(got, want) {
+		return []string{fmt.Sprintf("formatters.enable must contain exactly %v once each; got %v", want, got)}
+	}
+
+	return nil
+}
+
+// lintActionProblems rejects actions that change source instead of judging the configured inputs.
+func lintActionProblems(document map[string]any) []string {
+	var problems []string
+
+	if value := lookup(document, "issues.fix"); value != nil {
+		fix, valid := value.(bool)
+		if !valid || fix {
+			problems = append(problems, "issues.fix must be absent or false; lint gates must not repair their inputs")
+		}
+	}
+
+	if value := lookup(document, "formatters.settings.gofmt.rewrite-rules"); value != nil {
+		rules, valid := value.([]any)
+		if !valid || len(rules) != 0 {
+			problems = append(problems,
+				"formatters.settings.gofmt.rewrite-rules must be absent or empty; semantic rewrites are unsupported")
+		}
+	}
+
+	return problems
+}
+
+// explicitSuppressionSetting names the reviewed native exemptions without an ignore/disable spelling.
+// Import policies and positive restriction lists are deliberately not inferred from their names.
+func explicitSuppressionSetting(location string) bool {
+	return slices.Contains([]string{
+		"linters.settings.gosmopolitan.escape-hatches",
+		"linters.settings.gosmopolitan.allow-time-local",
+		"linters.settings.staticcheck.dot-import-whitelist",
+		"linters.settings.staticcheck.http-status-code-whitelist",
+		"linters.settings.unqueryvet.allowed-patterns",
+	}, location)
 }

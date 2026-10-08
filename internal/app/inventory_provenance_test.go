@@ -4,6 +4,7 @@
 package app_test
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -83,7 +84,10 @@ func nativeInventoryApp() *app.App {
 func decodedInventoryReport(t *testing.T, dir string) *report.Report {
 	t.Helper()
 
-	saved, decodeErr := report.Decode(t.Context(), reportFile, strings.NewReader(readFile(t, filepath.Join(dir, reportFile))))
+	ctx, cancel := context.WithTimeout(t.Context(), app.OperationTestTimeout)
+	defer cancel()
+
+	saved, decodeErr := report.Decode(ctx, reportFile, strings.NewReader(readFile(t, filepath.Join(dir, reportFile))))
 	if decodeErr != nil {
 		t.Fatal(decodeErr)
 	}

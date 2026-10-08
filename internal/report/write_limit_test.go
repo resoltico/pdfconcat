@@ -5,7 +5,6 @@ package report_test
 
 import (
 	"bytes"
-	"context"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/report"
@@ -13,7 +12,7 @@ import (
 
 const (
 	// fixedValues is the JSON values of a failed report with one diagnostic and no other record.
-	fixedValues = 26
+	fixedValues = 27
 
 	// valuesPerSource is the JSON values of a source without a digest: its object, path, and bytes.
 	valuesPerSource = 3
@@ -24,7 +23,9 @@ const (
 
 // reportOfNodeLimit is a failed report with one diagnostic and as many sources as make exactly report.MaxNodes values.
 func reportOfNodeLimit() *report.Report {
-	r := report.NewErrorReport(commandReport, report.StatusInvalid, report.Diagnostic{Stage: "s", Code: "c", Message: "m"})
+	r := failedReportFixture(report.Diagnostic{Stage: "s", Code: "c", Message: "m"})
+	r.Publication.Output = "/o"
+	r.Diagnostics[0].Path = "/p" // one value fills the remainder after whole source records
 	r.Sources = make([]report.Source, sourcesToFill)
 
 	for index := range r.Sources {
@@ -36,13 +37,13 @@ func reportOfNodeLimit() *report.Report {
 
 // TestWriteAcceptsExactlyTheNodesTheDecoderReads builds a report of exactly report.MaxNodes JSON values and
 // checks that it is written and read back, and that one value more is refused. The count is worked out by
-// hand: a failed report with one diagnostic holds 26 values (the object, 4 scalars, 3 objects with their 4, 3
+// hand: a failed report with one diagnostic holds 27 values (the object, 5 scalars, 3 objects with their 4, 3
 // and 2 members, 5 arrays, and the diagnostic's object with its stage, code and message), and a source without
 // a digest is 3 values (object, path, bytes).
 func TestWriteAcceptsExactlyTheNodesTheDecoderReads(t *testing.T) {
 	t.Parallel()
 
-	if fixedValues+valuesPerSource*sourcesToFill != report.MaxNodes {
+	if fixedValues+2+valuesPerSource*sourcesToFill != report.MaxNodes {
 		t.Fatalf("%d sources do not make exactly %d values", sourcesToFill, report.MaxNodes)
 	}
 
@@ -53,7 +54,11 @@ func TestWriteAcceptsExactlyTheNodesTheDecoderReads(t *testing.T) {
 		t.Fatalf("a report of exactly %d values: %v", report.MaxNodes, err)
 	}
 
-	_, err = report.Decode(context.Background(), savedReport, bytes.NewReader(out.Bytes()))
+	_, err = report.Decode(
+		report.DecoderTestContext(t.Context(), t),
+		savedReport,
+		report.ReaderRequiringStorage(bytes.NewReader(out.Bytes())),
+	)
 	if err != nil {
 		t.Errorf("the decoder refuses what the writer wrote: %v", err)
 	}

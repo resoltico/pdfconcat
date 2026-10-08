@@ -290,7 +290,7 @@ func installSource(ctx context.Context, tool sourceTool, version, binDir string)
 
 	command := exec.CommandContext(ctx, "go", "install", tool.pkg+"@"+version)
 
-	command.Env = append(os.Environ(), "GOBIN="+binDir, "GOFLAGS=-mod=mod")
+	command.Env = append(os.Environ(), sourceInstallEnv(binDir)...)
 	command.Stdout = log.Writer()
 	command.Stderr = log.Writer()
 

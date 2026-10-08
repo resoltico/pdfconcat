@@ -26,7 +26,7 @@ func TestWindowsConsoleInterruptBlockedStdinPreservesOutput(t *testing.T) {
 	writePDFsAt(t, filepath.Join(dir, fileOut), "original")
 	original, err := os.ReadFile(filepath.Clean(filepath.Join(dir, fileOut)))
 	ensure(t, err)
-	command := start(t, dir, commandBuild, flagPlan, "-", "-o", fileOut, flagOverwrite)
+	command := start(t, dir, commandBuild, flagPlan, "-", "-o", fileOut, flagOverwrite, flagReport, shortReportPath)
 	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_CONSOLE, HideWindow: true}
 
 	var stdout, stderr bytes.Buffer
@@ -76,6 +76,8 @@ func TestWindowsConsoleInterruptBlockedStdinPreservesOutput(t *testing.T) {
 	if data, readErr := os.ReadFile(filepath.Clean(filepath.Join(dir, fileOut))); readErr != nil || !bytes.Equal(data, original) {
 		t.Fatalf("interrupted output changed: %v", readErr)
 	}
+
+	requireSavedAttempt(t, dir, shortReportPath, contractObject(t, res.stdout), statusInterrupted)
 
 	if parsed := summaryOf(t, res); parsed.Publication.Published {
 		t.Fatal("interrupted input was published")

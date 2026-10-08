@@ -63,11 +63,6 @@ func runMutation(ctx context.Context, args []string) error {
 		return err
 	}
 
-	registry, err := repopolicy.LoadRegistry(filepath.Join(root, registryName))
-	if err != nil {
-		return fmt.Errorf(loadRegistryError, err)
-	}
-
 	snapshot, err := snapshotTree(ctx, root)
 	if err != nil {
 		return err
@@ -79,6 +74,11 @@ func runMutation(ctx context.Context, args []string) error {
 		log.Printf("mutation: snapshot kept at %s", snapshot)
 	} else {
 		defer removeAll(snapshot)
+	}
+
+	registry, err := repopolicy.LoadRegistry(filepath.Join(snapshot, registryName))
+	if err != nil {
+		return fmt.Errorf(loadRegistryError, err)
 	}
 
 	result, err := mutateSnapshot(ctx, &options, registry)
@@ -100,13 +100,16 @@ func runMutation(ctx context.Context, args []string) error {
 // mutateSnapshot runs gremlins in the snapshot and judges its report.
 func mutateSnapshot(ctx context.Context, options *mutationOptions, registry *repopolicy.Registry) (*repopolicy.MutationResult, error) {
 	root, snapshot := options.root, options.snapshot
+	if problems := repopolicy.RepositoryIssues(registry.Exceptions, fileReader(snapshot)); len(problems) > 0 {
+		return nil, fmt.Errorf("%w: clean mutation snapshot registry: %v", errGate, problems)
+	}
 
-	module, err := modulePath(root)
+	module, err := modulePath(snapshot)
 	if err != nil {
 		return nil, err
 	}
 
-	binary, err := gremlinsBinary(ctx, root)
+	binary, err := gremlinsBinary(ctx, root, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +126,7 @@ func mutateSnapshot(ctx context.Context, options *mutationOptions, registry *rep
 
 	log.Printf("mutation: gremlins in a snapshot of %d runtime packages (%d source files)", scope.packages, len(scope.hostFiles))
 
-	evidence, err := executeMutation(ctx, binary, reportFile, options, scope.excludes)
+	evidence, err := executeMutation(ctx, binary, reportFile, options, scope.excludes, registry)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +302,13 @@ func buildTagExclusions(ctx context.Context, dir, resolved string, runtimeList [
 }
 
 // executeMutation establishes complete discovery before running outcomes on the same snapshot.
-func executeMutation(ctx context.Context, tool, reportFile string, options *mutationOptions, excludes []string) (mutationEvidence, error) {
+func executeMutation(
+	ctx context.Context,
+	tool, reportFile string,
+	options *mutationOptions,
+	excludes []string,
+	registry *repopolicy.Registry,
+) (mutationEvidence, error) {
 	discoveryFile := reportFile + ".discovery.json"
 
 	paths := []string{reportFile, discoveryFile, mutationExecutionDirectory(reportFile), mutationExecutionDirectory(discoveryFile)}
@@ -313,11 +322,16 @@ func executeMutation(ctx context.Context, tool, reportFile string, options *muta
 		}
 	}
 
+	env, envErr := mutationEnvironment(ctx, options, registry)
+	if envErr != nil {
+		return mutationEvidence{}, envErr
+	}
+
 	discoveryArgs := append(gremlinsArguments(discoveryFile, options, excludes), "--dry-run", ".")
 
 	err := (&command{
 		dir: options.snapshot, name: tool, args: discoveryArgs, stdout: log.Writer(), stderr: log.Writer(),
-		env: []string{readonlyGoFlags},
+		env: env,
 	}).runMutation(ctx, options.maxDuration)
 	if err != nil {
 		return mutationEvidence{}, fmt.Errorf("mutation discovery failed: %w", err)
@@ -335,7 +349,7 @@ func executeMutation(ctx context.Context, tool, reportFile string, options *muta
 	err = (&command{
 		dir: options.snapshot, name: tool,
 		args: append(gremlinsArguments(reportFile, options, excludes), "."), stdout: log.Writer(), stderr: log.Writer(),
-		env: []string{readonlyGoFlags},
+		env: env,
 	}).runMutation(ctx, options.maxDuration)
 	if err != nil {
 		return mutationEvidence{}, fmt.Errorf("mutation tool failure (infrastructure, not a pass): %w", err)

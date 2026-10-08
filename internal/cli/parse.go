@@ -40,6 +40,8 @@ type (
 	}
 )
 
+const maxSuggestedOptionBytes = 32
+
 // Parse reads the arguments after the executable name. It returns a *UsageError for a rejected command line.
 //
 // The pass runs left to right. Every option is validated as it is read, so an invalid argument anywhere on the
@@ -256,13 +258,28 @@ func (p *parser) valueOf(spec *optionSpec, index int, arg argument) (string, int
 
 // unknownOption explains an option that no command has, naming what is valid here.
 func (p *parser) unknownOption(index int, name string) error {
-	return p.fail(CodeUnknownOption, index, "unknown option %q %s; options that apply: %s", name, p.where(), p.applicable())
+	usage := usageError(
+		p.context,
+		p.cmd.Format,
+		CodeUnknownOption,
+		index,
+		fmt.Sprintf("unknown option %q %s; consult command help", name, p.where()),
+	)
+
+	recovery := &report.Recovery{Action: "open_help", Command: string(p.context)}
+	if suggestion := nearbyOption(name, p.context); suggestion != "" {
+		recovery = &report.Recovery{Action: "edit_input", Location: usage.Diagnostics[0].Location, Replacement: suggestion}
+	}
+
+	usage.Diagnostics[0].Recovery = recovery
+
+	return usage
 }
 
 // inapplicableOption explains an option of another command, naming where it is valid and what is valid here.
 func (p *parser) inapplicableOption(index int, name string) error {
-	return p.fail(CodeInapplicableOption, index, "option %q is not valid %s%s; options that apply: %s",
-		name, p.where(), p.validFor(name), p.applicable())
+	return p.fail(CodeInapplicableOption, index, "option %q is not valid %s%s; consult command help",
+		name, p.where(), p.validFor(name))
 }
 
 // where names the current context for messages.
@@ -293,19 +310,6 @@ func (p *parser) validFor(name string) string {
 	return " (it applies to " + joinNames(commands) + ")"
 }
 
-// applicable lists the options valid in the current context.
-func (p *parser) applicable() string {
-	var names []string
-
-	for i := range p.specs {
-		if p.specs[i].appliesTo(p.context) {
-			names = append(names, p.specs[i].label())
-		}
-	}
-
-	return strings.Join(names, "; ")
-}
-
 // argumentEncoding rejects byte strings that JSON cannot represent losslessly before any parser echo.
 func (p *parser) argumentEncoding(index int) error {
 	if !utf8.ValidString(p.args[index]) {
@@ -313,4 +317,68 @@ func (p *parser) argumentEncoding(index int) error {
 	}
 
 	return nil
+}
+
+// nearbyOption considers only short flags and one adjacent transposition, insertion, or deletion.
+// This bounded scan does no edit-distance allocation for arbitrary user input.
+
+func nearbyOption(name string, context Name) string {
+	if len(name) > maxSuggestedOptionBytes {
+		return ""
+	}
+
+	found := ""
+
+	for _, spec := range optionSpecs() {
+		if !spec.appliesTo(context) || !oneEdit(name, spec.name) {
+			continue
+		}
+
+		if found != "" {
+			return ""
+		}
+
+		found = spec.name
+	}
+
+	return found
+}
+
+func oneEdit(candidate, option string) bool {
+	if len(candidate) == len(option) {
+		return sameLengthEdit(candidate, option)
+	}
+
+	if len(candidate) > len(option) {
+		candidate, option = option, candidate
+	}
+
+	if len(option) != len(candidate)+1 {
+		return false
+	}
+
+	for index := range len(option) {
+		if candidate == option[:index]+option[index+1:] {
+			return true
+		}
+	}
+
+	return false
+}
+
+func sameLengthEdit(candidate, option string) bool {
+	differences := []int{}
+
+	for index := range len(candidate) {
+		if candidate[index] != option[index] {
+			differences = append(differences, index)
+		}
+	}
+
+	if len(differences) == 1 {
+		return true
+	}
+
+	return len(differences) == 2 && differences[1] == differences[0]+1 &&
+		candidate[differences[0]] == option[differences[1]] && candidate[differences[1]] == option[differences[0]]
 }

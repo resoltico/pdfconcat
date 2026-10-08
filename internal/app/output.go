@@ -20,35 +20,44 @@ type (
 	// written after a command already did its work: it says what was published, so the caller is
 	// never left to guess.
 	committedState struct {
-		RecoveryBasename      string               `json:"recovery_basename,omitempty"`
-		RecoveryDirectoryFrom string               `json:"recovery_directory_from,omitempty"`
-		Kind                  string               `json:"kind"`
-		Command               string               `json:"command"`
-		Status                report.Status        `json:"status"`
-		Output                string               `json:"output,omitempty"`
-		ReportStatus          report.WriteState    `json:"report_status"`
-		ReportPath            string               `json:"report_path,omitempty"`
-		RecoveryReport        string               `json:"recovery_report,omitempty"`
-		RecoveryState         report.RecoveryState `json:"recovery_state,omitempty"`
-		StdoutError           string               `json:"stdout_error"`
-		Truncated             bool                 `json:"previews_truncated,omitzero"`
-		Published             bool                 `json:"published"`
+		ReportFrom              string               `json:"report_from,omitempty"`
+		ReportWrite             string               `json:"report_write,omitempty"`
+		ReportTargetObservation string               `json:"report_target_observation,omitempty"`
+		RecoveryBasename        string               `json:"recovery_basename,omitempty"`
+		RecoveryDirectoryFrom   string               `json:"recovery_directory_from,omitempty"`
+		AttemptID               string               `json:"attempt_id"`
+		Kind                    string               `json:"kind"`
+		Command                 string               `json:"command"`
+		Status                  report.Status        `json:"status"`
+		Output                  string               `json:"output,omitempty"`
+		ReportStatus            report.WriteState    `json:"report_status"`
+		ReportPath              string               `json:"report_path,omitempty"`
+		RecoveryReport          string               `json:"recovery_report,omitempty"`
+		RecoveryState           report.RecoveryState `json:"recovery_state,omitempty"`
+		StdoutError             string               `json:"stdout_error"`
+		FormatVersion           int                  `json:"format_version"`
+		Truncated               bool                 `json:"previews_truncated,omitzero"`
+		Published               bool                 `json:"published"`
 	}
 
 	// versionInfo is the payload of the version command.
 	versionInfo struct {
-		Version string `json:"version"`
-		Commit  string `json:"commit"`
-		Date    string `json:"date"`
-		Go      string `json:"go"`
-		OS      string `json:"os"`
-		Arch    string `json:"arch"`
+		Kind          string `json:"kind"`
+		Version       string `json:"version"`
+		Commit        string `json:"commit"`
+		Date          string `json:"date"`
+		Go            string `json:"go"`
+		OS            string `json:"os"`
+		Arch          string `json:"arch"`
+		FormatVersion int    `json:"format_version"`
 	}
 )
 
 const (
 	// binaryName prefixes warnings written to standard error.
 	binaryName = "pdfconcat"
+	// originalReportArgumentReference binds recovery to the caller-owned --report value.
+	originalReportArgumentReference = "original_argv.--report"
 	// committedStateKind is the kind of a committedState record.
 	committedStateKind = "committed_state"
 )
@@ -82,7 +91,12 @@ func writeResponse(w io.Writer, format cli.Format, response report.Response) err
 // the bounded summary, or the complete report with --details. If standard output cannot be written, the
 // committed state goes to standard error, and a run that had succeeded is a failure.
 func finishCommand(env Env, command *cli.Command, rep *report.Report) int {
-	response := report.NewResponse(rep.Summary())
+	summary := rep.Summary()
+	if rep.Publication.ReportStatus == report.ReportWritten {
+		summary.BindContinuation(env.Executable, rep.Publication.ReportPath, originalReportArgumentReference)
+	}
+
+	response := report.NewResponse(summary)
 	if command.Details {
 		response = report.NewResponse(rep)
 	}
@@ -102,16 +116,21 @@ func finishCommand(env Env, command *cli.Command, rep *report.Report) int {
 // stateOnStderr reports what the command did when standard output failed.
 func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
 	state := committedState{
-		Kind:           committedStateKind,
-		Command:        string(command),
-		Status:         rep.Status,
-		Published:      rep.Publication.Published,
-		Output:         rep.Publication.Output,
-		ReportStatus:   rep.Publication.ReportStatus,
-		ReportPath:     rep.Publication.ReportPath,
-		RecoveryReport: rep.Publication.RecoveryReport,
-		RecoveryState:  rep.Publication.RecoveryState,
-		StdoutError:    boundedMessage(cause.Error()),
+		FormatVersion:           report.Version,
+		AttemptID:               rep.AttemptID,
+		ReportFrom:              rep.Publication.ReportFrom,
+		ReportWrite:             rep.Publication.ReportWrite,
+		ReportTargetObservation: rep.Publication.ReportTargetObservation,
+		Kind:                    committedStateKind,
+		Command:                 string(command),
+		Status:                  rep.Status,
+		Published:               rep.Publication.Published,
+		Output:                  rep.Publication.Output,
+		ReportStatus:            rep.Publication.ReportStatus,
+		ReportPath:              rep.Publication.ReportPath,
+		RecoveryReport:          rep.Publication.RecoveryReport,
+		RecoveryState:           rep.Publication.RecoveryState,
+		StdoutError:             boundedMessage(cause.Error()),
 	}
 
 	if len(encodeLine(state)) <= report.SummaryBytes {
@@ -129,16 +148,14 @@ func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
 		state.RecoveryBasename = filepath.Base(rep.Publication.RecoveryReport)
 		state.RecoveryDirectoryFrom = "original_report_argument"
 		state.RecoveryReport = ""
-		state.Truncated = true
 	}
 
 	for _, value := range []*string{&state.Command, &state.Output, &state.ReportPath, &state.StdoutError} {
-		preview, truncated := report.BoundPreview(*value)
-		*value = preview
-		state.Truncated = state.Truncated || truncated
+		*value, _ = report.BoundPreview(*value)
 	}
 
-	state.Truncated = state.Truncated || len(summary.TruncatedFields) > 0
+	// Exceeding the full-state budget necessarily shortens a preview for valid report metadata.
+	state.Truncated = true
 	writeStderr(env, encodeLine(state))
 }
 
@@ -166,9 +183,15 @@ func writeStderr(env Env, data []byte) {
 
 // emitError prints a structured failure that happened before any layout existed and returns its exit code.
 func emitError(env Env, format cli.Format, name string, status report.Status, diagnostics ...report.Diagnostic) int {
-	rep := report.NewErrorReport(name, status, diagnostics...)
+	for index := range diagnostics {
+		if diagnostics[index].Recovery == nil {
+			diagnostics[index].Recovery = &report.Recovery{Action: "open_help", Command: name}
+		}
+	}
 
-	err := writeResponse(env.Stdout, format, report.NewResponse(rep.Summary()))
+	rep := report.NewCommandError(name, status, diagnostics, env.Executable)
+
+	err := writeResponse(env.Stdout, format, report.NewResponse(rep))
 	if err != nil {
 		_ = stdoutFailed(env, err)
 	}
@@ -185,9 +208,6 @@ func usageFailure(env Env, err error) int {
 	}
 
 	name := string(usage.Command)
-	if name == "" {
-		name = binaryName
-	}
 
 	return emitError(env, usage.Format, name, report.StatusInvalid, usage.Diagnostics...)
 }
@@ -201,10 +221,19 @@ func runSchema(command *cli.Command, env Env) int {
 		text = plan.Schema()
 	case cli.SchemaReport:
 		text = report.Schema()
+	case cli.SchemaResponse:
+		text = report.ResponseSchema()
 	default:
 		return emitError(env, command.Format, string(command.Name), report.StatusInvalid, report.Diagnostic{
-			Stage: report.StageUsage, Code: codeSchemaUnknown,
-			Message: fmt.Sprintf("unknown schema %q; use %s or %s", command.SchemaName, cli.SchemaPlan, cli.SchemaReport),
+			Stage: report.StageUsage,
+			Code:  codeSchemaUnknown,
+			Message: fmt.Sprintf(
+				"unknown schema %q; use %s, %s or %s",
+				command.SchemaName,
+				cli.SchemaPlan,
+				cli.SchemaReport,
+				cli.SchemaResponse,
+			),
 		})
 	}
 
@@ -219,6 +248,7 @@ func runSchema(command *cli.Command, env Env) int {
 // runVersion prints the release metadata and the toolchain and platform it was built for.
 func runVersion(command *cli.Command, env Env) int {
 	info := versionInfo{
+		FormatVersion: report.Version, Kind: "version",
 		Version: env.Build.Version, Commit: env.Build.Commit, Date: env.Build.CommitDate,
 		Go: runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH,
 	}
@@ -241,6 +271,31 @@ func runVersion(command *cli.Command, env Env) int {
 // runHelp prints the structured help of the root or of one command.
 func runHelp(command *cli.Command, env Env) int {
 	doc := cli.Help(command.HelpFor)
+
+	args := []string{"build", "--help"}
+	if command.HelpFor != "" {
+		args = []string{"schema", "plan"}
+	}
+
+	if command.HelpFor == cli.NameReport {
+		args = []string{"schema", "report"}
+	}
+
+	next := append([]string{env.Executable}, args...)
+	doc.Next = &next
+	encoded, encodeErr := report.Encode(doc)
+
+	budget := cli.CommandHelpBytes
+	if command.HelpFor == "" {
+		budget = cli.RootHelpBytes
+	}
+
+	if env.Executable == "" || encodeErr != nil || len(encoded)+1 > budget {
+		doc.Next = nil
+		doc.NextOmitted = true
+		doc.ExecutableFrom = "invoking_executable"
+		doc.NextArgs = args
+	}
 
 	return emit(env, func(out io.Writer) error {
 		if command.Format == cli.FormatText {

@@ -67,7 +67,12 @@ func architectureControls(ctx context.Context, root, binary string) ([]string, e
 		return nil, err
 	}
 
-	return append(append(problems, classification...), loader...), nil
+	structure, structureErr := architectureStructureControls(ctx, scratch, binary)
+	if structureErr != nil {
+		return nil, structureErr
+	}
+
+	return append(append(append(problems, classification...), loader...), structure...), nil
 }
 
 func prepareArchitectureControls(root, scratch string) error {
@@ -240,6 +245,10 @@ func compileArchitectureControl(ctx context.Context, root, target string) error 
 }
 
 func architectureControlIssues(ctx context.Context, root, binary, target string) ([]repopolicy.Issue, error, error) {
+	return architectureAnalyzerIssues(ctx, root, binary, target, dependencyLinter)
+}
+
+func architectureAnalyzerIssues(ctx context.Context, root, binary, target, linters string) ([]repopolicy.Issue, error, error) {
 	reportFile := filepath.Join(root, lintReportFileName)
 	if err := prepareLintRunReport(root); err != nil {
 		return nil, nil, err
@@ -248,7 +257,7 @@ func architectureControlIssues(ctx context.Context, root, binary, target string)
 	output, runErr := (&command{
 		dir: root, name: binary,
 		args: []string{
-			runVerb, serialLintRunners, configFlag, filepath.Join(root, lintConfigFileName), enableOnlyFlag, dependencyLinter,
+			runVerb, serialLintRunners, lintNoFixFlag, configFlag, filepath.Join(root, lintConfigFileName), enableOnlyFlag, linters,
 			"--output.json.path=" + reportFile, allPackages,
 		},
 		env: architectureTargetEnv(target),

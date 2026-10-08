@@ -68,8 +68,15 @@ func positionControlIssues(ctx context.Context, root, binary string) ([]repopoli
 	}
 
 	args := []string{
-		runVerb, serialLintRunners, enableOnlyFlag, "gosec,errcheck,unused",
-		"--output.json.path=" + reportFile, allPackages,
+		runVerb,
+		serialLintRunners,
+		lintNoFixFlag,
+		configFlag,
+		filepath.Join(root, lintConfigFileName),
+		enableOnlyFlag,
+		"gosec,errcheck,unused",
+		"--output.json.path=" + reportFile,
+		allPackages,
 	}
 
 	checker := &command{

@@ -45,13 +45,15 @@ func TestSavedBuildIdentityMatchesVerifiedBytesAndQueryKeepsCapturedState(t *tes
 		t.Fatalf("query revalidated changed current output: %s", queried.stdout)
 	}
 
-	var captured report.Summary
-	if decodeErr := json.Unmarshal([]byte(queried.stdout), &captured); decodeErr != nil {
+	var envelope struct {
+		Result report.Summary `json:"result"`
+	}
+	if decodeErr := json.Unmarshal([]byte(queried.stdout), &envelope); decodeErr != nil {
 		t.Fatal(decodeErr)
 	}
 
-	if !captured.Publication.Published || captured.Publication.OutputDigest != saved.Publication.OutputDigest {
-		t.Fatalf("query lost captured publication identity: %+v", captured.Publication)
+	if !envelope.Result.Publication.Published || envelope.Result.Publication.OutputDigest != saved.Publication.OutputDigest {
+		t.Fatalf("query lost captured publication identity: %+v", envelope.Result.Publication)
 	}
 }
 

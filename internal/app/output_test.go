@@ -20,7 +20,7 @@ func TestARejectedCommandLineNamesTheCommandItWasAbout(t *testing.T) {
 		command string
 		args    []string
 	}{
-		"no command":   {"pdfconcat", []string{"--no-such-option"}},
+		"no command":   {"", []string{"--no-such-option"}},
 		"build option": {commandBuild, []string{commandBuild, "--no-such-option"}},
 	}
 
@@ -50,7 +50,7 @@ func TestVersionIsPrintedAsTextOrAsJSON(t *testing.T) {
 
 	compact := executeWith(t.Context(), t, appOf(newFake(t)), env, commandVersion)
 
-	var info map[string]string
+	var info map[string]any
 
 	err := json.Unmarshal([]byte(compact.stdout), &info)
 	if err != nil || compact.code != 0 || info["version"] != "1.2.3" || info["commit"] != "abcdef" || info["go"] != runtime.Version() {

@@ -4,6 +4,7 @@
 package repopolicy
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -12,6 +13,8 @@ import (
 	"slices"
 	"strings"
 )
+
+var errSourceDirectoryLink = errors.New("owned source directory symlink")
 
 // OwnedGoDirectories finds the source directories that lint/format must consider, including hidden
 // and testdata fixture packages omitted by Go's ./... pattern. It shares the directive scan's owned
@@ -40,8 +43,12 @@ func OwnedGoSources(root string) ([]string, error) {
 				return walkErr
 			}
 
-			if entry.IsDir() && skippedDirectories()[entry.Name()] {
+			if entry.IsDir() && skippedDirectories()[name] {
 				return fs.SkipDir
+			}
+
+			if linkErr := ownedSourceLink(tree, name, entry); linkErr != nil {
+				return linkErr
 			}
 
 			if !entry.IsDir() && strings.HasSuffix(name, goSourceSuffix) {
@@ -58,4 +65,21 @@ func OwnedGoSources(root string) ([]string, error) {
 	slices.Sort(files)
 
 	return files, nil
+}
+
+func ownedSourceLink(tree *os.Root, name string, entry fs.DirEntry) error {
+	if entry.Type()&os.ModeSymlink == 0 {
+		return nil
+	}
+
+	info, err := tree.Stat(name)
+	if err != nil {
+		return fmt.Errorf("inspect owned source link %s: %w", name, err)
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("%w: %s", errSourceDirectoryLink, name)
+	}
+
+	return nil
 }

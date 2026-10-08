@@ -1471,16 +1471,17 @@ index 0000000..db5008f
 +}
 diff --git a/internal/engine/test_judgment_test.go b/internal/engine/test_judgment_test.go
 new file mode 100644
-index 0000000..f5908f1
+index 0000000..782cf32
 --- /dev/null
 +++ b/internal/engine/test_judgment_test.go
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,233 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
 +import (
 +	"context"
 +	"crypto/sha256"
++	"encoding/json"
 +	"fmt"
 +	"github.com/go-gremlins/gremlins/internal/execution"
 +	"github.com/go-gremlins/gremlins/internal/mutator"
@@ -1648,6 +1649,63 @@ index 0000000..f5908f1
 +	result, err = execution.JudgeTestStream(strings.NewReader(string(raw)), root, runErr, false, &baseline.Census)
 +	if result.Status != mutator.Lived || err != nil {
 +		t.Fatalf("valid changed subtest: %s %v", result.Status, err)
++	}
++}
++
++func TestCompilerInvalidExecutionKeepsCompleteNotViableReceipt(t *testing.T) {
++	root := t.TempDir()
++	mustWrite(t, filepath.Join(root, "go.mod"), "module probe.example\ngo 1.27.1\n")
++	mustWrite(t, filepath.Join(root, "value.go"), "package probe\nfunc broken(){_ = |nil}\n")
++	logs := t.TempDir()
++	m := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: logs}
++	cmd := exec.Command("go", "test", "-json", "./...")
++	cmd.Dir = root
++	status, err := m.executeJudgedTest(context.Background(), cmd, root)
++	if status != mutator.NotViable || err != nil {
++		t.Fatalf("compiler-invalid result: %s %v", status, err)
++	}
++	entries, err := os.ReadDir(logs)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var receipt struct {
++		Status        string `json:"judgment_status"`
++		ArtifactError string `json:"artifact_error"`
++		StdoutHash    string `json:"stdout_sha256"`
++		StderrHash    string `json:"stderr_sha256"`
++		StdoutBytes   int64  `json:"stdout_bytes"`
++		StderrBytes   int64  `json:"stderr_bytes"`
++	}
++	found := false
++	for _, entry := range entries {
++		if !strings.HasSuffix(entry.Name(), ".result.json") {
++			continue
++		}
++		raw, err := os.ReadFile(filepath.Join(logs, entry.Name()))
++		if err != nil {
++			t.Fatal(err)
++		}
++		if err = json.Unmarshal(raw, &receipt); err != nil {
++			t.Fatal(err)
++		}
++		prefix := strings.TrimSuffix(entry.Name(), ".result.json")
++		for _, stream := range []struct {
++			suffix, hash string
++			bytes        int64
++		}{{".stdout.json", receipt.StdoutHash, receipt.StdoutBytes}, {".stderr.txt", receipt.StderrHash, receipt.StderrBytes}} {
++			data, err := os.ReadFile(filepath.Join(logs, prefix+stream.suffix))
++			if err != nil {
++				t.Fatal(err)
++			}
++			expected := fmt.Sprintf("%x", sha256.Sum256(data))
++			if stream.hash != expected || stream.bytes != int64(len(data)) {
++				t.Fatalf("unbound capture %s", stream.suffix)
++			}
++		}
++		found = true
++	}
++	if !found || receipt.Status != mutator.NotViable.String() || receipt.ArtifactError != "" || receipt.StdoutBytes == 0 {
++		t.Fatalf("incomplete compiler receipt: %+v found%t", receipt, found)
 +	}
 +}
 diff --git a/internal/engine/tokenmutator.go b/internal/engine/tokenmutator.go
@@ -2660,10 +2718,10 @@ index 0000000..9f29d3b
 +}
 diff --git a/internal/execution/go_process_unix.go b/internal/execution/go_process_unix.go
 new file mode 100644
-index 0000000..16bc6bb
+index 0000000..1f483f5
 --- /dev/null
 +++ b/internal/execution/go_process_unix.go
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,130 @@
 +//go:build darwin || linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -2681,6 +2739,8 @@ index 0000000..16bc6bb
 +
 +	"golang.org/x/sys/unix"
 +)
++
++const goCommandCleanupBudget = 5 * time.Second
 +
 +// RunGoCommand owns the private process group until all signalling finishes,
 +// before Wait reaps its leader and permits numeric PID reuse.
@@ -2702,15 +2762,19 @@ index 0000000..16bc6bb
 +	}
 +	var ownership sync.Mutex
 +	closed := false
++	var cleanupDeadline time.Time
 +	killGroup := func() error {
 +		if cmd.Process == nil {
 +			return os.ErrProcessDone
++		}
++		if cleanupDeadline.IsZero() {
++			cleanupDeadline = time.Now().Add(goCommandCleanupBudget)
 +		}
 +		err := signalGroup(-cmd.Process.Pid, unix.SIGKILL)
 +		if errors.Is(err, unix.ESRCH) {
 +			return nil
 +		}
-+		return normalizeGroupKillError(cmd.Process.Pid, err)
++		return normalizeGroupKillError(cmd.Process.Pid, err, cleanupDeadline)
 +	}
 +	if cmd.Cancel != nil {
 +		cmd.Cancel = func() error {
@@ -2760,7 +2824,7 @@ index 0000000..16bc6bb
 +	}
 +	closed = true
 +	ownership.Unlock()
-+	deadline := time.NewTimer(5 * time.Second)
++	deadline := time.NewTimer(time.Until(cleanupDeadline))
 +	defer deadline.Stop()
 +
 +	var readerErr error
@@ -3342,10 +3406,10 @@ index 0000000..8115afa
 +}
 diff --git a/internal/execution/process_group_darwin.go b/internal/execution/process_group_darwin.go
 new file mode 100644
-index 0000000..a279be2
+index 0000000..3c85649
 --- /dev/null
 +++ b/internal/execution/process_group_darwin.go
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,119 @@
 +//go:build darwin
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -3362,16 +3426,22 @@ index 0000000..a279be2
 +
 +// Darwin sys/proc.h defines SIDL=1, SRUN=2, SSLEEP=3, SSTOP=4 and immutable SZOMB=5.
 +const darwinZombieState = 5
-+const zombieProofBudget = 50 * time.Millisecond
 +
-+func normalizeGroupKillError(pid int, err error) error {
++// P_WEXIT is the irreversible kernel exit transition exposed by Darwin sys/proc.h.
++const darwinProcessExitingFlag = 0x2000
++
++func normalizeGroupKillError(pid int, err error, deadline time.Time) error {
 +	if !errors.Is(err, unix.EPERM) {
 +		return err
 +	}
++	return proveOwnedGroupTermination(pid, err, deadline, func() ([]unix.KinfoProc, error) { return unix.SysctlKinfoProcSlice("kern.proc.pgrp", pid) })
++}
++
++func proveOwnedGroupTermination(pid int, signalErr error, deadline time.Time, query func() ([]unix.KinfoProc, error)) error {
 +	// Cleanup must still finish after work cancellation. The unreaped leader pins authority.
-+	cleanup, cancel := context.WithTimeout(context.Background(), zombieProofBudget)
++	cleanup, cancel := context.WithDeadline(context.Background(), deadline)
 +	defer cancel()
-+	return waitForZombieGroup(cleanup, pid, err, func() ([]unix.KinfoProc, error) { return unix.SysctlKinfoProcSlice("kern.proc.pgrp", pid) })
++	return waitForZombieGroup(cleanup, pid, signalErr, query)
 +}
 +
 +func waitForZombieGroup(ctx context.Context, pid int, signalErr error, query func() ([]unix.KinfoProc, error)) error {
@@ -3416,7 +3486,7 @@ index 0000000..a279be2
 +		if i == 8 {
 +			break
 +		}
-+		sample = append(sample, fmt.Sprintf("%d/%d/state%d", member.Proc.P_pid, member.Eproc.Pgid, member.Proc.P_stat))
++		sample = append(sample, fmt.Sprintf("%d/%d/state%d/flags%#x", member.Proc.P_pid, member.Eproc.Pgid, member.Proc.P_stat, member.Proc.P_flag))
 +	}
 +	return strings.Join(sample, ",")
 +}
@@ -3432,6 +3502,9 @@ index 0000000..a279be2
 +		}
 +		switch member.Proc.P_stat {
 +		case 1, 2, 3, 4:
++			if member.Proc.P_flag&darwinProcessExitingFlag == 0 {
++				return false, errors.New("owned process group has live member without exit transition")
++			}
 +			allZombie = false
 +		case darwinZombieState:
 +		default:
@@ -3458,7 +3531,7 @@ index 0000000..a279be2
 +}
 diff --git a/internal/execution/process_group_darwin_test.go b/internal/execution/process_group_darwin_test.go
 new file mode 100644
-index 0000000..4f9990a
+index 0000000..4fc96f0
 --- /dev/null
 +++ b/internal/execution/process_group_darwin_test.go
 @@ -0,0 +1,104 @@
@@ -3510,7 +3583,7 @@ index 0000000..4f9990a
 +		_ = cmd.Wait()
 +		t.Fatalf("expected native zombie-only EPERM: %v", killErr)
 +	}
-+	if err := normalizeGroupKillError(pid, killErr); err != nil {
++	if err := normalizeGroupKillError(pid, killErr, time.Now().Add(goCommandCleanupBudget)); err != nil {
 +		_ = cmd.Wait()
 +		t.Fatal(err)
 +	}
@@ -3548,7 +3621,7 @@ index 0000000..4f9990a
 +			}
 +		})
 +	}
-+	if normalizeGroupKillError(pid, unix.EIO) == nil {
++	if normalizeGroupKillError(pid, unix.EIO, time.Now().Add(goCommandCleanupBudget)) == nil {
 +		t.Fatal("unknown syscall error accepted")
 +	}
 +	cmd := exec.Command("/bin/sleep", "10")
@@ -3556,7 +3629,7 @@ index 0000000..4f9990a
 +	if err := cmd.Start(); err != nil {
 +		t.Fatal(err)
 +	}
-+	if normalizeGroupKillError(cmd.Process.Pid, unix.EPERM) == nil {
++	if normalizeGroupKillError(cmd.Process.Pid, unix.EPERM, time.Now().Add(goCommandCleanupBudget)) == nil {
 +		_ = cmd.Process.Kill()
 +		_ = cmd.Wait()
 +		t.Fatal("real live owned group accepted as zombie")
@@ -3568,16 +3641,18 @@ index 0000000..4f9990a
 +}
 diff --git a/internal/execution/process_group_linux.go b/internal/execution/process_group_linux.go
 new file mode 100644
-index 0000000..ebe5054
+index 0000000..f6a7a9d
 --- /dev/null
 +++ b/internal/execution/process_group_linux.go
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,8 @@
 +//go:build linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
-+func normalizeGroupKillError(_ int, err error) error { return err }
++import "time"
++
++func normalizeGroupKillError(_ int, err error, _ time.Time) error { return err }
 diff --git a/internal/execution/sparse_unix_test.go b/internal/execution/sparse_unix_test.go
 new file mode 100644
 index 0000000..68669de
@@ -3921,10 +3996,10 @@ index 0000000..a333826
 +}
 diff --git a/internal/execution/zombie_wait_darwin_test.go b/internal/execution/zombie_wait_darwin_test.go
 new file mode 100644
-index 0000000..f2a6594
+index 0000000..7c31964
 --- /dev/null
 +++ b/internal/execution/zombie_wait_darwin_test.go
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,165 @@
 +//go:build darwin
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -4025,7 +4100,7 @@ index 0000000..f2a6594
 +	}
 +	defer func() { _ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL); _ = cmd.Wait() }()
 +	_, _ = io.Copy(io.Discard, p)
-+	if err := normalizeGroupKillError(cmd.Process.Pid, unix.EPERM); err == nil {
++	if err := normalizeGroupKillError(cmd.Process.Pid, unix.EPERM, time.Now().Add(goCommandCleanupBudget)); err == nil {
 +		t.Fatal("zombie leader with live child accepted")
 +	}
 +}
@@ -4047,6 +4122,47 @@ index 0000000..f2a6594
 +		if !started || runErr != nil || cleanupErr != nil {
 +			t.Fatalf("native fast exit rejected at%d: %v %v", i, runErr, cleanupErr)
 +		}
++	}
++}
++
++// A slow exiting-state observation must share the command cleanup allowance, not a separate 50ms allowance.
++func TestOwnedExitingTransitionUsesCleanupDeadlineAndFinalZombieProof(t *testing.T) {
++	cmd := exec.Command("/usr/bin/true")
++	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++	pipe, err := cmd.StdoutPipe()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = cmd.Start(); err != nil {
++		t.Fatal(err)
++	}
++	defer cmd.Wait()
++	if _, err = io.Copy(io.Discard, pipe); err != nil {
++		t.Fatal(err)
++	}
++	pid := cmd.Process.Pid
++	deadline := time.Now().Add(goCommandCleanupBudget)
++	transition := time.Now().Add(80 * time.Millisecond)
++	observedExiting := false
++	observedZombie := false
++	err = proveOwnedGroupTermination(pid, unix.EPERM, deadline, func() ([]unix.KinfoProc, error) {
++		group, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pid)
++		if err != nil {
++			return nil, err
++		}
++		if time.Now().Before(transition) {
++			for i := range group {
++				group[i].Proc.P_stat = 2
++				group[i].Proc.P_flag |= darwinProcessExitingFlag
++			}
++			observedExiting = true
++		} else {
++			observedZombie, err = zombieGroupState(pid, group)
++		}
++		return group, err
++	})
++	if err != nil || !observedExiting || !observedZombie {
++		t.Fatalf("owned terminal transition: %v exiting%t zombie%t", err, observedExiting, observedZombie)
 +	}
 +}
 diff --git a/internal/mutator/mutator.go b/internal/mutator/mutator.go

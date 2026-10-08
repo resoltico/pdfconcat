@@ -23,6 +23,8 @@ type (
 )
 
 const (
+	unknownMetadataValue = "unknown"
+	attemptNotWritten    = "not_written"
 	// RecoveryCurrent means the retained file describes the actual committed failure.
 	RecoveryCurrent RecoveryState = "current"
 	// RecoveryPending means complete layout data remains but publication metadata could not be refreshed.

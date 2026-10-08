@@ -6,6 +6,7 @@
 package main_test
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,19 +47,6 @@ func TestPermissionFailuresAreReportedByTheirStage(t *testing.T) {
 
 	parsed := summaryOf(t, res)
 	requireCode(t, &parsed, "plan_unreadable")
-
-	// A report that cannot be staged beside its target stops the run before anything is published.
-	res = run(t, dir, "", commandBuild, "-o", fileOut, flagReport, readOnlyReportPath, fileA)
-	requireExit(t, res, 1)
-
-	parsed = summaryOf(t, res)
-	requireCode(t, &parsed, codeReportWriteBad)
-
-	if parsed.Publication.Published || parsed.Publication.ReportStatus != reportFailed {
-		t.Errorf("publication: %+v", parsed.Publication)
-	}
-
-	requireAbsent(t, filepath.Join(dir, fileOut))
 
 	// A check that cannot save its report is a failure, and says so.
 	res = run(t, dir, "", commandCheck, flagReport, readOnlyReportPath, fileA)
@@ -125,7 +113,7 @@ func TestADeletedWorkingDirectoryIsReported(t *testing.T) {
 	// Where the operating system cannot name the deleted directory the command says so; where it still
 	// reports the old path (macOS) the source is simply not found there.
 	parsed := summaryOf(t, res)
-	if parsed.Diagnostics[0].Code != "working_directory_unavailable" && parsed.Diagnostics[0].Code != "source_unreadable" {
+	if parsed.Diagnostics[0].Code != "working_directory_unavailable" && parsed.Diagnostics[0].Code != codeSourceUnreadable {
 		t.Errorf("diagnostics: %+v", parsed.Diagnostics)
 	}
 
@@ -199,4 +187,47 @@ func TestPublishedPDFHasThePermissionsOfAnOrdinaryFile(t *testing.T) {
 	if got := int(info.Mode().Perm()); got != want {
 		t.Errorf("published mode %04o, want %04o (0666 narrowed by umask %04o)", got, want, umask)
 	}
+}
+
+func TestReportStagingFailurePreservesAttemptOwnership(t *testing.T) {
+	t.Parallel()
+	requireUnprivilegedUser(t)
+	dir := tempDir(t)
+	writePDFs(t, dir, 1, "a")
+	ensure(t, os.Mkdir(filepath.Join(dir, "readonly"), 0o500))
+
+	sourceBefore := readFile(t, filepath.Join(dir, fileA))
+	earlier := run(t, dir, "", commandCheck, flagReport, fileSavedReport, fileA)
+	requireExit(t, earlier, 0)
+
+	// A report that cannot be staged beside its target stops the run before anything is published.
+	res := run(t, dir, "", commandBuild, "-o", fileOut, flagReport, readOnlyReportPath, fileA)
+	requireExit(t, res, 1)
+
+	parsed := summaryOf(t, res)
+	requireCode(t, &parsed, codeReportWriteBad)
+
+	if parsed.Publication.Published || parsed.Publication.ReportStatus != reportFailed {
+		t.Errorf("publication: %+v", parsed.Publication)
+	}
+
+	requireAbsent(t, filepath.Join(dir, fileOut))
+	requireAbsent(t, filepath.Join(dir, readOnlyReportPath))
+	receipt := contractObject(t, res.stdout)
+	attempt := textAt(t, receipt, keyAttemptID)
+
+	if attempt == "" || attempt == textAt(t, contractObject(t, earlier.stdout), keyAttemptID) {
+		t.Fatal("late report failure lost independent attempt identity")
+	}
+
+	if textAt(t, receipt, keyPublication, "report_write") != "not_written" ||
+		textAt(t, receipt, "phases", "output_verification") != phaseComplete {
+		t.Fatal("report staging failure lost completed verification or write receipt")
+	}
+
+	if !bytes.Equal(sourceBefore, readFile(t, filepath.Join(dir, fileA))) {
+		t.Fatal("late report failure modified its source")
+	}
+
+	requireSavedAttempt(t, dir, fileSavedReport, contractObject(t, earlier.stdout), "ok")
 }

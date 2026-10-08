@@ -21,11 +21,13 @@ type divergenceCase struct {
 }
 
 const (
+	policySecurityLinter  = "gosec"
 	gosecSeverityFragment = "    gosec:\n      severity: low"
 	registryFile          = ".quality-exceptions.yml"
 	golangciFile          = ".golangci.yml"
 
-	rulesList = "    presets: []\n    rules:\n"
+	lintSettingsSection = "  settings:\n"
+	rulesList           = "    presets: []\n    rules:\n"
 
 	// diagnosticRegistry has one exclusion whose configuration form the tests build by hand.
 	diagnosticRegistry = `
@@ -390,6 +392,15 @@ func TestLintFiltersCannotReduceAnalysis(t *testing.T) {
 	}
 
 	changes := [][2]string{
+		{"lines: 60", "lines: 61"},
+		{"statements: 40", "statements: 41"},
+		{"max-complexity: 12", "max-complexity: 13"},
+		{"package-average: 6", "package-average: 7"},
+		{"min-complexity: 15", "min-complexity: 16"},
+		{"min-complexity: 12", "min-complexity: 13"},
+		{"under: 25", "under: 24"},
+		{"min-complexity: 4", "min-complexity: 5"},
+		{"max: 5", "max: 6"},
 		{"severity: low", "severity: high"},
 		{"confidence: low", "confidence: high"},
 		{"new: false", "new: true"},
@@ -432,10 +443,12 @@ func TestStalenessMatchesDiagnosticSource(t *testing.T) {
 
 	entry := &repopolicy.Entry{
 		Tool: repopolicy.ToolLint, Effect: repopolicy.EffectExcludeDiagnostic,
-		Linter: "gosec", Path: directiveSourcePath, Message: "specific diagnostic", Source: `os\.ReadFile\(name\)`,
+		Linter: policySecurityLinter, Path: directiveSourcePath, Message: "specific diagnostic", Source: `os\.ReadFile\(name\)`,
 	}
 
-	issues := []repopolicy.Issue{{Linter: "gosec", File: directiveSourcePath, Text: "specific diagnostic", Source: "os.ReadFile(other)"}}
+	issues := []repopolicy.Issue{
+		{Linter: policySecurityLinter, File: directiveSourcePath, Text: "specific diagnostic", Source: "os.ReadFile(other)"},
+	}
 	if len(repopolicy.StaleDiagnosticEntries([]*repopolicy.Entry{entry}, issues, "darwin")) != 1 {
 		t.Fatal("unmatched source counted as current")
 	}
@@ -444,4 +457,84 @@ func TestStalenessMatchesDiagnosticSource(t *testing.T) {
 	if len(repopolicy.StaleDiagnosticEntries([]*repopolicy.Entry{entry}, issues, "darwin")) != 0 {
 		t.Fatal("matching source counted as stale")
 	}
+}
+
+func TestLintConfigRejectsStructuredErrorExemptions(t *testing.T) {
+	t.Parallel()
+
+	registry := loadRegistry(t)
+
+	original := string(readRepoFile(t, golangciFile))
+	for _, setting := range []string{"allowed-errors", "allowed-errors-wildcard"} {
+		t.Run(setting, func(t *testing.T) {
+			t.Parallel()
+
+			fragment := "    errorlint:\n      " + setting + ":\n        - err: io.EOF\n          fun: example.org/reader.Read\n"
+			config := strings.Replace(original, lintSettingsSection, "  settings:\n"+fragment, 1)
+
+			problems, err := repopolicy.LintConfigIssues(registry.Exceptions, []byte(config))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !strings.Contains(strings.Join(problems, "\n"), "linters.settings.errorlint."+setting+": active structured suppression") {
+				t.Fatalf("unregistered active exemption accepted: %v", problems)
+			}
+		})
+	}
+}
+
+func TestLintConfigAcceptsEmptyStructuredSuppressionList(t *testing.T) {
+	t.Parallel()
+
+	registry := loadRegistry(t)
+	original := string(readRepoFile(t, golangciFile))
+	config := strings.Replace(original, lintSettingsSection, "  settings:\n    errorlint:\n      allowed-errors: []\n", 1)
+
+	problems, err := repopolicy.LintConfigIssues(registry.Exceptions, []byte(config))
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("empty list treated as exemption: %v %v", problems, err)
+	}
+}
+
+func TestLintConfigRejectsUnregisteredDisabledErrorChecks(t *testing.T) {
+	t.Parallel()
+
+	registry := loadRegistry(t)
+	original := string(readRepoFile(t, golangciFile))
+
+	for _, setting := range []string{"errorf", "errorf-multi", "asserts", "comparison"} {
+		t.Run(setting, func(t *testing.T) {
+			t.Parallel()
+
+			config := strings.Replace(original, lintSettingsSection, "  settings:\n    errorlint:\n      "+setting+": false\n", 1)
+
+			problems, err := repopolicy.LintConfigIssues(registry.Exceptions, []byte(config))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !strings.Contains(strings.Join(problems, "\n"), "linters.settings.errorlint."+setting+": false") {
+				t.Fatalf("disabled correctness check escaped inventory: %v", problems)
+			}
+		})
+	}
+}
+
+func TestLintConfigRejectsTextSourceDelimiterCollision(t *testing.T) {
+	t.Parallel()
+
+	entry := &repopolicy.Entry{
+		Tool: repopolicy.ToolLint, Effect: repopolicy.EffectExcludeDiagnostic,
+		Path: "internal/example/file.go", Linter: policySecurityLinter, Message: fileReadDiagnostic, Source: "sourceanchor",
+	}
+	config := strings.Replace(exactRule, "G304: Potential file inclusion'", "G304: Potential file inclusion source=sourceanchor'", 1)
+
+	problems, err := repopolicy.LintConfigIssues([]*repopolicy.Entry{entry}, []byte(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireContains(t, problems, "registry exception missing from .golangci.yml: linters.exclusions.rules")
+	requireContains(t, problems, ".golangci.yml carries an exception the registry does not list: linters.exclusions.rules")
 }

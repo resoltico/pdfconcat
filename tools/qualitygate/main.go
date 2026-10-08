@@ -40,18 +40,19 @@ const (
 	securityLinter    = "gosec"
 	lintTool          = "golangci-lint"
 	serialLintRunners = "--allow-serial-runners"
+	lintNoFixFlag     = "--fix=false"
 
 	usage = `usage: go run ./tools/qualitygate <command> [flags]
 
 commands:
-  architecture  verify complete production ownership and real import-boundary controls
+  architecture  verify owned target selection, production ownership and real import/structure controls
   lint          run configured lint over every owned compiled package, including fixtures
   format        verify formatting of every owned Go source directory
   lint-config   verify .golangci.yml against .quality-exceptions.yml and the pinned golangci-lint
   lint-stale    verify every lint diagnostic exclusion still matches a real diagnostic
   test          run go test with discovery checks (flags: -race -run -require -timeout)
   coverage      run unit and executable-subprocess coverage, merge, apply the registry, enforce the threshold
-  fuzz          discover and run every fuzz target (flag: -time)
+  fuzz          run every fuzz target on macOS/Linux (-time duration|Nx)
   mutation      run mutation testing in a clean snapshot and judge it against the registry
   controls      prove the tests detect deliberate mutations listed in tools/mutation-controls.yml
   secrets       scan current source and reachable history for credentials

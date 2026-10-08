@@ -22,10 +22,13 @@ type (
 	// Publication states what happened to the output PDF and to the requested report. A published PDF is
 	// never described as untouched, whatever happened to the report afterwards.
 	Publication struct {
-		OutputDigest string     `json:"output_digest,omitempty"`
-		Output       string     `json:"output,omitempty"`
-		ReportStatus WriteState `json:"report_status"`
-		ReportPath   string     `json:"report_path,omitempty"`
+		ReportWrite             string     `json:"report_write,omitempty"`
+		ReportTargetObservation string     `json:"report_target_observation,omitempty"`
+		OutputDigest            string     `json:"output_digest,omitempty"`
+		Output                  string     `json:"output,omitempty"`
+		ReportStatus            WriteState `json:"report_status"`
+		ReportPath              string     `json:"report_path,omitempty"`
+		ReportFrom              string     `json:"report_from,omitempty"`
 		// RecoveryReport names retained recovery data after the PDF commit. RecoveryState says
 		// whether its publication metadata is current, still planned, or its owned identity was lost.
 		RecoveryReport string        `json:"recovery_report,omitempty"`
@@ -55,11 +58,13 @@ type (
 
 	// Diagnostic is one discovered problem. Codes are stable; messages are not.
 	Diagnostic struct {
+		Recovery  *Recovery `json:"recovery,omitempty"`
 		Location  *Location `json:"location,omitempty"`
 		Stage     Stage     `json:"stage"`
 		Code      Code      `json:"code"`
 		Path      string    `json:"path,omitempty"`
 		Message   string    `json:"message"`
+		Cause     string    `json:"cause,omitempty"`
 		Consumers []string  `json:"consumers,omitempty"`
 	}
 
@@ -161,8 +166,9 @@ type (
 		Platform string `json:"platform"`
 	}
 
-	// Report is the complete result of a build or check, or the structured error of any command.
+	// Report is the complete captured result of a build or check. Command errors use CommandError.
 	Report struct {
+		AttemptID     string       `json:"attempt_id"`
 		Producer      *Producer    `json:"producer,omitempty"`
 		Counts        Counts       `json:"counts"`
 		Kind          string       `json:"kind"`
@@ -175,13 +181,13 @@ type (
 		Sources       []Source     `json:"sources"`
 		Fonts         []Font       `json:"fonts"`
 		Styles        []Style      `json:"styles"`
-		ReportVersion int          `json:"report_version"`
+		FormatVersion int          `json:"format_version"`
 	}
 )
 
 const (
-	// Version is the report format version this package reads and writes.
-	Version = 1
+	// Version is the shared public JSON format version for responses and complete reports.
+	Version = 2
 
 	// KindReport marks a complete report.
 	KindReport = "report"

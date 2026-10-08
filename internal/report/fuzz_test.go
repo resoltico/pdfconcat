@@ -5,7 +5,6 @@ package report_test
 
 import (
 	"bytes"
-	"context"
 	"regexp"
 	"strings"
 	"testing"
@@ -53,14 +52,18 @@ func checkAcceptedReport(t *testing.T, compiled *jsonschema.Schema, decoded *rep
 		t.Fatalf("schema %s for an accepted report:\n%s", got, out.String())
 	}
 
-	again, err := report.Decode(context.Background(), "again.json", bytes.NewReader(out.Bytes()))
+	again, err := report.Decode(
+		report.DecoderTestContext(t.Context(), t),
+		"again.json",
+		report.ReaderRequiringStorage(bytes.NewReader(out.Bytes())),
+	)
 	if err != nil || encodeReport(t, again) != out.String() {
 		t.Fatalf("re-decoding changed the report: %v", err)
 	}
 }
 
 // FuzzDecodeReport feeds arbitrary bytes to the untrusted-file decoder. It must neither panic nor hang
-// nor allocate beyond the limits, must reject with a coded diagnostic, and whatever it accepts must
+// while enforcing byte, nesting and node limits; it must reject with a coded diagnostic, and whatever it accepts must
 // re-encode into a document that the schema validator and the decoder both accept again.
 func FuzzDecodeReport(f *testing.F) {
 	compiled := reportSchema(f)
@@ -78,7 +81,12 @@ func FuzzDecodeReport(f *testing.F) {
 	limits := report.Limits{MaxBytes: 1 << 20, MaxNesting: report.MaxNesting, MaxNodes: 20_000}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		decoded, err := report.DecodeLimited(context.Background(), "fuzz.json", bytes.NewReader(data), limits)
+		decoded, err := report.DecodeLimited(
+			report.DecoderTestContext(t.Context(), t),
+			"fuzz.json",
+			report.ReaderRequiringStorage(bytes.NewReader(data)),
+			limits,
+		)
 		if err != nil {
 			checkRejection(t, err, name)
 
@@ -93,7 +101,7 @@ func FuzzDecodeReport(f *testing.F) {
 func fuzzRequest(mode uint8, id string, page, offset, limit int64, which uint8, details bool) report.Request {
 	req := report.Request{Details: details}
 
-	switch mode % 4 {
+	switch mode % 5 {
 	case 0:
 		req.Part = &id
 	case 1:
@@ -101,38 +109,65 @@ func fuzzRequest(mode uint8, id string, page, offset, limit int64, which uint8, 
 	case 2:
 		req.View = []string{report.ViewParts, report.ViewDiagnostics, id}[int(which/3)%3]
 		req.Offset, req.Limit = &offset, &limit
-	default:
+	case 3:
 		req.Part, req.Offset = &id, &offset
+	default:
+		return req // Summary has no selection or paging operands.
 	}
 
 	return req
 }
 
-// checkResponse requires a response to encode, render, and, for a paged view, to stay within the bound.
-func checkResponse(t *testing.T, response report.Response, req *report.Request) {
+// checkResponse checks both actual transport codecs, including the query envelope and JSON newline.
+func checkResponse(t *testing.T, saved *report.Report, response report.Response, req *report.Request, compiled *jsonschema.Schema) {
 	t.Helper()
 
-	data, err := report.Encode(response)
+	query := report.QueryResultOf(saved, response, programName, fixtureReportPath)
+
+	data, err := report.Encode(query)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var text bytes.Buffer
-
-	err = response.RenderText(&text)
-	if err != nil {
+	if err = query.RenderText(&text); err != nil {
 		t.Fatal(err)
 	}
 
-	oversized := bytes.Contains(data, []byte(`"oversized_record":true`)) && bytes.Contains(data, []byte(`"returned":1`))
-	if len(data) > report.MaxResponseBytes && !oversized && req.View != "" {
-		t.Fatalf("a paged response is %d bytes", len(data))
+	if schemaVerdict(t, compiled, data) != schemaAccept {
+		t.Fatal("actual query response violates schema")
 	}
+
+	limit := 128 << 10
+	if req.Part == nil && req.Page == nil && req.View == "" {
+		limit = 2048
+	}
+
+	oversized := oversizedQueryRecord(query.Result)
+
+	wireBytes := len(data) + 1
+	if (wireBytes > limit || text.Len() > limit) && !oversized && (req.View != "" || limit == 2048) {
+		t.Fatalf("query transport exceeds %d bytes: JSON%d text%d", limit, len(data)+1, text.Len())
+	}
+}
+
+// oversizedQueryRecord recognizes only the producer's one-record page exception.
+func oversizedQueryRecord(response report.Response) bool {
+	if view, ok := report.ContentOf[report.ViewResponse[report.PartView]](response); ok {
+		return view.OversizedRecord && view.Returned == 1 && len(view.Records) == 1
+	}
+
+	if view, ok := report.ContentOf[report.ViewResponse[report.DiagnosticView]](response); ok {
+		return view.OversizedRecord && view.Returned == 1 && len(view.Records) == 1
+	}
+
+	return false
 }
 
 // FuzzQuery runs arbitrary requests against fixed valid reports. Every request must either fail with a
 // usage error or return a bounded, encodable response; paging by next_offset must terminate.
 func FuzzQuery(f *testing.F) {
+	compiled := compileSchema(f, report.ResponseSchema(), responseSchemaURL)
 	reports := []*report.Report{mustDecode(f, completeCheck), mustDecode(f, failedCheck), mustDecode(f, richFailure)}
 	reports[1].Diagnostics[0].Message = strings.Repeat("long ", 40_000)
 
@@ -141,6 +176,7 @@ func FuzzQuery(f *testing.F) {
 	f.Add(uint8(2), "", int64(0), int64(0), int64(1), uint8(1), true)
 	f.Add(uint8(2), "", int64(0), int64(-1), int64(101), uint8(2), false)
 	f.Add(uint8(3), firstArgvID, int64(1), int64(5), int64(5), uint8(1), true)
+	f.Add(uint8(4), "", int64(0), int64(0), int64(0), uint8(0), false)
 
 	f.Fuzz(func(t *testing.T, mode uint8, id string, page, offset, limit int64, which uint8, details bool) {
 		saved := reports[int(which)%len(reports)]
@@ -156,7 +192,7 @@ func FuzzQuery(f *testing.F) {
 			return
 		}
 
-		checkResponse(t, response, &req)
+		checkResponse(t, saved, response, &req, compiled)
 
 		if req.View != "" {
 			walkTerminates(t, saved, &req)

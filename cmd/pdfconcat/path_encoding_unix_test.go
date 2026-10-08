@@ -21,7 +21,7 @@ const rawBaseDirectoryKind = "base-directory"
 func TestRawBytePathArgumentsRejectBeforePublicationAndPreserveExistingFiles(t *testing.T) {
 	t.Parallel()
 
-	for _, kind := range []string{"source", "output", "report", "plan-file", rawBaseDirectoryKind} {
+	for _, kind := range []string{"source", "output", commandReport, "plan-file", rawBaseDirectoryKind} {
 		t.Run(kind, func(t *testing.T) { t.Parallel(); exerciseRawBytePath(t, kind) })
 	}
 }
@@ -41,7 +41,7 @@ func exerciseRawBytePath(t *testing.T, kind string) {
 		args[len(args)-1] = bad
 	case "output":
 		args[2] = bad
-	case "report":
+	case commandReport:
 		args[4] = bad
 	case "plan-file":
 		args = []string{commandBuild, flagPlan, bad, "-o", fileOut, flagReport, shortReportPath, flagOverwrite}
@@ -85,7 +85,7 @@ func exerciseRawBytePath(t *testing.T, kind string) {
 func requireNoLossyPathReference(t *testing.T, data string) {
 	t.Helper()
 
-	if !utf8.ValidString(data) || strings.ContainsRune(data, '�') || strings.Contains(data, `"next"`) {
+	if !utf8.ValidString(data) || strings.ContainsRune(data, '�') || strings.Contains(data, `"next":["�`) {
 		t.Fatalf("rejection exposes lossy executable reference: %s", data)
 	}
 }

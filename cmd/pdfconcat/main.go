@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -47,9 +48,12 @@ func run() int {
 		workingDir = "" // the command reports the missing working directory when it needs one
 	}
 
+	executable := usableExecutable(os.Executable())
+
 	info, _ := debug.ReadBuildInfo()
 
 	env := app.Env{
+		Executable: executable,
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
@@ -76,4 +80,13 @@ func progressStream() io.Writer {
 	}
 
 	return nil
+}
+
+// usableExecutable rejects a path returned alongside an error; it may be relative or incomplete.
+func usableExecutable(path string, err error) string {
+	if err != nil || !utf8.ValidString(path) {
+		return ""
+	}
+
+	return path
 }

@@ -172,7 +172,7 @@ func checkExistingDestination(destination string, info os.FileInfo, existing exi
 	case !info.Mode().IsRegular():
 		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "is not a regular file"}
 	case existing == refuseExisting:
-		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "already exists; use --overwrite to replace it"}
+		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "already exists; choose an unused target"}
 	default:
 		return nil
 	}

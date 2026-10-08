@@ -109,7 +109,7 @@ func TestSignalDuringBlockedStandardInput(t *testing.T) {
 		dir := tempDir(t)
 		writePDFs(t, dir, 1, "a")
 
-		command := start(t, dir, commandBuild, flagPlan, "-", "-o", fileOut)
+		command := start(t, dir, commandBuild, flagPlan, "-", "-o", fileOut, flagReport, shortReportPath)
 
 		// A plan that is never finished, on a pipe that is never closed.
 		pipe, err := command.StdinPipe()
@@ -127,6 +127,8 @@ func TestSignalDuringBlockedStandardInput(t *testing.T) {
 		if parsed.Status != statusInterrupted || parsed.Diagnostics[0].Code != statusInterrupted {
 			t.Errorf("%v: %+v", signal, parsed)
 		}
+
+		requireSavedAttempt(t, dir, shortReportPath, contractObject(t, res.stdout), statusInterrupted)
 
 		requireAbsent(t, filepath.Join(dir, fileOut))
 		requireNoScratch(t, dir)
@@ -186,7 +188,7 @@ func TestSignalDuringCaptureOfALargeSource(t *testing.T) {
 	// A sparse file: cheap to create, but copying it takes long enough to be interrupted in the middle.
 	writeSparseFile(t, filepath.Join(dir, "huge.pdf"), 768<<20)
 
-	command := start(t, dir, commandCheck, fileA, "huge.pdf")
+	command := start(t, dir, commandCheck, fileA, "huge.pdf", flagReport, shortReportPath)
 	scratch := tempOf(command)
 
 	res := interrupted(t, command, os.Interrupt, func() bool { return scratchBytes(scratch) > 4<<20 })
@@ -197,6 +199,8 @@ func TestSignalDuringCaptureOfALargeSource(t *testing.T) {
 	if parsed.Status != statusInterrupted {
 		t.Errorf(summaryFailureFormat, parsed)
 	}
+
+	requireSavedAttempt(t, dir, shortReportPath, contractObject(t, res.stdout), statusInterrupted)
 
 	requireNoScratch(t, scratch)
 }
@@ -254,6 +258,13 @@ func TestBrokenStandardOutputAfterPublication(t *testing.T) {
 		t.Errorf("committed state: %v", state)
 	}
 
+	saved := contractObject(t, string(readFile(t, filepath.Join(dir, shortReportPath))))
+	if textAt(t, state, keyAttemptID) != textAt(t, saved, keyAttemptID) {
+		t.Fatal("committed state lost published attempt identity")
+	}
+
+	validateContract(t, schemaFromExecutable(t, dir, responseSchemaName), stderr.String())
+
 	if stderr.Len() > 2048 {
 		t.Errorf("committed state is %d bytes", stderr.Len())
 	}
@@ -266,7 +277,9 @@ func TestBrokenStreamsDoNotPanic(t *testing.T) {
 
 	dir := tempDir(t)
 
-	for _, args := range [][]string{{commandVersion}, {commandHelp}, {"schema", planSchemaName}, {commandCheck, fileMissing}, {"bogus"}} {
+	for _, args := range [][]string{
+		{commandVersion}, {commandHelp}, {commandSchema, planSchemaName}, {commandCheck, fileMissing}, {"bogus"},
+	} {
 		out, outWriter, err := os.Pipe()
 		ensure(t, err)
 		ensure(t, out.Close())

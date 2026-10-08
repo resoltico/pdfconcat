@@ -33,7 +33,7 @@ func TestRefreshPermissionFailurePreservesPlannedCompleteRecoveryAndPDF(t *testi
 
 		makeReadOnly(t, reports)
 	})
-	res := execute(t.Context(), t, runner, dir, commandBuild, outputFlag, outputFile, reportFlag, target, "--overwrite", sourceA)
+	res := execute(t.Context(), t, runner, dir, commandBuild, outputFlag, outputFile, reportFlag, target, overwriteFlag, sourceA)
 	parsed := res.requireCode(t, 1, reportPublishFailureCode)
 
 	var summary report.Summary

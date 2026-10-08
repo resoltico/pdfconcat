@@ -48,7 +48,7 @@ type (
 		decoder *jsontext.Decoder
 		shapes  map[string]shape
 		pending *Error // first shape fault; reported unless the version or kind says the file is not ours
-		version string // the top-level report_version token, "" when absent
+		version string // the top-level format_version token, "" when absent
 		kind    string // the top-level kind string, when it is one
 		name    string
 		stack   []frame
@@ -59,6 +59,8 @@ type (
 )
 
 const (
+	memberCommand   = "command"
+	memberRecovery  = "recovery"
 	memberProducer  = "producer"
 	memberBounds    = "bounds"
 	memberInkBounds = "ink_bounds"
@@ -67,7 +69,7 @@ const (
 	readChunk       = 64 << 10
 	cancelInterval  = 0xFFF
 	kindSeparators  = " \t\r\n,:"
-	versionMember   = "report_version"
+	versionMember   = "format_version"
 	kindMember      = "kind"
 	maxRequiredBits = 32
 
@@ -337,9 +339,23 @@ func (s *scan) finish(data []byte) error {
 	}
 
 	switch {
+	case s.version == "":
+		return invalid(
+			StageShape,
+			CodeUnsupportedVersion,
+			&Location{File: s.name},
+			"A complete format_version 2 report is required. Preserve historical JSON; use a fresh check with "+
+				"the current job and a NEW report target.",
+		)
 	case s.version != "" && s.version != strconv.Itoa(Version):
-		return s.locate(data, "/"+versionMember, invalid(StageShape, CodeUnsupportedVersion, nil,
-			"this build reads report_version %d only; the file says %s", Version, s.version))
+		return s.locate(data, "/"+versionMember, invalid(
+			StageShape,
+			CodeUnsupportedVersion,
+			nil,
+			"This build reads format_version %d only. Preserve historical JSON; use a fresh check with "+
+				"the current job and a NEW report target.",
+			Version,
+		))
 	case s.kind != "" && s.kind != KindReport:
 		return s.locate(data, "/"+kindMember, invalid(StageShape, CodeWrongKind, nil,
 			"expected a complete report (kind %q), not a %s; save the full report with --report and query that", KindReport, s.kind))
@@ -481,14 +497,15 @@ func (s *scan) valueDone() {
 	}
 }
 
+// nullValue handles null values inside an open container; token rejects scalar roots before calling it.
 func (s *scan) nullValue(data []byte, offset int64) {
 	top := s.top()
 	// Unknown containers are diagnosed by typed decoding at their ancestor member.
-	if top != nil && top.shape == nil && !top.isArray {
+	if top.shape == nil && !top.isArray {
 		return
 	}
 
-	allowed := top != nil && !top.isArray && top.shape != nil && slices.Contains(top.shape.nullable, top.member)
+	allowed := !top.isArray && slices.Contains(top.shape.nullable, top.member)
 	if !allowed && s.pending == nil {
 		s.pending = s.failAt(data, StageShape, CodeNull, offset, string(s.decoder.StackPointer()), nil,
 			"null is not allowed here; omit optional members instead")
@@ -518,7 +535,7 @@ func shapes() map[string]shape {
 	return map[string]shape{
 		KindReport: {
 			required: []string{
-				versionMember, kindMember, "status", "command", memberPhases, memberCounts, memberPublication,
+				versionMember, "attempt_id", kindMember, "status", memberCommand, memberPhases, memberCounts, memberPublication,
 				ViewDiagnostics, ViewParts, "sources", "fonts", "styles",
 			},
 			children: map[string]string{
@@ -542,8 +559,9 @@ func shapes() map[string]shape {
 		memberPublication: {required: []string{"report_status", "published"}},
 		"diagnostic": {
 			required: []string{"stage", "code", "message"},
-			children: map[string]string{memberLocation: memberLocation, "consumers": "[string]"},
+			children: map[string]string{memberLocation: memberLocation, memberRecovery: memberRecovery, "consumers": "[string]"},
 		},
+		memberRecovery: {required: []string{"action", memberCommand}, children: map[string]string{memberLocation: memberLocation}},
 		memberLocation: {required: []string{"file"}},
 		"part": {
 			required: []string{"id", "kind", memberOrigin, memberRange, "pages"},

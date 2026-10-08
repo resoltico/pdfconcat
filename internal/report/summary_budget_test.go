@@ -52,7 +52,7 @@ func TestSummaryBoundsEveryVariablePreviewAndPreservesDetail(t *testing.T) {
 
 		checkUnchangedDetail(t, full, text)
 
-		if len(brief.Next) > 0 {
+		if len(nextArguments(brief.Next)) > 0 {
 			t.Fatal("truncated path exposed as exact next argv")
 		}
 	}
@@ -69,7 +69,7 @@ func checkUnchangedDetail(t *testing.T, full *report.Report, text string) {
 func TestSummaryKeepsLosslessRecoveryReferenceAndOmitsLongNextCommand(t *testing.T) {
 	t.Parallel()
 
-	directory := "/" + strings.Repeat("a/", 400)
+	directory := "/" + strings.Repeat("a/", 1200)
 	failed := mustDecode(t, richFailure)
 	failed.Publication.Output = directory + "output.pdf"
 	failed.Publication.ReportPath = directory + "report.json"
@@ -86,7 +86,9 @@ func TestSummaryKeepsLosslessRecoveryReferenceAndOmitsLongNextCommand(t *testing
 	success.Publication.ReportPath = directory + "report.json"
 
 	brief = success.Summary()
-	if len(brief.Next) != 0 || !brief.NextOmitted {
+	brief.BindContinuation(programName, success.Publication.ReportPath, originalReportReference)
+
+	if len(nextArguments(brief.Next)) != 0 || !brief.NextOmitted {
 		t.Fatalf("long argv should be omitted: %+v", brief)
 	}
 
@@ -101,13 +103,17 @@ func TestSummaryKeepsLosslessRecoveryReferenceAndOmitsLongNextCommand(t *testing
 func TestSummaryHumanRecoveryAndTruncationReferencesFitBudget(t *testing.T) {
 	t.Parallel()
 	saved := mustDecode(t, richFailure)
-	directory := "/" + strings.Repeat("a/", 400)
+	directory := "/" + strings.Repeat("a/", 1200)
 	saved.Publication.Output = directory + "output.pdf"
 	saved.Publication.ReportPath = directory + "report.json"
 	saved.Publication.RecoveryReport = directory + ".pdfconcat-report-123"
 
 	var output strings.Builder
-	if err := saved.Summary().RenderText(&output); err != nil {
+
+	brief := saved.Summary()
+	brief.BindContinuation(programName, saved.Publication.ReportPath, originalReportReference)
+
+	if err := brief.RenderText(&output); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +128,10 @@ func TestSummaryHumanRecoveryAndTruncationReferencesFitBudget(t *testing.T) {
 
 	output.Reset()
 
-	if err := saved.Summary().RenderText(&output); err != nil {
+	brief = saved.Summary()
+	brief.BindContinuation(programName, saved.Publication.ReportPath, originalReportReference)
+
+	if err := brief.RenderText(&output); err != nil {
 		t.Fatal(err)
 	}
 

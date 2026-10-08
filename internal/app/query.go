@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/cli"
@@ -34,7 +35,7 @@ func runQuery(ctx context.Context, command *cli.Command, env Env) int {
 			)
 		}
 
-		return readFailure(env, command, path, "cannot open the saved report: "+err.Error(), err)
+		return readFailure(env, command, path, "cannot open the saved report: "+reasonOf(err), err)
 	}
 
 	saved, err := report.Decode(ctx, path, file)
@@ -44,12 +45,28 @@ func runQuery(ctx context.Context, command *cli.Command, env Env) int {
 		return queryFailure(env, command, err)
 	}
 
+	if command.ExpectAttempt != "" && command.ExpectAttempt != saved.AttemptID {
+		return emitError(
+			env,
+			command.Format,
+			string(command.Name),
+			report.StatusInvalid,
+			report.Diagnostic{
+				Stage:    report.StageRead,
+				Code:     "report_attempt_mismatch",
+				Location: argumentLocation(env, "--expect-attempt"),
+				Message:  "The saved report belongs to a different attempt; use the report for the expected attempt.",
+				Recovery: &report.Recovery{Action: "inspect_report", ReportFrom: "original_argv.report_operand"},
+			},
+		)
+	}
+
 	response, err := saved.Query(requestOf(command))
 	if err != nil {
 		return queryFailure(env, command, err)
 	}
 
-	err = writeResponse(env.Stdout, command.Format, response)
+	err = writeResponse(env.Stdout, command.Format, report.NewResponse(report.QueryResultOf(saved, response, env.Executable, path)))
 	if err != nil {
 		return stdoutFailed(env, err)
 	}
@@ -73,7 +90,12 @@ func readFailure(env Env, command *cli.Command, path, message string, err error)
 // queryFailure prints a decoding or query failure with the status the report package assigns it.
 func queryFailure(env Env, command *cli.Command, err error) int {
 	if reportErr, ok := report.AsError(err); ok {
-		return emitError(env, command.Format, string(command.Name), reportErr.Status(), reportErr.Diagnostic)
+		diagnostic := reportErr.Diagnostic
+		if diagnostic.Code == report.CodeUnsupportedVersion {
+			diagnostic.Recovery = &report.Recovery{Action: "choose_new_report", ReportFrom: "unused_report_target"}
+		}
+
+		return emitError(env, command.Format, string(command.Name), reportErr.Status(), diagnostic)
 	}
 
 	found := classify(stageInput, err)
@@ -102,4 +124,14 @@ func requestOf(command *cli.Command) report.Request {
 	}
 
 	return request
+}
+
+func argumentLocation(env Env, option string) *report.Location {
+	for index, argument := range env.Arguments {
+		if argument == option || strings.HasPrefix(argument, option+"=") {
+			return &report.Location{File: "argv", ArgvIndex: &index}
+		}
+	}
+
+	return nil
 }

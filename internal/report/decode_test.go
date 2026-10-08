@@ -205,7 +205,12 @@ func TestLimits(t *testing.T) {
 	}
 
 	decode := func(doc string, limits report.Limits) error {
-		_, err := report.DecodeLimited(context.Background(), savedReport, strings.NewReader(doc), limits)
+		_, err := report.DecodeLimited(
+			report.DecoderTestContext(t.Context(), t),
+			savedReport,
+			report.ReaderRequiringStorage(strings.NewReader(doc)),
+			limits,
+		)
 
 		return err
 	}
@@ -221,7 +226,13 @@ func TestLimits(t *testing.T) {
 	}
 
 	nest := func(depth int) string {
-		return `{"report_version":1,"kind":"report","x":` + strings.Repeat("[", depth-1) + strings.Repeat("]", depth-1) + `}`
+		return `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","x":` + strings.Repeat(
+			"[",
+			depth-1,
+		) + strings.Repeat(
+			"]",
+			depth-1,
+		) + `}`
 	}
 
 	if code := errorCode(decode(nest(64), report.DefaultLimits())); code == report.CodeLimitDepth {
@@ -240,7 +251,7 @@ func TestLimits(t *testing.T) {
 func TestReadFailuresAndInterruption(t *testing.T) {
 	t.Parallel()
 
-	_, err := report.Decode(context.Background(), savedReport, iotest.ErrReader(io.ErrClosedPipe))
+	_, err := report.Decode(report.DecoderTestContext(t.Context(), t), savedReport, iotest.ErrReader(io.ErrClosedPipe))
 
 	found, _ := report.AsError(err)
 	if found.Diagnostic.Code != report.CodeReadFailed || found.Status() != report.StatusFailed || !errors.Is(err, io.ErrClosedPipe) {

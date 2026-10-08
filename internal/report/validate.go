@@ -27,6 +27,7 @@ type (
 )
 
 const (
+	pointerReportWrite = "/publication/report_write"
 	pointerStatus      = "/status"
 	pointerDiagnostics = "/diagnostics"
 	pointerCounts      = "/counts"
@@ -45,11 +46,17 @@ const (
 
 // Name patterns shared with the schema.
 var (
-	namePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-	commandPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-	idPattern      = regexp.MustCompile(`^(argv:(0|[1-9]\d*)|(/items/(0|[1-9]\d*))+)$`)
-	colorPattern   = regexp.MustCompile(`^#[0-9a-f]{6}$`)
-	digestPattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	namePattern              = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	commandPattern           = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	idPattern                = regexp.MustCompile(`^(argv:(0|[1-9]\d*)|(/items/(0|[1-9]\d*))+)$`)
+	colorPattern             = regexp.MustCompile(`^#[0-9a-f]{6}$`)
+	digestPattern            = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	attemptPattern           = regexp.MustCompile(`^[A-Z2-7]{26}$`)
+	recoveryCommandPattern   = regexp.MustCompile(`^(|build|check|report|schema|version|help)$`)
+	replacementPattern       = regexp.MustCompile(`^(|--[a-z][a-z0-9-]{0,62}|-[a-zA-Z])$`)
+	locationReferencePattern = regexp.MustCompile(
+		`^(|original_argv|original_argv\.report_operand|complete_report\.diagnostics/[0-9]{1,7}/recovery/location)$`,
+	)
 )
 
 func newFault(pointer string, code Code, message string) *fault {
@@ -102,8 +109,12 @@ func (v *validator) run() *fault {
 		return found
 	}
 
-	if r.ReportVersion != Version {
-		return newFault("/report_version", CodeUnsupportedVersion, "report_version must be "+strconv.Itoa(Version))
+	if !attemptPattern.MatchString(r.AttemptID) {
+		return newFault("/attempt_id", CodeInvalidValue, "attempt_id must be a 26-character base32 opaque identity")
+	}
+
+	if r.FormatVersion != Version {
+		return newFault("/format_version", CodeUnsupportedVersion, "format_version must be "+strconv.Itoa(Version))
 	}
 
 	if r.Kind != KindReport {
@@ -251,6 +262,18 @@ func validWriteState(state WriteState) bool {
 
 func (v *validator) publication() *fault {
 	pub := v.report.Publication
+	if found := unresolvedReportFault(pub); found != nil {
+		return found
+	}
+
+	if found := requestedReportPathFault(pub); found != nil {
+		return found
+	}
+
+	if found := reportWriteFault(pub); found != nil {
+		return found
+	}
+
 	if found := recoveryStateFault(&pub); found != nil {
 		return found
 	}
@@ -262,8 +285,6 @@ func (v *validator) publication() *fault {
 		return newFault("/publication/output", CodeInvalidValue, "a published output needs its path")
 	case pub.ReportStatus == ReportNotRequested && pub.ReportPath != "":
 		return newFault("/publication/report_path", CodeInvalidValue, "report_path needs a requested report")
-	case pub.ReportStatus != ReportNotRequested && pub.ReportPath == "":
-		return newFault("/publication/report_path", CodeInvalidValue, "a requested report needs its path")
 	default:
 		return recoveryRelationship(pub)
 	}
@@ -283,19 +304,25 @@ func recoveryRelationship(pub Publication) *fault {
 
 func (v *validator) diagnostics() *fault {
 	for index := range v.report.Diagnostics {
-		d := &v.report.Diagnostics[index]
+		diagnostic := &v.report.Diagnostics[index]
 
 		switch {
-		case !namePattern.MatchString(string(d.Stage)):
+		case !namePattern.MatchString(string(diagnostic.Stage)):
 			return newFault(at(pointerDiagnostics, index, "/stage"), CodeInvalidValue, "stage must be lower-case snake_case")
-		case !namePattern.MatchString(string(d.Code)):
+		case !namePattern.MatchString(string(diagnostic.Code)):
 			return newFault(at(pointerDiagnostics, index, "/code"), CodeInvalidValue, "code must be lower-case snake_case")
-		case d.Message == "":
+		case diagnostic.Message == "":
 			return newFault(at(pointerDiagnostics, index, "/message"), CodeInvalidValue, "a diagnostic needs an actionable message")
 		}
 
-		if d.Location != nil {
-			if found := locationFault(at(pointerDiagnostics, index, "/location"), d.Location); found != nil {
+		if diagnostic.Recovery != nil {
+			if found := recoveryFault(at(pointerDiagnostics, index, "/recovery"), diagnostic.Recovery); found != nil {
+				return found
+			}
+		}
+
+		if diagnostic.Location != nil {
+			if found := locationFault(at(pointerDiagnostics, index, "/location"), diagnostic.Location); found != nil {
 				return found
 			}
 		}
@@ -700,6 +727,109 @@ func (v *validator) consumerLinks() *fault {
 
 			seen[id] = true
 		}
+	}
+
+	return nil
+}
+
+func recoveryFault(pointer string, recovery *Recovery) *fault {
+	if found := recoveryReferencesFault(pointer, recovery); found != nil {
+		return found
+	}
+
+	valid := false
+
+	switch recovery.Action {
+	case "open_help":
+		valid = true
+	case "edit_input":
+		valid = recovery.Location != nil || recovery.LocationFrom != ""
+	case recoveryChooseNewReport, "inspect_report":
+		valid = recovery.ReportFrom != ""
+	case "recover_report":
+		valid = recovery.ReportFrom != "" && recovery.RecoveryFrom != ""
+	default:
+	}
+
+	if !valid {
+		return newFault(pointer, CodeInvalidValue, "recovery needs a supported action and its required reference")
+	}
+
+	if recovery.Location != nil {
+		return locationFault(pointer+"/location", recovery.Location)
+	}
+
+	return nil
+}
+
+func reportWriteFault(pub Publication) *fault {
+	switch {
+	case pub.ReportWrite != "" && pub.ReportWrite != "written" && pub.ReportWrite != attemptNotWritten:
+		return newFault(pointerReportWrite, CodeInvalidValue, "report_write must be written or not_written")
+	case pub.ReportTargetObservation != "" && pub.ReportTargetObservation != unknownMetadataValue &&
+		pub.ReportTargetObservation != "absent_when_observed":
+		return newFault(
+			"/publication/report_target_observation",
+			CodeInvalidValue,
+			"report_target_observation must be unknown or absent_when_observed",
+		)
+	case pub.ReportWrite == "written" && pub.ReportStatus != ReportWritten:
+		return newFault(pointerReportWrite, CodeInvalidValue, "written needs successful report publication")
+	case pub.ReportWrite == attemptNotWritten && pub.ReportStatus == ReportWritten:
+		return newFault(pointerReportWrite, CodeInvalidValue, "not_written excludes successful report publication")
+	default:
+		return nil
+	}
+}
+
+func recoveryReferencesFault(pointer string, recovery *Recovery) *fault {
+	switch {
+	case !recoveryCommandPattern.MatchString(recovery.Command):
+		return newFault(pointer+"/command", CodeInvalidValue, "recovery command must be a supported command or empty for root help")
+	case !replacementPattern.MatchString(recovery.Replacement):
+		return newFault(pointer+"/replacement", CodeInvalidValue, "replacement must be a bounded option spelling")
+	case !locationReferencePattern.MatchString(recovery.LocationFrom):
+		return newFault(
+			pointer+"/location_from",
+			CodeInvalidValue,
+			"location_from must reference original argv or a complete report recovery location",
+		)
+	case recovery.ReportFrom != "" && recovery.ReportFrom != jobReportReference &&
+		recovery.ReportFrom != queryReportReference && recovery.ReportFrom != "unused_report_target":
+		return newFault(
+			pointer+"/report_from",
+			CodeInvalidValue,
+			"report_from must identify the original report argument or an unused target",
+		)
+	case recovery.RecoveryFrom != "" && recovery.RecoveryFrom != "publication.recovery_report":
+		return newFault(pointer+"/recovery_from", CodeInvalidValue, "recovery_from must identify publication.recovery_report")
+	default:
+		return nil
+	}
+}
+
+func unresolvedReportFault(pub Publication) *fault {
+	if pub.ReportFrom == "" {
+		return nil
+	}
+
+	if pub.ReportFrom != jobReportReference || pub.ReportPath != "" || pub.ReportStatus != ReportFailed ||
+		pub.ReportWrite != attemptNotWritten || pub.ReportTargetObservation != unknownMetadataValue {
+		return newFault("/publication/report_from", CodeInvalidValue,
+			"report_from is only original_argv.--report for an unresolved, failed report target that was not written and remains unknown")
+	}
+
+	return nil
+}
+
+func requestedReportPathFault(pub Publication) *fault {
+	if pub.ReportStatus != ReportWritten && pub.ReportStatus != ReportFailed {
+		return nil
+	}
+
+	if pub.ReportPath == "" && pub.ReportFrom == "" {
+		return newFault("/publication/report_path", CodeInvalidValue,
+			"a requested report needs its path or an unresolved invocation reference")
 	}
 
 	return nil

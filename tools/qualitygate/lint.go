@@ -19,7 +19,10 @@ import (
 )
 
 // exitIssuesFound is golangci-lint's exit status when it ran and reported issues.
-const exitIssuesFound = 1
+const (
+	exitIssuesFound      = 1
+	toolVersionsFileName = "tools/versions.env"
+)
 
 // lintConfig verifies .golangci.yml against the registry and the pinned golangci-lint binary.
 func lintConfig(ctx context.Context, args []string) error {
@@ -34,6 +37,10 @@ func lintConfig(ctx context.Context, args []string) error {
 	root, err := repoRoot()
 	if err != nil {
 		return err
+	}
+
+	if limitErr := sourceLimits(root); limitErr != nil {
+		return limitErr
 	}
 
 	registry, err := repopolicy.LoadRegistry(filepath.Join(root, registryName))
@@ -85,26 +92,22 @@ func checkBinary(ctx context.Context, root, binary string, registry *repopolicy.
 		return nil, err
 	}
 
-	version, err := (&command{dir: root, name: binary, args: []string{versionVerb, "--short"}}).output(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("golangci-lint version: %w", err)
-	}
-
-	identity, identityErr := repopolicy.GolangciBuildIdentity(versions)
-	if identityErr != nil {
+	if identityErr := checkLinterIdentity(ctx, root, binary, versions); identityErr != nil {
 		return nil, identityErr
 	}
 
-	if want := identity.Version; strings.TrimSpace(version) != want {
-		problems = append(problems, fmt.Sprintf("golangci-lint is %s but tools/versions.env pins %s", strings.TrimSpace(version), want))
-	}
-
-	_, err = (&command{dir: root, name: binary, args: []string{"config", "verify"}}).output(ctx)
+	_, err = (&command{
+		dir: root, name: binary,
+		args: []string{"config", "verify", configFlag, filepath.Join(root, lintConfigFileName)},
+	}).output(ctx)
 	if err != nil {
 		problems = append(problems, "golangci-lint config verify failed: "+err.Error())
 	}
 
-	listing, err := (&command{dir: root, name: binary, args: []string{"linters", "--json"}}).output(ctx)
+	listing, err := (&command{
+		dir: root, name: binary,
+		args: []string{"linters", "--json", configFlag, filepath.Join(root, lintConfigFileName)},
+	}).output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("golangci-lint linters: %w", err)
 	}
@@ -136,8 +139,36 @@ func checkBinary(ctx context.Context, root, binary string, registry *repopolicy.
 	return append(append(problems, controls...), positionProblems...), nil
 }
 
+// checkLinterIdentity verifies the selected command's native source variant before running controls.
+func checkLinterIdentity(ctx context.Context, root, binary string, versions map[string]string) error {
+	if metadataErr := repopolicy.VerifyGolangciBinaryMetadata(binary); metadataErr != nil {
+		return metadataErr
+	}
+
+	identity, identityErr := repopolicy.GolangciBuildIdentity(versions)
+	if identityErr != nil {
+		return identityErr
+	}
+
+	patch, patchErr := readInRoot(root, "tools/lint-patches/golangci-lint-physical-source.patch")
+	if patchErr != nil {
+		return patchErr
+	}
+
+	if verifyErr := repopolicy.VerifyGolangciPatch(patch, versions); verifyErr != nil {
+		return verifyErr
+	}
+
+	version, err := (&command{dir: root, name: binary, args: []string{versionVerb, "--json"}}).output(ctx)
+	if err != nil {
+		return fmt.Errorf("golangci-lint version: %w", err)
+	}
+
+	return repopolicy.VerifyGolangciReportedIdentity([]byte(version), identity)
+}
+
 func readToolVersions(root string) (map[string]string, error) {
-	content, err := readInRoot(root, "tools/versions.env")
+	content, err := readInRoot(root, toolVersionsFileName)
 	if err != nil {
 		return nil, err
 	}
@@ -162,6 +193,10 @@ func lintStale(ctx context.Context, args []string) error {
 	root, err := repoRoot()
 	if err != nil {
 		return err
+	}
+
+	if limitErr := sourceLimits(root); limitErr != nil {
+		return limitErr
 	}
 
 	registry, err := repopolicy.LoadRegistry(filepath.Join(root, registryName))
@@ -261,6 +296,7 @@ func runUnexcludedLint(ctx context.Context, root, binary, configFile, reportFile
 		args: append([]string{
 			runVerb,
 			serialLintRunners,
+			lintNoFixFlag,
 			configFlag,
 			configFile,
 			"--path-mode=abs",

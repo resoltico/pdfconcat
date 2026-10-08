@@ -4,12 +4,17 @@
 package app_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/app"
+	"github.com/resoltico/pdfconcat/internal/cli"
+	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 type (
@@ -47,14 +52,16 @@ func queryAnswer(tb testing.TB, dir string, args ...string) answer {
 		tb.Fatalf(exitFailureFormat, res.code, res.stdout)
 	}
 
-	var parsed answer
+	var envelope struct {
+		Result answer `json:"result"`
+	}
 
-	err := json.Unmarshal([]byte(res.stdout), &parsed)
+	err := json.Unmarshal([]byte(res.stdout), &envelope)
 	if err != nil {
 		tb.Fatal(err)
 	}
 
-	return parsed
+	return envelope.Result
 }
 
 func TestReportQueriesHonorEverySelector(t *testing.T) {
@@ -120,5 +127,33 @@ func TestAReportThatCannotBeReadIsAReadFailure(t *testing.T) {
 	res := execute(t.Context(), t, appOf(newFake(t)), dir, commandReport, reportDirectoryPath)
 	if message := res.summary(t).Diagnostics[0].Message; !strings.Contains(message, "a saved report must be a regular file") {
 		t.Errorf("message %q", message)
+	}
+}
+
+// A parsed command can be executed without an argv source; do not invent a declaration then.
+func TestParsedQueryMismatchWithoutArgvHasNoInventedLocation(t *testing.T) {
+	t.Parallel()
+	dir := workDir(t)
+	writePDF(t, dir, sourceA)
+	runner := appOf(newFake(t))
+	execute(t.Context(), t, runner, dir, commandCheck, reportFlag, reportFile, sourceA).requireCode(t, 0, "")
+
+	command, err := cli.Parse([]string{commandReport, reportFile, "--expect-attempt", "different-attempt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	if code := runner.Execute(app.OperationTestContext(t.Context(), t), &command, app.Env{WorkingDir: dir, Stdout: &output}); code != 2 {
+		t.Fatalf("mismatch accepted: %s", output.String())
+	}
+
+	var result report.CommandError
+	if err = json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "report_attempt_mismatch" || result.Diagnostics[0].Location != nil {
+		t.Fatalf("invented source authority: %+v", result)
 	}
 }

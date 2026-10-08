@@ -34,6 +34,7 @@ type (
 	// outcome is what one command printed.
 	outcome struct {
 		stdout, stderr string
+		reportTarget   string
 		code           int
 	}
 
@@ -56,12 +57,14 @@ type (
 
 	// summaryView is the part of a summary the tests read.
 	summaryView struct {
-		Phases          map[string]string `json:"phases"`
-		Status          string            `json:"status"`
-		Command         string            `json:"command"`
-		Diagnostics     []diagnosticView  `json:"diagnostics"`
-		Publication     publicationView   `json:"publication"`
-		DiagnosticCount int               `json:"diagnostic_count"`
+		RecoveryBasename      string            `json:"recovery_basename"`
+		RecoveryDirectoryFrom string            `json:"recovery_directory_from"`
+		Phases                map[string]string `json:"phases"`
+		Status                string            `json:"status"`
+		Command               string            `json:"command"`
+		Diagnostics           []diagnosticView  `json:"diagnostics"`
+		Publication           publicationView   `json:"publication"`
+		DiagnosticCount       int               `json:"diagnostic_count"`
 	}
 
 	// assemblyFailure is an injected engine failure at assembly and what the command must make of it.
@@ -187,11 +190,17 @@ func writePDF(tb testing.TB, dir, name string) {
 func execute(ctx context.Context, tb testing.TB, runner *app.App, dir string, args ...string) outcome {
 	tb.Helper()
 
-	return executeWith(ctx, tb, runner, app.Env{WorkingDir: dir, Stdin: strings.NewReader("")}, args...)
+	return executeWith(ctx, tb, runner, app.Env{
+		WorkingDir: dir, Executable: "pdfconcat",
+		Stdin: strings.NewReader(""),
+	}, args...)
 }
 
 func executeWith(ctx context.Context, tb testing.TB, runner *app.App, env app.Env, args ...string) outcome {
 	tb.Helper()
+
+	ctx, cancel := context.WithTimeout(ctx, app.OperationTestTimeout)
+	defer cancel()
 
 	var stdout, stderr bytes.Buffer
 
@@ -205,7 +214,7 @@ func executeWith(ctx context.Context, tb testing.TB, runner *app.App, env app.En
 
 	code := runner.Run(ctx, args, env)
 
-	return outcome{stdout: stdout.String(), stderr: stderr.String(), code: code}
+	return outcome{stdout: stdout.String(), stderr: stderr.String(), code: code, reportTarget: reportArgument(env.WorkingDir, args)}
 }
 
 func (o outcome) summary(tb testing.TB) summaryView {
@@ -213,12 +222,61 @@ func (o outcome) summary(tb testing.TB) summaryView {
 
 	var parsed summaryView
 
-	err := json.Unmarshal([]byte(o.stdout), &parsed)
+	var envelope struct {
+		Kind   string          `json:"kind"`
+		Result json.RawMessage `json:"result"`
+	}
+
+	err := json.Unmarshal([]byte(o.stdout), &envelope)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	payload := []byte(o.stdout)
+	if envelope.Kind == "report_query" {
+		payload = envelope.Result
+	}
+
+	err = json.Unmarshal(payload, &parsed)
 	if err != nil {
 		tb.Fatalf("stdout is not a JSON summary: %v\n%.400s", err, o.stdout)
 	}
 
+	if parsed.Publication.RecoveryReport == "" && parsed.RecoveryBasename != "" &&
+		parsed.RecoveryDirectoryFrom == "original_report_argument" {
+		if o.reportTarget == "" {
+			tb.Fatal("recovery receipt requires the original report argument")
+		}
+
+		parsed.Publication.RecoveryReport = filepath.Join(filepath.Dir(o.reportTarget), parsed.RecoveryBasename)
+	}
+
 	return parsed
+}
+
+// reportArgument retains the test caller's original authority for omitted recovery paths.
+func reportArgument(dir string, args []string) string {
+	target := ""
+
+	for index, argument := range args {
+		if argument == reportFlag && index+1 < len(args) {
+			target = args[index+1]
+		}
+
+		if value, attached := strings.CutPrefix(argument, reportFlag+"="); attached {
+			target = value
+		}
+	}
+
+	if target == "" {
+		return ""
+	}
+
+	if filepath.IsAbs(target) {
+		return target
+	}
+
+	return filepath.Join(dir, target)
 }
 
 func (o outcome) requireCode(tb testing.TB, code int, diagnostic string) summaryView {
@@ -409,7 +467,10 @@ func TestInspectionFailuresKeepInputOrderAcrossWorkers(t *testing.T) {
 func requireInspectionFailureOrder(t *testing.T, path, dir string, operands []string) {
 	t.Helper()
 
-	saved, err := report.Decode(t.Context(), path, strings.NewReader(readFile(t, path)))
+	ctx, cancel := context.WithTimeout(t.Context(), app.OperationTestTimeout)
+	defer cancel()
+
+	saved, err := report.Decode(ctx, path, strings.NewReader(readFile(t, path)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +842,7 @@ func TestUnwritableStreamsAreReportedWithoutPanicking(t *testing.T) {
 	// A nil error stream is allowed and silent.
 	env.Stderr = nil
 
-	if code := appOf(newFake(t)).Run(t.Context(), []string{commandVersion}, env); code != 1 {
+	if code := appOf(newFake(t)).Run(app.OperationTestContext(t.Context(), t), []string{commandVersion}, env); code != 1 {
 		t.Errorf("exit %d", code)
 	}
 }
@@ -794,7 +855,7 @@ func TestExecuteRejectsWhatItCannotRun(t *testing.T) {
 	var stdout bytes.Buffer
 
 	env := app.Env{WorkingDir: workDir(t), Stdout: &stdout}
-	code := runner.Execute(t.Context(), &cli.Command{Name: "frobnicate"}, env)
+	code := runner.Execute(app.OperationTestContext(t.Context(), t), &cli.Command{Name: "frobnicate"}, env)
 
 	if code != 2 || !strings.Contains(stdout.String(), "command_unsupported") {
 		t.Errorf(exitFailureFormat, code, stdout.String())
@@ -803,7 +864,7 @@ func TestExecuteRejectsWhatItCannotRun(t *testing.T) {
 	stdout.Reset()
 
 	env.WorkingDir = "relative"
-	code = runner.Execute(t.Context(), &cli.Command{Name: cli.NameCheck}, env)
+	code = runner.Execute(app.OperationTestContext(t.Context(), t), &cli.Command{Name: cli.NameCheck}, env)
 
 	if code != 1 || !strings.Contains(stdout.String(), "working_directory_unavailable") {
 		t.Errorf(exitFailureFormat, code, stdout.String())
@@ -811,14 +872,18 @@ func TestExecuteRejectsWhatItCannotRun(t *testing.T) {
 
 	stdout.Reset()
 
-	code = runner.Execute(t.Context(), &cli.Command{Name: cli.NameSchema, SchemaName: "nonsense"}, env)
+	code = runner.Execute(app.OperationTestContext(t.Context(), t), &cli.Command{Name: cli.NameSchema, SchemaName: "nonsense"}, env)
 	if code != 2 || !strings.Contains(stdout.String(), "schema_unknown") {
 		t.Errorf(exitFailureFormat, code, stdout.String())
 	}
 
 	stdout.Reset()
 
-	code = runner.Execute(t.Context(), &cli.Command{Name: cli.NameCheck}, app.Env{WorkingDir: workDir(t), Stdout: &stdout})
+	code = runner.Execute(
+		app.OperationTestContext(t.Context(), t),
+		&cli.Command{Name: cli.NameCheck},
+		app.Env{WorkingDir: workDir(t), Stdout: &stdout},
+	)
 	if code != 2 || !strings.Contains(stdout.String(), "plan_missing") {
 		t.Errorf("a check without instructions: exit %d: %s", code, stdout.String())
 	}
@@ -830,7 +895,9 @@ func TestAnOperandJobWithoutOperandsIsInvalid(t *testing.T) {
 	var stdout bytes.Buffer
 
 	env := app.Env{WorkingDir: workDir(t), Stdout: &stdout}
-	code := appOf(newFake(t)).Execute(t.Context(), &cli.Command{Name: cli.NameCheck, PlanSource: cli.PlanOperands}, env)
+	code := appOf(
+		newFake(t),
+	).Execute(app.OperationTestContext(t.Context(), t), &cli.Command{Name: cli.NameCheck, PlanSource: cli.PlanOperands}, env)
 
 	if code != 2 || !strings.Contains(stdout.String(), "job_invalid") {
 		t.Errorf(exitFailureFormat, code, stdout.String())
@@ -860,7 +927,8 @@ func TestQueryOutputFailureAndTextHelp(t *testing.T) {
 	} {
 		stderr.Reset()
 
-		if code := runner.Run(t.Context(), args, env); code != 1 || !strings.Contains(stderr.String(), "cannot write standard output") {
+		code := runner.Run(app.OperationTestContext(t.Context(), t), args, env)
+		if code != 1 || !strings.Contains(stderr.String(), "cannot write standard output") {
 			t.Errorf("%v: exit %d, stderr %q", args, code, stderr.String())
 		}
 	}

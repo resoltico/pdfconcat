@@ -10,7 +10,7 @@ pdfconcat build  --plan-json JSON [-o FILE] [options]
 pdfconcat build  -o FILE [options] [--] PDF|--blank ...
 pdfconcat check  (the same three forms as build)
 pdfconcat report FILE [--part ID | --page N | --view parts|diagnostics] [--offset N] [--limit N] [--details]
-pdfconcat schema plan|report
+pdfconcat schema plan|report|response
 pdfconcat version
 pdfconcat help [COMMAND]
 ```
@@ -20,7 +20,7 @@ pdfconcat help [COMMAND]
 | `build` | Assembles the PDF and publishes it. |
 | `check` | Does everything `build` does short of creating a PDF: validates and snapshots the inputs, resolves every generated page's size and style, and reports a build-ready layout. It needs no output; when an output is named, by `-o` or by the plan's `output`, it also checks the destination, so a plan whose `output` exists fails `check` unless `--overwrite` is given. |
 | `report` | Reads a report saved by `--report` and answers one question about it. It never reopens a PDF. |
-| `schema` | Prints the JSON Schema of a plan or of a saved report. |
+| `schema` | Prints the JSON Schema of a plan, complete report, or structured response. |
 | `version` | Prints the version, commit, and commit date. `pdfconcat --version` is the same. |
 | `help` | Prints help. `pdfconcat help build`, `pdfconcat build --help`, and `pdfconcat build -h` are the same. |
 
@@ -43,6 +43,7 @@ An option applies to specific commands; the parser rejects an option that does n
 | `--report FILE` | build, check | Save the complete result to `FILE`, relative to the working directory. |
 | `--jobs N` | build, check | Concurrent source inspections, at least 1. Default: the smaller of 4 and the CPU count. |
 | `--details` | build, check, report | For `build` and `check`: print the complete result instead of the summary. For `report`: expand the selected records (`--part`, `--page`, or `--view`) to full resolved values; without a selection it is an error, so a query never prints a whole saved report. |
+| `--expect-attempt ID` | report | Reject a saved report from a different attempt; correlation only, not integrity or current PDF validity. |
 | `--part ID` | report | Show one contribution by id: a JSON pointer such as `/items/42/items/3`, or `argv:N`. |
 | `--page N` | report | Show the contribution covering output page `N` (1-based). |
 | `--view parts\|diagnostics` | report | List contributions or diagnostics, paged and in report order. |
@@ -121,10 +122,10 @@ Standard output is compact JSON by default, for help, version, results, and fail
 - `build` and `check` print a small summary: status, whether the PDF was published, source, generated, and total page counts, the number of diagnostics, and at most five of them. The summary says it is a summary. Default summaries and structured command failures fit within 2 KiB including the newline. With `--report FILE` they give the exact next command when it fits; otherwise `next_omitted: true` directs callers to their original report argument. `truncated_fields` marks path/location previews, which must not be used as complete filenames. The diagnostic preview may show fewer than five records to stay within the byte budget.
 - `--details` prints the complete result on standard output instead, in the chosen format.
 - `--report FILE` saves the complete result: every contribution with its source location, output page range, and resolved appearance, and every diagnostic with its stage, stable code, location, and message. Complete reports include producing tool/version/commit/toolchain/platform identity; a verified output records its SHA-256 `output_digest`, computed while writing. These identify the captured run and bytes; queries do not establish current file validity. JSON object member order is unspecified. The saved file is a regular JSON document that standard tools can read. See `pdfconcat schema report`.
-- `schema plan` and `schema report` print the raw JSON Schema, with no wrapper. `schema` has no `--format`.
-- Failures use the same structured shape. Messages are for reading; the `code` of a diagnostic is the stable identifier to match.
+- `schema plan`, `schema report`, and `schema response` print the raw JSON Schema, with no wrapper. `schema` has no `--format`.
+- Command errors omit job lifecycle fields; job failures retain known lifecycle and publication facts. Both share diagnostic stage/code/location/recovery vocabulary. Messages are for reading; `code` is the stable identifier to match. Separate `cause` retains report I/O details when the message leads with a safe repair.
 
-A late publication failure retains a report describing the PDF commit and the failed original report target. `recovery_state: "current"` means the retained report metadata was refreshed atomically. If refresh I/O fails, `publication_pending` marks complete layout data whose publication metadata still describes the planned success; use the outer committed state for the actual outcome. `unavailable` means its owned identity was lost: preserve the unknown file and do not copy it as a report. Manual recovery does not change the captured run’s publication history.
+A late publication failure retains a report describing the PDF commit and the failed original report target. `recovery_state: "current"` means the retained report metadata was refreshed atomically. If refresh I/O fails, `publication_pending` marks complete layout data whose publication metadata still describes the planned success; use the outer committed state for the actual outcome. `unavailable` means its owned identity was lost: preserve the unknown file and do not copy it as a report. Manual recovery does not change the captured run’s publication history. On a copied report query, a long historical recovery path is referenced through `complete_report.publication.recovery_report`, because its directory cannot be derived from the current report operand.
 
 When a late report failure has an overlong recovery path, the bounded result gives the lossless `recovery_basename` and `recovery_directory_from: "original_report_argument"`: combine that basename with the directory of the original `--report` path. Complete details preserve full paths. Never use a truncated preview as a recovery command. Recovery instructions use POSIX `cp -n` or, on Windows, PowerShell `[System.IO.File]::Copy` with literal quoted paths and overwrite disabled; choose a distinct unused report target when the original target is unsafe. Named plan/report/font/source inputs must be regular files; FIFOs and devices are rejected without waiting for a writer. Stdin plan pipes remain supported.
 
@@ -183,7 +184,7 @@ A rejected command line is a diagnostic with stage `usage`, a stable code, an `a
 | `usage_missing_operand` | `report` has no `FILE`, or `schema` no name. |
 | `usage_unexpected_operand` | An extra operand for `report`, `schema`, `version`, or `help`. |
 | `usage_stdin_operand` | `-` as an operand. |
-| `usage_unknown_schema` | `schema` was given a name other than `plan` or `report`. |
+| `usage_unknown_schema` | `schema` was given a name other than `plan`, `report`, or `response`. |
 | `report_selection_conflict` | More than one of `--part`, `--page`, `--view`. |
 | `report_paging_needs_view` | `--offset` or `--limit` without `--view`. |
 | `report_details_need_selection` | `report --details` without `--part`, `--page`, or `--view`. |
@@ -258,3 +259,21 @@ pdfconcat build -o out.pdf .\--blank
 ### Why not `find | sort | jq -R`?
 
 Newline-delimited text is a lossy transport for file names: a name containing a newline becomes two items, a locale-dependent `sort` makes the order differ between machines, `jq -R` silently replaces bytes that are not valid UTF-8 with U+FFFD so the plan names a different file, and without `pipefail` the pipeline reports the exit status of its last command even when `find` failed or found nothing. A plan is the one place that fixes the order and the exact file names, so generate it from a list that is never split on a delimiter: shell globs with `--args`, or the Python recipe.
+
+## Response and report format 2
+
+All structured responses and complete saved reports carry `format_version: 2`. Input plans remain version 1. Command errors (`kind: error`) have no build lifecycle fields. Help gives labeled argv templates whose input/output filenames must be replaced, and a concrete executable continuation when it fits. Omitted help continuations expose `executable_from` and exact `next_args`, so callers need not parse a shell example.
+
+Every build/check execution has one opaque `attempt_id`, including failed decoding and preflight. The same identity is retained in its saved or recovery report and broken-stdout committed-state receipt. This identifies an attempt; it is neither authentication nor proof that a current PDF or source still matches captured evidence.
+
+A successful report query has `kind: report_query`, `command: report`, `status: ok`, and exit 0. `saved_run` gives the captured attempt's identity, command and status; `result` carries its summary or selected records. Publication targets inside `result` are historical. Summary queries label them with `publication_context: historical_target`. Queries never reread PDFs or rerun preflight. A successful read of failed-job diagnostics is still a successful query.
+
+Concrete `next` arrays use the currently invoking executable and absolute path of the report actually selected, including a copied/renamed/symlinked report. Execute arrays unchanged under the same environment. Job follow-ups include `--expect-attempt ID`; a replaced report is rejected as `report_attempt_mismatch`. No suggestion executes automatically.
+
+If an exact continuation cannot fit, `next` is null, `next_omitted` is true, and `next_reference` states the action/view/expected attempt. Reconstruct argv from the current invoking executable and the caller-owned `original_argv.--report` value (jobs) or `original_argv.report_operand` (queries). Resolve a relative original argument in that invocation's working directory, not a later query directory. Preview paths must never be used as executable paths. Full diagnostic values remain available through `--details` or the saved current report; `location_from` references the exact recovery location in `complete_report.diagnostics/N/recovery/location` when a preview cannot carry it.
+
+Requested-report publication facts separately say `report_write: written|not_written` and `report_target_observation: unknown`. If the working directory cannot resolve a target, `report_from: original_argv.--report` identifies the caller-owned request while the target path remains absent. No file is opened or written in that case. They make no global unchanged-file promise during concurrency. An existing target can contain historical evidence. Until complete resource/alias inventory, even `--overwrite` permits a failure report only at an unused target. Repair the input and choose a new report target; do not treat an older target as evidence for the new attempt.
+
+Diagnostic recovery actions are a finite vocabulary: `open_help`, `edit_input`, `choose_new_report`, `inspect_report`, `recover_report`. They are guidance with declaration or invocation references, not shell commands. Late report-publication failure retains the existing no-rebuild recovery procedure and owned recovery metadata.
+
+Only complete format-2 reports are read. Old report-version-1 evidence is preserved and rejected non-destructively. Inspect its raw JSON with ordinary tools. A fresh `check` of the current job to a NEW report target creates current evidence; it cannot reconstruct a historical run. Never rebuild/overwrite merely to upgrade a report.

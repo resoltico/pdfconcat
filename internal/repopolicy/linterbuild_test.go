@@ -55,3 +55,22 @@ func TestGolangciBuildIdentityBindsReviewedPatchAndStableUpstream(t *testing.T) 
 		})
 	}
 }
+
+func TestGolangciPatchRejectsChangedCheckedInBytes(t *testing.T) {
+	t.Parallel()
+
+	versions, err := repopolicy.ParseToolVersions(string(readRepoFile(t, toolVersionsPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	patch := readRepoFile(t, "tools/lint-patches/golangci-lint-physical-source.patch")
+	if err = repopolicy.VerifyGolangciPatch(patch, versions); err != nil {
+		t.Fatal(err)
+	}
+
+	patch[0] ^= 1
+	if repopolicy.VerifyGolangciPatch(patch, versions) == nil {
+		t.Fatal("changed source patch accepted under the installed binary identity")
+	}
+}

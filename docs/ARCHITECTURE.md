@@ -29,7 +29,7 @@ Executable wiring only: a signal-aware root context (the first interrupt or term
 
 ### `internal/cli`
 
-The command grammar ([`CLI.md`](CLI.md)): `build`, `check`, `report`, `schema`, `version`, `help`, their options and value rules, and the structured help. It performs no filesystem access. `Parse` returns a typed `Command` or a `*UsageError` whose diagnostics use the same report shape as every other failure and which already knows whether the error is rendered as JSON or text.
+The command grammar ([`CLI.md`](CLI.md)): `build`, `check`, `report`, `schema`, `version`, `help`, their options and value rules, and the structured help. It performs no filesystem access. `Parse` returns a typed `Command` or a `*UsageError` whose diagnostics share the stage/code/location/recovery vocabulary with job failures and which already knows whether the error is rendered as JSON or text.
 
 ### `internal/plan`
 
@@ -66,7 +66,7 @@ Assemble  import the generated-pages document and the sources into one pool, reo
 
 ### `internal/report`
 
-The report model and everything that reads or renders it: the builder, the compact summary, the complete report and its schema, strict decoding of a saved report as untrusted input (byte, nesting and node limits enforced before any large structure exists), and the `--part`, `--page` and `--view` queries. Reading a report never involves a PDF. Generic domain-location conversion lives here; plan-specific failure adaptation belongs to `app`.
+The report model and everything that reads or renders it: the builder, the compact summary, the complete report, structured response union and their schemas, strict decoding of a saved report as untrusted input (byte, nesting and node limits enforced before any large structure exists), and the `--part`, `--page` and `--view` queries. Reading a report never involves a PDF. The query outcome and captured job identity/status are separate; navigation binds the currently invoking executable to the actual queried file, never to a historical publication target. Generic domain-location conversion lives here; plan-specific failure adaptation belongs to `app`.
 
 ### `internal/publish`
 

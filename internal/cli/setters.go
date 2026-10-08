@@ -211,7 +211,14 @@ func (p *parser) finishRoot() error {
 
 func (p *parser) finishSchema() error {
 	if p.cmd.SchemaName == "" {
-		return p.fail(CodeMissingOperand, -1, "schema needs a name: pdfconcat schema %s or pdfconcat schema %s", SchemaPlan, SchemaReport)
+		return p.fail(
+			CodeMissingOperand,
+			-1,
+			"schema needs a name: pdfconcat schema %s, %s or %s",
+			SchemaPlan,
+			SchemaReport,
+			SchemaResponse,
+		)
 	}
 
 	return nil

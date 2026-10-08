@@ -38,7 +38,7 @@ func diagnosticsOfSizes(t *testing.T, sizes []int) *report.Report {
 		diagnostics[index] = report.Diagnostic{Stage: "s", Code: "c", Message: strings.Repeat("x", size-len(recordFrame))}
 	}
 
-	return report.NewErrorReport(commandReport, report.StatusInvalid, diagnostics...)
+	return failedReportFixture(diagnostics...)
 }
 
 func budgetCases() []budgetCase {
@@ -154,8 +154,8 @@ func checkBudgetPage(
 func checkPageRecords(t *testing.T, saved *report.Report, view *report.ViewResponse[report.DiagnosticView]) {
 	t.Helper()
 
-	for index, record := range view.Records {
-		if record.Message != saved.Diagnostics[index].Message {
+	for index := range view.Records {
+		if view.Records[index].Message != saved.Diagnostics[index].Message {
 			t.Fatal("record changed")
 		}
 	}

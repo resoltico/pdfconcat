@@ -141,6 +141,7 @@ func TestScanDirectivesWalksHiddenDirectoriesAndTests(t *testing.T) {
 	directive := "//" + "no" + "lint:gosec\n"
 
 	files := map[string]string{
+		"pkg/dist/directive.go":       "package pkg\n\n" + directive + "func Nested() {}\n",
 		"main.go":                     "package main\n",
 		"pkg/code_test.go":            "package pkg\n\n" + directive + "func F() {}\n",
 		".hidden/inner/tool.go":       "package inner\n\n" + directive + "func G() {}\n",
@@ -175,7 +176,12 @@ func TestScanDirectivesWalksHiddenDirectoriesAndTests(t *testing.T) {
 		got[violation.File] = true
 	}
 
-	want := map[string]bool{"pkg/code_test.go": true, ".hidden/inner/tool.go": true, "third_party/vendored/lib.go": true}
+	want := map[string]bool{
+		"pkg/code_test.go":            true,
+		".hidden/inner/tool.go":       true,
+		"third_party/vendored/lib.go": true,
+		"pkg/dist/directive.go":       true,
+	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -184,5 +190,20 @@ func TestScanDirectivesWalksHiddenDirectoriesAndTests(t *testing.T) {
 		if !got[name] {
 			t.Fatalf("missing %s in %v", name, got)
 		}
+	}
+}
+
+func TestDirectiveViolationReportsPhysicalLineDespiteDisplayMapping(t *testing.T) {
+	t.Parallel()
+
+	source := "package p\n//line display.go:900\n//" + "no" + "lint:gosec\nfunc Value() {}\n"
+
+	violations, err := repopolicy.DirectivesIn(directiveSourcePath, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(violations) != 1 || violations[0].File != directiveSourcePath || violations[0].Line != 3 {
+		t.Fatalf("display position replaced the physical directive attribution: %v", violations)
 	}
 }

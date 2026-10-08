@@ -105,17 +105,8 @@ func selectDiagnosticEntries(
 			continue
 		}
 
-		possible := false
-
-		for target, files := range targets {
-			goos, _, _ := strings.Cut(target, "/")
-			if (entry.GOOS == "" || entry.GOOS == goos) && files[entry.Path] {
-				possible = true
-			}
-		}
-
-		if !possible {
-			problems = append(problems, entry.ID+": diagnostic source is not compiled on any applicable supported target")
+		if problem := diagnosticPlatformScopeIssue(entry, targets); problem != "" {
+			problems = append(problems, problem)
 		}
 
 		if nativeFiles[entry.Path] {
@@ -124,4 +115,31 @@ func selectDiagnosticEntries(
 	}
 
 	return selected, problems
+}
+
+// diagnosticPlatformScopeIssue verifies compiler ownership can express the registry's OS predicate.
+func diagnosticPlatformScopeIssue(entry *repopolicy.Entry, targets map[string]map[string]bool) string {
+	possible, broader := false, false
+
+	for target, files := range targets {
+		goos, _, _ := strings.Cut(target, "/")
+
+		if !files[entry.Path] {
+			continue
+		}
+
+		if entry.GOOS == "" || entry.GOOS == goos {
+			possible = true
+		} else {
+			broader = true
+		}
+	}
+
+	if !possible {
+		return entry.ID + ": diagnostic source is not compiled on any applicable supported target"
+	} else if broader {
+		return entry.ID + ": unconditional lint exclusion also applies outside its registered goos scope"
+	}
+
+	return ""
 }

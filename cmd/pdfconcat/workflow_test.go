@@ -24,7 +24,7 @@ func TestCheckBuildAndQueryWorkflow(t *testing.T) {
 	writeFile(t, dir, fileJob, planJSON(t, obj{
 		keyVersion: 1,
 		keyOutput:  fileOut,
-		keyBlank:   obj{"background": "#eeeeee", keyText: obj{keyValue: dividerText}},
+		keyBlank:   obj{keyBackground: "#eeeeee", keyText: obj{keyValue: dividerText}},
 		keyItems: []any{
 			fileA,
 			obj{keyBlank: obj{}, "count": 2},
@@ -43,7 +43,7 @@ func TestCheckBuildAndQueryWorkflow(t *testing.T) {
 		t.Fatalf("build summary: %+v", parsed)
 	}
 
-	if parsed.Phases["output_verification"] != "complete" {
+	if parsed.Phases["output_verification"] != phaseComplete {
 		t.Fatalf("output verification: %v", parsed.Phases)
 	}
 
@@ -120,7 +120,7 @@ func queryInheritedPart(t *testing.T, dir string) {
 	style := objAt(t, part, partField, keyStyle)
 	text := objAt(t, style, keyText)
 
-	if text[keyValue] != latvian || style["background"] != "#eeeeee" || textAt(t, text, keyFont, "name") != "Noto Sans" {
+	if text[keyValue] != latvian || style[keyBackground] != "#eeeeee" || textAt(t, text, keyFont, "name") != "Noto Sans" {
 		t.Errorf("part /items/3: %v", part)
 	}
 

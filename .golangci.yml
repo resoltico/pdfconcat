@@ -554,11 +554,13 @@ linters:
         - name: line-length-limit
           disabled: true
         - name: file-length-limit
+          disabled: true
           arguments:
             - max: 1000
               skipComments: true
               skipBlankLines: true
         - name: max-public-structs
+          disabled: true
           arguments: [20]
         - name: banned-characters
           arguments: [" ", "﻿", "​"]
@@ -916,6 +918,26 @@ linters:
         path: ^cmd/pdfconcat/progress_windows_internal_test\.go$
         source: os\.Stderr
         text: use of `os\.Stderr` forbidden because "process streams are wired in cmd/pdfconcat and injected"
+      - linters:
+          - gosec
+        path: ^tools/qualitygate/process_fuzz\.go$
+        source: exec\.Command\(c\.name, c\.args\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - noctx
+        path: ^tools/qualitygate/process_fuzz\.go$
+        source: exec\.Command\(c\.name, c\.args\.\.\.\)
+        text: os/exec\.Command must not be called\. use os/exec\.CommandContext
+      - linters:
+          - depguard
+        path: ^tools/qualitygate/process_fuzz_darwin\.go$
+        source: '"golang\.org/x/sys/unix"'
+        text: 'import ''golang\.org/x/sys/unix'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - depguard
+        path: ^tools/qualitygate/process_fuzz_linux\.go$
+        source: '"golang\.org/x/sys/unix"'
+        text: 'import ''golang\.org/x/sys/unix'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
 
 formatters:
   enable:

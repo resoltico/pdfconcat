@@ -36,9 +36,14 @@ func acceptedLimitCases() []boundaryCase {
 	argvLocation := func(index int) func(r *report.Report) {
 		return func(r *report.Report) {
 			r.Status = report.StatusInvalid
-			r.Diagnostics = []report.Diagnostic{{
-				Stage: "usage", Code: "bad_flag", Message: "m", Location: &report.Location{File: argvFile, ArgvIndex: &index},
-			}}
+			r.Diagnostics = []report.Diagnostic{
+				{
+					Stage:    fixtureUsageStage,
+					Code:     fixtureBadFlagCode,
+					Message:  "m",
+					Location: &report.Location{File: argvFile, ArgvIndex: &index},
+				},
+			}
 		}
 	}
 

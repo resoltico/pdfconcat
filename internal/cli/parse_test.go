@@ -18,9 +18,9 @@ import (
 type (
 	// accepted is a command line and the Command it must produce.
 	accepted struct {
+		want *cli.Command
 		name string
 		args []string
-		want cli.Command
 	}
 
 	// rejected is a command line and the single usage diagnostic it must produce.
@@ -55,7 +55,7 @@ func blank(position int) assembly.Operand {
 	return assembly.Operand{Position: position, Blank: true}
 }
 
-func accept(name, line string, want cli.Command) accepted {
+func accept(name, line string, want *cli.Command) accepted {
 	return accepted{name: name, args: argv(line), want: want}
 }
 
@@ -65,104 +65,104 @@ func acceptedLines() []accepted {
 
 func acceptedPlanning() []accepted {
 	return []accepted{
-		accept("plan file", "build --plan job.json", cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanFile, PlanPath: jobFile}),
+		accept("plan file", "build --plan job.json", new(cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanFile, PlanPath: jobFile})),
 		accept("plan file attached", "check --plan=--odd.json",
-			cli.Command{Name: cli.NameCheck, PlanSource: cli.PlanFile, PlanPath: "--odd.json"}),
+			new(cli.Command{Name: cli.NameCheck, PlanSource: cli.PlanFile, PlanPath: "--odd.json"})),
 		accept("plan from stdin with base dir and output", "build --plan - --base-dir /project -o out.pdf",
-			cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanStdin, BaseDir: "/project", Output: outputFile}),
+			new(cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanStdin, BaseDir: "/project", Output: outputFile})),
 		accept("stdin sentinel attached, base dir first", "build --base-dir=/p --plan=-",
-			cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanStdin, BaseDir: "/p"}),
+			new(cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanStdin, BaseDir: "/p"})),
 		{
 			name: "inline plan", args: []string{argBuild, argPlanJSON, `{"version":1}`, "--base-dir=/p", "--output=o.pdf"},
-			want: cli.Command{
+			want: new(cli.Command{
 				Name: cli.NameBuild, PlanSource: cli.PlanInline, PlanJSON: `{"version":1}`, BaseDir: "/p", Output: "o.pdf",
-			},
+			}),
 		},
 		accept("empty inline plan is the decoder's to reject", "check --plan-json=",
-			cli.Command{Name: cli.NameCheck, PlanSource: cli.PlanInline}),
+			new(cli.Command{Name: cli.NameCheck, PlanSource: cli.PlanInline})),
 		accept("every build option", "build --plan p.json --output=o.pdf --overwrite --report r.json --details --jobs 3 --format text",
-			cli.Command{
+			new(cli.Command{
 				Name: cli.NameBuild, PlanSource: cli.PlanFile, PlanPath: "p.json", Output: "o.pdf", Overwrite: true,
 				ReportPath: reportFile, Details: true, Jobs: 3, Format: cli.FormatText,
-			}),
+			})),
 	}
 }
 
 func acceptedOperands() []accepted {
 	return []accepted{
-		accept("operands with blank", "build -o out.pdf a.pdf --blank b.pdf", cli.Command{
+		accept("operands with blank", "build -o out.pdf a.pdf --blank b.pdf", new(cli.Command{
 			Name: cli.NameBuild, PlanSource: cli.PlanOperands, Output: outputFile,
 			Operands: []assembly.Operand{pdf(3, sourceAPath), blank(4), pdf(5, "b.pdf")},
-		}),
-		accept("repeated blank", "check --blank --blank a.pdf", cli.Command{
+		})),
+		accept("repeated blank", "check --blank --blank a.pdf", new(cli.Command{
 			Name: cli.NameCheck, PlanSource: cli.PlanOperands, Operands: []assembly.Operand{blank(1), blank(2), pdf(3, sourceAPath)},
-		}),
-		accept("operands may precede options", "build a.pdf -o out.pdf", cli.Command{
+		})),
+		accept("operands may precede options", "build a.pdf -o out.pdf", new(cli.Command{
 			Name: cli.NameBuild, PlanSource: cli.PlanOperands, Output: outputFile, Operands: []assembly.Operand{pdf(1, sourceAPath)},
-		}),
-		accept("end of options makes every argument a path", "build -o out.pdf -- --blank ./--blank - -- -o", cli.Command{
+		})),
+		accept("end of options makes every argument a path", "build -o out.pdf -- --blank ./--blank - -- -o", new(cli.Command{
 			Name: cli.NameBuild, PlanSource: cli.PlanOperands, Output: outputFile,
 			Operands: []assembly.Operand{pdf(4, argBlank), pdf(5, "./--blank"), pdf(6, "-"), pdf(7, "--"), pdf(8, "-o")},
-		}),
-		accept("after the end of options a help flag is a path", "build -- --help", cli.Command{
+		})),
+		accept("after the end of options a help flag is a path", "build -- --help", new(cli.Command{
 			Name: cli.NameBuild, PlanSource: cli.PlanOperands, Operands: []assembly.Operand{pdf(2, argHelp)},
-		}),
-		accept("check with a destination", "check -o out.pdf --overwrite a.pdf", cli.Command{
+		})),
+		accept("check with a destination", "check -o out.pdf --overwrite a.pdf", new(cli.Command{
 			Name: cli.NameCheck, PlanSource: cli.PlanOperands, Output: outputFile, Overwrite: true,
 			Operands: []assembly.Operand{pdf(4, sourceAPath)},
-		}),
+		})),
 	}
 }
 
 func acceptedReport() []accepted {
 	return []accepted{
-		accept("report summary", "report r.json", cli.Command{Name: cli.NameReport, ReportFile: reportFile}),
+		accept("report summary", "report r.json", new(cli.Command{Name: cli.NameReport, ReportFile: reportFile})),
 		accept("report file after options", "report --details --part=/items/1 --format=text r.json",
-			cli.Command{Name: cli.NameReport, ReportFile: reportFile, Details: true, Part: "/items/1", Format: cli.FormatText}),
-		accept("report literal file", "report -- --r.json", cli.Command{Name: cli.NameReport, ReportFile: "--r.json"}),
+			new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, Details: true, Part: "/items/1", Format: cli.FormatText})),
+		accept("report literal file", "report -- --r.json", new(cli.Command{Name: cli.NameReport, ReportFile: "--r.json"})),
 		accept("report part", "report r.json --part /items/42",
-			cli.Command{Name: cli.NameReport, ReportFile: reportFile, Part: "/items/42"}),
-		accept("report page", "report r.json --page=5001", cli.Command{Name: cli.NameReport, ReportFile: reportFile, Page: 5001}),
-		accept("report view with paging", "report r.json --view diagnostics --offset 0 --limit 20", cli.Command{
+			new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, Part: "/items/42"})),
+		accept("report page", "report r.json --page=5001", new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, Page: 5001})),
+		accept("report view with paging", "report r.json --view diagnostics --offset 0 --limit 20", new(cli.Command{
 			Name: cli.NameReport, ReportFile: reportFile, View: "diagnostics", HasOffset: true, HasLimit: true, Limit: 20,
-		}),
+		})),
 		accept("a page size outside 1 to 100 is the report package's to judge", "report r.json --view=parts --limit=0",
-			cli.Command{Name: cli.NameReport, ReportFile: reportFile, View: "parts", HasLimit: true}),
+			new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, View: "parts", HasLimit: true})),
 	}
 }
 
 func acceptedRootCommands() []accepted {
 	return []accepted{
-		accept("schema plan", "schema plan", cli.Command{Name: cli.NameSchema, SchemaName: "plan"}),
-		accept("schema report", "schema report", cli.Command{Name: cli.NameSchema, SchemaName: argReport}),
-		accept("version command", "version", cli.Command{Name: cli.NameVersion}),
-		accept("version command in text", "version --format text", cli.Command{Name: cli.NameVersion, Format: cli.FormatText}),
-		accept("explicit json format", "version --format=json", cli.Command{Name: cli.NameVersion}),
-		accept("version flag", argVersion, cli.Command{Name: cli.NameVersion}),
-		accept("version flag after format", "--format=text --version", cli.Command{Name: cli.NameVersion, Format: cli.FormatText}),
+		accept("schema plan", "schema plan", new(cli.Command{Name: cli.NameSchema, SchemaName: "plan"})),
+		accept("schema report", "schema report", new(cli.Command{Name: cli.NameSchema, SchemaName: argReport})),
+		accept("version command", "version", new(cli.Command{Name: cli.NameVersion})),
+		accept("version command in text", "version --format text", new(cli.Command{Name: cli.NameVersion, Format: cli.FormatText})),
+		accept("explicit json format", "version --format=json", new(cli.Command{Name: cli.NameVersion})),
+		accept("version flag", argVersion, new(cli.Command{Name: cli.NameVersion})),
+		accept("version flag after format", "--format=text --version", new(cli.Command{Name: cli.NameVersion, Format: cli.FormatText})),
 	}
 }
 
 func acceptedHelp() []accepted {
 	return []accepted{
-		accept("root help", argHelp, cli.Command{Name: cli.NameHelp}),
-		accept("root help short", "-h", cli.Command{Name: cli.NameHelp}),
-		accept("help command", argHelpCommand, cli.Command{Name: cli.NameHelp}),
-		accept("help for a command", "help build", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild}),
+		accept("root help", argHelp, new(cli.Command{Name: cli.NameHelp})),
+		accept("root help short", "-h", new(cli.Command{Name: cli.NameHelp})),
+		accept("help command", argHelpCommand, new(cli.Command{Name: cli.NameHelp})),
+		accept("help for a command", "help build", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild})),
 		{
 			name: "help for its own command", args: []string{argHelpCommand, argHelpCommand},
-			want: cli.Command{Name: cli.NameHelp, HelpFor: cli.NameHelp},
+			want: new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameHelp}),
 		},
-		accept("help flag on a command", "report --help", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameReport}),
-		accept("help flag after a valid plan", "build --plan a.json -h", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild}),
-		accept("help flag needs no plan source", "check --help", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameCheck}),
+		accept("help flag on a command", "report --help", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameReport})),
+		accept("help flag after a valid plan", "build --plan a.json -h", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild})),
+		accept("help flag needs no plan source", "check --help", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameCheck})),
 		accept("help does not enforce what a build would", "build --base-dir=d a.pdf --help",
-			cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild}),
+			new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild})),
 		accept("help in text", "build --help --format text",
-			cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild, Format: cli.FormatText}),
-		accept("help of version", "version --help", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameVersion}),
-		accept("help of schema", "schema -h", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameSchema}),
-		accept("help flag on help", "help build --help", cli.Command{Name: cli.NameHelp, HelpFor: cli.NameHelp}),
+			new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild, Format: cli.FormatText})),
+		accept("help of version", "version --help", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameVersion})),
+		accept("help of schema", "schema -h", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameSchema})),
+		accept("help flag on help", "help build --help", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameHelp})),
 	}
 }
 
@@ -178,7 +178,7 @@ func TestParseAccepts(t *testing.T) {
 				t.Fatalf("Parse(%q) failed: %v", test.args, err)
 			}
 
-			if !reflect.DeepEqual(got, test.want) {
+			if !reflect.DeepEqual(got, *test.want) {
 				t.Errorf("Parse(%q)\n got  %+v\n want %+v", test.args, got, test.want)
 			}
 		})
@@ -219,7 +219,7 @@ func commandRejections() []rejected {
 		reject("version takes no operand", "version x", cli.CodeUnexpectedOperand, 1, ""),
 		reject("help takes one command", "help build check", cli.CodeUnexpectedOperand, 2, ""),
 		reject("schema needs a name", "schema", cli.CodeMissingOperand, -1, "plan"),
-		reject("schema name is exact", "schema Plan", cli.CodeUnknownSchema, 1, "plan or report"),
+		reject("schema name is exact", "schema Plan", cli.CodeUnknownSchema, 1, "plan, report or response"),
 		reject("schema takes one name", "schema plan report", cli.CodeUnexpectedOperand, 2, ""),
 		reject("report needs a file", argReport, cli.CodeMissingOperand, -1, "FILE"),
 		reject("report takes one file", "report a b", cli.CodeUnexpectedOperand, 2, ""),
@@ -232,7 +232,7 @@ func commandRejections() []rejected {
 func optionRejections() []rejected {
 	return []rejected{
 		reject("unknown option", unknownOptionLine, cli.CodeUnknownOption, 1, `"--bogus"`),
-		reject("unknown option names what applies", unknownOptionLine, cli.CodeUnknownOption, 1, planUsageSyntax),
+		reject("unknown option names what applies", unknownOptionLine, cli.CodeUnknownOption, 1, "consult command help"),
 		reject("unknown short option", "build -x", cli.CodeUnknownOption, 1, ""),
 		reject("short option cannot attach", "build -o=out.pdf a.pdf", cli.CodeUnknownOption, 1, ""),
 		reject("short option cannot be glued", "build -oout.pdf", cli.CodeUnknownOption, 1, ""),

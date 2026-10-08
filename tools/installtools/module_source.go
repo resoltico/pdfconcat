@@ -50,6 +50,11 @@ func sourceBuildEnv() []string {
 	}
 }
 
+// sourceInstallEnv retains the same public-checksum and native-toolchain boundary for plain Go installs.
+func sourceInstallEnv(binDir string) []string {
+	return append(sourceBuildEnv(), "GOBIN="+binDir, "GOFLAGS=-mod=mod")
+}
+
 func downloadModuleSource(
 	ctx context.Context,
 	versions map[string]string,

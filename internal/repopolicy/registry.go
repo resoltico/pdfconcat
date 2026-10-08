@@ -290,6 +290,7 @@ func (r *Registry) Validate() error {
 
 	seen := map[string]bool{}
 	coverageScopes := map[[4]string]string{}
+	lintScopes := map[string]string{}
 
 	for _, entry := range r.Exceptions {
 		if entry == nil {
@@ -303,14 +304,7 @@ func (r *Registry) Validate() error {
 
 		seen[entry.ID] = true
 
-		if entry.Tool == ToolCoverage {
-			scope := [4]string{entry.Path, entry.Function, entry.Anchor, entry.GOOS}
-			if previous, exists := coverageScopes[scope]; exists {
-				problems = append(problems, fmt.Sprintf("duplicate coverage scope in %q and %q", previous, entry.ID))
-			}
-
-			coverageScopes[scope] = entry.ID
-		}
+		problems = append(problems, duplicateScopeProblems(entry, lintScopes, coverageScopes)...)
 
 		for _, problem := range entry.problems() {
 			problems = append(problems, fmt.Sprintf("entry %q: %s", entry.ID, problem))
@@ -322,6 +316,32 @@ func (r *Registry) Validate() error {
 	}
 
 	return fmt.Errorf("%w: %s", ErrRegistry, strings.Join(problems, "; "))
+}
+
+// duplicateScopeProblems prevents distinct registry IDs from claiming the same effective scope.
+func duplicateScopeProblems(entry *Entry, lintScopes map[string]string, coverageScopes map[[4]string]string) []string {
+	var problems []string
+
+	if entry.Tool == ToolLint {
+		for _, scope := range expectedKeys(entry) {
+			if previous, exists := lintScopes[scope]; exists {
+				problems = append(problems, fmt.Sprintf("duplicate lint scope in %q and %q: %s", previous, entry.ID, scope))
+			}
+
+			lintScopes[scope] = entry.ID
+		}
+	}
+
+	if entry.Tool == ToolCoverage {
+		scope := [4]string{entry.Path, entry.Function, entry.Anchor, entry.GOOS}
+		if previous, exists := coverageScopes[scope]; exists {
+			problems = append(problems, fmt.Sprintf("duplicate coverage scope in %q and %q", previous, entry.ID))
+		}
+
+		coverageScopes[scope] = entry.ID
+	}
+
+	return problems
 }
 
 // For returns the entries of one tool, in registry order.
@@ -423,7 +443,7 @@ func (e *Entry) lintProblems() []string {
 		problems = e.requireKind(KindDeprecatedRule, KindIncompatibleRule, KindDuplicateRule, KindDesignIncompat)
 		problems = append(problems, e.fieldProblems([]string{fieldLinter}, []string{fieldConflictsWith, fieldSupersededBy})...)
 	case EffectSettingItem:
-		problems = e.requireKind(KindIgnoredValue, KindIncompatibleRule, KindDuplicateRule)
+		problems = e.requireKind(KindIgnoredValue, KindIncompatibleRule, KindDuplicateRule, KindDesignIncompat)
 		problems = append(
 			problems,
 			e.fieldProblems([]string{fieldSetting, fieldValues}, []string{fieldConflictsWith, fieldSupersededBy})...)
@@ -446,6 +466,16 @@ func (e *Entry) lintProblems() []string {
 
 func (e *Entry) settingItemProblems() []string {
 	var problems []string
+
+	if e.Kind == KindDesignIncompat {
+		if e.Setting != "linters.settings.revive.rules" || len(e.Values) != 1 ||
+			!slices.Contains([]string{"file-length-limit", "max-public-structs"}, e.Values[0]) {
+			problems = append(
+				problems,
+				"design-incompatible setting-item applies only to the two revive algorithms replaced by mandatory owned-source limits",
+			)
+		}
+	}
 
 	if !strings.HasPrefix(e.Setting, "linters.") && !strings.HasPrefix(e.Setting, "formatters.") {
 		problems = append(problems, "setting must be a dotted path under linters. or formatters.")

@@ -221,8 +221,8 @@ func TestBuilderBuildsAValidReport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if built.Kind != report.KindReport || built.ReportVersion != report.Version {
-		t.Errorf("kind %q version %d", built.Kind, built.ReportVersion)
+	if built.Kind != report.KindReport || built.FormatVersion != report.Version {
+		t.Errorf("kind %q version %d", built.Kind, built.FormatVersion)
 	}
 
 	mustDecode(t, encodeReport(t, built))
@@ -286,7 +286,7 @@ func TestBuildDoesNotShareItsDiagnosticsAndKeepsAccumulating(t *testing.T) {
 func TestErrorReportIsTheOneErrorShape(t *testing.T) {
 	t.Parallel()
 
-	saved := report.NewErrorReport(commandReport, report.StatusInvalid,
+	saved := failedReportFixture(
 		report.Diagnostic{Stage: report.StageUsage, Code: report.CodeSelectionConflict, Message: "one"},
 		report.Diagnostic{Stage: report.StageUsage, Code: report.CodeInvalidPaging, Message: "two"},
 	)

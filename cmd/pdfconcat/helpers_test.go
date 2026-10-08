@@ -180,7 +180,22 @@ func decodeLine(tb testing.TB, text string, target any) {
 		tb.Fatalf("standard output is not one line of JSON: %.300q", text)
 	}
 
-	err := json.Unmarshal([]byte(text), target)
+	var envelope struct {
+		Kind   string          `json:"kind"`
+		Result json.RawMessage `json:"result"`
+	}
+
+	err := json.Unmarshal([]byte(text), &envelope)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	payload := []byte(text)
+	if envelope.Kind == "report_query" {
+		payload = envelope.Result
+	}
+
+	err = json.Unmarshal(payload, target)
 	if err != nil {
 		tb.Fatalf("standard output is not valid JSON: %v\n%.300q", err, text)
 	}

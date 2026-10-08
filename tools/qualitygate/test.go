@@ -13,8 +13,10 @@ import (
 	"log"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type (
@@ -405,6 +407,14 @@ func runFuzz(ctx context.Context, args []string) error {
 		return fmt.Errorf(parseFlagsError, err)
 	}
 
+	if budgetErr := validateFuzzBudget(*duration); budgetErr != nil {
+		return budgetErr
+	}
+
+	if platformErr := requireFuzzPlatform(); platformErr != nil {
+		return platformErr
+	}
+
 	patterns := set.Args()
 	if len(patterns) == 0 {
 		patterns = []string{allPackages}
@@ -429,18 +439,64 @@ func runFuzz(ctx context.Context, args []string) error {
 	var problems []string
 
 	for _, target := range targets {
+		if contextErr := ctx.Err(); contextErr != nil {
+			problems = append(problems, contextErr.Error())
+			break
+		}
+
 		log.Printf("fuzz: %s %s", target.pkg, target.name)
 
-		fuzzErr := (&command{
-			dir: root, name: goTool, stdout: log.Writer(), stderr: log.Writer(),
-			args: []string{testVerb, runSelectionFlag, "^$", "-fuzz", "^" + target.name + "$", "-fuzztime", *duration, target.pkg},
-		}).run(ctx)
-		if fuzzErr != nil {
+		if fuzzErr := runFuzzTarget(ctx, root, target, *duration); fuzzErr != nil {
 			problems = append(problems, fmt.Sprintf("%s %s: %v", target.pkg, target.name, fuzzErr))
 		}
 	}
 
 	return report(fuzzCommand, problems, fmt.Sprintf("%d targets fuzzed for %s each", len(targets), *duration))
+}
+
+// validateFuzzBudget rejects invalid budgets before compiling target discovery.
+func validateFuzzBudget(value string) error {
+	if before, ok := strings.CutSuffix(value, "x"); ok {
+		count, err := strconv.ParseInt(before, 10, 0)
+		if err == nil && count > 0 {
+			return nil
+		}
+	} else if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%w: fuzz time must be a positive duration or iteration count, got %q", errGate, value)
+}
+
+// runFuzzTarget requires the selected target's real lifecycle to pass; skipped or missing targets are failures.
+func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("fuzz target canceled: %w", err)
+	}
+
+	evidence, err := openTestEvidence("")
+	if err != nil {
+		return err
+	}
+
+	run := &command{
+		dir:           root,
+		name:          goTool,
+		fuzzLifecycle: true,
+		args: []string{
+			testVerb, jsonFlag, runSelectionFlag, "^$", "-fuzz", "^" + target.name + "$", "-fuzztime", duration, target.pkg,
+		},
+	}
+	outcome, runErr := collectTestEvents(ctx, run, evidence)
+	judged := judgeTests(
+		outcome,
+		[]string{target.pkg},
+		testOptions{run: "^$", require: []string{target.name}},
+		errors.Join(runErr, evidence.closeFiles()),
+	)
+	evidence.finish(judged)
+
+	return errors.Join(judged, runErr)
 }
 
 // recordLifecycle verifies each terminal event against its preceding start/run event.

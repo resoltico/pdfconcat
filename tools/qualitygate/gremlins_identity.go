@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"runtime"
 	"strings"
@@ -13,15 +14,24 @@ import (
 )
 
 // gremlinsBinary requires the reviewed source variant and its actual native module/main identity.
-func gremlinsBinary(ctx context.Context, root string) (string, error) {
-	binary, err := findTool(root, "gremlins")
+func gremlinsBinary(ctx context.Context, lookupRoot, sourceRoot string) (string, error) {
+	binary, err := findTool(lookupRoot, "gremlins")
 	if err != nil {
 		return "", err
 	}
 
-	versions, err := readToolVersions(root)
+	versions, err := readToolVersions(sourceRoot)
 	if err != nil {
 		return "", err
+	}
+
+	patch, patchErr := readInRoot(sourceRoot, "tools/mutation-patches/gremlins-executor.patch")
+	if patchErr != nil {
+		return "", patchErr
+	}
+
+	if digest := fmt.Sprintf("%x", sha256.Sum256(patch)); digest != versions["GREMLINS_PATCH_SHA256"] {
+		return "", fmt.Errorf("%w: reviewed mutation patch differs from snapshot identity pin", errGate)
 	}
 
 	identity, err := repopolicy.GremlinsBuildIdentity(versions)
@@ -33,7 +43,7 @@ func gremlinsBinary(ctx context.Context, root string) (string, error) {
 		return "", metadataErr
 	}
 
-	printed, err := (&command{dir: root, name: binary, args: []string{"--version"}}).output(ctx)
+	printed, err := (&command{dir: sourceRoot, name: binary, args: []string{"--version"}}).output(ctx)
 	if err != nil {
 		return "", fmt.Errorf("inspect mutation tool source variant: %w", err)
 	}

@@ -22,6 +22,8 @@ func TestMutationFlagsBoundActualWorkersAndReserveCleanup(t *testing.T) {
 		{"-workers=0"},
 		{"-workers=-1"},
 		{"-workers=5"},
+		{"-timeout-coefficient=0"},
+		{"-timeout-coefficient=-1"},
 		{"-max-duration=-1s"},
 		{"-max-duration=60s"},
 		{"-max-duration=1s"},

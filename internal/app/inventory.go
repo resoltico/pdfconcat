@@ -41,8 +41,8 @@ func (p *pipeline) at(origin assembly.Origin, member string) *report.Location {
 // combine decides the status of several problems found by one stage: interruption wins, otherwise the
 // first problem decides, so the status does not depend on timing.
 func combine(problems []problem) report.Status {
-	for _, found := range problems {
-		if found.status == report.StatusInterrupted {
+	for index := range problems {
+		if problems[index].status == report.StatusInterrupted {
 			return report.StatusInterrupted
 		}
 	}

@@ -409,7 +409,7 @@ func functionLines(file string, content []byte, name string) (int, int, error) {
 	for _, declaration := range parsed.Decls {
 		function, isFunction := declaration.(*ast.FuncDecl)
 		if isFunction && functionName(function) == name {
-			return fset.Position(function.Pos()).Line, fset.Position(function.End()).Line, nil
+			return fset.PositionFor(function.Pos(), false).Line, fset.PositionFor(function.End(), false).Line, nil
 		}
 	}
 

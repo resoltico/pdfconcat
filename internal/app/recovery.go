@@ -28,13 +28,25 @@ func (p *pipeline) reportCommitFailure(ctx context.Context, result *publish.Resu
 	p.publication.ReportStatus = report.ReportFailed
 	p.publication.RecoveryReport = failure.RecoveryPath
 	p.publication.RecoveryState = report.RecoveryCurrent
-	diagnostic := report.Diagnostic{Stage: stagePublish, Code: codeReportPublish, Path: failure.Target, Message: recoveryMessage(failure)}
+	diagnostic := report.Diagnostic{
+		Stage:   stagePublish,
+		Code:    codeReportPublish,
+		Path:    failure.Target,
+		Message: recoveryMessage(failure),
+		Cause:   reasonOf(failure.Err),
+		Recovery: &report.Recovery{
+			Action:       "recover_report",
+			ReportFrom:   "unused_report_target",
+			RecoveryFrom: "publication.recovery_report",
+		},
+	}
 
 	err := p.refreshRecovery(ctx, result.RecoveryOwner, diagnostic)
 	if err != nil {
 		p.publication.RecoveryState = report.RecoveryPending
 		if identityErr := p.verifyRetainedRecovery(result.RecoveryOwner); identityErr != nil {
 			p.publication.RecoveryState = report.RecoveryUnavailable
+			diagnostic.Recovery = nil
 			diagnostic.Message = "PDF published, report not saved. Do not rebuild or copy the observed recovery path: " +
 				"its owned identity is unavailable. " + failure.Err.Error()
 		}

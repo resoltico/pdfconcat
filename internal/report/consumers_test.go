@@ -52,7 +52,7 @@ func TestLargeConsumerRelationIsCompleteOnlyInExplicitDetailedRecord(t *testing.
 
 	const count = 20000
 
-	saved := report.NewErrorReport(commandReport, report.StatusInvalid,
+	saved := failedReportFixture(
 		report.Diagnostic{Stage: "s", Code: "c", Message: "m"}, report.Diagnostic{Stage: "s", Code: "c", Message: "m"})
 
 	for index := range count {
@@ -100,14 +100,14 @@ func TestBuilderOwnsCapturedConsumerReferences(t *testing.T) {
 			Consumers: consumers,
 		},
 	)
-	consumers[0] = "changed"
+	consumers[0] = fixtureMutation
 
 	built := builder.Build(report.StatusInvalid)
 	if built.Diagnostics[0].Consumers[0] != firstItemPointer {
 		t.Fatal("caller changed captured consumers")
 	}
 
-	built.Diagnostics[0].Consumers[0] = "changed again"
+	built.Diagnostics[0].Consumers[0] = fixtureMutationAgain
 	if builder.Build(report.StatusInvalid).Diagnostics[0].Consumers[0] != firstItemPointer {
 		t.Fatal("report changed builder consumers")
 	}

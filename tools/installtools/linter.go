@@ -6,7 +6,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -114,18 +113,9 @@ func verifyBuiltLinter(ctx context.Context, file string, identity repopolicy.Sou
 		return fmt.Errorf("verify built linter identity: %w", runErr)
 	}
 
-	var actual struct {
-		Version string `json:"version"`
-		Commit  string `json:"commit"`
-		Date    string `json:"date"`
-	}
-	if err := json.Unmarshal(output.Bytes(), &actual); err != nil {
-		return fmt.Errorf("decode built linter identity: %w", err)
+	if err := repopolicy.VerifyGolangciBinaryMetadata(file); err != nil {
+		return err
 	}
 
-	if actual.Version != identity.Version || actual.Commit != identity.Commit || actual.Date != identity.Date {
-		return fmt.Errorf("%w: built linter metadata differs from reviewed source/patch identity", errInstall)
-	}
-
-	return nil
+	return repopolicy.VerifyGolangciReportedIdentity(output.Bytes(), identity)
 }

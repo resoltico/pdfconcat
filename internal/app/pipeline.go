@@ -120,6 +120,20 @@ func (p *pipeline) run(ctx context.Context) *report.Report {
 
 // execute runs the stages; a stage that fails records its diagnostics and returns errStopped.
 func (p *pipeline) execute(ctx context.Context) error {
+	if diagnostic := workingDirectoryDiagnostic(p.command.Name, p.env.WorkingDir); diagnostic != nil {
+		if p.command.ReportPath != "" {
+			p.publication = report.Publication{
+				ReportStatus:            report.ReportFailed,
+				ReportWrite:             "not_written",
+				ReportTargetObservation: "unknown",
+				ReportFrom:              originalReportArgumentReference,
+			}
+			p.reportSettled = true
+		}
+
+		return p.stopWith(problem{diagnostic: *diagnostic, status: report.StatusFailed})
+	}
+
 	p.progress.enter(stagePrepare)
 
 	steps := []func() error{

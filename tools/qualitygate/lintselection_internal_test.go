@@ -87,7 +87,7 @@ func TestNeverSelectedAndContradictoryDiagnosticScopesFail(t *testing.T) {
 
 	entries = entries[:2]
 
-	entries[1].GOOS = "windows"
+	entries[1].GOOS = windowsOS
 	if _, problems := selectDiagnosticEntries(entries, targets, targets[selectionWindowsTarget]); len(problems) != 1 {
 		t.Fatalf("contradictory explicit scope escaped: %v", problems)
 	}
@@ -105,6 +105,7 @@ func selectionFixture(t *testing.T) map[string]map[string]bool {
 		selectionUnixSource:        "//go:build linux\n\npackage selection\n",
 		"unix_darwin_test.go":      "//go:build darwin\n\npackage selection\n",
 		"never_test.go":            "//go:build never_selected_here\n\npackage selection\n",
+		"only_window.go":           "//go:build windows\n\npackage selection\n",
 		"testdata/program/main.go": "package main\nfunc main(){}\n",
 	}
 	for name, body := range files {
@@ -124,4 +125,33 @@ func selectionFixture(t *testing.T) map[string]map[string]bool {
 	}
 
 	return targets
+}
+
+func TestDiagnosticPlatformScopeRejectsUnconditionalCommonSourceExclusion(t *testing.T) {
+	t.Parallel()
+
+	targets := selectionFixture(t)
+
+	entry := &repopolicy.Entry{
+		ID: "platform-scope", Tool: repopolicy.ToolLint, Effect: repopolicy.EffectExcludeDiagnostic,
+		Path: selectionCommonSource, GOOS: windowsOS,
+	}
+	if _, problems := selectDiagnosticEntries([]*repopolicy.Entry{entry}, targets, targets[selectionWindowsTarget]); len(problems) != 1 {
+		t.Fatalf("unconditional exclusion on common source escaped platform scope: %v", problems)
+	}
+}
+
+func TestDiagnosticPlatformScopeAcceptsCompilerGuardWithoutFilenameSuffix(t *testing.T) {
+	t.Parallel()
+
+	targets := selectionFixture(t)
+	entry := &repopolicy.Entry{
+		ID: "platform-tag", Tool: repopolicy.ToolLint, Effect: repopolicy.EffectExcludeDiagnostic,
+		Path: "only_window.go", GOOS: windowsOS,
+	}
+
+	selected, problems := selectDiagnosticEntries([]*repopolicy.Entry{entry}, targets, targets[selectionWindowsTarget])
+	if len(problems) != 0 || len(selected) != 1 {
+		t.Fatalf("compiler-guarded exclusion rejected: %v %v", selected, problems)
+	}
 }

@@ -109,8 +109,8 @@ func responseCases() []optionalCase {
 		{&report.ViewResponse[report.PartView]{OversizedRecord: true}, "oversized view response", optionalOversized, true},
 		{&report.Summary{}, "summary without omitted diagnostics", optionalOmitted, false},
 		{&report.Summary{DiagnosticsOmitted: 3}, "summary with omitted diagnostics", optionalOmitted, true},
-		{&report.Summary{}, "summary without a next command", optionalNext, false},
-		{&report.Summary{Next: []string{programName}}, "summary with a next command", optionalNext, true},
+		{&report.Summary{}, "summary without a next command", optionalNext, true},
+		{&report.Summary{Next: new([]string{programName})}, "summary with a next command", optionalNext, true},
 	}
 }
 

@@ -18,7 +18,7 @@ func TestOwnedGoDirectoriesIncludesCompiledFixturesAndHiddenSource(t *testing.T)
 	root := t.TempDir()
 	for _, name := range []string{
 		"pkg/source.go", "pkg/testdata/decoder/main.go", ".hidden/source.go",
-		".tools/cache/source.go", "dist/source.go",
+		".tools/cache/source.go", "dist/source.go", "pkg/dist/source.go", "pkg/.tools/source.go",
 	} {
 		file := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(file), 0o750); err != nil {
@@ -35,7 +35,7 @@ func TestOwnedGoDirectoriesIncludesCompiledFixturesAndHiddenSource(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(dirs, []string{".hidden", "pkg", "pkg/testdata/decoder"}) {
+	if !slices.Equal(dirs, []string{".hidden", "pkg", "pkg/.tools", "pkg/dist", "pkg/testdata/decoder"}) {
 		t.Fatalf("owned source discovery: %v", dirs)
 	}
 

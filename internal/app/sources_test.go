@@ -129,7 +129,8 @@ func TestAFailureReportMayReplaceAFileOnlyOnceEveryInputIsKnown(t *testing.T) {
 
 	secondary := parsed.Diagnostics[1]
 
-	explained := strings.Contains(secondary.Message, "does not apply") && strings.Contains(secondary.Message, "until every input is known")
+	explained := strings.Contains(secondary.Message, "--overwrite cannot replace") &&
+		strings.Contains(secondary.Message, "Before every input is known")
 	if secondary.Code != reportWriteFailureCode || !explained {
 		t.Errorf("secondary diagnostic %+v", secondary)
 	}
@@ -168,7 +169,7 @@ func TestAFailureReportCannotReplaceTheFileItDescribes(t *testing.T) {
 	}
 
 	// The report could not be saved because its path is the plan, and that is said with the code of the conflict.
-	described := strings.HasPrefix(parsed.Diagnostics[1].Message, "the failure report could not be saved")
+	described := strings.HasPrefix(parsed.Diagnostics[1].Message, "Before every input is known")
 	if parsed.Diagnostics[1].Code != codeAlias || !described {
 		t.Errorf("secondary diagnostic %+v", parsed.Diagnostics[1])
 	}

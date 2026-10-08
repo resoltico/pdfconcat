@@ -33,7 +33,8 @@ type (
 		// ReportPath is --report for build and check, relative to the working directory.
 		ReportPath string
 		// ReportFile is the saved report that the report command reads.
-		ReportFile string
+		ExpectAttempt string
+		ReportFile    string
 		// Part is --part, the id of one contribution.
 		Part string
 		// View is --view: "parts" or "diagnostics".
@@ -102,4 +103,6 @@ const (
 	SchemaPlan = "plan"
 	// SchemaReport is the schema command's name for the saved-report schema.
 	SchemaReport = "report"
+	// SchemaResponse describes every structured command response.
+	SchemaResponse = "response"
 )

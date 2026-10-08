@@ -64,10 +64,28 @@ func (p *pipeline) preflightReport() error {
 func (p *pipeline) snapshot(status report.Status) *report.Report {
 	p.builder.SetPhases(p.phases)
 	p.builder.SetCounts(p.counts)
+
 	p.publication.OutputDigest = p.outputDigest
+	if p.publication.ReportStatus == report.ReportWritten {
+		p.publication.ReportWrite = "written"
+	} else if p.reportPath != "" {
+		p.publication.ReportWrite = "not_written"
+	}
+
+	if p.reportPath != "" {
+		p.publication.ReportTargetObservation = unknownMetadata
+	}
+
 	p.builder.SetPublication(p.publication)
 
 	rep := p.builder.Build(status)
+	for index := range rep.Diagnostics {
+		diagnostic := &rep.Diagnostics[index]
+		if diagnostic.Recovery == nil && diagnostic.Location != nil {
+			diagnostic.Recovery = &report.Recovery{Action: "edit_input", Location: diagnostic.Location}
+		}
+	}
+
 	rep.Producer = &report.Producer{
 		Tool:     "pdfconcat",
 		Version:  firstNonEmpty("devel", p.env.Build.Version),
@@ -322,10 +340,14 @@ func (p *pipeline) saveFailureReport(ctx context.Context) *report.Report {
 	}
 
 	found := p.reportProblem(err)
-	found.diagnostic.Message = fmt.Sprintf("the failure report could not be saved to %s: %s", p.reportPath, found.diagnostic.Message)
+	found.diagnostic.Cause = found.diagnostic.Message
+	found.diagnostic.Message = "This attempt did not write the report. Choose an unused target; an existing report may describe an " +
+		"older attempt."
+	found.diagnostic.Recovery = &report.Recovery{Action: "choose_new_report", ReportFrom: originalReportArgumentReference}
 
 	if !p.inventoryComplete {
-		found.diagnostic.Message += "; until every input is known a report is only written to a new file, so --overwrite does not apply"
+		found.diagnostic.Message = "Before every input is known, --overwrite cannot replace a report. Choose an unused target; an " +
+			"existing report may be historical."
 	}
 
 	p.builder.AddDiagnostic(secondaryOrder, found.diagnostic)

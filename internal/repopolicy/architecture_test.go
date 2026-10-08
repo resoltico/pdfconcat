@@ -40,7 +40,7 @@ func TestProductionClassificationComesOnlyFromNativeBoundaryRules(t *testing.T) 
 		"internal/modelSibling/new.go",
 		"internal/model/tagged.go",
 	}
-	compiled := map[string]bool{files[0]: true, files[2]: true}
+	compiled := map[string]bool{files[0]: true, files[1]: true, files[2]: true}
 
 	issues := repopolicy.ProductionClassificationIssues(owners, files, compiled)
 	if len(issues) != 2 || !strings.Contains(strings.Join(issues, "\n"), "unclassified production file: "+files[2]) ||
@@ -48,7 +48,12 @@ func TestProductionClassificationComesOnlyFromNativeBoundaryRules(t *testing.T) 
 		t.Fatalf("wrong classification: %v", issues)
 	}
 
-	issues = repopolicy.ProductionClassificationIssues(owners, []string{"only_test.go"}, nil)
+	issues = repopolicy.ProductionClassificationIssues(owners, []string{"hidden_test.go"}, nil)
+	if len(issues) != 2 || !strings.Contains(strings.Join(issues, "\n"), "owned file is excluded") {
+		t.Fatalf("test excluded from every supported target accepted: %v", issues)
+	}
+
+	issues = repopolicy.ProductionClassificationIssues(owners, []string{"only_test.go"}, map[string]bool{"only_test.go": true})
 	if len(issues) != 1 || !strings.Contains(issues[0], "no owned production") {
 		t.Fatalf("empty evidence accepted: %v", issues)
 	}

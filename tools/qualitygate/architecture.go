@@ -11,12 +11,15 @@ import (
 	"io"
 	"log"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
-// architecture verifies complete production classification and real native-depguard controls.
+const architectureLinters = "depguard,funlen,gocognit,gocyclo,cyclop,maintidx,nestif,interfacebloat,revive"
+
+// architecture verifies owned target selection, production classification and native analyzer controls.
 func architecture(ctx context.Context, args []string) error {
 	if err := newFlags(architectureCommand).Parse(args); err != nil {
 		return fmt.Errorf(parseFlagsError, err)
@@ -25,6 +28,10 @@ func architecture(ctx context.Context, args []string) error {
 	root, err := repoRoot()
 	if err != nil {
 		return err
+	}
+
+	if limitErr := sourceLimits(root); limitErr != nil {
+		return limitErr
 	}
 
 	problems, err := architectureScope(ctx, root)
@@ -53,7 +60,7 @@ func architecture(ctx context.Context, args []string) error {
 	return report(
 		architectureCommand,
 		problems,
-		"every production file classified across compiler-selected target scopes; compiled import controls enforced",
+		"every owned file selected on a supported target; production classified; compiled import and source-structure controls enforced",
 	)
 }
 
@@ -154,7 +161,7 @@ func collectArchitectureFiles(output, module string, compiled map[string]bool) e
 	return nil
 }
 
-// architectureImports uses the installed native checker to analyze every supported target's selected
+// architectureImports uses the installed native analyzers to analyze every supported target's selected
 // owned packages. This is static cross-target import analysis, not native runtime execution.
 func architectureImports(ctx context.Context, root, binary string) error {
 	dirs, err := repopolicy.OwnedGoDirectories(root)
@@ -193,9 +200,17 @@ func architectureImports(ctx context.Context, root, binary string) error {
 			return parseErr
 		}
 
-		log.Printf("architecture: static import analysis for %s (%d owned packages)", target, len(packages))
+		log.Printf("architecture: static import and source-structure analysis for %s (%d owned packages)", target, len(packages))
 
-		lintArgs := append([]string{runVerb, serialLintRunners, enableOnlyFlag, dependencyLinter}, packages...)
+		lintArgs := append([]string{
+			runVerb,
+			serialLintRunners,
+			lintNoFixFlag,
+			configFlag,
+			filepath.Join(root, lintConfigFileName),
+			enableOnlyFlag,
+			architectureLinters,
+		}, packages...)
 		checker := &command{
 			dir: root, name: binary, args: lintArgs, env: architectureTargetEnv(target),
 			stdout: log.Writer(), stderr: log.Writer(),

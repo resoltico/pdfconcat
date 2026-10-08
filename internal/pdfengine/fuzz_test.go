@@ -14,6 +14,7 @@ import (
 
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
+	"github.com/resoltico/pdfconcat/internal/pdforacle"
 )
 
 const (
@@ -141,6 +142,7 @@ func requirePlausible(t *testing.T, info pdfengine.SourceInfo) {
 // accepts exactly the requests an independent model accepts, and that an accepted request yields a
 // valid PDF of exactly the expected page count.
 func FuzzAssembleOrder(f *testing.F) {
+	tools := pdforacle.RequireTools(f)
 	f.Add([]byte{0, 0, 1, 1, 0, 1, 0, 5, 0, 0, 0, 3})
 	f.Add([]byte{1, 0, 1, 5, 1, 2, 1, 3, 2, 0, 0, 1})
 	f.Add([]byte{1, 3, 0, 2, 0, 3, 0, 2, 0})
@@ -185,16 +187,25 @@ func FuzzAssembleOrder(f *testing.F) {
 			return
 		}
 
-		// Accepted: every source page is accounted for once per use.
-		total := 0
-		for _, run := range request.Order {
-			total += run.Count
-		}
-
-		if total != request.ExpectedPages {
-			t.Fatalf("accepted a request whose runs total %d, expected %d", total, request.ExpectedPages)
-		}
+		checkAssembledFuzzOutput(t, tools, output, request.ExpectedPages)
 	})
+}
+
+func checkAssembledFuzzOutput(t *testing.T, tools pdforacle.Tools, output string, expected int) {
+	t.Helper()
+
+	if err := tools.Check(output); err != nil {
+		t.Fatal(err)
+	}
+
+	document, err := pdforacle.Load(tools, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if document.PageCount() != expected {
+		t.Fatalf("assembled PDF has %d pages, expected %d", document.PageCount(), expected)
+	}
 }
 
 // decodeRequest turns fuzz bytes into a request: a header byte for the expected-total adjustment, then

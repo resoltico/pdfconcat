@@ -27,7 +27,7 @@ func verifyCommittedReference(t *testing.T, command cli.Name) {
 	t.Helper()
 
 	recovery := filepath.Join(string(filepath.Separator)+strings.Repeat("ē", 80), ".pdfconcat-report-12345678")
-	rep := report.NewErrorReport("build", report.StatusFailed)
+	rep := report.NewBuilder("build").Build(report.StatusFailed)
 	rep.Publication = report.Publication{Published: true, ReportStatus: report.ReportFailed, RecoveryReport: recovery}
 
 	var stderr bytes.Buffer

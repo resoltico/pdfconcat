@@ -24,6 +24,7 @@ func (t *textWriter) linef(format string, args ...any) {
 // RenderText writes the summary as human text: the same bounded preview as the JSON summary.
 func (s *Summary) RenderText(w io.Writer) error {
 	out := &textWriter{writer: w}
+	out.linef("attempt: %s", s.AttemptID)
 	out.overview(s.Status, s.Command, s.Phases, s.Counts, s.Publication)
 	out.linef("summary only: %d parts, %d diagnostics (%d shown)", s.PartCount, s.DiagnosticCount, len(s.Diagnostics))
 
@@ -43,8 +44,8 @@ func (s *Summary) RenderText(w io.Writer) error {
 		out.linef("next command omitted: use the original report argument")
 	}
 
-	if len(s.Next) > 0 {
-		out.linef("more: %v", s.Next)
+	if s.Next != nil {
+		out.linef("more: %v", *s.Next)
 	}
 
 	return out.err
@@ -121,7 +122,7 @@ func (v *ViewResponse[T]) RenderText(w io.Writer) error {
 
 func count(c *int64) string {
 	if c == nil {
-		return "unknown"
+		return unknownMetadataValue
 	}
 
 	return strconv.FormatInt(*c, 10)
@@ -140,18 +141,26 @@ func (t *textWriter) overview(status Status, command string, phases Phases, coun
 	}
 }
 
-func (t *textWriter) diagnostic(d *DiagnosticView) {
+func (t *textWriter) diagnostic(diagnostic *DiagnosticView) {
 	where := ""
-	if d.Location != nil {
-		where = " (" + d.Location.String() + ")"
+	if diagnostic.Location != nil {
+		where = " (" + diagnostic.Location.String() + ")"
 	}
 
 	cut := ""
-	if d.MessageTruncated {
+	if diagnostic.MessageTruncated {
 		cut = " [message cut]"
 	}
 
-	t.linef("- [%s/%s] %s%s%s", d.Stage, d.Code, d.Message, cut, where)
+	t.linef("- [%s/%s] %s%s%s", diagnostic.Stage, diagnostic.Code, diagnostic.Message, cut, where)
+
+	if diagnostic.Cause != "" {
+		t.linef("  cause: %s", diagnostic.Cause)
+	}
+
+	if diagnostic.Recovery != nil {
+		t.linef("  recovery: %s", diagnostic.Recovery.Action)
+	}
 }
 
 func (t *textWriter) part(view *PartView) {

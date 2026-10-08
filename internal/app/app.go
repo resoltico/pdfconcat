@@ -81,8 +81,10 @@ type (
 		// Progress receives stage lines; nil unless standard error is an interactive terminal.
 		Progress io.Writer
 		// WorkingDir is the absolute directory relative command-line paths resolve against.
+		Executable string
 		WorkingDir string
 		Build      BuildInfo
+		Arguments  []string
 	}
 
 	// App runs commands.
@@ -103,6 +105,8 @@ func New(newEngine EngineFactory) *App {
 
 // Run parses args (without the executable name) and executes the command. It returns the process exit code.
 func (a *App) Run(ctx context.Context, args []string, env Env) int {
+	env.Arguments = args
+
 	command, err := cli.Parse(args)
 	if err != nil {
 		return usageFailure(env, err)
@@ -113,7 +117,8 @@ func (a *App) Run(ctx context.Context, args []string, env Env) int {
 
 // Execute runs a parsed command and returns the process exit code.
 func (a *App) Execute(ctx context.Context, command *cli.Command, env Env) int {
-	if diagnostic := workingDirectoryDiagnostic(command.Name, env.WorkingDir); diagnostic != nil {
+	diagnostic := workingDirectoryDiagnostic(command.Name, env.WorkingDir)
+	if diagnostic != nil && command.Name != cli.NameBuild && command.Name != cli.NameCheck {
 		return emitError(env, command.Format, string(command.Name), report.StatusFailed, *diagnostic)
 	}
 

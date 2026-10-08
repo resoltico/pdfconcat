@@ -30,7 +30,7 @@ func TestLateAliasRecoveryRecordsFailedPublicationAndQueriesWithoutUnsafeNext(t 
 
 		cancel()
 	})
-	res := execute(ctx, t, runner, dir, commandBuild, outputFlag, outputFile, reportFlag, reportFile, "--overwrite", detailsFlag, sourceA)
+	res := execute(ctx, t, runner, dir, commandBuild, outputFlag, outputFile, reportFlag, reportFile, overwriteFlag, detailsFlag, sourceA)
 
 	parsed := res.requireCode(t, 1, reportPublishFailureCode)
 	if !parsed.Publication.Published || parsed.Publication.ReportStatus != failedState {
@@ -58,7 +58,7 @@ func TestLateAliasRecoveryRecordsFailedPublicationAndQueriesWithoutUnsafeNext(t 
 	var summary report.Summary
 	decodeRecoverySummary(t, query.stdout, &summary)
 
-	if len(summary.Next) != 0 {
+	if summary.Next != nil && (*summary.Next)[2] != path {
 		t.Fatalf("unsafe next points original report alias: %v", summary.Next)
 	}
 
@@ -71,7 +71,20 @@ func TestLateAliasRecoveryRecordsFailedPublicationAndQueriesWithoutUnsafeNext(t 
 func decodeRecoverySummary(t *testing.T, data string, target *report.Summary) {
 	t.Helper()
 
-	if err := json.Unmarshal([]byte(data), target); err != nil {
+	var envelope struct {
+		Kind   string          `json:"kind"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(data)
+	if envelope.Kind == "report_query" {
+		payload = envelope.Result
+	}
+
+	if err := json.Unmarshal(payload, target); err != nil {
 		t.Fatal(err)
 	}
 }

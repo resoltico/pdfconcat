@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"regexp"
 	"strings"
@@ -65,27 +64,24 @@ func skippedDirectories() map[string]bool {
 // and SPDX notices alone. A file that does not parse is an error: it cannot be shown clean. Files
 // are read through an [os.Root], so a symbolic link cannot lead the scan outside root.
 func ScanDirectives(root string) ([]DirectiveViolation, error) {
+	files, err := OwnedGoSources(root)
+	if err != nil {
+		return nil, err
+	}
+
 	var violations []DirectiveViolation
 
-	err := withRoot(root, func(tree *os.Root) error {
-		return fs.WalkDir(tree.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-
-			if entry.IsDir() && skippedDirectories()[entry.Name()] {
-				return fs.SkipDir
-			}
-
-			if entry.IsDir() || !strings.HasSuffix(name, goSourceSuffix) {
-				return nil
-			}
-
+	err = withRoot(root, func(tree *os.Root) error {
+		for _, name := range files {
 			found, scanErr := scanFile(tree, name)
-			violations = append(violations, found...)
+			if scanErr != nil {
+				return scanErr
+			}
 
-			return scanErr
-		})
+			violations = append(violations, found...)
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("scan Go sources for directives: %w", err)
@@ -120,7 +116,7 @@ func DirectivesIn(name string, content []byte) ([]DirectiveViolation, error) {
 			kind := directiveKind(commentText(comment.Text))
 			if kind != "" {
 				violations = append(violations, DirectiveViolation{
-					File: name, Line: fset.Position(comment.Pos()).Line, Kind: kind, Comment: comment.Text,
+					File: name, Line: fset.PositionFor(comment.Pos(), false).Line, Kind: kind, Comment: comment.Text,
 				})
 			}
 		}

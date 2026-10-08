@@ -32,7 +32,10 @@ func TestPlanDiagnosticConvertsALocatedDecodingFailure(t *testing.T) {
 		t.Fatalf("decoder diagnostic adaptation: %+v", diagnostic)
 	}
 
-	if validationErr := report.NewErrorReport(checkName, report.StatusInvalid, diagnostic).Validate(); validationErr != nil {
+	builder := report.NewBuilder(checkName)
+	builder.AddDiagnostic(0, diagnostic)
+
+	if validationErr := builder.Build(report.StatusInvalid).Validate(); validationErr != nil {
 		t.Fatal(validationErr)
 	}
 }

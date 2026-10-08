@@ -31,7 +31,7 @@ func headerInvariantCases() []invariantCase {
 	}
 
 	return []invariantCase{
-		{func(r *report.Report) { r.ReportVersion = 2 }, "version", "/report_version", report.CodeUnsupportedVersion},
+		{func(r *report.Report) { r.FormatVersion = 3 }, "version", "/format_version", report.CodeUnsupportedVersion},
 		{func(r *report.Report) { r.Kind = "summary" }, "kind", "/kind", report.CodeWrongKind},
 		{func(r *report.Report) { r.Command = commandReport }, "command ok but not build or check", pointerStatus, report.CodeInvalidValue},
 		{func(r *report.Report) {

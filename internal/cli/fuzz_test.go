@@ -22,19 +22,32 @@ type (
 	}
 
 	// invariant returns a description of how an accepted Command breaks a grammar rule, or "" when it holds.
-	invariant func(args []string, command cli.Command) string
+	invariant func(args []string, command *cli.Command) string
 )
 
-// argSeparator joins arguments in a fuzz input; an argument never contains it, so one fuzz string is one
-// argument vector, including empty arguments.
-const argSeparator = "\x1f"
+// OS arguments cannot contain NUL. A leading separator distinguishes no arguments from one empty argument.
+const argSeparator = "\x00"
+
+func joinArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+
+	for _, arg := range args {
+		if strings.Contains(arg, argSeparator) {
+			panic("fuzz argv seed contains NUL, which cannot occur in an OS argument")
+		}
+	}
+
+	return argSeparator + strings.Join(args, argSeparator)
+}
 
 func splitArgs(joined string) []string {
 	if joined == "" {
 		return nil
 	}
 
-	return strings.Split(joined, argSeparator)
+	return strings.Split(strings.TrimPrefix(joined, argSeparator), argSeparator)
 }
 
 // FuzzParse checks that Parse never panics, is deterministic, and that whatever it accepts or rejects satisfies
@@ -43,17 +56,18 @@ func FuzzParse(f *testing.F) {
 	accepts, rejects := acceptedLines(), rejectedLines()
 
 	for i := range accepts {
-		f.Add(strings.Join(accepts[i].args, argSeparator))
+		f.Add(joinArgs(accepts[i].args))
 	}
 
 	for i := range rejects {
-		f.Add(strings.Join(rejects[i].args, argSeparator))
+		f.Add(joinArgs(rejects[i].args))
 	}
 
-	f.Add(strings.Join([]string{argBuild, "-o", string([]byte{0xff})}, argSeparator))
-	f.Add(strings.Join([]string{argBuild, "--", "--", argBlank}, argSeparator))
-	f.Add(strings.Join([]string{argReport, "r", "--limit=" + strings.Repeat("9", 30)}, argSeparator))
-	f.Add(strings.Join([]string{argBuild, "--plan=-", argFormatText, argFormatText}, argSeparator))
+	f.Add(joinArgs([]string{argBuild, "-o", string([]byte{0xff})}))
+	f.Add(joinArgs([]string{argBuild, "--", "--", argBlank}))
+	f.Add(joinArgs([]string{argReport, "r", "--limit=" + strings.Repeat("9", 30)}))
+	f.Add(joinArgs([]string{argBuild, "--plan=-", argFormatText, argFormatText}))
+	f.Add(joinArgs([]string{argBuild, "-o", "control\x1f.pdf", argBlank}))
 
 	f.Fuzz(func(t *testing.T, joined string) {
 		args := splitArgs(joined)
@@ -66,7 +80,7 @@ func FuzzParse(f *testing.F) {
 		}
 
 		if firstErr != nil {
-			checkRejection(t, args, first, firstErr)
+			checkRejection(t, args, &first, firstErr)
 
 			return
 		}
@@ -74,7 +88,7 @@ func FuzzParse(f *testing.F) {
 		checkAcceptedEncoding(t, args)
 
 		for _, check := range invariants() {
-			if problem := check(args, first); problem != "" {
+			if problem := check(args, &first); problem != "" {
 				t.Fatalf("Parse(%q) = %+v: %s", args, first, problem)
 			}
 		}
@@ -89,11 +103,11 @@ func errorText(err error) string {
 	return err.Error()
 }
 
-func checkRejection(t *testing.T, args []string, command cli.Command, err error) {
+func checkRejection(t *testing.T, args []string, command *cli.Command, err error) {
 	t.Helper()
 
 	usage, ok := errors.AsType[*cli.UsageError](err)
-	if !ok || len(usage.Diagnostics) != 1 || !reflect.DeepEqual(command, cli.Command{}) {
+	if !ok || len(usage.Diagnostics) != 1 || !reflect.DeepEqual(*command, cli.Command{}) {
 		t.Fatalf("Parse(%q) = %+v, %v: want the zero Command and one *UsageError diagnostic", args, command, err)
 	}
 
@@ -144,7 +158,7 @@ func invariants() []invariant {
 	}
 }
 
-func formatInvariant(args []string, command cli.Command) string {
+func formatInvariant(args []string, command *cli.Command) string {
 	if command.Format == cli.FormatText && !mentionsTextFormat(args) {
 		return "text selected without a --format text"
 	}
@@ -152,11 +166,12 @@ func formatInvariant(args []string, command cli.Command) string {
 	return ""
 }
 
-func commandInvariant(_ []string, command cli.Command) string {
+func commandInvariant(_ []string, command *cli.Command) string {
 	known := slices.Contains(
 		[]cli.Name{cli.NameBuild, cli.NameCheck, cli.NameReport, cli.NameSchema, cli.NameVersion, cli.NameHelp},
 		command.Name,
 	)
+	schemaKnown := slices.Contains([]string{cli.SchemaPlan, cli.SchemaReport, cli.SchemaResponse}, command.SchemaName)
 	topic := command.HelpFor == "" || cli.Help(command.HelpFor).Command == command.HelpFor
 
 	switch {
@@ -164,7 +179,7 @@ func commandInvariant(_ []string, command cli.Command) string {
 		return "unknown command"
 	case !topic || (command.Name != cli.NameHelp && command.HelpFor != ""):
 		return "help topic is invalid or set for another command"
-	case command.Name == cli.NameSchema && command.SchemaName != cli.SchemaPlan && command.SchemaName != cli.SchemaReport:
+	case command.Name == cli.NameSchema && !schemaKnown:
 		return "schema name is invalid"
 	default:
 		return ""
@@ -182,7 +197,7 @@ func planShapes() map[cli.PlanSource]planShape {
 	}
 }
 
-func planSourceInvariant(_ []string, command cli.Command) string {
+func planSourceInvariant(_ []string, command *cli.Command) string {
 	planning := command.Name == cli.NameBuild || command.Name == cli.NameCheck
 	if planning != (command.PlanSource != cli.PlanNone) {
 		return "build and check have exactly one plan source, other commands none"
@@ -201,7 +216,7 @@ func planSourceInvariant(_ []string, command cli.Command) string {
 }
 
 // requiredPlanValue checks that a named plan has its path and a direct sequence its operands.
-func requiredPlanValue(command cli.Command) string {
+func requiredPlanValue(command *cli.Command) string {
 	namedWithoutPath := command.PlanSource == cli.PlanFile && command.PlanPath == ""
 	directWithoutOperands := command.PlanSource == cli.PlanOperands && len(command.Operands) == 0
 
@@ -212,7 +227,7 @@ func requiredPlanValue(command cli.Command) string {
 	return ""
 }
 
-func operandInvariant(args []string, command cli.Command) string {
+func operandInvariant(args []string, command *cli.Command) string {
 	previous := -1
 
 	for _, operand := range command.Operands {
@@ -232,7 +247,7 @@ func operandInvariant(args []string, command cli.Command) string {
 }
 
 // reportInvariant is the report command's selection and paging rules.
-func reportInvariant(_ []string, command cli.Command) string {
+func reportInvariant(_ []string, command *cli.Command) string {
 	selections := 0
 
 	for _, selected := range []bool{command.Part != "", command.Page != 0, command.View != ""} {
@@ -251,7 +266,7 @@ func reportInvariant(_ []string, command cli.Command) string {
 	}
 }
 
-func pagingProblem(command cli.Command) string {
+func pagingProblem(command *cli.Command) string {
 	switch {
 	case (command.HasOffset || command.HasLimit) && command.View == "":
 		return "paging without a view"
@@ -263,7 +278,7 @@ func pagingProblem(command cli.Command) string {
 }
 
 // strayInvariant requires the members of other commands to stay zero.
-func strayInvariant(_ []string, command cli.Command) string {
+func strayInvariant(_ []string, command *cli.Command) string {
 	planning := command.Name == cli.NameBuild || command.Name == cli.NameCheck
 	reporting := command.Name == cli.NameReport
 
@@ -279,12 +294,12 @@ func strayInvariant(_ []string, command cli.Command) string {
 	}
 }
 
-func planningMembersSet(command cli.Command) bool {
+func planningMembersSet(command *cli.Command) bool {
 	return command.Output != "" || command.ReportPath != "" || command.Overwrite || command.Jobs != 0
 }
 
 // jobsInvariant requires an explicit job count to be positive.
-func jobsInvariant(_ []string, command cli.Command) string {
+func jobsInvariant(_ []string, command *cli.Command) string {
 	if command.Jobs < 0 {
 		return "negative job count"
 	}
@@ -292,7 +307,7 @@ func jobsInvariant(_ []string, command cli.Command) string {
 	return ""
 }
 
-func reportMembersSet(command cli.Command) bool {
+func reportMembersSet(command *cli.Command) bool {
 	selected := command.ReportFile != "" || command.Part != "" || command.Page != 0 || command.View != ""
 
 	return selected || command.HasOffset || command.HasLimit

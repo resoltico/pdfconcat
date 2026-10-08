@@ -5,7 +5,6 @@ package report_test
 
 import (
 	"bytes"
-	"context"
 	"math"
 	"strings"
 	"testing"
@@ -14,41 +13,57 @@ import (
 )
 
 const (
-	fixtureBlackColor        = "#000000"
-	findingOutsideHorizontal = "outside-page-horizontal"
-	fixtureLayoutStage       = "layout"
-	fixtureOverflowCode      = "text_overflow"
-	unknownProducerCommit    = "unknown"
-	unknownFindingKind       = "unknown"
-	expectedSummaryBytes     = 2048
-	testCommandCheck         = "check"
-	testCommandBuild         = "build"
-	firstArgvID              = "argv:0"
-	secondArgvID             = "argv:1"
-	detailFormat             = "%+v"
-	memberStatusNull         = `"status":null`
-	duplicatedKindMembers    = `"kind":"report","kind":"report",`
-	memberFontZeroEnd        = `"font":0}`
-	namedErrorFormat         = "%s: %v"
-	firstItemPointer         = "/items/0"
-	itemPointerFormat        = "/items/%d"
+	fixtureQueryReportReference = "original_argv.report_operand"
+	fixtureNotWritten           = "not_written"
+	fixtureChooseNewReport      = "choose_new_report"
+	fixtureUnknownOption        = "unknown option"
+	fixtureEditInput            = "edit_input"
+	memberCannotRead            = `"message":"cannot read"`
+	fixtureMutation             = "changed"
+	fixtureMutationAgain        = "changed again"
+	fixtureAttemptID            = "AAAAAAAAAAAAAAAAAAAAAAAAAA"
+	fixtureUsageStage           = "usage"
+	fixtureBadFlagCode          = "bad_flag"
+	fixtureBlankOption          = "--blank"
+	memberEmptyDiagnostics      = `"diagnostics":[]`
+	responseSchemaURL           = "https://github.com/resoltico/pdfconcat/blob/main/internal/report/response.schema.json"
+	fixtureBlackColor           = "#000000"
+	findingOutsideHorizontal    = "outside-page-horizontal"
+	fixtureLayoutStage          = "layout"
+	fixtureOverflowCode         = "text_overflow"
+	unknownMetadataValue        = "unknown"
+	unknownFindingKind          = "unknown"
+	expectedSummaryBytes        = 2048
+	testCommandCheck            = "check"
+	testCommandBuild            = "build"
+	firstArgvID                 = "argv:0"
+	secondArgvID                = "argv:1"
+	detailFormat                = "%+v"
+	memberStatusNull            = `"status":null`
+	duplicatedKindMembers       = `"kind":"report","kind":"report",`
+	memberFontZeroEnd           = `"font":0}`
+	namedErrorFormat            = "%s: %v"
+	firstItemPointer            = "/items/0"
+	itemPointerFormat           = "/items/%d"
 
 	// Names shared by the test files.
-	fontName       = "NotoSans-Regular"
-	colorWhite     = "#ffffff"
-	alignCenter    = "center"
-	sourcePath     = "/a.pdf"
-	jobFile        = "/work/job.json"
-	argvFile       = "argv"
-	commandReport  = "report"
-	savedReport    = "saved.json"
-	jobName        = "job.json"
-	pointerStatus  = "/status"
-	pointerItemOne = "/items/1"
-	pointerItemTwo = "/items/2"
+	fontName                = "NotoSans-Regular"
+	colorWhite              = "#ffffff"
+	alignCenter             = "center"
+	sourcePath              = "/a.pdf"
+	jobFile                 = "/work/job.json"
+	argvFile                = "argv"
+	commandReport           = "report"
+	savedReport             = "saved.json"
+	originalReportReference = "original_argv.--report"
+	fixtureReportPath       = "/w/r.json"
+	jobName                 = "job.json"
+	pointerStatus           = "/status"
+	pointerItemOne          = "/items/1"
+	pointerItemTwo          = "/items/2"
 
 	// JSON fragments of the sample documents that the corpus rows edit.
-	memberVersion   = `"report_version":1`
+	memberVersion   = `"format_version":2`
 	memberKind      = `"kind":"report",`
 	memberStatusOK  = `"status":"ok"`
 	memberFontName  = `"name":"NotoSans-Regular"`
@@ -62,7 +77,7 @@ const (
 
 	// completeCheck is a successful check: one PDF of three pages and one blank run of two pages. It is
 	// written out by hand so that it is an oracle independent of the Builder and the encoder.
-	completeCheck = `{"report_version":1,"kind":"report","status":"ok","command":"check",` +
+	completeCheck = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"ok","command":"check",` +
 		`"phases":{"instructions":"complete","input_inspection":"complete","layout":"complete","output_verification":"not_run"},` +
 		`"counts":{"source_pages":3,"generated_pages":2,"total_pages":5},` +
 		`"publication":{"report_status":"written","report_path":"/w/r.json","published":false},` +
@@ -85,7 +100,7 @@ const (
 		`{"stage":"usage","code":"bad_flag","location":{"file":"argv","argv_index":2},"message":"bad flag"}]`
 
 	// failedCheck is an incomplete run: layout is unknown, so counts and ranges are null.
-	failedCheck = `{"report_version":1,"kind":"report","status":"invalid","command":"check",` +
+	failedCheck = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"invalid","command":"check",` +
 		`"phases":{"instructions":"complete","input_inspection":"incomplete","layout":"not_run","output_verification":"not_run"},` +
 		`"counts":{"source_pages":null,"generated_pages":null,"total_pages":null},` +
 		`"publication":{"report_status":"not_requested","published":false},` +
@@ -95,7 +110,7 @@ const (
 
 	// richFailure is a failed build that exercises every optional member: published output, a failed report
 	// with a recovery file, a font file, a pointer and an argv location, and a path.
-	richFailure = `{"report_version":1,"kind":"report","status":"failed","command":"build",` +
+	richFailure = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"failed","command":"build",` +
 		`"phases":{"instructions":"complete","input_inspection":"complete","layout":"complete","output_verification":"complete"},` +
 		`"counts":{"source_pages":1,"generated_pages":1,"total_pages":2},` +
 		`"publication":{"output":"/w/out.pdf","report_status":"failed","report_path":"/w/r.json",` +
@@ -117,7 +132,7 @@ const (
 func decodeText(tb testing.TB, text string) (*report.Report, error) {
 	tb.Helper()
 
-	return report.Decode(context.Background(), savedReport, strings.NewReader(text))
+	return report.Decode(report.DecoderTestContext(tb.Context(), tb), savedReport, report.ReaderRequiringStorage(strings.NewReader(text)))
 }
 
 func mustDecode(tb testing.TB, text string) *report.Report {
@@ -183,3 +198,27 @@ func containsAll(text string, parts ...string) bool {
 }
 
 func nan() float64 { return math.NaN() }
+
+func nextArguments(next *[]string) []string {
+	if next == nil {
+		return nil
+	}
+
+	return *next
+}
+
+func failedReportFixture(diagnostics ...report.Diagnostic) *report.Report {
+	builder := report.NewBuilder(commandReport)
+	builder.SetPhases(report.Phases{
+		Instructions:       report.PhaseIncomplete,
+		InputInspection:    report.PhaseNotRun,
+		Layout:             report.PhaseNotRun,
+		OutputVerification: report.PhaseNotRun,
+	})
+
+	for index, diagnostic := range diagnostics {
+		builder.AddDiagnostic(index, diagnostic)
+	}
+
+	return builder.Build(report.StatusInvalid)
+}

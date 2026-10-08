@@ -4,12 +4,13 @@
 package main_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 // agentSession is the state an agent carries through its check-and-fix loop: the directory and the plan it keeps editing.
@@ -73,7 +74,7 @@ func (s *agentSession) fixMissingSources(t *testing.T) {
 	requireExit(t, first, 1)
 
 	summary := summaryOf(t, first)
-	if summary.DiagnosticCount != 2 || summary.Publication.ReportStatus != reportWritten || len(summary.Next) == 0 {
+	if summary.DiagnosticCount != 2 || summary.Publication.ReportStatus != reportWritten {
 		t.Fatalf("first summary: %+v", summary)
 	}
 
@@ -82,7 +83,12 @@ func (s *agentSession) fixMissingSources(t *testing.T) {
 	}
 
 	// Fetch the failing locations, nothing else.
-	failing := pointersOf(t, run(t, s.dir, "", summary.Next[1:]...))
+	receipt := contractObject(t, first.stdout)
+	next := reportContinuation(t, receipt, filepath.Join(s.dir, planReportPath))
+	resumed := executeContinuation(t, s.dir, next)
+	requireExit(t, resumed, 0)
+	failing := pointersOf(t, resumed)
+
 	if strings.Join(failing, ",") != "/items/2,/items/5" {
 		t.Fatalf("failing locations: %v", failing)
 	}
@@ -106,11 +112,16 @@ func (s *agentSession) fixOverflow(t *testing.T) {
 	requireExit(t, second, 2)
 
 	summary := summaryOf(t, second)
-	if summary.Phases["input_inspection"] != "complete" || summary.Phases["layout"] != phaseIncomplete {
+	if summary.Phases["input_inspection"] != phaseComplete || summary.Phases["layout"] != phaseIncomplete {
 		t.Fatalf("second summary: %+v", summary)
 	}
 
-	failing := pointersOf(t, run(t, s.dir, "", summary.Next[1:]...))
+	receipt := contractObject(t, second.stdout)
+	next := reportContinuation(t, receipt, filepath.Join(s.dir, planReportPath))
+	resumed := executeContinuation(t, s.dir, next)
+	requireExit(t, resumed, 0)
+	failing := pointersOf(t, resumed)
+
 	if len(failing) != 1 || failing[0] != "/items/8/blank/text/width" {
 		t.Fatalf("overflow location: %v", failing)
 	}
@@ -143,9 +154,9 @@ func (s *agentSession) buildAndQuery(t *testing.T) {
 
 	// Query the final publication state without any PDF.
 	final := generic(t, run(t, s.dir, "", commandReport, buildReportPath).stdout)
-	published := flagAt(t, final, "publication", "published")
+	published := flagAt(t, final, keyPublication, "published")
 
-	if final["status"] != "ok" || !published || textAt(t, final, "publication", keyOutput) != bundle {
+	if final["status"] != "ok" || !published || textAt(t, final, keyPublication, keyOutput) != bundle {
 		t.Errorf("final state: %v", final)
 	}
 
@@ -170,7 +181,7 @@ func pointersOf(tb testing.TB, res result) []string {
 		Records []diagnostic `json:"records"`
 	}
 
-	ensure(tb, json.Unmarshal([]byte(res.stdout), &view))
+	decodeLine(tb, res.stdout, &view)
 
 	pointers := make([]string, len(view.Records))
 	for index, record := range view.Records {
@@ -227,7 +238,7 @@ func TestOutputStaysBoundedOnLargeJobs(t *testing.T) {
 		t.Errorf("failure summary: %d diagnostics, %d shown, %d bytes", parsed.DiagnosticCount, len(parsed.Diagnostics), len(failed.stdout))
 	}
 
-	if seen := pagedDiagnostics(t, dir, "bad.report.json"); seen != sources {
+	if seen := pagedDiagnostics(t, dir, "bad.report.json", sources); seen != sources {
 		t.Errorf("paging saw %d of %d diagnostics", seen, sources)
 	}
 
@@ -239,27 +250,42 @@ func TestOutputStaysBoundedOnLargeJobs(t *testing.T) {
 
 // pagedDiagnostics reads every diagnostic of a saved report in pages of 100, checks each page against the byte
 // bound, and returns how many it saw.
-func pagedDiagnostics(tb testing.TB, dir, reportFile string) int {
+func pagedDiagnostics(tb testing.TB, dir, reportFile string, expected int) int {
 	tb.Helper()
 
-	offset, seen := 0, 0
+	offset, seen := int64(0), 0
+	identities := map[string]bool{}
 
 	for offset >= 0 {
-		page := run(tb, dir, "", commandReport, reportFile, flagView, diagnosticsView, offsetFlag, strconv.Itoa(offset), limitFlag, "100")
+		page := run(
+			tb,
+			dir,
+			"",
+			commandReport,
+			reportFile,
+			flagView,
+			diagnosticsView,
+			offsetFlag,
+			strconv.FormatInt(offset, 10),
+			limitFlag,
+			"100",
+		)
 		requireExit(tb, page, 0)
 
 		if len(page.stdout) > 128<<10 {
 			tb.Fatalf("a page of diagnostics is %d bytes", len(page.stdout))
 		}
 
-		var view struct {
-			NextOffset *int `json:"next_offset"`
-			Returned   int  `json:"returned"`
-		}
+		var view report.ViewResponse[report.DiagnosticView]
 
 		decodeLine(tb, page.stdout, &view)
+		requireDiagnosticPageProgress(tb, &view, offset, expected, identities)
 
 		seen += view.Returned
+		if seen > expected {
+			tb.Fatalf("diagnostic pages exceed authored total: %d > %d", seen, expected)
+		}
+
 		offset = -1
 
 		if view.NextOffset != nil {
@@ -268,4 +294,36 @@ func pagedDiagnostics(tb testing.TB, dir, reportFile string) int {
 	}
 
 	return seen
+}
+
+func requireDiagnosticPageProgress(
+	tb testing.TB,
+	view *report.ViewResponse[report.DiagnosticView],
+	offset int64,
+	expected int,
+	identities map[string]bool,
+) {
+	tb.Helper()
+
+	if view.Offset != offset || view.Total != expected || view.Returned != len(view.Records) {
+		tb.Fatalf("diagnostic page lost offset/count truth: %+v, requested=%d expected=%d", view, offset, expected)
+	}
+
+	for index := range view.Records {
+		diagnostic := &view.Records[index]
+		if diagnostic.Location == nil || diagnostic.Location.Pointer == "" || identities[diagnostic.Location.Pointer] {
+			tb.Fatalf("missing or duplicate declaration location: %+v", diagnostic.Location)
+		}
+
+		identities[diagnostic.Location.Pointer] = true
+	}
+
+	if view.NextOffset != nil && (*view.NextOffset <= offset || *view.NextOffset != offset+int64(view.Returned)) {
+		tb.Fatalf(
+			"diagnostic pagination did not advance by returned records: offset=%d next=%d returned=%d",
+			offset,
+			*view.NextOffset,
+			view.Returned,
+		)
+	}
 }

@@ -32,7 +32,12 @@ func TestTextFormatIsAHumanRenderingOfTheSameResult(t *testing.T) {
 	} {
 		res := run(t, dir, "", args...)
 
-		if (strings.HasPrefix(res.stdout, "{") != slices.Contains(args, flagDetails)) || res.stdout == "" {
+		human := res.stdout
+		if args[0] == commandReport {
+			_, human, _ = strings.Cut(human, "\n")
+		}
+
+		if (strings.HasPrefix(human, "{") != slices.Contains(args, flagDetails)) || res.stdout == "" {
 			t.Errorf("%v: not text: %.200q", args, res.stdout)
 		}
 	}
@@ -50,14 +55,19 @@ func TestTextFormatIsAHumanRenderingOfTheSameResult(t *testing.T) {
 		{commandReport, fileSavedReport, flagFormat, formatText},
 		{commandReport, fileSavedReport, flagFormat, formatText, flagView, viewParts, flagDetails},
 		{commandReport, fileSavedReport, flagFormat, formatText, flagPage, "3"},
-		{commandReport, fileSavedReport, flagFormat, formatText, partFlag, "argv:3", flagDetails},
+		{commandReport, fileSavedReport, flagFormat, formatText, partFlag, directBlankPart, flagDetails},
 		{commandReport, fileSavedReport, flagFormat, formatText, flagView, viewParts},
 		{commandReport, fileSavedReport, flagFormat, formatText, flagView, diagnosticsView},
 	} {
 		res := run(t, dir, "", args...)
 		requireExit(t, res, 0)
 
-		if (strings.HasPrefix(res.stdout, "{") != slices.Contains(args, flagDetails)) || res.stdout == "" {
+		human := res.stdout
+		if args[0] == commandReport {
+			_, human, _ = strings.Cut(human, "\n")
+		}
+
+		if (strings.HasPrefix(human, "{") != slices.Contains(args, flagDetails)) || res.stdout == "" {
 			t.Errorf("%v: %.200q", args, res.stdout)
 		}
 	}
@@ -154,7 +164,7 @@ func TestGeneratedOnlyJobsAndInheritedSizes(t *testing.T) {
 	// A job that is all generated pages needs sizes it can resolve, and does not need a dummy source.
 	plan := planJSON(t, itemsOf(
 		obj{keyBlank: obj{keySize: "200x100", keyText: obj{keyValue: "first", keySize: 10}}},
-		obj{keyBlank: obj{keySize: "A4", "background": "#ff0000"}},
+		obj{keyBlank: obj{keySize: "A4", keyBackground: "#ff0000"}},
 	))
 	requireExit(t, run(t, dir, "", commandBuild, inlinePlanFlag, plan, "-o", "generated.pdf"), 0)
 
@@ -240,7 +250,7 @@ func TestSavedReportsAreUntrustedAndQueriesFailCleanly(t *testing.T) {
 	requireExit(t, run(t, dir, "", commandCheck, flagReport, failedReportPath, fileA, flagBlank, fileMissing), 1)
 
 	saved := string(readFile(t, filepath.Join(dir, successfulReportPath)))
-	writeFile(t, dir, "oldversion.json", strings.Replace(saved, `"report_version":1`, `"report_version":2`, 1))
+	writeFile(t, dir, "oldversion.json", strings.Replace(saved, `"format_version":2`, `"format_version":1`, 1))
 	writeFile(t, dir, "trailing.json", saved+"x")
 	writeFile(t, dir, "empty.json", "")
 	writeFile(t, dir, "unknown.json", strings.Replace(saved, `"kind":"report"`, `"kind":"report","extra":1`, 1))
@@ -290,7 +300,7 @@ func TestSavedReportsAreUntrustedAndQueriesFailCleanly(t *testing.T) {
 	}
 
 	// The partial report still answers part queries, by origin.
-	part := generic(t, run(t, dir, "", commandReport, failedReportPath, partFlag, "argv:3").stdout)
+	part := generic(t, run(t, dir, "", commandReport, failedReportPath, partFlag, directBlankPart).stdout)
 	if inner := objAt(t, part, partField); inner["range"] != nil || inner["path"] == nil {
 		t.Errorf("part of an incomplete layout: %v", part)
 	}
@@ -302,7 +312,7 @@ func TestSchemasAndHelpAreStructured(t *testing.T) {
 	dir := t.TempDir()
 
 	for _, name := range []string{planSchemaName, commandReport} {
-		res := run(t, dir, "", "schema", name)
+		res := run(t, dir, "", commandSchema, name)
 		requireExit(t, res, 0)
 
 		var schema obj

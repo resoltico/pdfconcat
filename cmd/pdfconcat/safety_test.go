@@ -227,10 +227,10 @@ func TestFailureReportNeverReplacesAnUnknownFile(t *testing.T) {
 	malformed := writeFile(t, dir, fileBadPlan, `{"version":1,"items":["a.pdf",]}`)
 
 	// A failure report goes to a new file.
-	fresh := run(t, dir, "", commandCheck, flagPlan, fileBadPlan, flagReport, "fresh.json")
+	fresh := run(t, dir, "", commandCheck, flagPlan, fileBadPlan, flagReport, freshReportPath)
 	requireExit(t, fresh, 2)
 
-	saved := generic(t, string(readFile(t, filepath.Join(dir, "fresh.json"))))
+	saved := generic(t, string(readFile(t, filepath.Join(dir, freshReportPath))))
 	if saved["status"] != statusInvalid || saved["kind"] != kindReport {
 		t.Errorf("failure report: %v", saved)
 	}
@@ -330,7 +330,7 @@ func TestExitCodesAndStableCodes(t *testing.T) {
 		{"unpaired surrogate", `{"version":1,"items":["\ud800.pdf"]}`, codeJSONSyntax, phaseInstructions, 2},
 		{"bad color", `{"version":1,"items":["a.pdf",{"blank":{"background":"red"}}]}`, "plan_bad_value", phaseInstructions, 2},
 		{"inherit without source", `{"version":1,"items":[{"blank":{}}]}`, "size_unresolved", "layout", 2},
-		{"missing source", `{"version":1,"items":["missing.pdf"]}`, "source_unreadable", "input_inspection", 1},
+		{"missing source", `{"version":1,"items":["missing.pdf"]}`, codeSourceUnreadable, "input_inspection", 1},
 		{"malformed pdf", `{"version":1,"items":["garbage.pdf"]}`, "pdf_invalid", "input_inspection", 1},
 	}
 

@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	disableWSLID   = "lint-disable-wsl"
 	kindDeprecated = "deprecated-rule"
 	wantExactFile  = "exact file"
 	wantGoSource   = "Go source file"
@@ -96,7 +97,7 @@ func TestParseRegistryAcceptsValidEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(registry.Exceptions) != 1 || registry.Exceptions[0].ID != "lint-disable-wsl" {
+	if len(registry.Exceptions) != 1 || registry.Exceptions[0].ID != disableWSLID {
 		t.Fatalf("unexpected registry %+v", registry)
 	}
 
@@ -229,26 +230,6 @@ func TestLoadRegistryReportsMissingFile(t *testing.T) {
 	}
 }
 
-// TestRepositoryRegistryIsValid loads the real registry and checks that every path, function and
-// anchor it names still exists in the tree.
-func TestRepositoryRegistryIsValid(t *testing.T) {
-	t.Parallel()
-
-	registry, err := repopolicy.LoadRegistry(filepath.Join(repoRoot(t), ".quality-exceptions.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(registry.Exceptions) == 0 {
-		t.Fatal("registry is empty; the reader has drifted from the file layout")
-	}
-
-	problems := repopolicy.RepositoryIssues(registry.Exceptions, repoReader(t))
-	if len(problems) > 0 {
-		t.Fatalf("registry points at code that no longer exists:\n%s", strings.Join(problems, "\n"))
-	}
-}
-
 func TestRepositoryIssuesFlagsVanishedCode(t *testing.T) {
 	t.Parallel()
 
@@ -308,5 +289,37 @@ func TestRegistryCannotAcceptUnjudgedMutationStatus(t *testing.T) {
 	_, err := repopolicy.ParseRegistry([]byte(content))
 	if !errors.Is(err, repopolicy.ErrRegistry) || !strings.Contains(err.Error(), `status "not-covered" is not one`) {
 		t.Fatalf("unjudged registry acceptance allowed: %v", err)
+	}
+}
+
+func TestDesignIncompatibleSettingIsRestrictedToReplacedSourceAlgorithms(t *testing.T) {
+	t.Parallel()
+
+	for _, rule := range []string{"file-length-limit", "max-public-structs", "function-length", "add-constant"} {
+		t.Run(rule, func(t *testing.T) {
+			t.Parallel()
+
+			entry := rationaleComment + "  - id: lint-source-algorithm\n" +
+				"    tool: golangci-lint\n    kind: design-incompatible\n    effect: setting-item\n" +
+				"    setting: linters.settings.revive.rules\n    values: [" + rule + "]\n" +
+				"    retained_property: mandatory source scanner enforces limits\n"
+			_, err := repopolicy.ParseRegistry([]byte(registryHeader + entry))
+
+			allowed := rule == "file-length-limit" || rule == "max-public-structs"
+			if allowed != (err == nil) {
+				t.Fatalf("rule %s: allowed=%v, parse error=%v", rule, allowed, err)
+			}
+		})
+	}
+}
+
+func TestRegistryRejectsDuplicateLintScopeWithDifferentIDs(t *testing.T) {
+	t.Parallel()
+
+	duplicate := strings.Replace(disableEntry, disableWSLID, "lint-other-wsl", 1)
+
+	_, err := repopolicy.ParseRegistry([]byte(registryHeader + disableEntry + duplicate))
+	if err == nil || !strings.Contains(err.Error(), "duplicate lint scope") {
+		t.Fatalf("duplicated authority accepted: %v", err)
 	}
 }

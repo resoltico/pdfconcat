@@ -168,7 +168,7 @@ func TestInheritedUnsupportedTextRejectsBeforeSourcesAndLocatesDeclaration(t *te
 	for _, override := range []bool{false, true} {
 		text := obj{keyValue: hebrewText}
 		item := obj{keyBlank: obj{}}
-		plan := obj{keyVersion: 1, keyBlank: obj{keyText: text}, keyItems: []any{"missing.pdf", item}}
+		plan := obj{keyVersion: 1, keyBlank: obj{keyText: text}, keyItems: []any{fileMissing, item}}
 		pointer := "/blank/text/value"
 
 		if override {

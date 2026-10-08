@@ -28,11 +28,12 @@ type (
 // Node counts of the fixed parts of an encoded report: each is the object or array itself plus its members
 // that are always present.
 const (
-	headerScalars       = 4 // report_version, kind, status, command
+	headerScalars       = 5 // format_version, attempt_id, kind, status, command
 	phaseStates         = 4
 	countValues         = 3
 	publicationRequired = 2 // report_status, published
 	tableCount          = 5 // diagnostics, parts, sources, fonts, styles
+	recoveryRequired    = 3 // object, action, command
 	diagnosticRequired  = 3 // stage, code, message
 	sizeMembers         = 3 // origin, width, height
 	producerNodes       = 6
@@ -126,21 +127,25 @@ func (r *Report) nodes() int64 {
 	count.publication(&r.Publication)
 
 	for i := range r.Diagnostics {
-		d := &r.Diagnostics[i]
+		diagnostic := &r.Diagnostics[i]
 
 		count.add(diagnosticNodes)
-		count.when(d.Path != "")
+		count.when(diagnostic.Path != "", diagnostic.Cause != "")
 
-		if len(d.Consumers) > 0 {
-			count.add(1 + int64(len(d.Consumers)))
+		if diagnostic.Recovery != nil {
+			count.recovery(diagnostic.Recovery)
 		}
 
-		if d.Location != nil {
+		if len(diagnostic.Consumers) > 0 {
+			count.add(1 + int64(len(diagnostic.Consumers)))
+		}
+
+		if diagnostic.Location != nil {
 			count.add(1)
 
-			position := d.Location.position()
+			position := diagnostic.Location.position()
 			count.position(&position)
-			count.when(d.Location.ArgvIndex != nil, d.Location.Pointer != "")
+			count.when(diagnostic.Location.ArgvIndex != nil, diagnostic.Location.Pointer != "")
 		}
 	}
 
@@ -195,7 +200,16 @@ func (c *nodeCounter) optionalPosition(p *Position) {
 }
 
 func (c *nodeCounter) publication(p *Publication) {
-	c.when(p.Output != "", p.ReportPath != "", p.RecoveryReport != "", p.OutputDigest != "", p.RecoveryState != "")
+	c.when(
+		p.Output != "",
+		p.ReportPath != "",
+		p.ReportFrom != "",
+		p.RecoveryReport != "",
+		p.OutputDigest != "",
+		p.RecoveryState != "",
+		p.ReportWrite != "",
+		p.ReportTargetObservation != "",
+	)
 }
 
 func (c *nodeCounter) styles(styles []Style) {
@@ -228,4 +242,17 @@ func EncodePretty(value any) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func (c *nodeCounter) recovery(r *Recovery) {
+	c.add(recoveryRequired)
+	c.when(r.LocationFrom != "", r.Replacement != "", r.ReportFrom != "", r.RecoveryFrom != "")
+
+	if r.Location != nil {
+		c.add(1)
+
+		position := r.Location.position()
+		c.position(&position)
+		c.when(r.Location.ArgvIndex != nil, r.Location.Pointer != "")
+	}
 }

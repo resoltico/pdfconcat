@@ -177,6 +177,28 @@ exceptions:
     superseded_by: [funlen]
     retained_property: functions above 60 lines or 40 statements are rejected, by funlen
 
+  # Revive subtracts trailing comments from its file length, allowing code-bearing physical lines
+  # to evade the limit. The mandatory owned-source scanner counts physical code lines independently
+  # of comments and compiler display directives, including files omitted from native compilation.
+  - id: lint-revive-physical-file-length
+    tool: golangci-lint
+    kind: design-incompatible
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [file-length-limit]
+    retained_property: mandatory owned-source scan rejects every file above 1000 physical code lines
+
+  # Revive uses byte case for Unicode names, misclassifying lowercase identifiers as exported.
+  # The mandatory owned-source scanner uses Unicode exported names for all type
+  # declarations; disabling this algorithm never exempts a file from the twenty-type limit.
+  - id: lint-revive-exported-types
+    tool: golangci-lint
+    kind: design-incompatible
+    effect: setting-item
+    setting: linters.settings.revive.rules
+    values: [max-public-structs]
+    retained_property: mandatory owned-source scan rejects every file above 20 exported types
+
   # noinlineerr forbids `if err := f(); err != nil`, Go's standard way to keep err scoped to the
   # statement that produced it, and its autofixer has produced code that does not compile when err
   # was already declared. The project's owner policy is to keep the idiom available; shadowing is
@@ -439,6 +461,21 @@ exceptions:
     function: run
     anchor: 'return nil, fmt.Errorf("create the PDF engine: %w", engineErr)'
     retained_property: the constructor failure is wrapped with the operation that failed
+
+  # QueryResultOf calls summaryOverhead only after ContentOf[Summary] proves that Result serializes
+  # the same Summary pointer encoded separately. Summary and SavedRun are closed acyclic scalar,
+  # pointer and slice structures with fixed unique JSON tags, no floats or arbitrary payloads, and
+  # Encode marshals into memory with AllowInvalidUTF8. Neither encode can return an error here.
+  # Retain the guard for future type/encoder changes; final encoding, sinks, malformed-report
+  # rejection and envelope budgets remain checked. A fabricated unrelated Result is outside this
+  # callsite invariant. Only the guarded return is excluded; the threshold and raw report stay intact.
+  - id: coverage-report-summary-envelope-encoding-failure
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/report/query_result.go
+    function: QueryResult.summaryOverhead
+    anchor: 'return 0'
+    retained_property: encoding failures remain guarded and final response encoding and sink failures remain checked
 
   # LoadDefaultFont parses only the fixed embedded NotoSans asset, whose digest and real parsing
   # are verified by typeset tests. No application input mutates those embedded bytes; malformed user
@@ -1480,3 +1517,193 @@ exceptions:
     message: 'use of `os\.Stderr` forbidden because "process streams are wired in cmd/pdfconcat and injected"'
     source: 'os\.Stderr'
     retained_property: native progress goes to an actual terminal and is refused for an actual redirected pipe
+
+  # This exact >1 to >=1 boundary mutation cannot remove a supported bounded primary: the
+  # encoded-byte previews and schema-valid name/Recovery/location fields fit the JSON line bound
+  # once one diagnostic remains. This premise is for schema-valid/current-producer inputs, not
+  # validation of arbitrary typed Recovery strings. See internal/report/response.schema.json and
+  # TestCommandErrorPrimarySchemaBoundsFitJSONLine; the independent component proof is retained
+  # with the reviewed campaign evidence. Keep the primary-retention guard and all other mutants.
+  - id: mutation-command-error-single-primary-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/command_error.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'for len(e.Diagnostics) > 1 && !e.fits() {'
+    column: 25
+    statuses: [lived]
+    retained_property: supported bounded primary diagnostics remain within the command JSON line limit without disappearing
+
+  # The bounded suggestion scan only matches one-edit spellings of declared options. Every option
+  # and its one-edit spellings fit strictly below the suggestion cutoff. Changing > to >=
+  # therefore only skips names at the cutoff that cannot match anyway.
+  # TestEveryOptionSingleEditFitsBelowSuggestionCutoff derives this premise from optionSpecs and
+  # rejects future option growth to the boundary; no option-name inventory is copied here.
+  - id: mutation-cli-suggestion-cutoff-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/cli/parse.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'if len(name) > maxSuggestedOptionBytes {'
+    column: 15
+    statuses: [lived]
+    retained_property: every declared option single-edit spelling fits below the bounded suggestion cutoff
+
+  # oneEdit returns immediately for equal lengths before this predicate. The operands therefore
+  # have unequal lengths here, so > and >= choose the same shorter/longer ordering for every
+  # reachable input. Keep the preceding equal-length edit behavior and the exact predicate.
+  - id: mutation-cli-unequal-length-ordering-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/cli/parse.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'if len(candidate) > len(option) {'
+    column: 20
+    statuses: [lived]
+    retained_property: equal lengths return before ordering and unequal lengths choose the same shorter spelling
+
+  # offsetOf enters this separator scan only after jsontext.ReadToken succeeds. With an immutable
+  # byte reader, success establishes a token byte after the saved InputOffset; whitespace, commas
+  # and colons precede that token and no token starts with one of those separators. The scan must
+  # therefore stop before len(data). ReadToken EOF and syntax errors return before the scan, so
+  # changing < to <= cannot reach the additional end-of-input index. Keep the defensive bound.
+  - id: mutation-report-token-offset-end-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/decode.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'for before < int64(len(data)) && strings.IndexByte(kindSeparators, data[before]) >= 0 {'
+    column: 15
+    statuses: [lived]
+    retained_property: successful token decoding bounds the separator scan and physical diagnostic offsets remain checked
+
+  # The structural scan only observes the counter through a positive contiguous low-bit mask.
+  # From zero, incrementing and decrementing have the same zero-mask iterations: multiples of
+  # that mask's power-of-two period. The internal mask premise test protects uniform cadence;
+  # real context cancellation and resource-limit controls remain required. Counter direction
+  # therefore does not change any observation or decoded result.
+  - id: mutation-report-cancellation-counter-direction
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/decode.go
+    operator: INCREMENT_DECREMENT
+    anchor: 'for tokens := 0; ; tokens++ {'
+    column: 27
+    statuses: [lived]
+    retained_property: a contiguous low-bit mask checks actual context cancellation at the same uniform intervals
+
+  # firstByte is called only immediately after successful ReadToken on the same immutable byte
+  # slice. The token's first nonseparator byte exists before the end of that slice. Skipping only
+  # whitespace, commas and colons cannot reach EOF; < and <= consequently behave identically.
+  # Keep the defensive bound and physical-offset tests for leading separators and closing tokens.
+  - id: mutation-report-first-token-byte-end-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/decode.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'for from < int64(len(data)) && strings.IndexByte(kindSeparators, data[from]) >= 0 {'
+    column: 11
+    statuses: [lived]
+    retained_property: successful token decoding bounds the first-byte scan and preserves physical offsets
+
+  # markSeen receives only authoritative shapes. Required-member lists fit both the cutoff and
+  # the actual seen-mask capacity, checked by TestStructuralRequiredMembersFitPresenceMask.
+  # slices.Index consequently returns -1 or an index strictly below the cutoff; changing < to <=
+  # adds no possible index. Keep the explicit bounds and strict missing-member rejection controls.
+  - id: mutation-report-required-member-index-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/decode.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'if index := slices.Index(f.shape.required, f.member); index >= 0 && index < maxRequiredBits {'
+    column: 76
+    statuses: [lived]
+    retained_property: every required member fits the actual presence mask and missing members remain rejected
+
+  # At offset equal to total the original predicate returns the initialized empty view. The
+  # changed predicate enters a loop whose first index is already at its end. Even if the positive
+  # offset-plus-limit sum overflows, the end is negative and no iteration occurs. No record is
+  # materialized and the same terminal view is returned; beyond-end handling is unchanged.
+  - id: mutation-report-terminal-page-offset-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/query.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'if offset >= int64(total) {'
+    column: 12
+    statuses: [lived]
+    retained_property: terminal and beyond-end queries return the same honest empty page without materialization
+
+  # The private summaryOverhead caller first proves ContentOf[Summary], so both encodings carry
+  # the same closed acyclic Summary and SavedRun fields. They contain no floats, unsupported
+  # dynamic payload, custom marshaler or external sink; memory encoding permits invalid UTF-8.
+  # Both error operands are therefore false in this caller context. Keep the checked guard for
+  # future type changes and all actual writer, malformed-input and envelope-budget controls.
+  - id: mutation-report-summary-envelope-encoding-error-conjunction
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/query_result.go
+    operator: INVERT_LOGICAL
+    anchor: 'if wrappedErr != nil || innerErr != nil {'
+    column: 23
+    statuses: [lived]
+    retained_property: the private typed summary envelope is infallibly encoded while real sink and budget failures remain checked
+  # In QueryResultOf, a validated saved report and its actual empty parts/diagnostics view have
+  # finite schema-constrained saved identity and bounded integer metadata, with no record payload.
+  # The empty query fits both transport budgets, so >=0 cannot enter the loop at zero; both
+  # guards agree for positive record counts. Strict budget guards retain their rejection controls.
+  - id: mutation-query-envelope-empty-record-boundary
+    tool: mutation
+    kind: equivalent-mutant
+    path: internal/report/query_result.go
+    operator: CONDITIONALS_BOUNDARY
+    anchor: 'for len(view.Records) > 0 && !query.fits(MaxResponseBytes) {'
+    column: 24
+    statuses: [lived]
+    retained_property: validated empty views fit both transport envelopes while complete-record trimming and offset advancement remain tested
+
+  # Fuzz launches are constructed only by runFuzzTarget from the Go executable, compiler-discovered packages and fixed structured flags. No shell receives product input; lifecycle controls retain child exit and cleanup failures.
+  - id: lint-fuzz-owned-process-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: tools/qualitygate/process_fuzz.go
+    message: "G204: Subprocess launched with a potential tainted input or cmd arguments"
+    source: "exec\\.Command\\(c\\.name, c\\.args\\.\\.\\.\\)"
+    retained_property: only the discovered Go fuzz target and fixed structured arguments are launched without a shell
+
+  # The native observer owns the actual caller context, group termination and bounded pipe drain before the sole Wait. CommandContext can race cancellation against reaping and release PID authority before group cleanup finishes.
+  - id: lint-fuzz-owned-process-context
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: noctx
+    path: tools/qualitygate/process_fuzz.go
+    message: "os/exec\\.Command must not be called\\. use os/exec\\.CommandContext"
+    source: "exec\\.Command\\(c\\.name, c\\.args\\.\\.\\.\\)"
+    retained_property: actual context cancellation terminates the owned group before releasing the unreaped leader identity
+
+  # The Darwin fuzz controller must observe native process exit and inherited group terminal state before reaping the leader. Its kernel boundary is confined to this observer; real lifecycle controls verify cancellation and cleanup ownership.
+  - id: lint-fuzz-darwin-exit-observer
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    path: tools/qualitygate/process_fuzz_darwin.go
+    message: "import 'golang\\.org/x/sys/unix' is not allowed from list 'platform-boundary': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness"
+    source: "\"golang\\.org/x/sys/unix\""
+    goos: darwin
+    retained_property: native process observation retains leader identity until owned group cleanup completes
+
+  # The Linux fuzz controller must observe native process exit without reaping the leader while inherited group members are drained. Its kernel boundary is confined to this observer; real lifecycle controls verify cancellation and cleanup ownership.
+  - id: lint-fuzz-linux-exit-observer
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: depguard
+    path: tools/qualitygate/process_fuzz_linux.go
+    message: "import 'golang\\.org/x/sys/unix' is not allowed from list 'platform-boundary': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness"
+    source: "\"golang\\.org/x/sys/unix\""
+    goos: linux
+    retained_property: native process observation retains leader identity until owned group cleanup completes

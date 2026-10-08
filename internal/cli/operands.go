@@ -85,8 +85,8 @@ func (p *parser) schemaName(index int, arg string) error {
 		return p.fail(CodeUnexpectedOperand, index, "schema takes one name; %q is an extra operand", arg)
 	}
 
-	if arg != SchemaPlan && arg != SchemaReport {
-		return p.fail(CodeUnknownSchema, index, "unknown schema %q; use %s or %s", arg, SchemaPlan, SchemaReport)
+	if arg != SchemaPlan && arg != SchemaReport && arg != SchemaResponse {
+		return p.fail(CodeUnknownSchema, index, "unknown schema %q; use %s, %s or %s", arg, SchemaPlan, SchemaReport, SchemaResponse)
 	}
 
 	p.cmd.SchemaName = arg

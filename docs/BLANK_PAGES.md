@@ -19,7 +19,7 @@ Every setting is optional. Anything left unset inherits from the next layer (see
 | Block width | `text.width` | page width − 72pt (at least 1pt) | Width of the text block; lines wrap here. The block is always this wide, however short the text. |
 | Alignment | `text.align` | `center` | `left`, `center`, `right`, `justify`. |
 | Leading | `text.leading` | `1.2` | Distance from one baseline to the next, as a multiple of the font size (not of the font's own line gap), 1 to 10. |
-| Overflow | `text.overflow` | `error` | `error` or `allow`; see [Overflow](#wrapping-and-overflow). |
+| Overflow | `text.overflow` | `error` | `error` or `allow`; see [Overflow](#wrapping-whitespace-and-overflow). |
 
 Names are exact lower case (`top-left`, not `Top-Left`); paper names are exact (`A4`). An omitted setting inherits; `null` is an error. To clear an inherited background write `"background": "none"`; to clear inherited text write `"value": ""`.
 
@@ -94,7 +94,7 @@ Text is split into paragraphs at line breaks, and each paragraph is wrapped to `
 - `align` places each line in the block: `left`, `center`, `right`, or `justify`. `justify` widens the interior U+0020 spaces of every wrapped line so it fills `width`; the last line of each paragraph, and any line without an interior space, stays left-aligned.
 - The value holds at most 10,000 characters.
 
-By default (`"overflow": "error"`) the layout is rejected, when a word is wider than the block, or when the block or positioned glyph ink extends beyond any page edge. Actual font bearings, combining-mark offsets, baseline positions and justification all contribute to ink bounds; a negative left bearing is rejected even when the advance-based block fits. The message gives the measured widths and spans. Text is never silently shrunk, clipped, or truncated. `"overflow": "allow"` places the text exactly as specified even when it extends past the page, for deliberate off-page art, and the report records the policy and findings. The report preserves computed block `bounds` and separate `ink_bounds` even when overflow rejects a page. Unavailable geometry is null; null ink bounds also describe text with no visible ink. Empty text gives a background-only page. Whitespace-only text has null ink bounds while retaining logical block overflow checks.
+By default (`"overflow": "error"`) the layout is rejected, when a word is wider than the block, or when the block or positioned glyph ink extends beyond any page edge. Actual font bearings, combining-mark offsets, baseline positions and justification all contribute to ink bounds; a negative left bearing is rejected even when the advance-based block fits. The message gives the measured widths and spans. Text is never silently shrunk, clipped, or truncated. `"overflow": "allow"` places the text exactly as specified even when it extends past the page, for deliberate off-page art, and the report records the policy and findings. When measured findings exist, one `generated_text_overflow` warning per shared resolved style identifies all affected contribution IDs; counted/repeated pages do not create one warning per page. In-bounds `allow` produces no warning. Default part/page previews expose a warning count and whether generated text has findings; inspect the attempt-bound diagnostics and explicit details before treating off-page text as visible. Check/unpublished runs predict the consequence, while a committed build records its published effect. The report preserves computed block `bounds` and separate `ink_bounds` even when overflow rejects a page. Unavailable geometry is null; null ink bounds also describe text with no visible ink. Empty text gives a background-only page. Whitespace-only text has null ink bounds while retaining logical block overflow checks.
 
 ## Fonts and characters
 
@@ -132,6 +132,8 @@ For each blank, each setting comes from the first layer that sets it:
 3. the built-in defaults above.
 
 Settings merge one by one: a blank that sets only its text keeps the font, color, and background from lower layers. Writing a setting's default value still counts as setting it. The one exception is the font, which is a single atomic choice: `"font": { "file": ... }` replaces the inherited font entirely, and `"font": "default"` selects the built-in font even when the defaults name a file.
+
+Clearing text with `"value": ""` retains the selected font, which is still captured and validated. If an inherited font file is absent or unusable, clear the text and explicitly set `"font": "default"` to select the built-in font. Empty text does not disable validation of other selected settings. The [whitespace rules](#wrapping-whitespace-and-overflow) distinguish empty text from spaces and line breaks.
 
 ## Identical blanks
 

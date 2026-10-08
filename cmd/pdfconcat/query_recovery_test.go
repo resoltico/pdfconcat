@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package main_test
 
@@ -50,8 +50,8 @@ func TestReportAttemptMismatchNamesTheActualOptionDeclaration(t *testing.T) {
 		args  []string
 		index int
 	}{
-		{"separate value", []string{commandReport, fileJob, "--format", "json", expectedAttemptFlag, "different-attempt"}, 4},
-		{"joined value", []string{commandReport, fileJob, "--view=parts", expectedAttemptFlag + "=different-attempt"}, 3},
+		{"separate value", []string{commandReport, fileJob, "--format", "json", expectedAttemptFlag, "BBBBBBBBBBBBBBBBBBBBBBBBBB"}, 4},
+		{"joined value", []string{commandReport, fileJob, "--view=parts", expectedAttemptFlag + "=BBBBBBBBBBBBBBBBBBBBBBBBBB"}, 3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

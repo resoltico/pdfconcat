@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package repopolicy_test
 
@@ -93,7 +93,7 @@ func TestDirectivesIgnoreLiteralsAndProse(t *testing.T) {
 
 	nolint := "no" + "lint"
 	source := "// SPDX-License-Identifier: MPL-2.0\n" +
-		"// Copyright (c) 2026 Ervins\n\n" +
+		"// Copyright (c) 2026 Ervins Strauhmanis\n\n" +
 		"//go:build linux || darwin\n\n" +
 		"// Package p demonstrates that mentioning //" + nolint + " in prose is not a directive.\n" +
 		"package p\n\n" +

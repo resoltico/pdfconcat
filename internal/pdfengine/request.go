@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine
 
@@ -38,6 +38,14 @@ type (
 		Count int
 	}
 
+	// AssemblyPlan is the source-known instruction policy, independent of destination and resource files.
+	AssemblyPlan struct {
+		Sources        []SourceFile
+		Order          []Run
+		GeneratedSpecs int
+		ExpectedPages  int
+	}
+
 	// AssembleRequest describes one output document.
 	AssembleRequest struct {
 		Resource      *ResourceDocument
@@ -67,7 +75,7 @@ var (
 	errPagesOutOfRange    = errors.New("pages are outside the source")
 	errMustBeWhole        = errors.New("a source with annotations, forms or named destinations must be used whole")
 	errLegacyDestsClash   = errors.New("sources with a legacy catalog /Dests dictionary occur more than once: " +
-		"their destination names would overwrite each other")
+		"only one such occurrence is supported to avoid overwriting destination references")
 )
 
 // SourcePages is a run of count consecutive pages of Sources[source] beginning at the 1-based page start.
@@ -80,23 +88,37 @@ func GeneratedPages(spec, repeat int) Run {
 	return Run{Generated: true, Index: spec, Count: repeat}
 }
 
-// check validates the request and enforces the source policy before any file is read.
-//
-// The page total is accumulated without overflow, is bounded by MaxOutputPages, and must equal ExpectedPages.
+// check validates assembly-only requirements and delegates instruction policy to Validate.
 func (r *AssembleRequest) check() error {
 	if r.Destination == "" {
 		return newError(CodeRequestInvalid, NoSource, "", errNoDestination)
 	}
 
+	generated := 0
+	if r.Resource != nil {
+		generated = r.Resource.Pages
+	}
+
+	return (AssemblyPlan{Sources: r.Sources, Order: r.Order, GeneratedSpecs: generated, ExpectedPages: r.ExpectedPages}).Validate()
+}
+
+// Validate checks inspected source facts and compact order without I/O or page-sized allocations.
+// At most one legacy catalog /Dests source occurrence is supported, even across distinct sources:
+// the backend cannot safely reconcile their catalog dictionaries.
+func (r AssemblyPlan) Validate() error {
 	if len(r.Order) == 0 {
-		return newError(CodeRequestInvalid, NoSource, "", errEmptyOrder)
+		return policyError(CodeRequestInvalid, NoRun, NoSource, "", ReasonOrder, errEmptyOrder)
+	}
+
+	if r.GeneratedSpecs < 0 {
+		return policyError(CodeRequestInvalid, NoRun, NoSource, "", ReasonResource, errResourceOutOfRange)
 	}
 
 	total, legacyRuns := 0, 0
 
 	for position, run := range r.Order {
 		if run.Count < 1 {
-			return requestError(position, run, fmt.Errorf(causeNumberFormat, errCountNotPositive, run.Count))
+			return requestError(position, run, ReasonCount, fmt.Errorf(causeNumberFormat, errCountNotPositive, run.Count))
 		}
 
 		if err := r.checkRun(position, run, &legacyRuns); err != nil {
@@ -104,14 +126,14 @@ func (r *AssembleRequest) check() error {
 		}
 
 		if run.Count > MaxOutputPages-total {
-			return requestError(position, run, fmt.Errorf("%w of %d pages", errTotalOverLimit, MaxOutputPages))
+			return requestError(position, run, ReasonPageLimit, fmt.Errorf("%w of %d pages", errTotalOverLimit, MaxOutputPages))
 		}
 
 		total += run.Count
 	}
 
 	if total != r.ExpectedPages {
-		return newError(CodeRequestInvalid, NoSource, "",
+		return policyError(CodeRequestInvalid, NoRun, NoSource, "", ReasonTotalMismatch,
 			fmt.Errorf("%w: %d pages, expected %d", errTotalMismatch, total, r.ExpectedPages))
 	}
 
@@ -120,55 +142,77 @@ func (r *AssembleRequest) check() error {
 
 // checkRun validates one run and applies the per-source policy. legacyRuns counts the runs of sources
 // that carry a legacy /Dests dictionary.
-func (r *AssembleRequest) checkRun(position int, run Run, legacyRuns *int) error {
+func (r AssemblyPlan) checkRun(position int, run Run, legacyRuns *int) error {
 	if run.Generated {
 		return r.checkGeneratedRun(position, run)
 	}
 
 	if run.Index < 0 || run.Index >= len(r.Sources) {
-		return requestError(position, run, fmt.Errorf("%w: %d not in 0..%d", errSourceOutOfRange, run.Index, len(r.Sources)-1))
+		return requestError(
+			position,
+			run,
+			ReasonSource,
+			fmt.Errorf("%w: %d not in 0..%d", errSourceOutOfRange, run.Index, len(r.Sources)-1),
+		)
 	}
 
 	source := &r.Sources[run.Index]
 	pages := source.Info.Pages
 
 	if run.Start < 1 || run.Start > pages || run.Count > pages-run.Start+1 {
-		return requestError(position, run, fmt.Errorf("%w: pages %d+%d of %d", errPagesOutOfRange, run.Start, run.Count, pages))
+		return requestError(
+			position,
+			run,
+			ReasonRange,
+			fmt.Errorf("%w: pages %d+%d of %d", errPagesOutOfRange, run.Start, run.Count, pages),
+		)
 	}
 
 	if source.Info.ImportPerOccurrence() && (run.Start != 1 || run.Count != pages) {
-		return newError(CodePartialRange, run.Index, source.Path,
+		return policyError(CodePartialRange, position, run.Index, source.Path, ReasonWholeSource,
 			fmt.Errorf("%w: pages %d-%d only", errMustBeWhole, run.Start, run.Start+run.Count-1))
 	}
 
 	if source.Info.LegacyDests {
 		*legacyRuns++
 		if *legacyRuns > 1 {
-			return newError(CodeLegacyDestsRepeated, run.Index, source.Path, errLegacyDestsClash)
+			return policyError(CodeLegacyDestsRepeated, position, run.Index, source.Path, ReasonLegacyDests, errLegacyDestsClash)
 		}
 	}
 
 	return nil
 }
 
-// checkGeneratedRun validates a run of a generated page against the resource document.
-func (r *AssembleRequest) checkGeneratedRun(position int, run Run) error {
-	if r.Resource == nil {
-		return requestError(position, run, errNoResource)
+// checkGeneratedRun validates a generated reference against the known distinct specification count.
+func (r AssemblyPlan) checkGeneratedRun(position int, run Run) error {
+	if r.GeneratedSpecs == 0 {
+		return requestError(position, run, ReasonResource, errNoResource)
 	}
 
-	if run.Index < 0 || run.Index >= r.Resource.Pages {
-		return requestError(position, run, fmt.Errorf("%w: %d not in 0..%d", errResourceOutOfRange, run.Index, r.Resource.Pages-1))
+	if run.Index < 0 || run.Index >= r.GeneratedSpecs {
+		return requestError(
+			position,
+			run,
+			ReasonResource,
+			fmt.Errorf("%w: %d not in 0..%d", errResourceOutOfRange, run.Index, r.GeneratedSpecs-1),
+		)
 	}
 
 	return nil
 }
 
-func requestError(position int, run Run, err error) *Error {
+func requestError(position int, run Run, reason PolicyReason, err error) *Error {
 	source := NoSource
 	if !run.Generated {
 		source = run.Index
 	}
 
-	return newError(CodeRequestInvalid, source, "", fmt.Errorf("order run %d: %w", position, err))
+	return policyError(CodeRequestInvalid, position, source, "", reason, fmt.Errorf("order run %d: %w", position, err))
+}
+
+func policyError(code Code, run, source int, path string, reason PolicyReason, err error) *Error {
+	failure := newError(code, source, path, err)
+	failure.Run, failure.Reason = run, reason
+
+	return failure
 }

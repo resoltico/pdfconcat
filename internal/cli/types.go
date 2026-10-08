@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package cli defines and parses PDFConcat's command-line grammar and describes it as structured help.
 // It performs no filesystem access and writes no output: Parse turns arguments into a typed Command or a
 // *UsageError, and Help returns the documentation of a command as data.
 package cli
 
-import "github.com/resoltico/pdfconcat/internal/assembly"
+import (
+	"github.com/resoltico/pdfconcat/internal/assembly"
+	"github.com/resoltico/pdfconcat/internal/report"
+)
 
 type (
 	// Name identifies a command.
@@ -39,14 +42,14 @@ type (
 		Part string
 		// View is --view: "parts" or "diagnostics".
 		View string
-		// SchemaName is the schema command's operand: "plan" or "report".
+		// SchemaName is the schema command's operand: "plan", "report" or "response".
 		SchemaName string
 		// HelpFor is the command a help request is about; empty for the root help.
 		HelpFor Name
 		// Operands are the direct PDF paths and --blank directives in command-line order, for PlanOperands.
 		// Each Position is the operand's zero-based index in the arguments, excluding the executable.
 		Operands []assembly.Operand
-		// Page is --page, a 1-based output page; 0 means unset.
+		// Page is --page, a 1-based output page; HasPage preserves explicit zero.
 		Page int64
 		// Offset and Limit page a View; HasOffset and HasLimit say whether they were given.
 		Offset int64
@@ -61,8 +64,8 @@ type (
 		Details bool
 		// Overwrite is --overwrite.
 		Overwrite bool
-		// HasOffset and HasLimit distinguish a given 0 from an absent option.
-		HasOffset, HasLimit bool
+		// HasPage, HasOffset and HasLimit distinguish a given 0 from an absent option.
+		HasPage, HasOffset, HasLimit bool
 	}
 )
 
@@ -106,3 +109,25 @@ const (
 	// SchemaResponse describes every structured command response.
 	SchemaResponse = "response"
 )
+
+// ReportRequest adapts parsed option presence into the report package's pure request contract.
+func (c *Command) ReportRequest() report.Request {
+	request := report.Request{View: c.View, Details: c.Details, ExpectAttempt: c.ExpectAttempt}
+	if c.Part != "" {
+		request.Part = &c.Part
+	}
+
+	if c.HasPage {
+		request.Page = &c.Page
+	}
+
+	if c.HasOffset {
+		request.Offset = &c.Offset
+	}
+
+	if c.HasLimit {
+		request.Limit = &c.Limit
+	}
+
+	return request
+}

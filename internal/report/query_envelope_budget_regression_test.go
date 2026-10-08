@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -205,7 +205,7 @@ func saveEnvelopeFixture(t *testing.T, saved *report.Report) *report.Report {
 
 func envelopeCandidate(saved *report.Report, response report.Response) *report.QueryResult {
 	return &report.QueryResult{
-		FormatVersion: 2,
+		FormatVersion: report.Version,
 		Kind:          "report_query",
 		Command:       "report",
 		Status:        report.StatusOK,

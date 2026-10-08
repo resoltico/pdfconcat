@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package pdforacle judges PDF output with programs that share no code with the PDF library under test:
 // qpdf's JSON dump and checker for structure, Poppler's pdftotext for page text, and pdfinfo and

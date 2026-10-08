@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -59,6 +60,56 @@ func TestHumanDiagnosticsRetainTheActualReadFailureCause(t *testing.T) {
 		if !strings.Contains(output.String(), "  cause: permission denied by directory policy\n") {
 			t.Fatalf("human evidence lost read cause: %s", output.String())
 		}
+	}
+}
+
+func TestHumanDiagnosticsIdentifyInputPathsWithoutUnboundedText(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{"/work/Rīga/sākums.pdf", "/work/" + strings.Repeat("ļ", 1000) + ".pdf"} {
+		saved := mustDecode(t, failedCheck)
+		saved.Diagnostics[0].Path = path
+		saved.Diagnostics[0].Cause = "source permission denied"
+
+		for _, request := range []report.Request{{}, {View: report.ViewDiagnostics}} {
+			response := queryOK(t, saved, request)
+
+			var output strings.Builder
+			if err := response.RenderText(&output); err != nil {
+				t.Fatal(err)
+			}
+
+			assertHumanPath(t, output.String(), path)
+		}
+
+		response := queryAs[report.ViewResponse[report.DiagnosticView]](
+			t, saved, report.Request{View: report.ViewDiagnostics, Details: true},
+		)
+		if response.Records[0].Path != path {
+			t.Fatal("explicit details lost original path")
+		}
+	}
+}
+
+func assertHumanPath(t *testing.T, text, path string) {
+	t.Helper()
+
+	if !strings.Contains(text, "  path: ") || !strings.Contains(text, "source permission denied") {
+		t.Fatalf("path or cause omitted: %s", text)
+	}
+
+	if len(path) < 200 {
+		if !strings.Contains(text, strconv.Quote(path)) {
+			t.Fatalf("Unicode input path changed: %s", text)
+		}
+
+		return
+	}
+
+	cutMarked := strings.Contains(text, "path cut; inspect details for the full path") ||
+		strings.Contains(text, "truncated previews: [diagnostics/0/path]")
+	if strings.Contains(text, path) || !cutMarked {
+		t.Fatalf("long path is unbounded or silently cut: %s", text)
 	}
 }
 

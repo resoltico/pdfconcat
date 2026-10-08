@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine
 
@@ -19,9 +19,13 @@ import (
 // Engine performs PDF inspection and assembly with the embedded pdfcpu library, using stateless,
 // offline configuration. It is safe for concurrent use: every operation works on a clone of its
 // configuration.
-type Engine struct {
-	conf *model.Configuration
-}
+type (
+	Engine            struct{ conf *model.Configuration }
+	inspectedDocument struct {
+		pdf      *model.Context
+		features []SourceFeature
+	}
+)
 
 var (
 	errEncryptedPDF   = errors.New("the PDF is encrypted; encrypted sources are not supported")
@@ -50,6 +54,20 @@ func New() (*Engine, error) {
 // readContext opens path, reads and validates it, and returns the pdfcpu context. The file is closed
 // before returning; the context owns its data in memory.
 func (e *Engine) readContext(ctx context.Context, source int, path string) (*model.Context, error) {
+	document, err := e.readDocument(ctx, source, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return document.pdf, nil
+}
+
+func (e *Engine) readDocument(
+	ctx context.Context,
+	source int,
+	path string,
+	observe func(context.Context, *model.Context) ([]SourceFeature, error),
+) (*inspectedDocument, error) {
 	if err := canceled(ctx, source, path); err != nil {
 		return nil, err
 	}
@@ -59,7 +77,7 @@ func (e *Engine) readContext(ctx context.Context, source int, path string) (*mod
 		return nil, newError(CodeUnreadable, source, path, err)
 	}
 
-	pdfContext, readErr := e.readFrom(ctx, file)
+	pdfContext, readErr := e.readFrom(ctx, file, observe)
 	closeErr := file.Close()
 
 	if readErr != nil {
@@ -70,14 +88,18 @@ func (e *Engine) readContext(ctx context.Context, source int, path string) (*mod
 		return nil, newError(CodeUnreadable, source, path, closeErr)
 	}
 
-	if renderingErr := checkRenderingState(pdfContext); renderingErr != nil {
+	if renderingErr := checkRenderingState(pdfContext.pdf); renderingErr != nil {
 		return nil, newError(CodeUnsupportedRendering, source, path, renderingErr)
 	}
 
 	return pdfContext, nil
 }
 
-func (e *Engine) readFrom(ctx context.Context, reader io.ReadSeeker) (*model.Context, error) {
+func (e *Engine) readFrom(
+	ctx context.Context,
+	reader io.ReadSeeker,
+	observe func(context.Context, *model.Context) ([]SourceFeature, error),
+) (*inspectedDocument, error) {
 	pdfContext, err := api.ReadContext(ctx, reader, e.conf.Clone())
 	if err != nil {
 		return nil, fmt.Errorf("read context: %w", err)
@@ -92,11 +114,27 @@ func (e *Engine) readFrom(ctx context.Context, reader io.ReadSeeker) (*model.Con
 		return nil, renderingErr
 	}
 
+	if signatureErr := checkSignatureState(ctx, pdfContext); signatureErr != nil {
+		return nil, signatureErr
+	}
+
+	if formErr := checkFormState(ctx, pdfContext); formErr != nil {
+		return nil, formErr
+	}
+
+	document := &inspectedDocument{pdf: pdfContext}
+	if observe != nil {
+		document.features, err = observe(ctx, pdfContext)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if validationErr := api.ValidateContext(ctx, pdfContext); validationErr != nil {
 		return nil, fmt.Errorf("validate context: %w", validationErr)
 	}
 
-	return pdfContext, nil
+	return document, nil
 }
 
 // classifyRead maps a pdfcpu read failure to the engine's codes.
@@ -108,6 +146,10 @@ func classifyRead(ctx context.Context, source int, path string, err error) *Erro
 		return newError(CodeEncrypted, source, path, errEncryptedPDF)
 	case errors.Is(err, errRenderingState):
 		return newError(CodeUnsupportedRendering, source, path, err)
+	case errors.Is(err, errSignatureState):
+		return newError(CodeSignatureUnsupported, source, path, err)
+	case errors.Is(err, errFormState):
+		return newError(CodeFormUnsupported, source, path, err)
 	default:
 		return newError(CodeInvalid, source, path, err)
 	}

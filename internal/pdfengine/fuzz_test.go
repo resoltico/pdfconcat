@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine_test
 
@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestInspectRenderingFailureMatchesInspectionContract(t *testing.T) {
 	requirePlausible(t, info)
 
 	again, inspectErr := engine.Inspect(t.Context(), valid)
-	if inspectErr != nil || again != info {
+	if inspectErr != nil || !reflect.DeepEqual(again, info) {
 		t.Fatalf("valid inspection changed after rejected rendering state: %+v %v", again, inspectErr)
 	}
 }
@@ -117,7 +118,7 @@ func FuzzInspect(f *testing.F) {
 		requirePlausible(t, info)
 
 		again, err := engine.Inspect(ctx, path)
-		if err != nil || again != info {
+		if err != nil || !reflect.DeepEqual(again, info) {
 			t.Fatalf("second Inspect differs: %+v %v vs %+v", again, err, info)
 		}
 	})

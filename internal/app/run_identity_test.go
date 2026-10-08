@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app_test
 
@@ -99,7 +99,7 @@ func requireProducer(t *testing.T, saved *report.Report) {
 		t.Fatal("complete report has no producing identity")
 	}
 
-	identityMatches := producer.Tool == "pdfconcat" && producer.Version == "devel" && producer.Commit == "unknown" &&
+	identityMatches := producer.Tool == applicationToolName && producer.Version == "devel" && producer.Commit == "unknown" &&
 		producer.Go == runtime.Version() && producer.Platform == runtime.GOOS+"/"+runtime.GOARCH
 	if !identityMatches {
 		t.Fatalf("incorrect producing identity: %+v", producer)

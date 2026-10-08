@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package main is the pdfconcat executable: it connects the process (signals, streams, working directory,
 // build metadata) to internal/app and exits with the code the command decides.

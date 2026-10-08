@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -17,8 +17,8 @@ const (
 	commandHelpOption       = "--help"
 	commandField            = "command"
 	recoveryReportReference = "publication.recovery_report"
-	commandWireFormat       = `{"format_version":2,"kind":"error","status":"invalid","command":"report",` +
-		`"next":["%s","report","--help"],"diagnostics":[]}`
+	commandWireFormat       = `{"format_version":3,"kind":"error","status":"invalid","command":"report",` +
+		`"next":["%s","report","--help"],"diagnostic_count":0,"error_count":0,"warning_count":0,"diagnostics":[]}`
 )
 
 func TestCommandErrorHelpUsesCommandAndRequiresExecutableAuthority(t *testing.T) {

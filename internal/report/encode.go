@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -28,13 +28,13 @@ type (
 // Node counts of the fixed parts of an encoded report: each is the object or array itself plus its members
 // that are always present.
 const (
-	headerScalars       = 5 // format_version, attempt_id, kind, status, command
+	headerScalars       = 8 // format_version, attempt_id, kind, status, command
 	phaseStates         = 4
 	countValues         = 3
 	publicationRequired = 2 // report_status, published
 	tableCount          = 5 // diagnostics, parts, sources, fonts, styles
 	recoveryRequired    = 3 // object, action, command
-	diagnosticRequired  = 3 // stage, code, message
+	diagnosticRequired  = 4 // stage, code, message
 	sizeMembers         = 3 // origin, width, height
 	producerNodes       = 6
 	textSettings        = 10
@@ -130,7 +130,7 @@ func (r *Report) nodes() int64 {
 		diagnostic := &r.Diagnostics[i]
 
 		count.add(diagnosticNodes)
-		count.when(diagnostic.Path != "", diagnostic.Cause != "")
+		count.when(diagnostic.Path != "", diagnostic.Cause != "", diagnostic.ConsequenceContext != "")
 
 		if diagnostic.Recovery != nil {
 			count.recovery(diagnostic.Recovery)

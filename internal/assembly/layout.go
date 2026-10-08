@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package assembly
 
@@ -134,7 +134,8 @@ const (
 	// RunGenerated is one distinct generated page repeated.
 	RunGenerated RunKind = 2
 
-	// MaxOutputPages is the backend's integer boundary for page numbers: output pages never exceed it.
+	// MaxOutputPages bounds domain page-number arithmetic to signed 32 bits.
+	// The selected backend applies its own, potentially smaller resource-policy limit.
 	MaxOutputPages = math.MaxInt32
 )
 
@@ -347,7 +348,7 @@ func (r *resolution) account(contribution *Contribution, placement Placement, pa
 	total, err := AddCounts(totals.Total, pages, MaxOutputPages)
 	if err != nil {
 		r.failf(contribution.Origin, "", CodePageTotalExceeded, err,
-			"the output would exceed %d pages at this %s; the backend numbers pages with 32 bits",
+			"the output would exceed %d pages at this %s; domain page numbers use 32 bits",
 			int64(MaxOutputPages), contribution.Kind)
 
 		return false

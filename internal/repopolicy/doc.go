@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package repopolicy enforces the repository's quality policy. It reads the central exception
 // registry (.quality-exceptions.yml) and checks that .golangci.yml carries exactly the lint

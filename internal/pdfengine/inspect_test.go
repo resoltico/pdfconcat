@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine_test
 
@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -151,10 +152,10 @@ func TestInspectReportsFacts(t *testing.T) {
 		doc  *pdffixture.Doc
 		want pdfengine.SourceInfo
 	}{
-		"plain":        {pdffixture.Plain("P"), pdfengine.SourceInfo{Pages: 1, Version: pdfengine.Version17}},
-		"many pages":   {pdffixture.Pages("P", 7), pdfengine.SourceInfo{Pages: 7, Version: pdfengine.Version17}},
-		fixtureLinks:   {pdffixture.Links("P"), pdfengine.SourceInfo{Pages: 2, Version: pdfengine.Version17, PageLocal: true}},
-		"page actions": {pdffixture.PageActions("P"), pdfengine.SourceInfo{Pages: 2, Version: pdfengine.Version17, PageLocal: true}},
+		"ordinary document": {pdffixture.Plain("P"), pdfengine.SourceInfo{Pages: 1, Version: pdfengine.Version17}},
+		"many pages":        {pdffixture.Pages("P", 7), pdfengine.SourceInfo{Pages: 7, Version: pdfengine.Version17}},
+		fixtureLinks:        {pdffixture.Links("P"), pdfengine.SourceInfo{Pages: 2, Version: pdfengine.Version17, PageLocal: true}},
+		"page actions":      {pdffixture.PageActions("P"), pdfengine.SourceInfo{Pages: 2, Version: pdfengine.Version17, PageLocal: true}},
 		"named destinations": {
 			pdffixture.NamedDests("P"),
 			pdfengine.SourceInfo{Pages: 2, Version: pdfengine.Version17, PageLocal: true, NamedDests: true},
@@ -173,8 +174,8 @@ func TestInspectReportsFacts(t *testing.T) {
 			pdffixture.Versioned("P", pdfVersion20, ""),
 			pdfengine.SourceInfo{Pages: 1, Version: pdfengine.Version20},
 		},
-		"outlines are not page-local": {pdffixture.Outlined("P"), pdfengine.SourceInfo{Pages: 2, Version: pdfengine.Version17}},
-		"attachment name tree":        {pdffixture.Attachment("P"), pdfengine.SourceInfo{Pages: 1, Version: pdfengine.Version17}},
+		"outlines are not page-local": {pdffixture.Outlined("P"), removedFeatureFacts(2, pdfengine.FeatureBookmarks)},
+		"attachment name tree":        {pdffixture.Attachment("P"), removedFeatureFacts(1, pdfengine.FeatureCatalogAttachments)},
 	}
 
 	engine := newEngine(t)
@@ -188,7 +189,7 @@ func TestInspectReportsFacts(t *testing.T) {
 			want := tc.want
 			want.First, want.Last = size{612, 792}, size{612, 792}
 
-			if got != want {
+			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("got %+v, want %+v", got, want)
 			}
 		})
@@ -394,26 +395,24 @@ func TestInspectAcceptsFloatAndIndirectBoxes(t *testing.T) {
 	}
 }
 
-// TestInspectSurvivesLibraryPanic reads a file that makes pdfcpu index past the end of a slice while it
-// walks the form fields of the catalog (testdata/hostile, found by FuzzInspect). The failure must come back as
-// an invalid-PDF error that says the library failed, never as a panic. The file pins the pdfcpu version in
-// go.mod: if an upgrade makes the library reject it cleanly, the guard has no real trigger left and the
-// test needs a new hostile file.
-func TestInspectSurvivesLibraryPanic(t *testing.T) {
+// TestInspectRejectsMalformedFieldTree refuses a hostile field reference before backend validation
+// can repair it or panic. The exact source path and structured policy failure remain available.
+func TestInspectRejectsMalformedFieldTree(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join("testdata", "hostile", "malformed-form-fields-panic.pdf")
-
 	_, err := newEngine(t).Inspect(context.Background(), path)
-	if err == nil {
-		t.Fatal("no error")
-	}
 
-	if code := pdfengine.CodeOf(err); code != pdfengine.CodeInvalid {
-		t.Fatalf("code %q: %v", code, err)
+	failure := requireFailure(t, err, pdfengine.CodeFormUnsupported)
+	if failure.Path != path || !strings.Contains(failure.Error(), "missing field dictionary") {
+		t.Fatalf("malformed field failure: %+v", failure)
 	}
+}
 
-	if !strings.Contains(err.Error(), "the PDF library failed unexpectedly") {
-		t.Errorf("the library failure is not named: %v", err)
+func removedFeatureFacts(pages int, kind pdfengine.FeatureKind) pdfengine.SourceInfo {
+	return pdfengine.SourceInfo{
+		Pages:    pages,
+		Version:  pdfengine.Version17,
+		Features: []pdfengine.SourceFeature{{Kind: kind, Disposition: pdfengine.FeatureRemoved}},
 	}
 }

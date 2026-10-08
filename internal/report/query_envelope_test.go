@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -95,7 +95,7 @@ func TestQuerySummaryIncludesEnvelopeInBothBudgets(t *testing.T) {
 	}
 
 	if err != nil || len(payload)+1 > expectedSummaryBytes || text.Len() > expectedSummaryBytes {
-		t.Fatalf("query summary: JSON %d, text %d: %v", len(payload)+1, text.Len(), err)
+		t.Fatalf("query summary: JSON %d, text %d: %v: %s", len(payload)+1, text.Len(), err, payload)
 	}
 
 	summary, ok := report.ContentOf[report.Summary](query.Result)

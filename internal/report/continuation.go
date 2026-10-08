@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -32,13 +32,13 @@ func (s *Summary) BindContinuation(executable, path, reference string) {
 		view = ViewDiagnostics
 	}
 
-	next := []string{executable, reportCommand, path, "--expect-attempt", s.AttemptID, "--view", view}
+	next := []string{executable, reportCommand, path, expectAttemptOption, s.AttemptID, "--view", view}
 	s.Next = &next
 
 	referenceValue := &ContinuationReference{
-		Executable: "invoking_executable",
+		Executable: invokingExecutableReference,
 		Report:     reference,
-		Action:     "inspect_report",
+		Action:     recoveryInspectReport,
 		View:       view,
 		AttemptID:  s.AttemptID,
 	}

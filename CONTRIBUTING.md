@@ -64,13 +64,13 @@ What each proves, and how it can fail without a code defect:
 - `controls` applies each deliberate defect in `tools/mutation-controls.yml` (a text-anchored one-line change) to a snapshot and requires the package's tests to fail. When a refactor moves an anchor, the control reports the missing or ambiguous anchor; update the anchor, keep the property.
 - Run scale acceptance with `PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_QA_TOOLS=1 go run ./tools/qualitygate test -run '^TestScaleAcceptance$' -require TestScaleAcceptance -timeout 30m ./test/scale`. The manually dispatched Campaigns job enables both variables and preserves results. Set `PDFCONCAT_SCALE_RESULTS` to save JSON rows. Missing RSS/descriptor readings or failed intermediate samples fail enabled acceptance. Descriptor counts are sampled lower bounds; results include successful/attempted samples and the observed span divided by wall time. Unix RSS uses launch-through-exit kernel accounting; Windows RSS is a sampled peak lower bound. Fixtures and independent verification are timed separately.
 
-A workflow file is configuration, not evidence: GitHub-hosted execution has not been observed for these workflows.
+A workflow file is configuration, not execution evidence. Retain the actual native workflow results and skipped/unavailable prerequisites for the candidate under review.
 
 Format with `golangci-lint fmt --config .golangci.yml` (gofumpt, gci, goimports, golines). Build-tagged files are analyzed only for the host OS; CI lints on each OS.
 
 ## Scope and contracts
 
-PDFConcat does one thing: assemble existing PDFs in an explicit order and insert generated blank pages at explicit positions. [`docs/DESIGN.md`](docs/DESIGN.md) records what was rejected and why; read it before proposing a feature.
+PDFConcat does one thing: assemble existing PDFs in an explicit order and insert generated blank pages at explicit positions. [`docs/DESIGN.md`](docs/DESIGN.md) explains current scope and design choices; read it before proposing a feature.
 
 These documents are the product contracts: [`docs/CLI.md`](docs/CLI.md), [`docs/PLAN.md`](docs/PLAN.md), [`docs/BLANK_PAGES.md`](docs/BLANK_PAGES.md), and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), together with the plan JSON Schema at `internal/plan/plan.schema.json`. A behavior change updates the relevant contract and its tests together.
 
@@ -81,6 +81,16 @@ Invariants worth knowing before you change code:
 - pdfcpu runs stateless and offline, with merge bookmarks disabled, and is imported only by `internal/pdfengine`. Nothing silently falls back to Ghostscript, qpdf, or another engine.
 - macOS, Windows, and Linux share the supported behavior contract; OS-specific primitives are isolated in build-tagged files and require native verification.
 - No implicit directory scanning or globbing, and one syntax per concept.
+
+## Fidelity and diagnostic verification
+
+Use synthetic PDFs and independent oracles. A valid file and correct page count do not establish correct form appearance, ordinary editability, signature policy or visible generated text. Form resource tests need differently bound fonts under the same name, inherited defaults, existing/missing appearances and independent same/changed-value refill rendering. Signature tests need signed-byte integrity controls and refusal before publication, with empty unsigned fields and text/name decoys as acceptance controls.
+
+Keep schema, decoder, builder, summary and query contracts synchronized. Format 3 diagnostics carry error/warning severity; counts describe aggregated records. A query can succeed while selecting historical errors. Test error-only, warning-only and mixed saved runs, predicted/committed effects, consumer projections, bounded previews and complete diagnostic traversal. Use measured placement findings and reachable PDF object facts rather than duplicate geometry math or raw string searches.
+
+Recovery tests must retry a remedy that repairs the named cause. A distinct safe report remains writable when the PDF target is unusable, while report/input/output aliases and unknown-inventory no-clobber safeguards still reject. After PDF commit, retain actual publication and owned report recovery; cancellation and failed stdout cannot imply rollback.
+
+Keep work bills, fixtures generated for audits, binaries, credentials and raw measurement/campaign evidence outside commits. Reusable deterministic fixtures and failure-detecting controls belong in tests. Campaign commands below describe available checks; run fuzzing/mutation campaigns only when explicitly authorized, and never report an unrun or partial campaign as passed.
 
 ## Exceptions
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package plan decodes plan files (format version 1) into the neutral assembly job tree, strictly and in
 // one pass over the JSON token stream, with provenance and declared resource limits.

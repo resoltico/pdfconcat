@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -88,7 +88,7 @@ func classify(stage report.Stage, err error) problem {
 }
 
 func classifyKind(stage report.Stage, err error) problem {
-	diagnostic := report.Diagnostic{Stage: stage, Message: boundedMessage(err.Error())}
+	diagnostic := report.Diagnostic{Severity: report.SeverityError, Stage: stage, Message: boundedMessage(err.Error())}
 
 	var (
 		alias      *capture.AliasError
@@ -127,6 +127,9 @@ func classifyKind(stage report.Stage, err error) problem {
 		return problem{diagnostic: diagnostic, status: report.StatusFailed}
 	case errors.As(err, &engine):
 		diagnostic.Code, diagnostic.Message = report.Code(engine.Code), boundedMessage(engine.Err.Error())
+		if engine.Reason != "" && engine.Reason != pdfengine.ReasonTotalMismatch {
+			return problem{diagnostic: diagnostic, status: report.StatusInvalid}
+		}
 
 		return problem{diagnostic: diagnostic, status: engineStatus(engine.Code)}
 	case errors.As(err, &unreadable):
@@ -146,7 +149,8 @@ func classifyKind(stage report.Stage, err error) problem {
 // or verification failure) is an input or backend failure. Cancellation never reaches here: classify
 // recognizes it first.
 func engineStatus(code pdfengine.Code) report.Status {
-	if code == pdfengine.CodePartialRange || code == pdfengine.CodeLegacyDestsRepeated {
+	if code == pdfengine.CodePartialRange || code == pdfengine.CodeLegacyDestsRepeated ||
+		code == pdfengine.CodeSignatureUnsupported || code == pdfengine.CodeFormUnsupported {
 		return report.StatusInvalid
 	}
 
@@ -196,6 +200,7 @@ func planProblem(err error) problem {
 // planDiagnostic adapts a decoder failure to the application's report format.
 func planDiagnostic(err *plan.Error) report.Diagnostic {
 	return report.Diagnostic{
+		Severity: report.SeverityError,
 		Stage:    report.Stage(err.Stage),
 		Code:     report.Code(err.Code),
 		Location: report.LocationOf(err.Location),

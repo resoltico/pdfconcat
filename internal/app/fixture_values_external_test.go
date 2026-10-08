@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app_test
 
 // Fixture paths, markers and expected contract values shared by these tests.
 const (
+	blankFlag                    = "--blank"
+	applicationToolName          = "pdfconcat"
 	codePDFInvalid               = "pdf_invalid"
 	keySize                      = "size"
 	previousReportContent        = "old\n"

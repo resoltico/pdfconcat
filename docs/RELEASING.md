@@ -1,6 +1,6 @@
 # Releasing
 
-PDFConcat currently publishes source-only GitHub releases. `v0.1.0` has no uploaded executables, binary archives, package checksums, or binary provenance attestations. GitHub supplies the source ZIP and tar.gz for the tag. Binary distribution is deferred to later versions; the retained GoReleaser configuration is packaging machinery, not the current publication path.
+The source-release workflow publishes tagged source and changelog notes. Executable distribution uses the separate configured packaging path and requires verification against its final candidate. The publication status of each release is recorded in [`CHANGELOG.md`](../CHANGELOG.md); configured workflows and archives do not establish published assets or native execution.
 
 ## Before tagging
 
@@ -33,7 +33,7 @@ Ordinary source builds embed `internal/app/version.txt` and retain the Go toolch
 
 GoReleaser snapshots derive their version from the same file and append `-SNAPSHOT-` plus Git's short commit. The packaging build sets `main.version` at link time and retains recorded linker arguments; it deliberately omits `-trimpath` because Go otherwise suppresses those arguments. Executables can contain compiler source/build paths, so byte reproducibility also requires a stable checkout path.
 
-`qualitygate archives` inspects all six packaging targets, checks checksums and the explicit runtime-content inventory, executable headers, source/toolchain/module metadata and the consumed linker version. It executes only the native host target. `qualitygate release-bytes` can compare a binary draft's actual remote bytes with verified local artifacts. These retained controls do not establish binary release verification for this source-only release, and must be exercised against the final candidate before any future binary publication.
+`qualitygate archives` inspects all six packaging targets, checks checksums and the explicit runtime-content inventory, executable headers, source/toolchain/module metadata and the consumed linker version. It executes only the native host target. `qualitygate release-bytes` can compare a binary draft's actual remote bytes with verified local artifacts. These controls must be exercised against the final candidate before executable publication; configured or cross-compiled targets do not establish native behavior.
 
 ## Corresponding source
 

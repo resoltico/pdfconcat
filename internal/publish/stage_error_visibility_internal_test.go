@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package publish
 
@@ -33,7 +33,9 @@ func TestStagingPreservesSimultaneousCopyAndCloseFailures(t *testing.T) {
 		return errInjected
 	}
 
-	_, err := fillStaged(t.Context(), ops, file, strings.NewReader(stagedContent), 100)
+	_, err := finishStaged(file, func(file *os.File) (int64, error) {
+		return copyChunks(t.Context(), ops, file, strings.NewReader(stagedContent), 100)
+	})
 	if !errors.Is(err, errInjected) || !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("copy/close error lost: %v", err)
 	}

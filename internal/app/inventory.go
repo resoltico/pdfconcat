@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -236,6 +236,8 @@ func (p *pipeline) inspectSources(ctx context.Context) error {
 	feedSourceIndexes(ctx, queue, len(files))
 
 	group.Wait()
+
+	p.sourceFeatureWarnings()
 
 	err = p.cancelled(ctx, stageInput)
 	if err != nil {

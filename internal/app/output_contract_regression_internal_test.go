@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -50,15 +50,43 @@ func TestCommittedStateExactWireBoundaryKeepsCompletePublication(t *testing.T) {
 	cause := fmt.Errorf("%s: %w", strings.Repeat("ā", 500), errInjected)
 	// This independent wire envelope sizes a supported path; the actual operation supplies its attempt ID.
 	base := map[string]any{
-		"format_version": 2, "attempt_id": strings.Repeat("A", 26), "kind": "committed_state",
-		"command": buildName, "status": "ok", "published": true, "output": "",
-		"report_status": "not_requested", "stdout_error": "write result: " + cause.Error(),
+		"format_version": report.Version,
+		"attempt_id":     strings.Repeat("A", 26),
+		"kind":           "committed_state",
+		"command":        buildName,
+		"status":         "failed",
+		"published":      true,
+		"output":         "",
+		"saved_run": map[string]any{
+			"attempt_id":       strings.Repeat("A", 26),
+			"command":          buildName,
+			"status":           "ok",
+			"published":        true,
+			"diagnostic_count": 0,
+			"error_count":      0,
+			"warning_count":    0,
+		},
+		"diagnostic_count": 1,
+		"error_count":      1,
+		"warning_count":    0,
+		"diagnostics": []map[string]any{
+			{
+				"severity": "error",
+				"stage":    "write",
+				"code":     "stdout_write_failed",
+				"message": "Cannot write the command response. Use the captured run and publication fields; " +
+					"do not rebuild a published PDF.",
+				"cause": "write result: " + cause.Error(),
+			},
+		},
+		"report_status": "not_requested",
 	}
 	dir := outputContractDirectory(t)
 	target := outputContractPathWireContent(t, dir, "out.pdf", 2048-len(outputContractJSON(t, base)))
 
 	state, data := runOutputFailure(t, dir, target, cause, "", nil)
-	if len(data) != 2048 || state.Output != target || state.StdoutError != "write result: "+cause.Error() || state.Truncated {
+	if len(data) != 2048 || state.Output != target ||
+		state.Diagnostics[0].Cause != "write result: "+cause.Error() || state.Truncated {
 		t.Fatalf("exact-boundary receipt changed complete values: bytes=%d state=%+v", len(data), state)
 	}
 }
@@ -99,7 +127,7 @@ func runOutputFailure(t *testing.T, dir, target string, cause error, requested s
 
 	args := []string{buildName, "-o", target, source}
 	if requested != "" {
-		args = append(args, "--report", requested)
+		args = append(args, fixtureReportOption, requested)
 	}
 
 	code := runner.Run(t.Context(), args, Env{
@@ -356,6 +384,14 @@ func validateOutputContract(t *testing.T, data []byte) {
 		t.Fatal(err)
 	}
 
+	if err = outputResponseSchema(t).Validate(value); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func outputResponseSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+
 	source, err := jsonschema.UnmarshalJSON(strings.NewReader(report.ResponseSchema()))
 	if err != nil {
 		t.Fatal(err)
@@ -371,7 +407,5 @@ func validateOutputContract(t *testing.T, data []byte) {
 		t.Fatal(err)
 	}
 
-	if err = schema.Validate(value); err != nil {
-		t.Fatal(err)
-	}
+	return schema
 }

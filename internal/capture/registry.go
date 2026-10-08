@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package capture
 
@@ -148,7 +148,63 @@ func (r *Registry) Add(role Role, path string) (Identity, error) {
 		return Identity{}, &SourceError{Path: path, Operation: "resolve " + role.String(), Err: err}
 	}
 
-	return r.registerArtifact(artifactBinding{role: role, path: absolute})
+	return r.registerArtifact(artifactBinding{role: role, path: absolute}, inspectArtifact)
+}
+
+// ProtectOutput reserves the intended PDF path and its current identity against other roles.
+// It checks aliases independently of output usability: a failed PDF target must not prevent
+// saving evidence to a distinct safe report. Publication still requires Add and destination checks.
+func (r *Registry) ProtectOutput(path string) error {
+	if path == "" {
+		return &SourceError{Path: path, Operation: "protect output", Err: errEmptyPath}
+	}
+
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return &SourceError{Path: path, Operation: "resolve protected output", Err: err}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// An absent or non-directory parent proves there is no output object to alias yet.
+	// Keep its planned name; a later verification repeats identity/name checks if the parent appears.
+	if artifactParentUnavailable(absolute) {
+		r.artifactBindings[artifactBinding{role: RoleOutput, path: absolute}] = Identity{}
+		return nil
+	}
+
+	_, err = r.registerArtifact(artifactBinding{role: RoleOutput, path: absolute}, inspectArtifactIdentity)
+
+	return err
+}
+
+func inspectArtifactIdentity(role Role, path string) (Identity, error) {
+	identity, err := IdentityOf(path)
+	if errors.Is(err, fs.ErrNotExist) || (err != nil && artifactParentUnavailable(path)) {
+		return Identity{}, nil
+	}
+
+	if err != nil {
+		return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}
+	}
+
+	return identity, nil
+}
+
+// artifactParentUnavailable requires observed absence or a regular-file ancestor, not an I/O guess.
+func artifactParentUnavailable(path string) bool {
+	for parent := filepath.Dir(path); filepath.Dir(parent) != parent; parent = filepath.Dir(parent) {
+		_, directory, err := inspectIdentity(parent)
+		if err == nil {
+			return !directory
+		}
+
+		if errors.Is(err, fs.ErrNotExist) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // RetireReport abandons one failed report destination before publishing a distinct recovery file.
@@ -276,8 +332,8 @@ func artifactProblem(mode fs.FileMode) string {
 
 // registerArtifact refreshes only the small artifact set, never the immutable input inventory.
 // Inspection and conflict checks complete before any existing claim is changed.
-func (r *Registry) registerArtifact(binding artifactBinding) (Identity, error) {
-	next, err := r.refreshArtifactBindings(binding)
+func (r *Registry) registerArtifact(binding artifactBinding, inspect func(Role, string) (Identity, error)) (Identity, error) {
+	next, err := r.refreshArtifactBindings(binding, inspect)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -299,14 +355,17 @@ func (r *Registry) registerArtifact(binding artifactBinding) (Identity, error) {
 	return identity, nil
 }
 
-func (r *Registry) refreshArtifactBindings(binding artifactBinding) (map[artifactBinding]Identity, error) {
+func (r *Registry) refreshArtifactBindings(
+	binding artifactBinding,
+	inspect func(Role, string) (Identity, error),
+) (map[artifactBinding]Identity, error) {
 	next := make(map[artifactBinding]Identity, len(r.artifactBindings)+1)
 	for current := range r.artifactBindings {
 		if current == binding {
 			continue
 		}
 
-		identity, err := inspectArtifact(current.role, current.path)
+		identity, err := inspectArtifactIdentity(current.role, current.path)
 		if err != nil {
 			return nil, err
 		}
@@ -314,7 +373,7 @@ func (r *Registry) refreshArtifactBindings(binding artifactBinding) (map[artifac
 		next[current] = identity
 	}
 
-	identity, err := inspectArtifact(binding.role, binding.path)
+	identity, err := inspect(binding.role, binding.path)
 	if err != nil {
 		return nil, err
 	}

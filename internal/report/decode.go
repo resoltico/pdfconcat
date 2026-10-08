@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -73,6 +73,7 @@ const (
 	kindMember      = "kind"
 	maxRequiredBits = 32
 
+	phaseLayout       = "layout"
 	memberCounts      = "counts"
 	memberLocation    = "location"
 	memberOrigin      = "origin"
@@ -536,7 +537,7 @@ func shapes() map[string]shape {
 		KindReport: {
 			required: []string{
 				versionMember, "attempt_id", kindMember, "status", memberCommand, memberPhases, memberCounts, memberPublication,
-				ViewDiagnostics, ViewParts, "sources", "fonts", "styles",
+				ViewDiagnostics, ViewParts, "sources", "fonts", "styles", "diagnostic_count", "error_count", "warning_count",
 			},
 			children: map[string]string{
 				memberProducer:    memberProducer,
@@ -551,14 +552,14 @@ func shapes() map[string]shape {
 			},
 		},
 		memberProducer: {required: []string{"tool", "version", "commit", "go", "platform"}},
-		memberPhases:   {required: []string{"instructions", "input_inspection", "layout", "output_verification"}},
+		memberPhases:   {required: []string{"instructions", "input_inspection", phaseLayout, "output_verification"}},
 		memberCounts: {
 			required: []string{"source_pages", "generated_pages", "total_pages"},
 			nullable: []string{"source_pages", "generated_pages", "total_pages"},
 		},
 		memberPublication: {required: []string{"report_status", "published"}},
 		"diagnostic": {
-			required: []string{"stage", "code", "message"},
+			required: []string{"severity", "stage", "code", "message"},
 			children: map[string]string{memberLocation: memberLocation, memberRecovery: memberRecovery, "consumers": "[string]"},
 		},
 		memberRecovery: {required: []string{"action", memberCommand}, children: map[string]string{memberLocation: memberLocation}},

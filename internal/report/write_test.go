@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -68,6 +68,7 @@ func TestWriteStopsEarlyOnAHugeReport(t *testing.T) {
 	}
 
 	big.Status = report.StatusFailed
+	big.FinalizeDiagnostics()
 
 	var out bytes.Buffer
 

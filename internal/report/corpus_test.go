@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -126,27 +126,27 @@ func corpusVersionAndMembers() []corpusCase {
 		{Name: "complete check", Base: "ok", Schema: schemaAccept},
 		{Name: "failed check with nulls", Base: baseFailed, Schema: schemaAccept},
 		{
-			Name:   "unsupported format 3",
+			Name:   "unsupported format 2",
 			Base:   "ok",
 			Old:    memberVersion,
-			New:    `"format_version":3`,
+			New:    `"format_version":2`,
 			Code:   report.CodeUnsupportedVersion,
 			Schema: schemaReject,
 		},
 		{
-			Name:   "noncanonical format 2.0",
+			Name:   "noncanonical format 3.0",
 			Base:   "ok",
 			Old:    memberVersion,
-			New:    `"format_version":2.0`,
+			New:    `"format_version":3.0`,
 			Code:   report.CodeUnsupportedVersion,
 			Schema: schemaAccept,
 			Gap:    gapInteger,
 		},
 		{
-			Name:   "noncanonical format 2e0",
+			Name:   "noncanonical format 3e0",
 			Base:   "ok",
 			Old:    memberVersion,
-			New:    `"format_version":2e0`,
+			New:    `"format_version":3e0`,
 			Code:   report.CodeUnsupportedVersion,
 			Schema: schemaAccept,
 			Gap:    gapInteger,
@@ -155,7 +155,7 @@ func corpusVersionAndMembers() []corpusCase {
 			Name:   "version string",
 			Base:   "ok",
 			Old:    memberVersion,
-			New:    `"format_version":"2"`,
+			New:    `"format_version":"3"`,
 			Code:   report.CodeWrongType,
 			Schema: schemaReject,
 		},
@@ -257,7 +257,7 @@ func corpusCountsAndOutcome() []corpusCase {
 			Name:   "ok with a diagnostic",
 			Base:   "ok",
 			Old:    memberEmptyDiagnostics,
-			New:    `"diagnostics":[{"stage":"x","code":"y","message":"m"}]`,
+			New:    `"diagnostics":[{"severity":"error","stage":"x","code":"y","message":"m"}]`,
 			Code:   report.CodeInvalidValue,
 			Schema: schemaAccept,
 			Gap:    gapRelations,

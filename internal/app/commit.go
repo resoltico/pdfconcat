@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -99,14 +98,10 @@ func (p *pipeline) snapshot(status report.Status) *report.Report {
 
 // stageFile writes rep beside the report target without making it visible.
 func (p *pipeline) stageFile(ctx context.Context, target string, rep *report.Report) (*publish.Staged, error) {
-	var buffer bytes.Buffer
-
-	_, err := report.Write(&buffer, rep, report.MaxReportBytes)
-	if err != nil {
-		return nil, fmt.Errorf("report: %w", err)
-	}
-
-	staged, err := publish.Stage(ctx, target, &buffer, report.MaxReportBytes)
+	staged, err := publish.StageProduced(ctx, target, report.MaxReportBytes, func(writer io.Writer) error {
+		_, writeErr := report.Write(writer, rep, report.MaxReportBytes)
+		return writeErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("stage report: %w", err)
 	}
@@ -144,6 +139,10 @@ func (p *pipeline) reportFailure(err error) error {
 
 // reportProblem classifies a failure to write the report.
 func (p *pipeline) reportProblem(err error) problem {
+	if isInterrupted(err) {
+		return classify(stagePublish, err)
+	}
+
 	if reportErr, ok := report.AsError(err); ok {
 		return problem{diagnostic: reportErr.Diagnostic, status: reportErr.Status()}
 	}
@@ -160,9 +159,9 @@ func (p *pipeline) reportProblem(err error) problem {
 	return found
 }
 
-// toInt converts a page count or page number that layout resolution already bounded by
-// assembly.MaxOutputPages (the backend's 32-bit page numbers). The clamp only keeps the conversion
-// total; the engine rejects a request whose runs do not add up to the expected pages.
+// toInt converts a page count or page number bounded by the domain's signed 32-bit arithmetic.
+// The clamp keeps the conversion total; shared backend policy separately enforces its resource cap
+// and rejects an inconsistent expected total.
 func toInt(value int64) int {
 	return int(min(max(value, 0), assembly.MaxOutputPages))
 }
@@ -196,17 +195,26 @@ func (p *pipeline) order() []pdfengine.Run {
 	return order
 }
 
+// assemblyPlan contains exactly the inspected facts and compact order used by both preflight and merge.
+func (p *pipeline) assemblyPlan() pdfengine.AssemblyPlan {
+	sources := make([]pdfengine.SourceFile, len(p.files))
+	for index := range p.files {
+		sources[index] = pdfengine.SourceFile{Path: p.files[index].captured.Path, Info: p.files[index].info}
+	}
+
+	return pdfengine.AssemblyPlan{
+		Sources: sources, Order: p.order(), GeneratedSpecs: len(p.layout.Specs), ExpectedPages: toInt(p.layout.Totals.Total),
+	}
+}
+
 // merge assembles the staged file and verifies it (the engine reads it back and compares its page count).
 func (p *pipeline) merge(ctx context.Context, staged string) error {
 	p.progress.enter(stageMerge)
 
+	plan := p.assemblyPlan()
 	request := &pdfengine.AssembleRequest{
-		Sources: make([]pdfengine.SourceFile, len(p.files)), Resource: p.resource, Order: p.order(),
-		Destination: staged, ExpectedPages: toInt(p.layout.Totals.Total),
-	}
-
-	for index := range p.files {
-		request.Sources[index] = pdfengine.SourceFile{Path: p.files[index].captured.Path, Info: p.files[index].info}
+		Sources: plan.Sources, Resource: p.resource, Order: plan.Order,
+		Destination: staged, ExpectedPages: plan.ExpectedPages,
 	}
 
 	p.phases.OutputVerification = report.PhaseIncomplete
@@ -234,7 +242,37 @@ func (p *pipeline) assembleProblem(err error) problem {
 		found.diagnostic.Location = p.at(file.FirstUse, "")
 	}
 
+	if ok && engineErr.Reason != "" {
+		p.locatePolicyProblem(&found, engineErr)
+	}
+
 	return found
+}
+
+// locatePolicyProblem maps an offending run back to the declaration containing its first refused page.
+func (p *pipeline) locatePolicyProblem(found *problem, failure *pdfengine.Error) {
+	if failure.Run < 0 || failure.Run >= len(p.layout.Runs) {
+		return
+	}
+
+	page := int64(1)
+	for _, run := range p.layout.Runs[:failure.Run] {
+		page += run.Count
+	}
+
+	if failure.Reason == pdfengine.ReasonPageLimit {
+		page = int64(pdfengine.MaxOutputPages) + 1
+	}
+	// Generated runs may combine declarations; cap failures identify the contribution crossing it.
+	for index, placement := range p.layout.Placements {
+		if page >= placement.Range.Start && page <= placement.Range.End {
+			contribution := &p.flat.Contributions[index]
+			found.diagnostic.Location = p.at(contribution.Origin, "")
+			found.diagnostic.Path = contribution.Path
+
+			return
+		}
+	}
 }
 
 // publishAll stages the report, rechecks both destinations, and publishes the PDF and then the report.
@@ -341,11 +379,16 @@ func (p *pipeline) saveFailureReport(ctx context.Context) *report.Report {
 
 	found := p.reportProblem(err)
 	found.diagnostic.Cause = found.diagnostic.Message
-	found.diagnostic.Message = "This attempt did not write the report. Choose an unused target; an existing report may describe an " +
-		"older attempt."
-	found.diagnostic.Recovery = &report.Recovery{Action: "choose_new_report", ReportFrom: originalReportArgumentReference}
+	found.diagnostic.Message = "This attempt did not write the report: " + found.diagnostic.Message
+	found.diagnostic.Location = argumentLocation(p.env, "--report")
 
-	if !p.inventoryComplete {
+	found.diagnostic.Recovery = &report.Recovery{Action: "choose_new_report", ReportFrom: originalReportArgumentReference}
+	if found.diagnostic.Path == p.output {
+		found.diagnostic.Location = p.outputLocation()
+		found.diagnostic.Recovery = nil
+	}
+
+	if !p.inventoryComplete && errors.Is(err, os.ErrExist) {
 		found.diagnostic.Message = "Before every input is known, --overwrite cannot replace a report. Choose an unused target; an " +
 			"existing report may be historical."
 	}
@@ -481,7 +524,7 @@ func (p *pipeline) resourceFonts() []*typeset.Font {
 // verifyReport protects every known input and the PDF at the report's commit boundary.
 func (p *pipeline) verifyReport(target string) error {
 	if p.output != "" {
-		if _, err := p.registry.Add(capture.RoleOutput, p.output); err != nil {
+		if err := p.registry.ProtectOutput(p.output); err != nil {
 			return err
 		}
 	}

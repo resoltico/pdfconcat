@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 //go:build unix
 
@@ -155,6 +155,36 @@ func TestNamedFIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
 	}
 }
 
+func TestInvalidReportQueriesRejectBeforeArtifactAccess(t *testing.T) {
+	t.Parallel()
+	dir := tempDir(t)
+	ensure(t, syscall.Mkfifo(filepath.Join(dir, pipePath), 0o600))
+	ensure(t, os.WriteFile(filepath.Join(dir, "malformed.json"), []byte("not JSON"), 0o600))
+	ensure(t, os.WriteFile(filepath.Join(dir, "unreadable.json"), []byte("not JSON"), 0o000))
+	writePDFs(t, dir, 1, "a")
+	requireExit(t, run(t, dir, "", commandCheck, flagReport, fileJob, fileA), 0)
+
+	for _, path := range []string{"absent-query.json", "malformed.json", "unreadable.json", pipePath, fileJob} {
+		for _, query := range []struct {
+			code string
+			args []string
+		}{
+			{"report_invalid_paging", []string{"--view", "diagnostics", "--limit", "0"}},
+			{"report_invalid_paging", []string{"--view", "diagnostics", "--limit", "101"}},
+			{"report_invalid_number", []string{"--page", "0"}},
+		} {
+			args := append([]string{commandReport, path}, query.args...)
+			failed := run(t, dir, "", args...)
+			requireExit(t, failed, 2)
+
+			diagnostic := objAt(t, listAt(t, contractObject(t, failed.stdout), diagnosticsView)[0])
+			if diagnostic["code"] != query.code {
+				t.Fatalf("artifact-dependent request rejection for %s: %v", path, diagnostic)
+			}
+		}
+	}
+}
+
 // TestReportFromAPipeIsRejected: a saved report is read to the end before it is decoded, so a pipe that is
 // never closed must be refused up front instead of blocking the command.
 func TestReportFromAPipeIsRejected(t *testing.T) {
@@ -254,8 +284,12 @@ func TestBrokenStandardOutputAfterPublication(t *testing.T) {
 	state := generic(t, stderr.String())
 	committed := state["kind"] == "committed_state" && flagAt(t, state, "published") && state["report_status"] == reportWritten
 
-	if !committed || state["status"] != "ok" || !strings.HasSuffix(textAt(t, state, keyOutput), fileOut) {
+	if !committed || state["status"] != "failed" || !strings.HasSuffix(textAt(t, state, keyOutput), fileOut) {
 		t.Errorf("committed state: %v", state)
+	}
+
+	if objAt(t, state, "saved_run")["status"] != "ok" {
+		t.Fatal("stdout failure replaced the captured successful outcome")
 	}
 
 	saved := contractObject(t, string(readFile(t, filepath.Join(dir, shortReportPath))))

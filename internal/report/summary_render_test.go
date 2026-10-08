@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -21,7 +21,7 @@ func TestSummaryPointsAtTheSavedReportsPartsWhenThereIsNothingToFix(t *testing.T
 	summary := mustDecode(t, completeCheck).Summary()
 	summary.BindContinuation(programName, fixtureReportPath, originalReportReference)
 
-	want := []string{programName, commandReport, "/w/r.json", "--expect-attempt", fixtureAttemptID, "--view", report.ViewParts}
+	want := []string{programName, commandReport, "/w/r.json", fixtureExpectAttemptFlag, fixtureAttemptID, fixtureViewFlag, report.ViewParts}
 	if !slices.Equal(nextArguments(summary.Next), want) {
 		t.Errorf("next = %v, want %v", summary.Next, want)
 	}

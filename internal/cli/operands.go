@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli
 
 import (
 	"github.com/resoltico/pdfconcat/internal/assembly"
-	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 // operandHandlers returns what each command context does with an operand: a path of a direct sequence, the
@@ -138,16 +137,4 @@ func sourceLabel(source PlanSource) string {
 	}
 
 	return optPlan
-}
-
-// claimSelection enforces that --part, --page, and --view are mutually exclusive.
-func (p *parser) claimSelection(index int, option string) error {
-	if p.selected != "" {
-		return p.fail(report.CodeSelectionConflict, index,
-			"%s cannot be combined with %s (argv:%d); choose one of --part, --page, or --view", option, p.selected, p.selectedAt)
-	}
-
-	p.selected, p.selectedAt = option, index
-
-	return nil
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine
 
@@ -24,9 +24,10 @@ type (
 	// pool is the merged object graph that the final page order is cut from. The first imported document
 	// is its base: pdfcpu merges later documents into the context of an already read one.
 	pool struct {
-		engine  *Engine
-		pdf     *model.Context
-		version model.Version
+		engine         *Engine
+		pdf            *model.Context
+		version        model.Version
+		formOccurrence int
 	}
 )
 
@@ -48,6 +49,17 @@ func (p *pool) importDocument(ctx context.Context, source int, path string, page
 		return nil, err
 	}
 
+	p.formOccurrence++
+
+	form, err := prepareFormResources(ctx, imported, p.formOccurrence)
+	if err != nil {
+		if cancellation := canceled(ctx, source, path); cancellation != nil {
+			return nil, cancellation
+		}
+
+		return nil, newError(CodeFormUnsupported, source, path, err)
+	}
+
 	// The tree to collect is the whole page tree of the base document, and for later documents the
 	// subtree that the merge appended as the last kid of the pool's root.
 	var top types.IndirectRef
@@ -63,6 +75,10 @@ func (p *pool) importDocument(ctx context.Context, source int, path string, page
 
 	if err != nil {
 		return nil, assemblyError(ctx, source, path, err)
+	}
+
+	if resourceErr := mergeFormResources(p.pdf, form); resourceErr != nil {
+		return nil, assemblyError(ctx, source, path, resourceErr)
 	}
 
 	var collected []*poolPage

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -756,5 +756,39 @@ func TestAPlanFileThatCannotBeClosedIsUnreadable(t *testing.T) {
 	err = current.decodePlanFile(t.Context(), filepath.Join(dir, planPath), clean)
 	if err != nil || current.job == nil {
 		t.Errorf("a plan that closes cleanly: %v %v", err, current.job)
+	}
+}
+
+func TestClassifySeparatesBackendPolicyAndInvariantFailures(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		reason pdfengine.PolicyReason
+		status report.Status
+	}{
+		{pdfengine.ReasonPageLimit, report.StatusInvalid},
+		{pdfengine.ReasonTotalMismatch, report.StatusFailed},
+	} {
+		failure := &pdfengine.Error{Code: pdfengine.CodeRequestInvalid, Reason: test.reason, Err: errInjected}
+
+		found := classify(stageAssemble, failure)
+		if found.status != test.status || found.diagnostic.Code != "assemble_request_invalid" {
+			t.Fatalf("%s: %+v", test.reason, found)
+		}
+	}
+}
+
+func TestPolicyLocationRejectsUnavailableRunIndices(t *testing.T) {
+	t.Parallel()
+
+	current := &pipeline{layout: &assembly.Layout{Runs: []assembly.Run{{Count: 1}}}}
+
+	for _, index := range []int{pdfengine.NoRun, 1} {
+		found := problem{diagnostic: report.Diagnostic{Path: "unlocated.pdf"}}
+		current.locatePolicyProblem(&found, &pdfengine.Error{Run: index})
+
+		if found.diagnostic.Location != nil || found.diagnostic.Path != "unlocated.pdf" {
+			t.Fatalf("unavailable run %d changed provenance: %+v", index, found)
+		}
 	}
 }

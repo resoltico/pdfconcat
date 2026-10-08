@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -14,6 +14,10 @@ import (
 
 const (
 	fixtureQueryReportReference = "original_argv.report_operand"
+	fixtureOverflowAllow        = "allow"
+	fixtureContextCommitted     = "committed"
+	fixtureExpectAttemptFlag    = "--expect-attempt"
+	fixtureViewFlag             = "--view"
 	fixtureNotWritten           = "not_written"
 	fixtureChooseNewReport      = "choose_new_report"
 	fixtureUnknownOption        = "unknown option"
@@ -63,7 +67,7 @@ const (
 	pointerItemTwo          = "/items/2"
 
 	// JSON fragments of the sample documents that the corpus rows edit.
-	memberVersion   = `"format_version":2`
+	memberVersion   = `"format_version":3`
 	memberKind      = `"kind":"report",`
 	memberStatusOK  = `"status":"ok"`
 	memberFontName  = `"name":"NotoSans-Regular"`
@@ -77,11 +81,11 @@ const (
 
 	// completeCheck is a successful check: one PDF of three pages and one blank run of two pages. It is
 	// written out by hand so that it is an oracle independent of the Builder and the encoder.
-	completeCheck = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"ok","command":"check",` +
+	completeCheck = `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"ok","command":"check",` +
 		`"phases":{"instructions":"complete","input_inspection":"complete","layout":"complete","output_verification":"not_run"},` +
 		`"counts":{"source_pages":3,"generated_pages":2,"total_pages":5},` +
 		`"publication":{"report_status":"written","report_path":"/w/r.json","published":false},` +
-		`"diagnostics":[],` +
+		`"diagnostic_count":0,"error_count":0,"warning_count":0,"diagnostics":[],` +
 		`"parts":[` +
 		`{"id":"/items/0","kind":"pdf","origin":{"file":"/w/job.json","offset":30,"line":2,"column":3},"range":{"start":1,"end":3},` +
 		`"pages":3,"source":0},` +
@@ -95,30 +99,31 @@ const (
 		`"leading":1.2,"bounds":{"x":250,"y":420,"width":60,"height":14},"ink_bounds":null,"font":0}}]}`
 
 	// failedDiagnostics are the two diagnostics of failedCheck: one located by pointer, one by argv index.
-	failedDiagnostics = `[{"stage":"inspect","code":"source_unreadable","location":{"file":"/w/job.json","offset":30,"line":2,"column":3,` +
+	failedDiagnostics = `[{"severity":"error","stage":"inspect","code":"source_unreadable",` +
+		`"location":{"file":"/w/job.json","offset":30,"line":2,"column":3,` +
 		`"pointer":"/items/0"},"path":"/w/a.pdf","message":"cannot read"},` +
-		`{"stage":"usage","code":"bad_flag","location":{"file":"argv","argv_index":2},"message":"bad flag"}]`
+		`{"severity":"error","stage":"usage","code":"bad_flag","location":{"file":"argv","argv_index":2},"message":"bad flag"}]`
 
 	// failedCheck is an incomplete run: layout is unknown, so counts and ranges are null.
-	failedCheck = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"invalid","command":"check",` +
+	failedCheck = `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"invalid","command":"check",` +
 		`"phases":{"instructions":"complete","input_inspection":"incomplete","layout":"not_run","output_verification":"not_run"},` +
 		`"counts":{"source_pages":null,"generated_pages":null,"total_pages":null},` +
 		`"publication":{"report_status":"not_requested","published":false},` +
-		`"diagnostics":` + failedDiagnostics + `,` +
+		`"diagnostic_count":2,"error_count":2,"warning_count":0,"diagnostics":` + failedDiagnostics + `,` +
 		`"parts":[{"id":"argv:0","kind":"pdf","origin":{"file":"argv"},"range":null,"pages":null,"source":0}],` +
 		`"sources":[{"path":"/w/a.pdf","bytes":null}],"fonts":[],"styles":[]}`
 
 	// richFailure is a failed build that exercises every optional member: published output, a failed report
 	// with a recovery file, a font file, a pointer and an argv location, and a path.
-	richFailure = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"failed","command":"build",` +
+	richFailure = `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"failed","command":"build",` +
 		`"phases":{"instructions":"complete","input_inspection":"complete","layout":"complete","output_verification":"complete"},` +
 		`"counts":{"source_pages":1,"generated_pages":1,"total_pages":2},` +
 		`"publication":{"output":"/w/out.pdf","report_status":"failed","report_path":"/w/r.json",` +
 		`"recovery_report":"/w/.rec.json","recovery_state":"current",` +
 		`"published":true},` +
-		`"diagnostics":[` +
-		`{"stage":"publish","code":"report_write_failed","path":"/w/r.json","message":"cannot write the report"},` +
-		`{"stage":"shape","code":"plan_bad_value","location":{"file":"/w/job.json","offset":5,"line":1,"column":6,` +
+		`"diagnostic_count":2,"error_count":2,"warning_count":0,"diagnostics":[` +
+		`{"severity":"error","stage":"publish","code":"report_write_failed","path":"/w/r.json","message":"cannot write the report"},` +
+		`{"severity":"error","stage":"shape","code":"plan_bad_value","location":{"file":"/w/job.json","offset":5,"line":1,"column":6,` +
 		`"pointer":"/items/1"},"message":"bad"}],` +
 		`"parts":[` +
 		`{"id":"argv:0","kind":"pdf","origin":{"file":"argv"},"range":{"start":1,"end":1},"pages":1,"source":0},` +
@@ -157,6 +162,8 @@ func errorCode(err error) report.Code {
 
 func encodeReport(tb testing.TB, r *report.Report) string {
 	tb.Helper()
+
+	r.FinalizeDiagnostics()
 
 	var out bytes.Buffer
 
@@ -216,8 +223,8 @@ func failedReportFixture(diagnostics ...report.Diagnostic) *report.Report {
 		OutputVerification: report.PhaseNotRun,
 	})
 
-	for index, diagnostic := range diagnostics {
-		builder.AddDiagnostic(index, diagnostic)
+	for index := range diagnostics {
+		builder.AddDiagnostic(index, diagnostics[index])
 	}
 
 	return builder.Build(report.StatusInvalid)

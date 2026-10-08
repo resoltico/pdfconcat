@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -20,8 +20,8 @@ type (
 	// written after a command already did its work: it says what was published, so the caller is
 	// never left to guess.
 	committedState struct {
-		ReportFrom              string               `json:"report_from,omitempty"`
-		ReportWrite             string               `json:"report_write,omitempty"`
+		ReportStatus            report.WriteState    `json:"report_status"`
+		ReportPath              string               `json:"report_path,omitempty"`
 		ReportTargetObservation string               `json:"report_target_observation,omitempty"`
 		RecoveryBasename        string               `json:"recovery_basename,omitempty"`
 		RecoveryDirectoryFrom   string               `json:"recovery_directory_from,omitempty"`
@@ -29,12 +29,16 @@ type (
 		Kind                    string               `json:"kind"`
 		Command                 string               `json:"command"`
 		Status                  report.Status        `json:"status"`
-		Output                  string               `json:"output,omitempty"`
-		ReportStatus            report.WriteState    `json:"report_status"`
-		ReportPath              string               `json:"report_path,omitempty"`
 		RecoveryReport          string               `json:"recovery_report,omitempty"`
+		ReportWrite             string               `json:"report_write,omitempty"`
+		ReportFrom              string               `json:"report_from,omitempty"`
+		Output                  string               `json:"output,omitempty"`
 		RecoveryState           report.RecoveryState `json:"recovery_state,omitempty"`
-		StdoutError             string               `json:"stdout_error"`
+		Diagnostics             []report.Diagnostic  `json:"diagnostics"`
+		SavedRun                report.SavedRun      `json:"saved_run"`
+		DiagnosticCount         int                  `json:"diagnostic_count"`
+		ErrorCount              int                  `json:"error_count"`
+		WarningCount            int                  `json:"warning_count"`
 		FormatVersion           int                  `json:"format_version"`
 		Truncated               bool                 `json:"previews_truncated,omitzero"`
 		Published               bool                 `json:"published"`
@@ -59,7 +63,10 @@ const (
 	// originalReportArgumentReference binds recovery to the caller-owned --report value.
 	originalReportArgumentReference = "original_argv.--report"
 	// committedStateKind is the kind of a committedState record.
-	committedStateKind = "committed_state"
+	committedStateKind             = "committed_state"
+	stdoutWriteCode    report.Code = "stdout_write_failed"
+	stdoutWriteMessage             = "Cannot write the command response. Use the captured run and publication fields; " +
+		"do not rebuild a published PDF."
 )
 
 // encodeLine is the compact JSON of value and a newline. The values encoded here are plain data that always
@@ -115,6 +122,8 @@ func finishCommand(env Env, command *cli.Command, rep *report.Report) int {
 
 // stateOnStderr reports what the command did when standard output failed.
 func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
+	fullCause := cause.Error()
+	boundedCause := boundedMessage(fullCause)
 	state := committedState{
 		FormatVersion:           report.Version,
 		AttemptID:               rep.AttemptID,
@@ -123,14 +132,19 @@ func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
 		ReportTargetObservation: rep.Publication.ReportTargetObservation,
 		Kind:                    committedStateKind,
 		Command:                 string(command),
-		Status:                  rep.Status,
+		Status:                  report.StatusFailed,
 		Published:               rep.Publication.Published,
 		Output:                  rep.Publication.Output,
 		ReportStatus:            rep.Publication.ReportStatus,
 		ReportPath:              rep.Publication.ReportPath,
 		RecoveryReport:          rep.Publication.RecoveryReport,
 		RecoveryState:           rep.Publication.RecoveryState,
-		StdoutError:             boundedMessage(cause.Error()),
+		SavedRun:                report.SavedRunOf(rep), DiagnosticCount: 1, ErrorCount: 1,
+		Truncated: boundedCause != fullCause,
+		Diagnostics: []report.Diagnostic{{
+			Severity: report.SeverityError, Stage: report.StageWrite, Code: stdoutWriteCode,
+			Message: stdoutWriteMessage, Cause: boundedCause,
+		}},
 	}
 
 	if len(encodeLine(state)) <= report.SummaryBytes {
@@ -150,7 +164,7 @@ func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
 		state.RecoveryReport = ""
 	}
 
-	for _, value := range []*string{&state.Command, &state.Output, &state.ReportPath, &state.StdoutError} {
+	for _, value := range []*string{&state.Command, &state.Output, &state.ReportPath, &state.Diagnostics[0].Cause} {
 		*value, _ = report.BoundPreview(*value)
 	}
 

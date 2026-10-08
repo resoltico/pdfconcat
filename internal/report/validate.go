@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -165,7 +165,7 @@ func phasesFault(phases *Phases) *fault {
 	}{
 		{"instructions", phases.Instructions},
 		{"input_inspection", phases.InputInspection},
-		{"layout", phases.Layout},
+		{phaseLayout, phases.Layout},
 		{"output_verification", phases.OutputVerification},
 	}
 
@@ -188,17 +188,18 @@ func phasesFault(phases *Phases) *fault {
 
 func (v *validator) statusRelations() *fault {
 	rep := v.report
+	counts := diagnosticCounts(rep.Diagnostics)
 
 	if rep.Status != StatusOK {
-		if len(rep.Diagnostics) == 0 {
-			return newFault(pointerDiagnostics, CodeInvalidValue, "a report whose status is not ok needs at least one diagnostic")
+		if counts.ErrorCount == 0 {
+			return newFault(pointerDiagnostics, CodeInvalidValue, "a report whose status is not ok needs at least one error")
 		}
 
 		return nil
 	}
 
-	if len(rep.Diagnostics) > 0 {
-		return newFault(pointerDiagnostics, CodeInvalidValue, "a report whose status is ok has no diagnostics")
+	if counts.ErrorCount > 0 {
+		return newFault(pointerDiagnostics, CodeInvalidValue, "a report whose status is ok has no errors")
 	}
 
 	if rep.Command != commandBuild && rep.Command != commandCheck {
@@ -306,25 +307,70 @@ func (v *validator) diagnostics() *fault {
 	for index := range v.report.Diagnostics {
 		diagnostic := &v.report.Diagnostics[index]
 
-		switch {
-		case !namePattern.MatchString(string(diagnostic.Stage)):
-			return newFault(at(pointerDiagnostics, index, "/stage"), CodeInvalidValue, "stage must be lower-case snake_case")
-		case !namePattern.MatchString(string(diagnostic.Code)):
-			return newFault(at(pointerDiagnostics, index, "/code"), CodeInvalidValue, "code must be lower-case snake_case")
-		case diagnostic.Message == "":
-			return newFault(at(pointerDiagnostics, index, "/message"), CodeInvalidValue, "a diagnostic needs an actionable message")
+		if found := diagnosticSeverityFault(at(pointerDiagnostics, index, ""), diagnostic, v.report.Publication); found != nil {
+			return found
 		}
 
-		if diagnostic.Recovery != nil {
-			if found := recoveryFault(at(pointerDiagnostics, index, "/recovery"), diagnostic.Recovery); found != nil {
-				return found
-			}
+		if found := diagnosticShapeFault(at(pointerDiagnostics, index, ""), diagnostic); found != nil {
+			return found
 		}
+	}
 
-		if diagnostic.Location != nil {
-			if found := locationFault(at(pointerDiagnostics, index, "/location"), diagnostic.Location); found != nil {
-				return found
-			}
+	counts := diagnosticCounts(v.report.Diagnostics)
+
+	declared := DiagnosticCounts{
+		DiagnosticCount: v.report.DiagnosticCount,
+		ErrorCount:      v.report.ErrorCount,
+		WarningCount:    v.report.WarningCount,
+	}
+	if declared != counts {
+		return newFault(
+			"/diagnostic_count",
+			CodeInvalidValue,
+			"diagnostic_count, error_count and warning_count must count captured records",
+		)
+	}
+
+	return nil
+}
+
+func diagnosticSeverityFault(pointer string, diagnostic *Diagnostic, publication Publication) *fault {
+	switch diagnostic.Severity {
+	case SeverityWarning:
+		if diagnostic.ConsequenceContext != consequenceContext(publication) {
+			return newFault(pointer+"/consequence_context", CodeInvalidValue, "warning context must describe captured publication")
+		}
+	case SeverityError:
+		if diagnostic.ConsequenceContext != "" {
+			return newFault(pointer+"/consequence_context", CodeInvalidValue, "only warnings carry consequence context")
+		}
+	default:
+		return newFault(pointer+"/severity", CodeInvalidValue, "severity must be error or warning")
+	}
+
+	return nil
+}
+
+func diagnosticShapeFault(pointer string, diagnostic *Diagnostic) *fault {
+	switch {
+	case !namePattern.MatchString(string(diagnostic.Stage)):
+		return newFault(pointer+"/stage", CodeInvalidValue, "stage must be lower-case snake_case")
+	case !namePattern.MatchString(string(diagnostic.Code)):
+		return newFault(pointer+"/code", CodeInvalidValue, "code must be lower-case snake_case")
+	case diagnostic.Message == "":
+		return newFault(pointer+"/message", CodeInvalidValue, "a diagnostic needs an actionable message")
+	default:
+	}
+
+	if diagnostic.Recovery != nil {
+		if found := recoveryFault(pointer+"/recovery", diagnostic.Recovery); found != nil {
+			return found
+		}
+	}
+
+	if diagnostic.Location != nil {
+		if found := locationFault(pointer+"/location", diagnostic.Location); found != nil {
+			return found
 		}
 	}
 
@@ -744,7 +790,7 @@ func recoveryFault(pointer string, recovery *Recovery) *fault {
 		valid = true
 	case "edit_input":
 		valid = recovery.Location != nil || recovery.LocationFrom != ""
-	case recoveryChooseNewReport, "inspect_report":
+	case recoveryChooseNewReport, recoveryInspectReport:
 		valid = recovery.ReportFrom != ""
 	case "recover_report":
 		valid = recovery.ReportFrom != "" && recovery.RecoveryFrom != ""

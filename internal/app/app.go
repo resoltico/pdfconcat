@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package app runs PDFConcat commands: it connects the parsed command line to plan decoding, resource
 // capture, inspection, layout, assembly, report production and publication, and decides the outcome that

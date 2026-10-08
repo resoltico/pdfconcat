@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli
 
 import (
+	"errors"
 	"math"
 
 	"github.com/resoltico/pdfconcat/internal/report"
@@ -82,48 +83,23 @@ func (p *parser) setJobs(index int, value string) error {
 	return nil
 }
 
-func (p *parser) setPart(index int, value string) error {
-	err := p.claimSelection(index, optPart)
-	if err != nil {
-		return err
-	}
-
+func (p *parser) setPart(_ int, value string) error {
 	p.cmd.Part = value
-
 	return nil
 }
 
-func (p *parser) setView(index int, value string) error {
-	err := p.claimSelection(index, optView)
-	if err != nil {
-		return err
-	}
-
-	if value != report.ViewParts && value != report.ViewDiagnostics {
-		return p.fail(report.CodeUnknownView, index, "--view needs %s or %s, not %q", report.ViewParts, report.ViewDiagnostics, value)
-	}
-
+func (p *parser) setView(_ int, value string) error {
 	p.cmd.View = value
-
 	return nil
 }
 
 func (p *parser) setPage(index int, value string) error {
-	err := p.claimSelection(index, optPage)
-	if err != nil {
-		return err
-	}
-
 	page, err := p.number(index, optPage, value)
 	if err != nil {
 		return err
 	}
 
-	if page < 1 {
-		return p.fail(report.CodeInvalidNumber, index, "--page needs a whole number of at least 1 (pages are 1-based), not %q", value)
-	}
-
-	p.cmd.Page = page
+	p.cmd.Page, p.cmd.HasPage = page, true
 
 	return nil
 }
@@ -150,19 +126,9 @@ func (p *parser) setLimit(index int, value string) error {
 	return nil
 }
 
-// pagingNumber parses a non-negative paging value. Range limits such as a maximum page size belong to the
-// report package; the command line rejects only what is not a whole non-negative 64-bit number.
+// pagingNumber parses a numeric token; semantic ranges belong to report.Request.Validate.
 func (p *parser) pagingNumber(index int, option, value string) (int64, error) {
-	number, err := p.number(index, option, value)
-	if err != nil {
-		return 0, err
-	}
-
-	if number < 0 {
-		return 0, p.fail(report.CodeInvalidPaging, index, "%s must not be negative, not %q", option, value)
-	}
-
-	return number, nil
+	return p.number(index, option, value)
 }
 
 // number parses a decimal whole number that fits 64 bits, or fails naming the option at index.
@@ -190,13 +156,24 @@ func finishers() map[Name]func(*parser) error {
 
 // finish applies the requirements that need the whole line and produces the result. A help request skips them.
 func (p *parser) finish() error {
-	if p.help {
-		p.cmd = Command{Name: NameHelp, Format: p.cmd.Format, HelpFor: p.context}
-
-		return nil
+	if !p.help {
+		return finishers()[p.context](p)
 	}
 
-	return finishers()[p.context](p)
+	if p.context == NameReport {
+		err := p.validateReportRequest()
+
+		if found, ok := errors.AsType[*UsageError](err); ok {
+			code := found.Diagnostics[0].Code
+			if code != report.CodeDetailsNeedSelect && code != report.CodePagingNeedsView {
+				return err
+			}
+		}
+	}
+
+	p.cmd = Command{Name: NameHelp, Format: p.cmd.Format, HelpFor: p.context}
+
+	return nil
 }
 
 func (p *parser) finishRoot() error {
@@ -253,21 +230,27 @@ func (p *parser) finishReport() error {
 		return p.fail(CodeMissingOperand, -1, "report needs the saved report: pdfconcat report FILE")
 	}
 
-	if p.cmd.Details && p.cmd.View == "" && p.cmd.Part == "" && p.cmd.Page == 0 {
-		return p.fail(report.CodeDetailsNeedSelect, p.seen[optDetails],
-			"--details expands the records you select; add --part ID, --page N, or --view parts|diagnostics")
-	}
+	return p.validateReportRequest()
+}
 
-	if p.cmd.View != "" {
+func (p *parser) validateReportRequest() error {
+	err := p.cmd.ReportRequest().Validate()
+	if err == nil {
 		return nil
 	}
 
-	for _, option := range []string{optOffset, optLimit} {
-		index, given := p.seen[option]
-		if given {
-			return p.fail(report.CodePagingNeedsView, index, "%s pages a --view; add --view parts or --view diagnostics", option)
+	found, _ := report.AsError(err)
+	index := -1
+
+	if found.Diagnostic.Code == report.CodeSelectionConflict {
+		for _, option := range []string{optPart, optPage, optView} {
+			if at, given := p.seen[option]; given && at > index {
+				index = at
+			}
 		}
+	} else if at, given := p.seen[found.Option]; given {
+		index = at
 	}
 
-	return nil
+	return p.fail(found.Diagnostic.Code, index, "%s", found.Diagnostic.Message)
 }

@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/report/report.schema.json",
-  "title": "PDFConcat complete report, format 2",
+  "title": "PDFConcat complete report, format 3",
   "type": "object",
   "properties": {
     "format_version": {
-      "const": 2
+      "const": 3
     },
     "kind": {
       "const": "report"
@@ -69,6 +69,18 @@
       "minLength": 26,
       "maxLength": 26,
       "pattern": "^[A-Z2-7]{26}$"
+    },
+    "diagnostic_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warning_count": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "required": [
@@ -84,7 +96,10 @@
     "sources",
     "fonts",
     "styles",
-    "attempt_id"
+    "attempt_id",
+    "diagnostic_count",
+    "error_count",
+    "warning_count"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -414,14 +429,50 @@
         },
         "cause": {
           "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning"
+          ]
+        },
+        "consequence_context": {
+          "enum": [
+            "predicted",
+            "committed"
+          ]
         }
       },
       "required": [
         "stage",
         "code",
-        "message"
+        "message",
+        "severity"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "consequence_context"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "consequence_context"
+              ]
+            }
+          }
+        }
+      ]
     },
     "range": {
       "type": "object",
@@ -997,5 +1048,30 @@
         }
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error_count": {
+            "const": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "error_count": {
+            "minimum": 1
+          }
+        }
+      }
+    }
+  ]
 }

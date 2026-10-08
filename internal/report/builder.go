@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -142,6 +142,10 @@ func (b *Builder) AddDiagnostic(order int, d Diagnostic) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
+	if d.Severity == "" {
+		d.Severity = SeverityError
+	}
+
 	b.ordered = append(b.ordered, orderedDiagnostic{diagnostic: cloneDiagnostic(d), order: order})
 }
 
@@ -261,6 +265,9 @@ func (b *Builder) Build(status Status) *Report {
 	for i := range sorted {
 		out.Diagnostics[i] = cloneDiagnostic(sorted[i].diagnostic)
 	}
+
+	out.Diagnostics = append(out.Diagnostics, layoutWarnings(&out)...)
+	out.FinalizeDiagnostics()
 
 	return &out
 }

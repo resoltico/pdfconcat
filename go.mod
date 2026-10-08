@@ -3,6 +3,7 @@ module github.com/resoltico/pdfconcat
 go 1.27.1
 
 require (
+	github.com/benoitkugler/pdf v0.0.15
 	github.com/go-text/typesetting v0.3.5
 	github.com/pdfcpu/pdfcpu v0.16.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3

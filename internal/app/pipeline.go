@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -322,6 +322,11 @@ func (p *pipeline) resolveLayout(ctx context.Context) error {
 	}
 
 	p.layout = resolved
+	// Backend policy is source-known and must precede placement/rendering in check and build.
+	if policyErr := p.assemblyPlan().Validate(); policyErr != nil {
+		return p.stopWith(p.assembleProblem(policyErr))
+	}
+
 	p.counts = report.Counts{
 		SourcePages: &resolved.Totals.Source, GeneratedPages: &resolved.Totals.Generated, TotalPages: &resolved.Totals.Total,
 	}

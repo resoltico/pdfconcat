@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -17,6 +17,8 @@ type Recovery struct {
 
 const (
 	recoveryChooseNewReport     = "choose_new_report"
+	recoveryInspectReport       = "inspect_report"
+	invokingExecutableReference = "invoking_executable"
 	jobReportReference          = "original_argv.--report"
 	queryReportReference        = "original_argv.report_operand"
 	historicalRecoveryReference = "complete_report.publication.recovery_report"

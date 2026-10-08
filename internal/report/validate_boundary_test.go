@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -98,6 +98,7 @@ func TestValidateAcceptsValuesOnTheirLimits(t *testing.T) {
 	for _, tc := range acceptedLimitCases() {
 		saved := mustDecode(t, completeCheck)
 		tc.edit(saved)
+		saved.FinalizeDiagnostics()
 
 		err := saved.Validate()
 		if err != nil {
@@ -112,6 +113,7 @@ func TestValidateRefusesValuesBeyondTheirLimits(t *testing.T) {
 	for _, tc := range refusedLimitCases() {
 		saved := mustDecode(t, completeCheck)
 		tc.edit(saved)
+		saved.FinalizeDiagnostics()
 
 		found, ok := report.AsError(saved.Validate())
 		if !ok {

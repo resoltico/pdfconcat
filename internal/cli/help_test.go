@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli_test
 
@@ -100,7 +100,7 @@ func TestHelpListsExactlyTheApplicableOptions(t *testing.T) {
 // probe is the arguments that use option once in command: a sample value is added for options that take one.
 func probe(command cli.Name, option string) []string {
 	samples := map[string]string{
-		"--expect-attempt": "fixture-attempt",
+		"--expect-attempt": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
 		planOption:         "x",
 		argPlanJSON:        "{}",
 		argBaseDir:         "x",

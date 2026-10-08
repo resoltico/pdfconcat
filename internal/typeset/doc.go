@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package typeset loads TrueType fonts, shapes and wraps text, and places one text block on a page.
 // It is pure computation: it knows nothing about PDF.

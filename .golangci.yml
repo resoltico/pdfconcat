@@ -69,6 +69,8 @@ linters:
             - $gostd
             - github.com/resoltico/pdfconcat
             - github.com/pdfcpu/pdfcpu
+            - github.com/benoitkugler/pdf/fonts/glyphsnames$
+            - github.com/benoitkugler/pdf/fonts/simpleencodings$
             - github.com/go-text/typesetting
             - github.com/santhosh-tekuri/jsonschema/v6
             - go.yaml.in/yaml/v3
@@ -79,6 +81,7 @@ linters:
             - golang.org/x/text
             - golang.org/x/text/cases
             - golang.org/x/text/unicode/norm
+            - golang.org/x/text/encoding/charmap$
             # depguard mis-resolves go/* standard-library imports once an allowed module path begins with
             # "go."; naming the go/* packages the project uses keeps them recognised.
             - go/ast
@@ -391,6 +394,8 @@ linters:
           deny:
             - pkg: github.com/pdfcpu/pdfcpu
               desc: pdfcpu may only be imported by internal/pdfengine
+            - pkg: github.com/benoitkugler/pdf/fonts
+              desc: PDF glyph encoding tables belong to internal/pdfengine
         typesetting-boundary:
           # Text shaping is internal/typeset's concern; other packages use its API.
           list-mode: lax
@@ -494,7 +499,7 @@ linters:
     goheader:
       template: |-
         SPDX-License-Identifier: MPL-2.0
-        Copyright (c) 2026 Ervins
+        Copyright (c) 2026 Ervins Strauhmanis
     gomoddirectives:
       replace-allow-list: []
       retract-allow-no-explanation: false

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package layout places the text of resolved generated pages. It joins the pure domain of package
 // assembly (resolved page sizes and appearances) with package typeset (fonts, shaping, wrapping,

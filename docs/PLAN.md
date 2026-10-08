@@ -137,6 +137,8 @@ Every item, and every style value, remembers where it was written: the source na
 
 The limits are charged while the plan is read, so an oversized plan is rejected early with an error that names the limit and the location where it was crossed. They are declared resource bounds, not a promise that every job within them runs in bounded memory.
 
+After source inspection, both `check` and `build` also enforce the backend's total-page resource cap, declared by [`pdfengine.MaxOutputPages`](../internal/pdfengine/request.go), and its [source occurrence rules](ARCHITECTURE.md#pdf-backend-behavior). The domain's signed 32-bit page arithmetic is a separate representational bound, not the backend's capacity promise. A passing check validates the source-known policy without assembling millions of pages; build still performs output verification and can fail on later I/O or file changes.
+
 ## Generating plans
 
 Plans are plain JSON, so any tool can write one. The list of files is the only thing that needs generating; the ordering rule is whatever the generating command sorts by, and writing it down in the plan lets it be reviewed and rerun. A plan on standard input has no directory, so pass `--base-dir` (or use absolute paths) to make relative paths independent of the working directory.

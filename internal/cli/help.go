@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli
 
@@ -178,7 +178,7 @@ func checkHelp() helpEntry {
 		templates: jobTemplates(NameCheck),
 		notes: append(jobNotes(), []string{
 			"Plan sources and options are those of build; -o additionally checks the destination.",
-			"Snapshots of the inputs are scratch files; no PDF is published.",
+			"Checks source-known backend policy using scratch snapshots; later I/O or destination changes may still fail.",
 		}...),
 		example: "pdfconcat check --plan job.json --report job.report.json",
 	}
@@ -189,8 +189,8 @@ func reportHelp() helpEntry {
 		summary: "Query a saved report without reopening any PDF.",
 		usage:   []string{"pdfconcat report FILE [--part ID | --page N | --view parts|diagnostics] [--offset N] [--limit N] [--details]"},
 		notes: []string{
-			"The query status describes this read; saved_run describes the captured job. --expect-attempt guards " +
-				"correlation, not integrity or current PDF contents.",
+			"Query status/counts describe this read; saved_run and selection_counts describe historical records. --expect-attempt guards " +
+				"correlation using a 26-character base32 ID, not integrity or current PDF contents.",
 			"--details materializes source/style/font values; complete reports use shared array indexes. " +
 				"Publication targets in saved evidence are historical.",
 			"Choose at most one of --part, --page, --view; --offset and --limit page a --view.",
@@ -272,9 +272,9 @@ func jobNotes() []string {
 		"Blank size: leading blanks inherit the first following source; others inherit the nearest preceding " +
 			"source. Explicit generated sizes do not change inheritance.",
 		"Coordinates: x right, y up. Anchor positions the block; alignment positions lines. Clear defaults " +
-			"with text.value=\"\" and background:\"none\".",
+			"with text.value=\"\" and background:\"none\". Whitespace: docs/BLANK_PAGES.md.",
 		"No-clobber is default. --overwrite replaces PDF/report only after complete input/alias inventory; " +
-			"earlier failures can write reports only to unused targets. A passing check is advisory.",
+			"earlier failures can write reports only to unused targets. Success can carry warnings: review warning_count and diagnostics.",
 		"Workflow: check --plan job.json --report job.report.json; report job.report.json --view parts " +
 			"--details; build --plan job.json. Templates require your own paths.",
 	}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -31,7 +31,7 @@ func headerInvariantCases() []invariantCase {
 	}
 
 	return []invariantCase{
-		{func(r *report.Report) { r.FormatVersion = 3 }, "version", "/format_version", report.CodeUnsupportedVersion},
+		{func(r *report.Report) { r.FormatVersion = 2 }, "version", "/format_version", report.CodeUnsupportedVersion},
 		{func(r *report.Report) { r.Kind = "summary" }, "kind", "/kind", report.CodeWrongKind},
 		{func(r *report.Report) { r.Command = commandReport }, "command ok but not build or check", pointerStatus, report.CodeInvalidValue},
 		{func(r *report.Report) {
@@ -116,6 +116,7 @@ func TestValidateRejectsEveryBrokenInvariant(t *testing.T) {
 	for _, tc := range slices.Concat(headerInvariantCases(), elementInvariantCases()) {
 		saved := mustDecode(t, completeCheck)
 		tc.edit(saved)
+		saved.FinalizeDiagnostics()
 
 		err := saved.Validate()
 
@@ -275,14 +276,15 @@ func TestRenderViewText(t *testing.T) {
 
 	failed := failedSynthetic()
 
-	const wantParts = "parts: 2 of 10000 from offset 0 (next offset 2)\n/items/0 pdf pages 1-1: /work/inputs/chapter-00000.pdf\n"
+	const wantParts = "parts: 2 of 10000 from offset 0 (next offset 2)\n" +
+		"/items/0 pdf pages 1-1: /work/inputs/chapter-00000.pdf (0 warning records)\n"
 
 	parts := renderQuery(t, failed, report.Request{View: report.ViewParts, Limit: new(int64(2))})
 	if !strings.HasPrefix(parts, wantParts) {
 		t.Errorf("parts text: %.200s", parts)
 	}
 
-	const wantDiagnostics = "diagnostics: 1 of 5000 from offset 4999 (no more)\n- [layout/text_overflow] diagnostic 4999: "
+	const wantDiagnostics = "diagnostics: 1 of 5000 from offset 4999 (no more)\n- [error layout/text_overflow] diagnostic 4999: "
 
 	last := report.Request{View: report.ViewDiagnostics, Offset: new(int64(4999)), Limit: new(int64(5))}
 

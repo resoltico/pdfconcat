@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -15,16 +15,18 @@ type (
 	// DiagnosticView is a diagnostic as a query or a summary shows it: the message is cut to PreviewRunes
 	// characters and marked, unless the full record was asked for.
 	DiagnosticView struct {
-		Recovery         *Recovery `json:"recovery,omitempty"`
-		Location         *Location `json:"location,omitempty"`
-		Stage            Stage     `json:"stage"`
-		Code             Code      `json:"code"`
-		Path             string    `json:"path,omitempty"`
-		Message          string    `json:"message"`
-		Cause            string    `json:"cause,omitempty"`
-		Consumers        []string  `json:"consumers,omitempty"`
-		reportIndex      int
-		MessageTruncated bool `json:"message_truncated,omitzero"`
+		Recovery           *Recovery `json:"recovery,omitempty"`
+		Location           *Location `json:"location,omitempty"`
+		Severity           Severity  `json:"severity"`
+		ConsequenceContext string    `json:"consequence_context,omitempty"`
+		Stage              Stage     `json:"stage"`
+		Code               Code      `json:"code"`
+		Path               string    `json:"path,omitempty"`
+		Message            string    `json:"message"`
+		Cause              string    `json:"cause,omitempty"`
+		Consumers          []string  `json:"consumers,omitempty"`
+		reportIndex        int
+		MessageTruncated   bool `json:"message_truncated,omitzero"`
 	}
 
 	// Summary is the compact default result. It is labeled as a summary, never lists every diagnostic of a
@@ -48,6 +50,8 @@ type (
 		FormatVersion         int  `json:"format_version"`
 		PartCount             int  `json:"part_count"`
 		DiagnosticCount       int  `json:"diagnostic_count"`
+		ErrorCount            int  `json:"error_count"`
+		WarningCount          int  `json:"warning_count"`
 		DiagnosticsOmitted    int  `json:"diagnostics_omitted,omitzero"`
 		NextOmitted           bool `json:"next_omitted,omitzero"`
 	}
@@ -86,6 +90,7 @@ func fullDiagnosticView(d *Diagnostic) DiagnosticView {
 	d = &snapshot
 
 	return DiagnosticView{
+		Severity: d.Severity, ConsequenceContext: d.ConsequenceContext,
 		Recovery:  d.Recovery,
 		Consumers: slices.Clone(d.Consumers),
 		Location:  d.Location,
@@ -103,6 +108,7 @@ func previewDiagnosticView(d *Diagnostic) DiagnosticView {
 	d = &snapshot
 
 	view := DiagnosticView{
+		Severity: d.Severity, ConsequenceContext: d.ConsequenceContext,
 		Recovery: d.Recovery,
 		Location: d.Location,
 		Stage:    d.Stage,
@@ -121,39 +127,22 @@ func previewDiagnosticView(d *Diagnostic) DiagnosticView {
 func (r *Report) Summary() *Summary {
 	shown := min(len(r.Diagnostics), PreviewDiagnostics)
 	summary := &Summary{
-		FormatVersion:      Version,
-		AttemptID:          r.AttemptID,
-		Kind:               KindSummary,
-		Status:             r.Status,
-		Command:            r.Command,
-		Phases:             r.Phases,
-		Counts:             r.Counts,
-		Publication:        r.Publication,
-		PartCount:          len(r.Parts),
-		DiagnosticCount:    len(r.Diagnostics),
+		FormatVersion:   Version,
+		AttemptID:       r.AttemptID,
+		Kind:            KindSummary,
+		Status:          r.Status,
+		Command:         r.Command,
+		Phases:          r.Phases,
+		Counts:          r.Counts,
+		Publication:     r.Publication,
+		PartCount:       len(r.Parts),
+		DiagnosticCount: len(r.Diagnostics),
+		ErrorCount:      r.ErrorCount, WarningCount: r.WarningCount,
 		Diagnostics:        make([]DiagnosticView, shown),
 		DiagnosticsOmitted: len(r.Diagnostics) - shown,
 	}
 
-	indices := make([]int, 0, shown)
-	if shown > 0 {
-		indices = append(indices, 0)
-	}
-
-	for index := 1; index < len(r.Diagnostics); index++ {
-		if recovery := r.Diagnostics[index].Recovery; recovery != nil && recovery.Action == recoveryChooseNewReport {
-			indices = append(indices, index)
-			break
-		}
-	}
-
-	// Visiting every source index fills shown; an initially selected safety index is skipped once.
-	for index := 1; len(indices) < shown; index++ {
-		if !slices.Contains(indices, index) {
-			indices = append(indices, index)
-		}
-	}
-
+	indices := summaryIndices(r.Diagnostics, shown)
 	for index, original := range indices {
 		summary.Diagnostics[index] = previewDiagnosticView(&r.Diagnostics[original])
 		summary.Diagnostics[index].reportIndex = original
@@ -162,6 +151,40 @@ func (r *Report) Summary() *Summary {
 	summary.bound()
 
 	return summary
+}
+
+func summaryIndices(diagnostics []Diagnostic, shown int) []int {
+	indices := make([]int, 0, shown)
+	if shown == 0 {
+		return indices
+	}
+
+	indices = appendSummarySeverity(indices, diagnostics, SeverityError, 1)
+	if len(indices) == 0 {
+		indices = appendSummarySeverity(indices, diagnostics, SeverityWarning, 1)
+	}
+
+	for i := range diagnostics {
+		recovery := diagnostics[i].Recovery
+		if recovery != nil && recovery.Action == recoveryChooseNewReport && !slices.Contains(indices, i) && len(indices) < shown {
+			indices = append(indices, i)
+			break
+		}
+	}
+
+	indices = appendSummarySeverity(indices, diagnostics, SeverityError, shown)
+
+	return appendSummarySeverity(indices, diagnostics, SeverityWarning, shown)
+}
+
+func appendSummarySeverity(indices []int, diagnostics []Diagnostic, severity Severity, limit int) []int {
+	for i := 0; i < len(diagnostics) && len(indices) < limit; i++ {
+		if diagnostics[i].Severity == severity && !slices.Contains(indices, i) {
+			indices = append(indices, i)
+		}
+	}
+
+	return indices
 }
 
 // ParseNumber parses a decimal integer flag value: optional minus sign, ASCII digits, nothing else, and it
@@ -321,6 +344,41 @@ func (s *Summary) bound() {
 		}
 
 		s.omitDiagnosticPreviews(index)
+	}
+
+	s.tightenPublicationPreviews()
+	shrinkDiagnosticMessages(s.Diagnostics, s.fits)
+}
+
+func (s *Summary) tightenPublicationPreviews() {
+	for limit := previewBytes / 2; limit >= previewBytes/8 && !s.fits(); limit /= 2 {
+		for _, field := range []struct {
+			value *string
+			name  string
+		}{
+			{&s.Publication.Output, "publication.output"}, {&s.Publication.ReportPath, "publication.report_path"},
+		} {
+			value, cut := boundPreviewBytes(*field.value, limit)
+			if cut {
+				*field.value = value
+				s.markTruncated(field.name)
+			}
+		}
+	}
+}
+
+// Required scope/recovery fields take priority over long message previews; codes and remedies remain.
+func shrinkDiagnosticMessages(records []DiagnosticView, fits func() bool) {
+	for limit := messagePreviewBytes / 2; limit >= messagePreviewBytes/8 && !fits(); limit /= 2 {
+		for index := range records {
+			diagnostic := &records[index]
+
+			message, cut := boundPreviewBytes(diagnostic.Message, limit)
+			if cut {
+				diagnostic.Message = message
+				diagnostic.MessageTruncated = true
+			}
+		}
 	}
 }
 

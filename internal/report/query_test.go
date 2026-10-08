@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -69,7 +69,7 @@ func syntheticBuilder() (*report.Builder, string) {
 		Color:    fixtureBlackColor,
 		Anchor:   alignCenter,
 		Align:    alignCenter,
-		Overflow: "allow",
+		Overflow: fixtureOverflowAllow,
 		Size:     12,
 		Width:    523,
 		Leading:  1.2,
@@ -250,9 +250,9 @@ func TestFailureSummaryDoesNotGrowWithDiagnostics(t *testing.T) {
 		"pdfconcat",
 		commandReport,
 		"/work/job.report.json",
-		"--expect-attempt",
+		fixtureExpectAttemptFlag,
 		failed.AttemptID,
-		"--view",
+		fixtureViewFlag,
 		report.ViewDiagnostics,
 	}
 	if !slices.Equal(nextArguments(failure.Next), want) {
@@ -347,7 +347,7 @@ func checkDetailedText(t *testing.T, text *report.TextDetail, longText string) {
 		t.Errorf("font identity: %+v", text.Font)
 	}
 
-	if text.Bounds.Width != 523 || text.Overflow != "allow" {
+	if text.Bounds.Width != 523 || text.Overflow != fixtureOverflowAllow {
 		t.Errorf("bounds and overflow policy: %+v", text.TextSettings)
 	}
 }
@@ -408,7 +408,13 @@ func TestPageQuery(t *testing.T) {
 
 	for _, page := range []int64{0, -1, int64(3*syntheticPairs) + 1} {
 		_, err := failed.Query(report.Request{Page: &page})
-		if errorCode(err) != report.CodePageOutOfRange {
+
+		want := report.CodePageOutOfRange
+		if page < 1 {
+			want = report.CodeInvalidNumber
+		}
+
+		if errorCode(err) != want {
 			t.Errorf("page %d: %v", page, err)
 		}
 	}
@@ -432,6 +438,41 @@ func TestPageQueryNeedsACompleteLayout(t *testing.T) {
 	data, err := report.Encode(part)
 	if err != nil || !strings.Contains(string(data), `"range":null,"pages":null`) {
 		t.Errorf("unknown must be null: %s %v", data, err)
+	}
+}
+
+func TestRequestValidationDoesNotRequireAReport(t *testing.T) {
+	t.Parallel()
+
+	var saved *report.Report
+	for _, request := range []report.Request{
+		{Page: new(int64(0))},
+		{View: report.ViewParts, Limit: new(int64(0))},
+		{View: report.ViewParts, Limit: new(int64(101))},
+		{View: report.ViewParts, Offset: new(int64(-1))},
+		{View: "unknown"},
+		{Details: true},
+		{ExpectAttempt: "bad"},
+	} {
+		_, err := saved.Query(request)
+
+		found, ok := report.AsError(err)
+		if !ok || found.Status() != report.StatusInvalid || found.Diagnostic.Stage != report.StageUsage {
+			t.Fatalf("invalid request accessed report or lost usage status: %+v: %v", request, err)
+		}
+	}
+}
+
+func TestDirectQueryHonorsAttemptGuard(t *testing.T) {
+	t.Parallel()
+
+	saved := mustDecode(t, failedCheck)
+	if _, err := saved.Query(report.Request{ExpectAttempt: saved.AttemptID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := saved.Query(report.Request{ExpectAttempt: "BBBBBBBBBBBBBBBBBBBBBBBBBB"}); errorCode(err) != report.CodeAttemptMismatch {
+		t.Fatalf("direct query ignored guard: %v", err)
 	}
 }
 

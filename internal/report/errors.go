@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -19,6 +19,8 @@ type (
 	// cannot be answered. The command layer turns Diagnostic into a structured error report and Status
 	// into the exit code.
 	Error struct {
+		// Option is request adapter metadata, not a report or wire-format member.
+		Option     string
 		Err        error
 		status     Status
 		Diagnostic Diagnostic
@@ -62,15 +64,17 @@ const (
 	CodeDuplicateID        Code = "report_duplicate_id"
 	CodeInvalidRange       Code = "report_invalid_range"
 
-	CodeSelectionConflict Code = "report_selection_conflict"
-	CodePagingNeedsView   Code = "report_paging_needs_view"
-	CodeDetailsNeedSelect Code = "report_details_need_selection"
-	CodeInvalidPaging     Code = "report_invalid_paging"
-	CodeInvalidNumber     Code = "report_invalid_number"
-	CodeUnknownView       Code = "report_unknown_view"
-	CodePartNotFound      Code = "report_part_not_found"
-	CodePageOutOfRange    Code = "report_page_out_of_range"
-	CodeLayoutIncomplete  Code = "report_layout_incomplete"
+	CodeSelectionConflict  Code = "report_selection_conflict"
+	CodePagingNeedsView    Code = "report_paging_needs_view"
+	CodeDetailsNeedSelect  Code = "report_details_need_selection"
+	CodeInvalidPaging      Code = "report_invalid_paging"
+	CodeInvalidNumber      Code = "report_invalid_number"
+	CodeInvalidExpectation Code = "report_invalid_expectation"
+	CodeAttemptMismatch    Code = "report_attempt_mismatch"
+	CodeUnknownView        Code = "report_unknown_view"
+	CodePartNotFound       Code = "report_part_not_found"
+	CodePageOutOfRange     Code = "report_page_out_of_range"
+	CodeLayoutIncomplete   Code = "report_layout_incomplete"
 )
 
 // Error formats the failure as "file: message [code]".
@@ -118,7 +122,7 @@ func newError(status Status, stage Stage, code Code, location *Location, cause e
 		Err:    cause,
 		status: status,
 		Diagnostic: Diagnostic{
-			Stage: stage, Code: code, Location: location,
+			Severity: SeverityError, Stage: stage, Code: code, Location: location,
 			Message: fmt.Sprintf(format, args...),
 		},
 	}

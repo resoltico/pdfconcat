@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package main
 
@@ -43,6 +43,13 @@ type (
 	// archiveNamespace includes explicit and implied directories, before content maps discard directories.
 	archiveNamespace  map[string]archiveMemberKind
 	archiveMemberKind uint8
+
+	// printedVersion contains the identity fields verified against the archive and executable metadata.
+	printedVersion struct {
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
+		Date    string `json:"date"`
+	}
 )
 
 const (
@@ -523,21 +530,21 @@ func versionOutputProblems(archivePath, version, output string) []string {
 }
 
 func reportedVersionProblems(archivePath, version, output string, executable []byte) []string {
-	var fields map[string]string
+	var fields printedVersion
 	if err := json.Unmarshal([]byte(output), &fields); err != nil {
 		return []string{archivePath + ": invalid version JSON: " + err.Error()}
 	}
 
 	var problems []string
-	if fields["version"] != version {
+	if fields.Version != version {
 		problems = append(problems, archivePath+": version output does not exactly match "+version)
 	}
 
-	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(fields["commit"]) {
+	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(fields.Commit) {
 		problems = append(problems, archivePath+": invalid printed commit")
 	}
 
-	if date, err := time.Parse(time.RFC3339, fields["date"]); err != nil || date.IsZero() {
+	if date, err := time.Parse(time.RFC3339, fields.Date); err != nil || date.IsZero() {
 		problems = append(problems, archivePath+": invalid printed commit date")
 	}
 
@@ -548,7 +555,7 @@ func reportedVersionProblems(archivePath, version, output string, executable []b
 	return problems
 }
 
-func printedIdentityProblems(archivePath string, fields map[string]string, executable []byte) []string {
+func printedIdentityProblems(archivePath string, fields printedVersion, executable []byte) []string {
 	info, err := buildinfo.Read(bytes.NewReader(executable))
 	if err != nil {
 		return []string{archivePath + ": unreadable executable build metadata: " + err.Error()}
@@ -560,11 +567,11 @@ func printedIdentityProblems(archivePath string, fields map[string]string, execu
 		switch setting.Key {
 		case "vcs.revision":
 			expected := setting.Value[:min(len(setting.Value), printedCommitLength)]
-			if fields["commit"] != expected {
+			if fields.Commit != expected {
 				problems = append(problems, archivePath+": printed commit differs from executable metadata")
 			}
 		case "vcs.time":
-			if fields["date"] != setting.Value {
+			if fields.Date != setting.Value {
 				problems = append(problems, archivePath+": printed date differs from executable metadata")
 			}
 		default:

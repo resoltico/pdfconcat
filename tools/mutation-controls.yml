@@ -26,3 +26,17 @@ controls:
     file: internal/assembly/layout.go
     anchor: 'r.layout.Runs = append(r.layout.Runs, Run{Kind: RunSource, Index: contribution.File, FirstPage: 1, Count: pages})'
     replacement: 'r.layout.Runs = append([]Run{{Kind: RunSource, Index: contribution.File, FirstPage: 1, Count: pages}}, r.layout.Runs...)'
+
+  # Measured allowed overflow remains visible in the captured diagnostic authority.
+  - id: report-omits-layout-warnings
+    package: ./internal/report
+    file: internal/report/builder.go
+    anchor: 'out.Diagnostics = append(out.Diagnostics, layoutWarnings(&out)...)'
+    replacement: 'out.Diagnostics = append(out.Diagnostics, []Diagnostic{}...)'
+
+  # Selected contributions expose their own relevant warning records.
+  - id: report-hides-selected-part-warnings
+    package: ./internal/report
+    file: internal/report/query.go
+    anchor: 'WarningCount: r.relevantCounts([]string{part.ID}).WarningCount,'
+    replacement: 'WarningCount: 0,'

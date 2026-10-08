@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -58,14 +58,16 @@ type (
 
 	// Diagnostic is one discovered problem. Codes are stable; messages are not.
 	Diagnostic struct {
-		Recovery  *Recovery `json:"recovery,omitempty"`
-		Location  *Location `json:"location,omitempty"`
-		Stage     Stage     `json:"stage"`
-		Code      Code      `json:"code"`
-		Path      string    `json:"path,omitempty"`
-		Message   string    `json:"message"`
-		Cause     string    `json:"cause,omitempty"`
-		Consumers []string  `json:"consumers,omitempty"`
+		Recovery           *Recovery `json:"recovery,omitempty"`
+		Location           *Location `json:"location,omitempty"`
+		Severity           Severity  `json:"severity"`
+		ConsequenceContext string    `json:"consequence_context,omitempty"`
+		Stage              Stage     `json:"stage"`
+		Code               Code      `json:"code"`
+		Path               string    `json:"path,omitempty"`
+		Message            string    `json:"message"`
+		Cause              string    `json:"cause,omitempty"`
+		Consumers          []string  `json:"consumers,omitempty"`
 	}
 
 	// PageRange is the inclusive 1-based range of output pages of a part.
@@ -168,26 +170,29 @@ type (
 
 	// Report is the complete captured result of a build or check. Command errors use CommandError.
 	Report struct {
-		AttemptID     string       `json:"attempt_id"`
-		Producer      *Producer    `json:"producer,omitempty"`
-		Counts        Counts       `json:"counts"`
-		Kind          string       `json:"kind"`
-		Status        Status       `json:"status"`
-		Command       string       `json:"command"`
-		Phases        Phases       `json:"phases"`
-		Publication   Publication  `json:"publication"`
-		Diagnostics   []Diagnostic `json:"diagnostics"`
-		Parts         []Part       `json:"parts"`
-		Sources       []Source     `json:"sources"`
-		Fonts         []Font       `json:"fonts"`
-		Styles        []Style      `json:"styles"`
-		FormatVersion int          `json:"format_version"`
+		AttemptID       string       `json:"attempt_id"`
+		Producer        *Producer    `json:"producer,omitempty"`
+		Counts          Counts       `json:"counts"`
+		Kind            string       `json:"kind"`
+		Status          Status       `json:"status"`
+		Command         string       `json:"command"`
+		Phases          Phases       `json:"phases"`
+		Publication     Publication  `json:"publication"`
+		Diagnostics     []Diagnostic `json:"diagnostics"`
+		Parts           []Part       `json:"parts"`
+		Sources         []Source     `json:"sources"`
+		Fonts           []Font       `json:"fonts"`
+		Styles          []Style      `json:"styles"`
+		FormatVersion   int          `json:"format_version"`
+		DiagnosticCount int          `json:"diagnostic_count"`
+		ErrorCount      int          `json:"error_count"`
+		WarningCount    int          `json:"warning_count"`
 	}
 )
 
 const (
 	// Version is the shared public JSON format version for responses and complete reports.
-	Version = 2
+	Version = 3
 
 	// KindReport marks a complete report.
 	KindReport = "report"

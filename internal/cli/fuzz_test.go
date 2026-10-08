@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli_test
 
@@ -250,14 +250,14 @@ func operandInvariant(args []string, command *cli.Command) string {
 func reportInvariant(_ []string, command *cli.Command) string {
 	selections := 0
 
-	for _, selected := range []bool{command.Part != "", command.Page != 0, command.View != ""} {
+	for _, selected := range []bool{command.Part != "", command.HasPage, command.View != ""} {
 		if selected {
 			selections++
 		}
 	}
 
 	switch {
-	case command.Name == cli.NameReport && command.ReportFile == "", selections > 1, command.Page < 0:
+	case command.Name == cli.NameReport && command.ReportFile == "", selections > 1, command.HasPage && command.Page < 1:
 		return "report selection rules are violated"
 	case command.View != "" && command.View != report.ViewParts && command.View != report.ViewDiagnostics:
 		return "unknown view"
@@ -308,7 +308,7 @@ func jobsInvariant(_ []string, command *cli.Command) string {
 }
 
 func reportMembersSet(command *cli.Command) bool {
-	selected := command.ReportFile != "" || command.Part != "" || command.Page != 0 || command.View != ""
+	selected := command.ReportFile != "" || command.Part != "" || command.HasPage || command.View != ""
 
 	return selected || command.HasOffset || command.HasLimit
 }

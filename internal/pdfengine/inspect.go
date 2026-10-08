@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine
 
@@ -15,6 +15,8 @@ import (
 type (
 	// SourceInfo is what the assembly policy and layout need to know about one PDF.
 	SourceInfo struct {
+		// Features captures material scope-specific source effects before validator repairs.
+		Features []SourceFeature
 		// Pages is the number of pages, at least 1.
 		Pages int
 		// Version is the effective PDF version: the catalog /Version entry when present, else the header.
@@ -63,14 +65,16 @@ func (e *Engine) Inspect(ctx context.Context, path string) (SourceInfo, error) {
 	var info SourceInfo
 
 	err := guard(CodeInvalid, path, func() error {
-		pdf, readErr := e.readContext(ctx, NoSource, path)
+		document, readErr := e.readDocument(ctx, NoSource, path, observeFeatures)
 		if readErr != nil {
 			return readErr
 		}
 
 		var inspectErr error
 
-		info, inspectErr = inspectContext(ctx, pdf, path)
+		info, inspectErr = inspectContext(ctx, document.pdf, path)
+
+		info.Features = document.features
 
 		return inspectErr
 	})

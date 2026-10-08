@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package publish enforces output policy and final same-filesystem publication of the PDF and
 // of the report.
@@ -28,6 +28,7 @@ import (
 type (
 	// DestinationError reports a destination or its directory that the output policy refuses.
 	DestinationError struct {
+		cause error
 		// Subject names what was inspected, such as "output" or "output directory".
 		Subject string
 		// Path is the inspected path.
@@ -63,6 +64,9 @@ var (
 func (e *DestinationError) Error() string {
 	return fmt.Sprintf("%s %q %s", e.Subject, e.Path, e.Reason)
 }
+
+// Unwrap distinguishes a refused existing target from unrelated destination faults.
+func (e *DestinationError) Unwrap() error { return e.cause }
 
 // Error states both facts so a caller never describes the output as untouched.
 func (e *FinalizationError) Error() string {
@@ -172,7 +176,10 @@ func checkExistingDestination(destination string, info os.FileInfo, existing exi
 	case !info.Mode().IsRegular():
 		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "is not a regular file"}
 	case existing == refuseExisting:
-		return &DestinationError{Subject: outputSubject, Path: destination, Reason: "already exists; choose an unused target"}
+		return &DestinationError{
+			Subject: outputSubject, Path: destination,
+			Reason: "already exists; choose an unused target", cause: os.ErrExist,
+		}
 	default:
 		return nil
 	}

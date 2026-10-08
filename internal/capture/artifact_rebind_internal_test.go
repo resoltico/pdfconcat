@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package capture
 
@@ -250,14 +250,21 @@ func TestArtifactRefreshFailureDoesNotPartiallyRebind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.Mkdir(former, 0o700); err != nil {
+	source := filepath.Join(filepath.Dir(output), "protected-source.pdf")
+	writeTestFile(t, source, []byte("protected source"))
+
+	if _, err := registry.Add(RoleSource, source); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Link(source, former); err != nil {
 		t.Fatal(err)
 	}
 
 	replaceArtifactFixture(t, output)
 
 	if _, err := registry.Add(RoleOutput, output); err == nil {
-		t.Fatal("invalid remaining artifact was accepted")
+		t.Fatal("remaining artifact/input alias was accepted")
 	}
 
 	_, err := registry.Add(RoleFont, witness)

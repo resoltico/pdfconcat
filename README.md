@@ -8,14 +8,14 @@ pdfconcat build -o Annex.pdf 01.pdf 02.pdf --blank 03.pdf 04.pdf
 
 produces `01.pdf`, `02.pdf`, a generated blank page, `03.pdf`, `04.pdf`. The place where `--blank` appears is the place where the blank appears.
 
-Agents are the primary audience. Every command prints compact JSON on standard output by default (`--format text` renders it for people), default build/check/report summaries and command failures are bounded to 2 KiB, and the complete result is saved to a file that can be queried without reopening any PDF.
+Agents are the primary audience. Every command prints compact JSON on standard output by default (`--format text` renders it for people), default build/check/report summaries and command failures are bounded to 2 KiB, and `--report FILE` saves the complete result for queries without reopening any PDF.
 
 ## Install
 
-`v0.1.0` is a source-only release. There are no packaged executables to download. Build from source with Go 1.27.1 or newer (the `go` line of `go.mod`):
+Build the checked-out source with the Go toolchain required by [`go.mod`](go.mod). Published releases provide source; executable packaging is configured separately and is not evidence of a published binary:
 
 ```text
-git clone --branch v0.1.0 https://github.com/resoltico/pdfconcat
+git clone https://github.com/resoltico/pdfconcat
 cd pdfconcat
 go build -o ./bin/ ./cmd/pdfconcat
 ./bin/pdfconcat version
@@ -25,7 +25,7 @@ Contributor verification builds the patched development linter and mutation tool
 
 The build creates `bin/` when needed. On Windows, use `.\bin\pdfconcat.exe version` to run it. The examples below use the installed command name `pdfconcat`; for a source build, substitute `./bin/pdfconcat` on macOS/Linux or `.\bin\pdfconcat.exe` on Windows. No PATH change is needed.
 
-GitHub release notes are extracted from the matching version section in `CHANGELOG.md`. Current releases contain source only; binary packages are deferred to later versions. See [`docs/RELEASING.md`](docs/RELEASING.md). `pdfconcat version` prints the version, commit, and commit date of the running executable. The application version is configured once in [`internal/app/version.txt`](internal/app/version.txt); ordinary builds embed it, snapshots derive from it, and release tags must match it.
+GitHub release notes are extracted from the matching version section in `CHANGELOG.md`. The source-release workflow publishes source and changelog notes. See [`docs/RELEASING.md`](docs/RELEASING.md). `pdfconcat version` prints the version, commit, and commit date of the running executable. The application version is configured once in [`internal/app/version.txt`](internal/app/version.txt); ordinary builds embed it, snapshots derive from it, and release tags must match it.
 
 ## Quickstart
 
@@ -57,22 +57,24 @@ pdfconcat report Annex.report.json --page 5
 pdfconcat build --plan Annex.json
 ```
 
-- `check` validates and snapshots every input, resolves every generated page's size and text layout, and reports a build-ready layout. It creates no PDF. `--report FILE` keeps the complete result; the summary stays within 2 KiB and gives an exact next command when it fits; longer paths are explicitly marked as previews.
-- `report --view diagnostics` lists what failed, in pages of results, with the plan location (JSON pointer, byte offset, line, column) of each fault. `--part` shows one contribution with its resolved appearance, `--page N` the contribution that covers output page N. None of these opens a PDF.
+- `check` validates and snapshots every input, resolves every generated page's size and text layout, and reports the resolved layout and known policy consequences. It creates no PDF. `--report FILE` keeps the complete result; the summary stays within 2 KiB and gives an exact next command when it fits; longer paths are explicitly marked as previews.
+- `report --view diagnostics` lists errors and warnings, in pages of results, with the declaration location (JSON pointer, byte offset, line, column) of each diagnostic. `--part` shows one contribution with its resolved appearance, `--page N` the contribution that covers output page N. None of these opens a PDF.
 - `build` repeats the preparation, assembles, verifies the result, and publishes it.
 
-A passing `check` is advisory: files can change before the `build`, and `build` checks everything again. A plan with an `output` that already exists fails `check` and `build` alike until you pass `--overwrite`.
+Success does not mean there are no consequences to review. `error_count` and `warning_count` count captured diagnostic records; their sum is `diagnostic_count`. Allowed text overflow warns only when measured layout finds clipping or another overflow. Material catalog-feature removal and retained executable actions also warn. Follow the attempt-bound diagnostics route, inspect selected parts/pages, and compare counts, order, provenance and source digests with the requested packet. A check predicts consequences; a published build records committed effects. A report query never validates current PDF bytes.
+
+A passing `check` applies the same source-known assembly policy as `build`, including the backend page cap and legacy-destination restrictions. It is advisory about later file changes, backend I/O, and output verification: `build` captures and checks everything again and verifies the assembled PDF. A plan with an `output` that already exists fails `check` and `build` alike until you pass `--overwrite`.
 
 Other ways to give the same job: a plan on standard input, `pdfconcat build --plan - --base-dir /project -o out.pdf < generated.json`; the whole plan inline, `pdfconcat build --plan-json '{"version":1,"items":["a.pdf",{"blank":{}},"b.pdf"]}' -o out.pdf`; or the direct operands shown above. All four are compiled to the same job. A file literally named `--blank` is written `./--blank`. Arguments, filenames, and the working directory must use valid Unicode text; raw byte filenames outside UTF-8 are rejected.
 
-The first command to run is `pdfconcat --help`: it prints one screen and ends with the next command to try. `pdfconcat schema plan`, `pdfconcat schema report`, and `pdfconcat schema response` print the JSON Schemas. Plans remain version 1; JSON responses and saved reports use format 2.
+The first command to run is `pdfconcat --help`: it prints one screen and ends with the next command to try. `pdfconcat schema plan`, `pdfconcat schema report`, and `pdfconcat schema response` print the JSON Schemas. Plans remain version 1; JSON responses and saved reports use format 3.
 
 ## Exit status
 
 | Status | Meaning |
 | ---: | --- |
-| `0` | Success, including a passing `check`, help, version, schema, and report queries. |
-| `2` | Invalid instructions: a malformed command line, an invalid plan, a failed layout, a destination or file-role conflict, or an invalid report query. |
+| `0` | Success; a build/check can carry warnings. A successful report query preserves the saved run's own outcome. |
+| `2` | Invalid instructions or unsupported source policy: command/plan/layout/query errors, signature/form/rendering refusals, or destination/file-role conflicts. |
 | `1` | Operational failure: an unreadable file, the PDF backend, verification, or publication. |
 | `130` | Interrupted. Cancellation before the native PDF commit preserves the destination; a completed commit remains published. |
 
@@ -85,12 +87,12 @@ If the PDF was published and a later step fails (writing the report, writing sta
 | [`docs/CLI.md`](docs/CLI.md) | Commands, options, output, report queries, exit status, shell recipes |
 | [`docs/PLAN.md`](docs/PLAN.md) | Plan-file format, limits, and provenance |
 | [`docs/BLANK_PAGES.md`](docs/BLANK_PAGES.md) | Generated page size, background, fonts, text, placement, and overflow |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | Why it works this way, what was rejected, and measured results |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | Why it works this way, design choices and measurement method |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Packages, pipeline, PDF backend behavior, and invariants |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup and checks |
 | [`docs/RELEASING.md`](docs/RELEASING.md), [`SECURITY.md`](SECURITY.md), [`CHANGELOG.md`](CHANGELOG.md) | Releases, security boundaries, changes |
 
-Release archives will contain this README, `docs/CLI.md`, `docs/PLAN.md`, `docs/BLANK_PAGES.md`, the JSON Schemas, and the licenses; the other documents are in the source repository.
+Configured executable archives contain this README, `docs/CLI.md`, `docs/PLAN.md`, `docs/BLANK_PAGES.md`, the JSON Schemas, and the licenses; the other documents are in the source repository.
 
 ## Safety
 
@@ -98,13 +100,13 @@ PDFConcat never modifies source PDFs, fonts, or plan files. It copies each disti
 
 ## Limits
 
-- The output is a newly assembled PDF. Page order, links between pages, forms, and generated appearance are the contract. Bookmarks, document metadata, tagged-PDF structure, attachments, and signatures do not carry over, and the output has a new `/Info` entry. The table in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#pdf-backend-behavior) lists each feature.
+- The output is a newly assembled PDF. Supported page order, ordinary links, static-form appearance and ordinary editing, and generated appearance are the contract. Signature-bearing inputs are refused: use unsigned sources and sign the final PDF externally. Catalog bookmarks/tagged structure and non-destination name trees are removed; page-local attachments and actions can remain. This is not a sanitizer. The table in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#pdf-backend-behavior) lists each feature.
 - Verification means the embedded pdfcpu validator accepts the result and the page count matches. It is not a second implementation's conformance check.
 - An input the embedded engine rejects fails with an error; nothing is repaired or rewritten with another tool. Encrypted PDFs are rejected, including those that open with an empty password.
-- Plans have declared bounds (64 MiB, 100,000 contributions, 1,000,000 generated pages; see [`docs/PLAN.md`](docs/PLAN.md#limits)). Memory grows with the size of the documents, because the result is built in memory. Measured wall time and memory for large jobs are in [`docs/DESIGN.md`](docs/DESIGN.md#measured-results); they are measurements, not guarantees.
+- Plans have declared bounds (64 MiB, 100,000 contributions, 1,000,000 generated pages; see [`docs/PLAN.md`](docs/PLAN.md#limits)). Memory grows with the size of the documents, because the result is built in memory. The measurement method for large jobs is in [`docs/DESIGN.md`](docs/DESIGN.md#measured-results); results require an identified executable and native host, and are not guarantees.
 - Generated-page text uses an embedded Unicode font (Noto Sans) or a TrueType file you supply. Only left-to-right Latin, Greek, and Cyrillic text is accepted; other scripts are rejected rather than set incorrectly ([details](docs/BLANK_PAGES.md#fonts-and-characters)).
 - PDFConcat is not a PDF repair tool, optimizer, OCR tool, converter, or general pdfcpu front end.
 
 ## License
 
-Copyright (c) 2026 Ervins. The PDFConcat application is licensed under the [Mozilla Public License 2.0](LICENSE). Third-party components keep their own licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The corresponding source of a release will be the matching version tag of the repository at `https://github.com/resoltico/pdfconcat`.
+Copyright (c) 2026 Ervins Strauhmanis. The PDFConcat application is licensed under the [Mozilla Public License 2.0](LICENSE). Third-party components keep their own licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The corresponding source of a release is the matching version tag of the repository at `https://github.com/resoltico/pdfconcat`.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -87,7 +87,7 @@ func summaryFailureWithProtectedRecovery(t *testing.T) *report.Report {
 	saved.Diagnostics = make([]report.Diagnostic, 2)
 	for i := range saved.Diagnostics {
 		saved.Diagnostics[i] = report.Diagnostic{
-			Stage: report.Stage(strings.Repeat("s", 64)), Code: report.Code(strings.Repeat("c", 64)),
+			Stage: report.Stage(strings.Repeat("s", 44)), Code: report.Code(strings.Repeat("c", 44)),
 			Message: strings.Repeat("m", 256), Path: strings.Repeat("p", 64), Cause: strings.Repeat("a", 64),
 			Location: &report.Location{File: strings.Repeat("f", 64), Pointer: strings.Repeat("/", 64)},
 		}
@@ -221,12 +221,12 @@ func summaryEncodedAndHumanSizes(t *testing.T, summary *report.Summary) (int, in
 func TestSummaryHumanBudgetKeepsExactlyFittingContinuation(t *testing.T) {
 	t.Parallel()
 	saved := summaryWithQuotedRecoveryBasename(t)
-	operand := strings.Repeat("x", 322)
+	operand := fittingHumanContinuation(t, saved)
 	summary := saved.Summary()
 	summary.BindContinuation(programName, operand, originalReportReference)
 
 	wire, human := summaryEncodedAndHumanSizes(t, summary)
-	if wire != 2030 || human != 2048 {
+	if wire > 2048 || human != 2048 {
 		t.Fatalf("exact-fit dimensions: JSON%d text%d", wire, human)
 	}
 
@@ -243,7 +243,7 @@ func TestSummaryHumanBudgetOmitsJSONFittingOversizedContinuation(t *testing.T) {
 	t.Parallel()
 	saved := summaryWithQuotedRecoveryBasename(t)
 	accepted := saved.Summary()
-	accepted.BindContinuation(programName, strings.Repeat("x", 322), originalReportReference)
+	accepted.BindContinuation(programName, fittingHumanContinuation(t, saved), originalReportReference)
 
 	if accepted.Next == nil {
 		t.Fatal("exactly fitting seed lost its continuation")
@@ -255,7 +255,7 @@ func TestSummaryHumanBudgetOmitsJSONFittingOversizedContinuation(t *testing.T) {
 	accepted.Next = &argv
 
 	wire, human := summaryEncodedAndHumanSizes(t, accepted)
-	if wire != 2031 || human != 2049 {
+	if wire > 2048 || human != 2049 {
 		t.Fatalf("rejected candidate dimensions: JSON%d text%d", wire, human)
 	}
 
@@ -270,6 +270,49 @@ func TestSummaryHumanBudgetOmitsJSONFittingOversizedContinuation(t *testing.T) {
 	if bounded.Next != nil || !bounded.NextOmitted || bounded.NextReference == nil {
 		t.Fatal("oversized human argv must retain only reconstruction authority")
 	}
+}
+
+// Calibrate the format's frame with independent byte measurements, before the continuation guard runs.
+func fittingHumanContinuation(t *testing.T, saved *report.Report) string {
+	t.Helper()
+
+	summary := saved.Summary()
+
+	for length := range 2048 {
+		operand := strings.Repeat("x", length)
+		argv := []string{
+			programName,
+			commandReport,
+			operand,
+			fixtureExpectAttemptFlag,
+			saved.AttemptID,
+			fixtureViewFlag,
+			report.ViewDiagnostics,
+		}
+		summary.Next = &argv
+
+		payload, err := json.Marshal(summary)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var text strings.Builder
+		if textErr := summary.RenderText(&text); textErr != nil {
+			t.Fatal(textErr)
+		}
+
+		if text.Len() == 2048 && len(payload)+1 < 2048 {
+			return operand
+		}
+
+		if len(payload)+1 > 2048 || text.Len() > 2048 {
+			t.Fatalf("fixture does not isolate the human boundary: JSON%d text%d", len(payload)+1, text.Len())
+		}
+	}
+
+	t.Fatal("no exact-fit human continuation")
+
+	return ""
 }
 
 func TestSummarySchemaRejectsMissingOrContradictoryRecoveryAuthority(t *testing.T) {

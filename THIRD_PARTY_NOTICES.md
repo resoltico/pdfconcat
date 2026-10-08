@@ -8,6 +8,7 @@ This inventory lists the modules linked into application executables for macOS, 
 | --- | --- | --- | --- | --- |
 | Go standard library | Go 1.27.1 toolchain | BSD 3-Clause | Runtime and standard-library code linked by the Go toolchain | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
 | `github.com/pdfcpu/pdfcpu` | v0.16.1 | Apache-2.0 | PDF parsing, validation, merging, and writing of the assembled output (the text of generated pages is shaped with go-text/typesetting and written by PDFConcat's own page writer) | `third_party/licenses/Apache-2.0.txt` |
+| `github.com/benoitkugler/pdf` | v0.0.15 | MIT | Predefined PDF single-byte encodings and glyph-name Unicode mappings for source form appearances | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
 | `github.com/clipperhouse/uax29/v2` | v2.7.0 | MIT | pdfcpu dependency graph | `third_party/licenses/clipperhouse-uax29-MIT.txt` |
 | `github.com/go-text/typesetting` | v0.3.5 | Unlicense OR BSD 3-Clause | text shaping (HarfBuzz port) and TrueType parsing for generated-page text; used under the BSD 3-Clause terms | `third_party/licenses/go-text-typesetting-LICENSE.txt` |
 | `github.com/hhrutter/tiff` | v1.0.7 | BSD 3-Clause | pdfcpu dependency graph | `third_party/licenses/hhrutter-tiff-BSD-3-Clause.txt` |

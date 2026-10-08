@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -20,7 +20,7 @@ type budgetCase struct {
 
 const (
 	// recordFrame is a detailed diagnostic record without its message text; the record is this plus the message.
-	recordFrame = `{"stage":"s","code":"c","message":""}`
+	recordFrame = `{"severity":"error","stage":"s","code":"c","message":""}`
 
 	// pageBudget selects inputs near the independently specified 128 KiB transport bound.
 	pageBudget = (128 << 10) - 1024
@@ -91,7 +91,7 @@ func assertNextRecordExceedsBudget(t *testing.T, view *report.ViewResponse[repor
 	candidate := *view
 	candidate.Records = append(
 		append([]report.DiagnosticView{}, view.Records...),
-		report.DiagnosticView{Stage: next.Stage, Code: next.Code, Message: next.Message},
+		report.DiagnosticView{Severity: next.Severity, Stage: next.Stage, Code: next.Code, Message: next.Message},
 	)
 	candidate.Returned++
 

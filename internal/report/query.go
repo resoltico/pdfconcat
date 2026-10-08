@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -14,13 +14,15 @@ import (
 
 type (
 	// Request selects what to read from a saved report. At most one of Part, Page, and View is set; with
-	// none, the result is the summary (the complete report with Details). Offset and Limit page a View only.
+	// none, the result is the summary. Details requires a selection. Offset and Limit page a View only.
 	Request struct {
 		Part   *string
 		Page   *int64
 		Offset *int64
 		Limit  *int64
 		View   string
+		// ExpectAttempt optionally guards the saved report identity.
+		ExpectAttempt string
 		// Details expands the selected records to their full resolved values.
 		Details bool
 	}
@@ -39,9 +41,10 @@ type (
 
 	// TextBrief is a bounded description of generated text.
 	TextBrief struct {
-		Preview   string `json:"preview"`
-		Chars     int    `json:"chars"`
-		Truncated bool   `json:"truncated,omitzero"`
+		Preview     string `json:"preview"`
+		Chars       int    `json:"chars"`
+		Truncated   bool   `json:"truncated,omitzero"`
+		HasFindings bool   `json:"has_findings"`
 	}
 
 	// GeneratedBrief is a bounded description of a generated page.
@@ -71,15 +74,16 @@ type (
 	// PartView is a part as a query shows it. Brief records carry Path (a PDF) or Generated (a blank);
 	// detailed records carry the materialized Source or Style instead, so one call is enough.
 	PartView struct {
-		Range     *PageRange      `json:"range"`
-		Pages     *int64          `json:"pages"`
-		Generated *GeneratedBrief `json:"generated,omitempty"`
-		Source    *Source         `json:"source,omitempty"`
-		Style     *StyleDetail    `json:"style,omitempty"`
-		ID        string          `json:"id"`
-		Kind      PartKind        `json:"kind"`
-		Path      string          `json:"path,omitempty"`
-		Origin    Position        `json:"origin"`
+		Range        *PageRange      `json:"range"`
+		Pages        *int64          `json:"pages"`
+		Generated    *GeneratedBrief `json:"generated,omitempty"`
+		Source       *Source         `json:"source,omitempty"`
+		Style        *StyleDetail    `json:"style,omitempty"`
+		ID           string          `json:"id"`
+		Kind         PartKind        `json:"kind"`
+		Path         string          `json:"path,omitempty"`
+		Origin       Position        `json:"origin"`
+		WarningCount int             `json:"warning_count"`
 	}
 
 	// PartResponse answers a part query.
@@ -126,9 +130,11 @@ const (
 	// MaxResponseBytes bounds a paged response, except for one oversized first record.
 	MaxResponseBytes = 128 << 10
 
-	kindPart = "part"
-	kindPage = "page"
-	kindView = "view"
+	textOverflowAllow   = "allow"
+	expectAttemptOption = "--expect-attempt"
+	kindPart            = "part"
+	kindPage            = "page"
+	kindView            = "view"
 )
 
 // NewResponse wraps a result value as a Response.
@@ -174,9 +180,14 @@ func (r *Report) Query(req Request) (Response, error) {
 }
 
 func (r *Report) selectResponse(req Request) (Response, error) {
-	err := req.check()
+	err := req.Validate()
 	if err != nil {
 		return Response{}, err
+	}
+
+	if req.ExpectAttempt != "" && req.ExpectAttempt != r.AttemptID {
+		return Response{}, requestUsage(expectAttemptOption, CodeAttemptMismatch,
+			"The saved report belongs to a different attempt; use the report for the expected attempt.")
 	}
 
 	switch {
@@ -208,14 +219,30 @@ func responseOf[T TextRenderer](content T, err error) (Response, error) {
 	return NewResponse(content), nil
 }
 
-// check validates the selection modes and paging values.
-func (q Request) check() error {
+// Validate checks request semantics without artifact access. Errors are *Error values; Option names
+// the corresponding command-line declaration for adapters that can supply provenance.
+func (q Request) Validate() error {
 	err := q.checkSelection()
 	if err != nil {
 		return err
 	}
 
+	if q.Page != nil && *q.Page < 1 {
+		return requestUsage("--page", CodeInvalidNumber, "--page must be at least 1 (pages are 1-based)")
+	}
+
+	if q.ExpectAttempt != "" && !attemptPattern.MatchString(q.ExpectAttempt) {
+		return requestUsage(expectAttemptOption, CodeInvalidExpectation, "--expect-attempt must be a 26-character base32 attempt identity")
+	}
+
 	return q.checkPaging()
+}
+
+func requestUsage(option string, code Code, format string, args ...any) *Error {
+	err := usage(code, format, args...)
+	err.Option = option
+
+	return err
 }
 
 func (q Request) checkSelection() error {
@@ -229,10 +256,10 @@ func (q Request) checkSelection() error {
 
 	switch {
 	case selectors > 1:
-		return usage(CodeSelectionConflict, "--part, --page, and --view are mutually exclusive; choose one")
+		return requestUsage("", CodeSelectionConflict, "--part, --page, and --view are mutually exclusive; choose one")
 	case q.Details && selectors == 0:
-		return usage(
-			CodeDetailsNeedSelect,
+		return requestUsage(
+			"--details", CodeDetailsNeedSelect,
 			"--details expands the records you select; add --part ID, --page N, or --view parts|diagnostics",
 		)
 	default:
@@ -243,9 +270,14 @@ func (q Request) checkSelection() error {
 func (q Request) checkView() error {
 	switch {
 	case (q.Offset != nil || q.Limit != nil) && q.View == "":
-		return usage(CodePagingNeedsView, "--offset and --limit page a --view; add --view parts or --view diagnostics")
+		option := "--offset"
+		if q.Limit != nil {
+			option = "--limit"
+		}
+
+		return requestUsage(option, CodePagingNeedsView, "--offset and --limit page a --view; add --view parts or --view diagnostics")
 	case q.View != "" && q.View != ViewParts && q.View != ViewDiagnostics:
-		return usage(CodeUnknownView, "unknown view %q; use %s or %s", q.View, ViewParts, ViewDiagnostics)
+		return requestUsage("--view", CodeUnknownView, "unknown view %q; use parts or diagnostics", q.View)
 	default:
 		return nil
 	}
@@ -254,9 +286,9 @@ func (q Request) checkView() error {
 func (q Request) checkPaging() error {
 	switch {
 	case q.Offset != nil && *q.Offset < 0:
-		return usage(CodeInvalidPaging, "--offset must not be negative")
+		return requestUsage("--offset", CodeInvalidPaging, "--offset must not be negative")
 	case q.Limit != nil && (*q.Limit < 1 || *q.Limit > MaxLimit):
-		return usage(CodeInvalidPaging, "--limit must be between 1 and %d", MaxLimit)
+		return requestUsage("--limit", CodeInvalidPaging, "--limit must be between 1 and %d", MaxLimit)
 	default:
 		return nil
 	}
@@ -289,19 +321,26 @@ func (r *Report) page(page int64, details bool) (*PageResponse, error) {
 }
 
 func (r *Report) partView(index int, details bool) PartView {
-	p := &r.Parts[index]
-	view := PartView{ID: p.ID, Kind: p.Kind, Origin: p.Origin, Range: p.Range, Pages: p.Pages}
+	part := &r.Parts[index]
+	view := PartView{
+		WarningCount: r.relevantCounts([]string{part.ID}).WarningCount,
+		ID:           part.ID,
+		Kind:         part.Kind,
+		Origin:       part.Origin,
+		Range:        part.Range,
+		Pages:        part.Pages,
+	}
 
 	switch {
-	case p.Source != nil && details:
-		source := r.Sources[*p.Source]
+	case part.Source != nil && details:
+		source := r.Sources[*part.Source]
 		view.Source = &source
-	case p.Source != nil:
-		view.Path = r.Sources[*p.Source].Path
-	case p.Style != nil && details:
-		view.Style = r.styleDetail(&r.Styles[*p.Style])
-	case p.Style != nil:
-		view.Generated = generatedBrief(&r.Styles[*p.Style])
+	case part.Source != nil:
+		view.Path = r.Sources[*part.Source].Path
+	case part.Style != nil && details:
+		view.Style = r.styleDetail(&r.Styles[*part.Style])
+	case part.Style != nil:
+		view.Generated = generatedBrief(&r.Styles[*part.Style])
 	default:
 	}
 
@@ -323,7 +362,12 @@ func generatedBrief(s *Style) *GeneratedBrief {
 
 	if s.Text != nil {
 		cut, truncated := preview(s.Text.Value)
-		brief.Text = &TextBrief{Preview: cut, Chars: utf8.RuneCountInString(s.Text.Value), Truncated: truncated}
+		brief.Text = &TextBrief{
+			Preview:     cut,
+			Chars:       utf8.RuneCountInString(s.Text.Value),
+			Truncated:   truncated,
+			HasFindings: len(s.Text.Findings) > 0,
+		}
 	}
 
 	return brief

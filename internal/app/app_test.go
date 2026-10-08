@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app_test
 
@@ -191,7 +191,7 @@ func execute(ctx context.Context, tb testing.TB, runner *app.App, dir string, ar
 	tb.Helper()
 
 	return executeWith(ctx, tb, runner, app.Env{
-		WorkingDir: dir, Executable: "pdfconcat",
+		WorkingDir: dir, Executable: applicationToolName,
 		Stdin: strings.NewReader(""),
 	}, args...)
 }
@@ -479,7 +479,9 @@ func requireInspectionFailureOrder(t *testing.T, path, dir string, operands []st
 		t.Fatalf("saved report status %s has %d diagnostics, want failed with all %d", saved.Status, len(saved.Diagnostics), len(operands))
 	}
 
-	for index, found := range saved.Diagnostics {
+	for index := range saved.Diagnostics {
+		found := &saved.Diagnostics[index]
+
 		want := filepath.Join(dir, operands[index])
 		if found.Path != want {
 			t.Errorf("diagnostic %d is about %s, want %s", index, found.Path, want)
@@ -586,7 +588,7 @@ func TestCancellationAtEveryStageStopsWithoutPublishing(t *testing.T) {
 			ctx, cancel := cancelAt(t)
 			arrange(fake, runner, cancel)
 
-			res := execute(ctx, t, runner, dir, commandBuild, "-o", outputFile, reportFlag, reportFile, sourceA, "--blank", sourceB)
+			res := execute(ctx, t, runner, dir, commandBuild, "-o", outputFile, reportFlag, reportFile, sourceA, blankFlag, sourceB)
 			parsed := res.requireCode(t, 130, outcomeInterrupted)
 
 			if parsed.Status != outcomeInterrupted || parsed.Publication.Published {
@@ -638,7 +640,7 @@ func TestStandardInputReadIsCancellable(t *testing.T) {
 	done := make(chan outcome, 1)
 
 	go func() {
-		done <- executeWith(ctx, t, appOf(newFake(t)), app.Env{WorkingDir: dir, Stdin: reader}, commandCheck, "--plan", "-")
+		done <- executeWith(ctx, t, appOf(newFake(t)), app.Env{WorkingDir: dir, Stdin: reader}, commandCheck, planFlag, "-")
 	}()
 
 	cancel()

@@ -24,6 +24,144 @@ version: 1
 coverage_threshold_percent: 100
 
 exceptions:
+  # The private imported context has just passed the same shared form analysis during readDocument.
+  # No caller can mutate its graph between that boundary and preparation. Non-cancellation failures
+  # here defend against future validator/analysis disagreement; cancellation is independently tested
+  # through real import checkpoints and is not excluded. Unsupported source shapes remain required.
+  - id: coverage-pdfengine-imported-form-analysis-disagreement
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/pool.go
+    function: pool.importDocument
+    anchor: 'return nil, newError(CodeFormUnsupported, source, path, err)'
+    retained_property: form-analysis disagreement prevents assembly and remains a located policy error
+
+  # Preparation installs dictionary-shaped DR categories in the private source graph before a
+  # successful backend merge renumbers references. The pool and imported forms are private and no
+  # job can substitute a scalar between those operations. Keep the exact resource-merge failure
+  # guard for backend regressions; malformed graph and binding controls test the helper directly.
+  - id: coverage-pdfengine-normalized-form-resource-merge-disagreement
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/pool.go
+    function: pool.importDocument
+    anchor: 'return nil, assemblyError(ctx, source, path, resourceErr)'
+    retained_property: invalid merged resource graphs prevent output publication rather than losing defaults
+
+  # Both state streams use fixed in-memory Flate encoding and a validated private xref graph.
+  # Their construction cannot fail for an accepted plan in the pinned backend; preserve separate
+  # off/on error propagation if a dependency breaks those invariants. Real cancellation and all
+  # source-known shape, value, appearance and geometry failures are covered before materialization.
+  - id: coverage-pdfengine-button-off-state-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.apply
+    anchor: 'return offErr'
+    retained_property: off-state construction failure prevents form materialization and publication
+
+  # The on-state propagation has the same fixed-buffer/validated-xref invariant as the off state.
+  # Repair by deleting this guard would conceal a backend regression; injecting a failure hook
+  # into a private valid graph would add production machinery solely for coverage.
+  - id: coverage-pdfengine-button-on-state-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.apply
+    anchor: 'return onErr'
+    retained_property: on-state construction failure prevents form materialization and publication
+
+  # Analysis resolved and validated this AP dictionary in the same private graph. State-stream
+  # allocations cannot invalidate its live reference, and other widgets clone rather than mutate
+  # shared AP dictionaries. Retain the lookup guard against internal graph disagreement.
+  - id: coverage-pdfengine-button-appearance-lookup-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.apply
+    anchor: 'return fmt.Errorf("button AP: %w", err)'
+    retained_property: unexpected private appearance lookup failure prevents publication
+
+  # IndRefForNewObject in pdfcpu 0.16.1 can fail only on an inconsistent free/recycle xref list.
+  # Reading and validation establish that list before this private materializer runs; normalization
+  # adds valid objects and no external writer can change it. Keep both allocation guards.
+  - id: coverage-pdfengine-button-font-allocation-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("button appearance font: %w", err)'
+    retained_property: font allocation failure prevents incomplete appearance publication
+
+  # Storing the completed stream uses the same validated free/recycle list as font allocation.
+  # No source can invalidate it between allocations. Repair by dropping the error would allow an
+  # incomplete appearance; forged allocator failures would only instrument an unreachable state.
+  - id: coverage-pdfengine-button-stream-allocation-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("store button appearance: %w", err)'
+    retained_property: appearance object allocation failure prevents incomplete publication
+
+  # NewStreamDictForBuf in pinned pdfcpu 0.16.1 unconditionally returns a fresh fixed-Flate
+  # dictionary and nil error. Retain the API error guard for a future backend implementation.
+  - id: coverage-pdfengine-button-stream-constructor-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("button appearance stream: %w", err)'
+    retained_property: stream construction failure prevents incomplete appearance publication
+
+  # The fresh stream uses Flate without decode parameters, over bytes.Reader/bytes.Buffer.
+  # No source-controlled filter, external I/O or mutable stream state reaches this encoder;
+  # its pinned in-memory path has no returned failure. Keep the backend failure guard.
+  - id: coverage-pdfengine-button-stream-encoding-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_button_streams.go
+    function: buttonAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("encode button appearance: %w", err)'
+    retained_property: encoding failure prevents publication of an incomplete appearance stream
+
+  # NewStreamDictForBuf in pinned pdfcpu 0.16.1 unconditionally creates a fixed-Flate dictionary
+  # and returns nil error. Accepted variable plans already contain validated drawing data.
+  # Removing this API guard would conceal a dependency regression; a failure hook would add
+  # production machinery solely to exercise the constructor's currently nonexistent error.
+  - id: coverage-pdfengine-variable-stream-constructor-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_variable_streams.go
+    function: variableAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("variable appearance stream: %w", err)'
+    retained_property: stream construction failure prevents incomplete variable appearance publication
+
+  # Encoding uses the constructor's fixed Flate pipeline without decode parameters, over an
+  # in-memory bytes reader/buffer; source filters and external I/O cannot reach this fresh stream.
+  # The pinned encoder has no returned failure on that path. Keep the guard for backend changes;
+  # deleting it or forging mutable compressor state would not repair an input-reachable defect.
+  - id: coverage-pdfengine-variable-stream-encoding-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_variable_streams.go
+    function: variableAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("encode variable appearance: %w", err)'
+    retained_property: encoding failure prevents incomplete variable appearance publication
+
+  # IndRefForNewObject can fail only for an inconsistent xref free/recycle list. Reading and
+  # validation establish that list in the private import graph; rendering adds valid objects
+  # and no external writer can change it. Retain allocation failure propagation for regressions;
+  # removing the guard would hide an incomplete object, while a forged allocator hook adds no
+  # source-boundary assurance.
+  - id: coverage-pdfengine-variable-stream-allocation-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/form_variable_streams.go
+    function: variableAppearancePlan.stream
+    anchor: 'return nil, fmt.Errorf("store variable appearance: %w", err)'
+    retained_property: object allocation failure prevents incomplete variable appearance publication
+
   # golangci-lint ships both an old and a replacement linter under similar names and marks the old
   # ones deprecated: running them duplicates the replacement's findings and prints deprecation
   # warnings. The replacements (exhaustruct_v5, gomodguard_v2, wsl_v5) stay enabled or are
@@ -551,7 +689,7 @@ exceptions:
     tool: coverage
     kind: unreachable-branch
     path: internal/pdfengine/engine.go
-    function: Engine.readContext
+    function: Engine.readDocument
     anchor: 'return nil, newError(CodeUnreadable, source, path, closeErr)'
     retained_property: a failed close is reported as an unreadable source
 
@@ -1019,18 +1157,6 @@ exceptions:
     message: 'use of `os\.Stderr` forbidden'
     source: 'fmt\.Fprint\(os\.Stderr, "complete process stderr\\n"\)'
     retained_property: actual child stderr is captured separately from JSON events
-
-  # Raw ReadContext materializes the xref/catalog, and the first rendering scan rejects all unsupported
-  # states before validation. Pinned pdfcpu validation consumes/deletes these states but never creates
-  # them (optional-state creation belongs to unrelated stamping APIs). Retain the second scan to
-  # reject a future validator that starts introducing rendering state after the established boundary.
-  - id: coverage-pdfengine-validation-creates-rendering-state
-    tool: coverage
-    kind: unreachable-branch
-    path: internal/pdfengine/engine.go
-    function: Engine.readContext
-    anchor: 'return nil, newError(CodeUnsupportedRendering, source, path, renderingErr)'
-    retained_property: post-validation rendering state cannot silently enter assembled output
 
   # Every real Stage either returns a live owner or an error; a retained pre-rename failure transfers
   # that owner into Commit's Result before producing ReportPublishError. The app reaches this check

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Command qualitygate runs the repository's quality gates that need more than `go test`: lint
 // configuration and staleness checks against the central exception registry, test discovery,

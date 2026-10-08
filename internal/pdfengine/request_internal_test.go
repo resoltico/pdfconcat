@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -141,5 +142,82 @@ func TestCheckRequiresWholeUseOfSourcesWithPageLocalObjects(t *testing.T) {
 				t.Fatalf("check() = %v, want %s containing %q", err, CodePartialRange, test.want)
 			}
 		})
+	}
+}
+
+func TestAssemblyPlanValidatesWithoutArtifactPaths(t *testing.T) {
+	t.Parallel()
+
+	plan := AssemblyPlan{
+		Sources: []SourceFile{{Info: SourceInfo{Pages: 3}}}, GeneratedSpecs: 1,
+		Order: []Run{SourcePages(0, 1, 3), GeneratedPages(0, 2)}, ExpectedPages: 5,
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	plan.ExpectedPages++
+
+	failure := requirePlanFailure(t, plan)
+	if failure.Reason != ReasonTotalMismatch || failure.Run != NoRun || failure.Source != NoSource {
+		t.Fatalf("invariant failure: %+v", failure)
+	}
+}
+
+func TestAssemblyPlanLocatesUnsupportedOccurrences(t *testing.T) {
+	t.Parallel()
+
+	sources := []SourceFile{
+		{Info: SourceInfo{Pages: 1, LegacyDests: true}},
+		{Info: SourceInfo{Pages: 1, LegacyDests: true}},
+	}
+	for _, second := range []int{0, 1} {
+		plan := AssemblyPlan{Sources: sources, Order: []Run{SourcePages(0, 1, 1), SourcePages(second, 1, 1)}, ExpectedPages: 2}
+
+		failure := requirePlanFailure(t, plan)
+		if failure.Code != CodeLegacyDestsRepeated || failure.Reason != ReasonLegacyDests || failure.Run != 1 || failure.Source != second {
+			t.Fatalf("second legacy occurrence: %+v", failure)
+		}
+	}
+}
+
+func TestAssemblyPlanLocatesPageLimitWithoutExpandingPages(t *testing.T) {
+	t.Parallel()
+
+	plan := AssemblyPlan{
+		Sources: []SourceFile{{Info: SourceInfo{Pages: MaxOutputPages}}}, GeneratedSpecs: 1,
+		Order: []Run{SourcePages(0, 1, MaxOutputPages), GeneratedPages(0, 1)}, ExpectedPages: MaxOutputPages + 1,
+	}
+
+	failure := requirePlanFailure(t, plan)
+	if failure.Reason != ReasonPageLimit || failure.Run != 1 || failure.Source != NoSource {
+		t.Fatalf("page limit: %+v", failure)
+	}
+
+	plan.Order, plan.ExpectedPages = plan.Order[:1], MaxOutputPages
+	if err := plan.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requirePlanFailure(t *testing.T, plan AssemblyPlan) *Error {
+	t.Helper()
+
+	failure, ok := errors.AsType[*Error](plan.Validate())
+	if !ok {
+		t.Fatal("expected a structured assembly-plan failure")
+	}
+
+	return failure
+}
+
+func TestAssemblyPlanRejectsNegativeGeneratedSpecCount(t *testing.T) {
+	t.Parallel()
+
+	plan := AssemblyPlan{GeneratedSpecs: -1, Order: []Run{GeneratedPages(0, 1)}, ExpectedPages: 1}
+
+	failure := requirePlanFailure(t, plan)
+	if failure.Reason != ReasonResource || failure.Run != NoRun || failure.Source != NoSource {
+		t.Fatalf("negative specification count: %+v", failure)
 	}
 }

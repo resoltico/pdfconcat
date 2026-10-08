@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package genpage writes the generated-page resource document: one PDF whose page i is the i-th
 // distinct generated page specification.

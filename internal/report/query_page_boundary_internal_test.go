@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -22,6 +22,8 @@ func TestOversizedPageStopsBeforeMaterializingNextValidRecord(t *testing.T) {
 	})
 	saved.Counts.GeneratedPages = new(int64(2))
 	saved.Counts.TotalPages = new(int64(3))
+
+	saved.FinalizeDiagnostics()
 
 	if err := saved.Validate(); err != nil {
 		t.Fatalf("materialization fixture must be a supported report: %v", err)
@@ -52,6 +54,8 @@ func TestQueryAtAndBeyondEndReturnsHonestEmptyPage(t *testing.T) {
 	t.Parallel()
 
 	saved := nodeSamples()[0]
+	saved.FinalizeDiagnostics()
+
 	if err := saved.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +115,8 @@ func diagnosticNewlineBoundaryFixture(t *testing.T) (*Report, int) {
 
 	saved := nodeSamples()[0]
 	saved.Diagnostics = []Diagnostic{{Stage: "inspect", Code: "missing", Message: "source missing", Cause: "x"}}
+
+	saved.FinalizeDiagnostics()
 
 	if err := saved.Validate(); err != nil {
 		t.Fatal(err)

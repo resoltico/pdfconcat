@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package exectest builds the pdfconcat executable for tests that run it as a child process, and
 // lets the coverage gate (tools/qualitygate coverage) see what those child processes execute.

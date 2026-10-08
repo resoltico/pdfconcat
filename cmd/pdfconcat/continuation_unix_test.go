@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 //go:build unix
 
@@ -25,12 +25,7 @@ func TestLongContinuationCanBeReconstructedWithoutTruncatedPaths(t *testing.T) {
 	ensure(t, os.MkdirAll(longDir, 0o700))
 	executable := filepath.Join(longDir, "local tool")
 	source := binary(t)
-	info, err := os.Stat(source)
-	ensure(t, err)
-	content := readFile(t, source)
-	ensure(t, os.WriteFile(executable, content, 0o600))
-
-	ensure(t, os.Chmod(executable, info.Mode().Perm()))
+	ensure(t, os.Link(source, executable))
 
 	reportPath := filepath.Join(longDir, "report.json")
 	args := []string{executable, commandCheck, inlinePlanFlag, `{"version":1,"items":[{"blank":{"size":"A4"}}]}`, flagReport, reportPath}

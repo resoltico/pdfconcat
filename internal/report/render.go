@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -26,6 +26,7 @@ func (s *Summary) RenderText(w io.Writer) error {
 	out := &textWriter{writer: w}
 	out.linef("attempt: %s", s.AttemptID)
 	out.overview(s.Status, s.Command, s.Phases, s.Counts, s.Publication)
+	out.linef("diagnostic records: %d errors, %d warnings", s.ErrorCount, s.WarningCount)
 	out.linef("summary only: %d parts, %d diagnostics (%d shown)", s.PartCount, s.DiagnosticCount, len(s.Diagnostics))
 
 	for i := range s.Diagnostics {
@@ -152,7 +153,22 @@ func (t *textWriter) diagnostic(diagnostic *DiagnosticView) {
 		cut = " [message cut]"
 	}
 
-	t.linef("- [%s/%s] %s%s%s", diagnostic.Stage, diagnostic.Code, diagnostic.Message, cut, where)
+	t.linef("- [%s %s/%s] %s%s%s", diagnostic.Severity, diagnostic.Stage, diagnostic.Code, diagnostic.Message, cut, where)
+
+	if diagnostic.ConsequenceContext != "" {
+		t.linef("  consequence: %s", diagnostic.ConsequenceContext)
+	}
+
+	if diagnostic.Path != "" {
+		path, truncated := preview(diagnostic.Path)
+
+		cue := ""
+		if truncated {
+			cue = " [path cut; inspect details for the full path]"
+		}
+
+		t.linef("  path: %q%s", path, cue)
+	}
 
 	if diagnostic.Cause != "" {
 		t.linef("  cause: %s", diagnostic.Cause)
@@ -177,9 +193,12 @@ func (t *textWriter) part(view *PartView) {
 
 		if view.Generated.Text != nil {
 			what += fmt.Sprintf(", text %q", view.Generated.Text.Preview)
+			if view.Generated.Text.HasFindings {
+				what += ", measured overflow findings"
+			}
 		}
 	default:
 	}
 
-	t.linef("%s %s %s: %s", view.ID, view.Kind, span, what)
+	t.linef("%s %s %s: %s (%d warning records)", view.ID, view.Kind, span, what, view.WarningCount)
 }

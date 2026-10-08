@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package pdfengine is the pdfcpu adapter: the only package that imports pdfcpu. It inspects source
 // PDFs and assembles the final document from them and from a generated-pages document. It knows nothing
@@ -10,7 +10,8 @@
 //
 // Inspect reads one captured source once and reports SourceInfo: page count, effective version, whether
 // pages carry page-local objects, whether a form or destinations exist, and the visible size of the
-// first and last pages. Assemble takes the inspected sources, the generated resource document and the
+// first and last pages, plus material scope-specific feature observations captured before validator repairs.
+// Assemble takes the inspected sources, the generated resource document and the
 // final order, and writes and verifies one PDF.
 //
 // # Visible page geometry
@@ -40,15 +41,21 @@
 // There is no streaming mode and no fixed memory bound; MaxOutputPages only bounds a request. The
 // package benchmarks measure wall time, memory and descriptors.
 //
+// AssemblyPlan.Validate applies source-known instruction policy without opening files; callers use it
+// for preflight as well as assembly. Assemble calls the same validator defensively before importing.
+// Preflight cannot establish later file/destination state or successful output verification.
+//
 // # Source policy
 //
 // A source whose pages have /Annots, /AA or /B, or that has an AcroForm or destinations, is "per
 // occurrence": it is imported anew for every run that uses it, so each occurrence owns its annotations,
 // widgets and destinations. Such a source must be used whole in each run (a partial range would leave
 // links, fields or destinations pointing at dropped pages: CodePartialRange). A source with the legacy
-// catalog /Dests dictionary may occur once per output (CodeLegacyDestsRepeated), because pdfcpu merges that
-// dictionary by overwriting equal keys. Every other source is imported once; repeated pages get a cloned
-// page dictionary and share everything else. Inherited MediaBox, CropBox, Rotate and Resources are copied
+// catalog /Dests dictionary is supported for at most one source occurrence across the entire output
+// (CodeLegacyDestsRepeated), including sources with different destination names. The backend conservatively
+// refuses a second dictionary because pdfcpu merges legacy destinations by overwriting equal keys.
+// Every other source is imported once; repeated pages get a cloned page dictionary and share everything else.
+// Inherited MediaBox, CropBox, Rotate and Resources are copied
 // onto each page, so reordering never changes a page's geometry, and the root of the output page tree
 // carries none.
 //
@@ -58,14 +65,22 @@
 //     occurrence's own pages (direct /Dest, GoTo actions, page /AA actions, /P back-references).
 //   - Forms: the AcroForm is kept. Fields of equal name in different documents or occurrences stay
 //     separate fields; pdfcpu nests the fields of later documents under a generated numeric parent field,
-//     so qualified names differ from the source's.
+//     so qualified names differ from the source's. Effective DA/Q defaults and actual AcroForm resource
+//     bindings are preserved per occurrence; widget AP and page resources retain independent scopes.
+//     Ordinary appearance/editability is supported; field-name references in retained scripts are not rewritten.
+//     Unsupported form defaults/ancestry reject with CodeFormUnsupported during inspection and import.
 //   - Named destinations: the /Names /Dests tree is kept and merged. pdfcpu renames a colliding name in
 //     a later occurrence (a control-character suffix) and its links follow the rename.
 //   - Outlines/bookmarks, document information, XMP metadata, page labels, open action, viewer
 //     preferences, permissions and other non-rendering catalog entries: dropped.
 //     The output has a fresh /Info with pdfcpu's producer and the current date.
-//   - Tagged-PDF structure (StructTreeRoot, MarkInfo, StructParents): dropped; output is not tagged.
-//   - Attachments (embedded files), JavaScript and any name tree other than destinations: dropped.
+//   - Catalog tagged-PDF structure (StructTreeRoot, MarkInfo): dropped; output is not tagged.
+//   - Non-destination catalog name trees, including EmbeddedFiles and JavaScript, and catalog AF
+//     associated-file indices: dropped. An index removal does not remove payloads still reachable
+//     through kept page FileAttachment annotations. Page/annotation/widget actions remain, including
+//     executable actions. The assembler does not execute scripts and output is not sanitized.
+//     Material keep/drop facts are returned once per kind/source for application warning projection;
+//     ordinary GoTo/URI links, absent/empty features and producer metadata do not warn.
 //   - Optional content (OCProperties, OCG/OCMD and /OC references) and OutputIntents: rejected with
 //     CodeUnsupportedRendering because document-wide layer/color configuration cannot be reconciled.
 //   - Dynamic XFA forms and NeedsRendering true: rejected before validator repairs, including XFA-only
@@ -74,8 +89,10 @@
 //     empty password. Output is never encrypted.
 //   - PDF version: the output is PDF 2.0 when any input is PDF 2.0, else PDF 1.7. A 2.0 source may appear
 //     anywhere in the order.
-//   - Digital signatures: not supported and not tested. Assembly rewrites the file, so any signature
-//     is invalid in the output; signature fields in an AcroForm are not specially handled.
+//   - Actual signatures, certification/usage-rights signatures and document timestamps: rejected
+//     before validator repairs and during import with CodeSignatureUnsupported. Supported empty unsigned
+//     signature fields remain allowed. Assemble unsigned sources and sign the final document externally;
+//     the adapter does not authenticate signers, strip signatures or claim preserved signed-byte integrity.
 //
 // Output is written by pdfcpu with a fresh creation date, so it is not byte-reproducible.
 //

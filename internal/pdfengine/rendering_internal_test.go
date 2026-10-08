@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package pdfengine
 
@@ -18,7 +18,7 @@ func TestRenderingStateCannotHideLayersOutsideCatalogDeclaration(t *testing.T) {
 		types.Dict{keyType: types.Name("OCMD")},
 		types.Dict{"OC": types.NewIndirectRef(5, 0)},
 		types.Array{types.Dict{"OC": types.Name("Layer")}},
-		types.StreamDict{Dict: types.Dict{"Resources": types.Dict{"Properties": types.Dict{"L": types.Dict{keyType: types.Name("OCG")}}}}},
+		types.StreamDict{Dict: types.Dict{"Resources": types.Dict{keyProperties: types.Dict{"L": types.Dict{keyType: types.Name("OCG")}}}}},
 	} {
 		pdf := &model.Context{
 			XRefTable: &model.XRefTable{RootDict: types.Dict{}, Table: map[int]*model.XRefTableEntry{1: {Object: object}}},

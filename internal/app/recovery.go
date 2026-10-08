@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -29,11 +29,12 @@ func (p *pipeline) reportCommitFailure(ctx context.Context, result *publish.Resu
 	p.publication.RecoveryReport = failure.RecoveryPath
 	p.publication.RecoveryState = report.RecoveryCurrent
 	diagnostic := report.Diagnostic{
-		Stage:   stagePublish,
-		Code:    codeReportPublish,
-		Path:    failure.Target,
-		Message: recoveryMessage(failure),
-		Cause:   reasonOf(failure.Err),
+		Severity: report.SeverityError,
+		Stage:    stagePublish,
+		Code:     codeReportPublish,
+		Path:     failure.Target,
+		Message:  recoveryMessage(failure),
+		Cause:    reasonOf(failure.Err),
 		Recovery: &report.Recovery{
 			Action:       "recover_report",
 			ReportFrom:   "unused_report_target",
@@ -75,6 +76,7 @@ func (p *pipeline) refreshRecovery(ctx context.Context, owner *publish.RecoveryO
 
 	snapshot := p.snapshot(report.StatusFailed)
 	snapshot.Diagnostics = append(snapshot.Diagnostics, diagnostic)
+	snapshot.FinalizeDiagnostics()
 
 	staged, err := p.stageFile(ctx, p.publication.RecoveryReport, snapshot)
 	if err != nil {

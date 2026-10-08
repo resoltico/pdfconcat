@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
 type (
 	// RecoveryState describes the retained recovery file, separately from the original report target.
 	RecoveryState string
+	// Severity distinguishes a fatal operation problem from a captured nonfatal consequence.
+	Severity string
 	// Status is the outcome class of a command.
 	Status string
 
@@ -25,6 +27,10 @@ type (
 const (
 	unknownMetadataValue = "unknown"
 	attemptNotWritten    = "not_written"
+	// SeverityError marks an error of the operation or captured run.
+	SeverityError Severity = "error"
+	// SeverityWarning marks a measured or detected material advisory.
+	SeverityWarning Severity = "warning"
 	// RecoveryCurrent means the retained file describes the actual committed failure.
 	RecoveryCurrent RecoveryState = "current"
 	// RecoveryPending means complete layout data remains but publication metadata could not be refreshed.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package main_test
 
@@ -15,6 +15,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/resoltico/pdfconcat/internal/exectest"
+	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 type declarationFault struct {
@@ -109,7 +110,7 @@ func TestExecutableResponseAndSavedReportContracts(t *testing.T) {
 		validateContract(t, responseSchema, output.stdout)
 
 		envelope := contractObject(t, output.stdout)
-		if numberAt(t, envelope, "format_version") != float64(2) {
+		if numberAt(t, envelope, "format_version") != float64(report.Version) {
 			t.Fatalf("format identity: %v", envelope)
 		}
 
@@ -245,7 +246,7 @@ func TestHistoricalReportRejectionPreservesEvidence(t *testing.T) {
 	beforePDF := readFile(t, filepath.Join(dir, fileOut))
 	saved := readFile(t, filepath.Join(dir, fileJob))
 	// Historical format rejection must not modify either evidence or output.
-	old := strings.Replace(string(saved), `"format_version":2`, `"report_version":1`, 1)
+	old := strings.Replace(string(saved), `"format_version":3`, `"report_version":1`, 1)
 	writeFile(t, dir, historicalReport, old)
 	rejected := run(t, dir, "", commandReport, historicalReport)
 	requireExit(t, rejected, 2)

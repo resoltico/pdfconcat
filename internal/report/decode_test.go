@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -226,7 +226,7 @@ func TestLimits(t *testing.T) {
 	}
 
 	nest := func(depth int) string {
-		return `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","x":` + strings.Repeat(
+		return `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","x":` + strings.Repeat(
 			"[",
 			depth-1,
 		) + strings.Repeat(

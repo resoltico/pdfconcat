@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli
 
@@ -17,15 +17,11 @@ type (
 	parser struct {
 		// seen maps an option's long name to the argument index where it first appeared.
 		seen map[string]int
-		// selected names the first report selection option; selectedAt is its index.
-		selected string
 		// context is the command being parsed, or rootContext before one is named.
 		context Name
 		args    []string
 		specs   []optionSpec
 		cmd     Command
-		// selectedAt is the argument index of the first selection option.
-		selectedAt int
 		// sourceAt is the argument index that first fixed cmd.PlanSource.
 		sourceAt   int
 		endOptions bool
@@ -44,9 +40,9 @@ const maxSuggestedOptionBytes = 32
 
 // Parse reads the arguments after the executable name. It returns a *UsageError for a rejected command line.
 //
-// The pass runs left to right. Every option is validated as it is read, so an invalid argument anywhere on the
-// line is reported even when --help is also present; help is shown only for an otherwise valid line, and
-// requirements that need the whole line (a plan source, a report file) are not enforced for a help request.
+// The grammar and numeric tokens are checked left to right. Report-request semantics are checked once
+// all options are known. Help still rejects invalid values and conflicting selectors, but skips missing
+// requirements (a plan source, a report file, or a selection required by details/paging).
 // After a lone "--" every argument is a literal operand.
 func Parse(args []string) (Command, error) {
 	state := &parser{args: args, specs: optionSpecs(), seen: map[string]int{}}

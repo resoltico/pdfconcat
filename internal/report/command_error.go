@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
 import (
 	"io"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -18,16 +19,28 @@ type CommandError struct {
 	Diagnostics        []DiagnosticView `json:"diagnostics"`
 	TruncatedFields    []string         `json:"truncated_fields,omitempty"`
 	FormatVersion      int              `json:"format_version"`
+	DiagnosticCount    int              `json:"diagnostic_count"`
+	ErrorCount         int              `json:"error_count"`
+	WarningCount       int              `json:"warning_count"`
 	DiagnosticsOmitted int              `json:"diagnostics_omitted,omitzero"`
 	NextOmitted        bool             `json:"next_omitted,omitzero"`
 }
 
 // NewCommandError creates a compact command failure.
 func NewCommandError(command string, status Status, diagnostics []Diagnostic, executable string) *CommandError {
+	diagnostics = slices.Clone(diagnostics)
+	for i := range diagnostics {
+		if diagnostics[i].Severity == "" {
+			diagnostics[i].Severity = SeverityError
+		}
+	}
+
+	counts := diagnosticCounts(diagnostics)
 	shown := min(len(diagnostics), PreviewDiagnostics)
 
 	result := &CommandError{
 		FormatVersion: Version, Kind: "error", Status: status,
+		DiagnosticCount: counts.DiagnosticCount, ErrorCount: counts.ErrorCount, WarningCount: counts.WarningCount,
 		Diagnostics: make([]DiagnosticView, shown), DiagnosticsOmitted: len(diagnostics) - shown,
 	}
 	if command != "" {
@@ -49,7 +62,7 @@ func NewCommandError(command string, status Status, diagnostics []Diagnostic, ex
 	if executable == "" || !utf8.ValidString(executable) || !result.fits() {
 		result.Next = nil
 		result.NextOmitted = true
-		result.ExecutableFrom = "invoking_executable"
+		result.ExecutableFrom = invokingExecutableReference
 	}
 
 	if !result.fits() {
@@ -124,4 +137,6 @@ func (e *CommandError) boundDiagnostics(command string) {
 		e.TruncatedFields = summary.TruncatedFields
 		e.DiagnosticsOmitted++
 	}
+
+	shrinkDiagnosticMessages(e.Diagnostics, e.fits)
 }

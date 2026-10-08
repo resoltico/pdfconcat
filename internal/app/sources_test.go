@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app_test
 
@@ -169,7 +169,8 @@ func TestAFailureReportCannotReplaceTheFileItDescribes(t *testing.T) {
 	}
 
 	// The report could not be saved because its path is the plan, and that is said with the code of the conflict.
-	described := strings.HasPrefix(parsed.Diagnostics[1].Message, "Before every input is known")
+	described := strings.Contains(parsed.Diagnostics[1].Message, "same file as") &&
+		!strings.HasPrefix(parsed.Diagnostics[1].Message, "Before every input is known")
 	if parsed.Diagnostics[1].Code != codeAlias || !described {
 		t.Errorf("secondary diagnostic %+v", parsed.Diagnostics[1])
 	}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package capture owns the private job workspace, the single-pass snapshot of source and font
 // files, and filesystem-identity alias protection between the resources of one job.

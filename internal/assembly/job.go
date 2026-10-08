@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Package assembly defines PDFConcat's domain values and the neutral job tree: the ordered PDFs, blank
 // pages, and directory groups that both the plan decoder and the command-line shortcut compile to.

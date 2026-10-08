@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes target the latest release line (`0.1.x`) and the current development branch unless a published advisory states otherwise. Release `v0.1.0` provides source only.
+Security fixes target the latest published release line and the maintained source branch unless a published advisory states otherwise. See [`CHANGELOG.md`](CHANGELOG.md) for release versions and publication status.
 
 ## Reporting a vulnerability
 
@@ -30,6 +30,14 @@ Do not send confidential production PDFs when a synthetic reproducer can demonst
 - **Saved reports are untrusted files.** `pdfconcat report` rejects malformed JSON, unsupported versions, invalid references, duplicate identifiers, and impossible ranges with located errors, and enforces 256 MiB, nesting 64, and 2,000,000 decoded nodes before building any large structure. A query never reopens a PDF or modifies the report. A report describes the run that wrote it and says nothing about the current state of the files.
 - **Reports contain absolute paths.** A saved report names the absolute path of every source, font, plan, output, and report file and the text of generated pages. Treat reports like the files they describe: do not share one publicly if paths or text are sensitive. Default diagnostics carry bounded path previews, explicitly marked when truncated; complete details retain full paths, and messages that echo a foreign error are length-bounded but not otherwise redacted.
 
+### Retained PDF content and signatures
+
+PDFConcat does not execute source scripts during assembly. Output is not sanitized: ordinary page/annotation/widget actions and page-local FileAttachment payloads can remain reachable. Catalog open/additional actions, associated-file (`/AF`) indices and non-destination name trees, including JavaScript and attachment indices, are removed; removing an index does not remove a payload still referenced by a retained annotation. Material keep/drop effects are recorded as warnings. A retained script's behavior is not verified or rewritten to follow qualified form names. Use a separate trusted viewer policy and active-content isolation when opening untrusted output.
+
+Static forms preserve supported appearance and ordinary editing. Dynamic forms, unsupported rendering controls and unsupported form semantics fail instead of being flattened or silently altered. Actual signature values, certification/usage-rights signatures and document timestamps are refused because assembly rewrites signed bytes. Empty unsigned signature fields are distinct from signed inputs. PDFConcat does not authenticate a signer, evaluate certificate trust, strip signatures or sign output; assemble suitable unsigned inputs and sign the final document externally.
+
+A passing check predicts known policy/layout effects. A warning does not imply that an unpublished job already removed content. A successful query can expose historical errors from a failed saved run; its own exit status says whether the query succeeded.
+
 ### Files PDFConcat writes
 
 Source PDFs, fonts, and plan files are never intentionally modified. A job writes only its private workspace (beside the destination for `build`, in the system temporary directory for `check`), the output PDF, and the requested report; the workspace is removed on every exit path except one report-recovery file kept after a published PDF whose report could not be published.
@@ -54,4 +62,4 @@ The mandatory secret-hygiene CI gate uses the pinned Gitleaks default rules to s
 
 GitHub Actions are pinned by full commit SHA, workflows request least-privilege permissions, checkout does not persist credentials, and source release verification depends on the reusable baseline CI including secret hygiene. CI also scans known vulnerabilities with govulncheck. Hosted execution is established by actual workflow results, not configuration alone.
 
-The current release workflow publishes tagged source and changelog notes after baseline CI verification. Release `v0.1.0` has no uploaded executable packages, package checksums or binary attestations. Retained packaging controls must be verified against a future candidate before binary distribution begins. Fuzzing, mutation testing and scale acceptance require explicit campaign dispatch; baseline success does not establish those results.
+The release workflow publishes tagged source and changelog notes after baseline CI verification. Executable packages require separate packaging and final-candidate verification; configured checksum and provenance controls do not establish that binary distribution has occurred. Fuzzing, mutation testing and scale acceptance require explicit campaign dispatch; baseline success does not establish those results.

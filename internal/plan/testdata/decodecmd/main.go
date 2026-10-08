@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 // Command decodecmd is a test fixture: it decodes a plan from standard input the way an executable would
 // and exits 0 on success, 2 on an invalid plan, and 130 when interrupted. With the argument "naive" it reads

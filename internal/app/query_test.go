@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app_test
 
@@ -71,7 +71,7 @@ func TestReportQueriesHonorEverySelector(t *testing.T) {
 	writePDF(t, dir, sourceA)
 	writePDF(t, dir, sourceB)
 
-	execute(t.Context(), t, appOf(newFake(t)), dir, commandCheck, reportFlag, reportFile, sourceA, "--blank", sourceB).
+	execute(t.Context(), t, appOf(newFake(t)), dir, commandCheck, reportFlag, reportFile, sourceA, blankFlag, sourceB).
 		requireCode(t, 0, "")
 
 	cases := map[string]struct {
@@ -138,7 +138,7 @@ func TestParsedQueryMismatchWithoutArgvHasNoInventedLocation(t *testing.T) {
 	runner := appOf(newFake(t))
 	execute(t.Context(), t, runner, dir, commandCheck, reportFlag, reportFile, sourceA).requireCode(t, 0, "")
 
-	command, err := cli.Parse([]string{commandReport, reportFile, "--expect-attempt", "different-attempt"})
+	command, err := cli.Parse([]string{commandReport, reportFile, "--expect-attempt", "BBBBBBBBBBBBBBBBBBBBBBBBBB"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
@@ -226,17 +226,19 @@ func (p *pipeline) flatten() error {
 // font, source, output or report file can never be used in two roles.
 func (p *pipeline) checkDestinations() error {
 	if p.output != "" {
+		if err := p.registry.ProtectOutput(p.output); err != nil {
+			return p.stopWith(artifactProblem(err))
+		}
+
 		err := publish.CheckDestination(p.output, p.command.Overwrite)
 		if err != nil {
 			return p.stopWith(problem{
-				diagnostic: report.Diagnostic{Stage: stageOutput, Code: codeOutputInvalid, Path: p.output, Message: err.Error()},
-				status:     report.StatusInvalid,
+				diagnostic: report.Diagnostic{
+					Stage: stageOutput, Code: codeOutputInvalid, Path: p.output,
+					Message: err.Error(), Location: p.outputLocation(),
+				},
+				status: report.StatusInvalid,
 			})
-		}
-
-		_, err = p.registry.Add(capture.RoleOutput, p.output)
-		if err != nil {
-			return p.stopWith(artifactProblem(err))
 		}
 	}
 
@@ -245,6 +247,22 @@ func (p *pipeline) checkDestinations() error {
 		if err != nil {
 			return p.stopWith(artifactProblem(err))
 		}
+	}
+
+	return nil
+}
+
+func (p *pipeline) outputLocation() *report.Location {
+	if p.command.Output != "" {
+		if location := argumentLocation(p.env, "-o"); location != nil {
+			return location
+		}
+
+		return argumentLocation(p.env, "--output")
+	}
+
+	if p.job != nil && p.job.Output.IsSet() {
+		return report.LocationOf(assembly.Locate(p.job.Source, p.job.Output.Origin, "/output"))
 	}
 
 	return nil

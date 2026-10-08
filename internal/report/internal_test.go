@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report
 
@@ -31,7 +31,7 @@ func nodeSamples() []*Report {
 	count := int64(1)
 	rng := &PageRange{Start: 1, End: 1}
 	text := &Text{
-		Color: "#000000", Anchor: "top", Align: "left", Overflow: "allow", Size: 1, Width: 1, Leading: 1,
+		Color: "#000000", Anchor: "top", Align: "left", Overflow: textOverflowAllow, Size: 1, Width: 1, Leading: 1,
 	}
 	pointerLocation := &Location{File: internalFile, Offset: &offset, Line: 1, Column: 8, Pointer: "/items/0"}
 	argvLocation := &Location{File: "argv", ArgvIndex: &argv}
@@ -79,6 +79,8 @@ func nodeSamples() []*Report {
 		},
 	}
 
+	full.FinalizeDiagnostics()
+
 	return []*Report{
 		full,
 		failedReportFixture("report", StatusInvalid, Diagnostic{Stage: "usage", Code: "x", Message: "m"}),
@@ -95,6 +97,8 @@ func TestNodeCountMatchesTheDecoder(t *testing.T) {
 		if len(r.Diagnostics) == 0 {
 			r.Diagnostics = []Diagnostic{{Stage: "a", Code: "b", Message: "m"}}
 		}
+
+		r.FinalizeDiagnostics()
 
 		var out bytes.Buffer
 
@@ -286,7 +290,7 @@ func partFeatureSamples() map[string]*Report {
 func tableFeatureSamples() map[string]*Report {
 	size := PageSize{Origin: SizeExplicit, Width: 1, Height: 1}
 	font := Font{Digest: internalDigest, Name: "n"}
-	text := &Text{Color: "#000000", Anchor: "top", Align: "left", Overflow: "allow", Size: 1, Width: 1, Leading: 1}
+	text := &Text{Color: "#000000", Anchor: "top", Align: "left", Overflow: textOverflowAllow, Size: 1, Width: 1, Leading: 1}
 
 	return map[string]*Report{
 		"producer identity": singleFeatureReport(func(r *Report) {
@@ -378,8 +382,8 @@ func failedReportFixture(command string, status Status, diagnostics ...Diagnosti
 		Instructions: PhaseIncomplete, InputInspection: PhaseNotRun, Layout: PhaseNotRun, OutputVerification: PhaseNotRun,
 	})
 
-	for index, diagnostic := range diagnostics {
-		builder.AddDiagnostic(index, diagnostic)
+	for index := range diagnostics {
+		builder.AddDiagnostic(index, diagnostics[index])
 	}
 
 	return builder.Build(status)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package report_test
 
@@ -12,7 +12,7 @@ import (
 
 const (
 	// fixedValues is the JSON values of a failed report with one diagnostic and no other record.
-	fixedValues = 27
+	fixedValues = 31
 
 	// valuesPerSource is the JSON values of a source without a digest: its object, path, and bytes.
 	valuesPerSource = 3
@@ -24,7 +24,6 @@ const (
 // reportOfNodeLimit is a failed report with one diagnostic and as many sources as make exactly report.MaxNodes values.
 func reportOfNodeLimit() *report.Report {
 	r := failedReportFixture(report.Diagnostic{Stage: "s", Code: "c", Message: "m"})
-	r.Publication.Output = "/o"
 	r.Diagnostics[0].Path = "/p" // one value fills the remainder after whole source records
 	r.Sources = make([]report.Source, sourcesToFill)
 
@@ -37,13 +36,13 @@ func reportOfNodeLimit() *report.Report {
 
 // TestWriteAcceptsExactlyTheNodesTheDecoderReads builds a report of exactly report.MaxNodes JSON values and
 // checks that it is written and read back, and that one value more is refused. The count is worked out by
-// hand: a failed report with one diagnostic holds 27 values (the object, 5 scalars, 3 objects with their 4, 3
-// and 2 members, 5 arrays, and the diagnostic's object with its stage, code and message), and a source without
+// hand: a failed report with one diagnostic holds 31 values (the object, 8 scalars, 3 objects with their 4, 3
+// and 2 members, 5 arrays, and the diagnostic's object with its severity, stage, code and message), and a source without
 // a digest is 3 values (object, path, bytes).
 func TestWriteAcceptsExactlyTheNodesTheDecoderReads(t *testing.T) {
 	t.Parallel()
 
-	if fixedValues+2+valuesPerSource*sourcesToFill != report.MaxNodes {
+	if fixedValues+1+valuesPerSource*sourcesToFill != report.MaxNodes {
 		t.Fatalf("%d sources do not make exactly %d values", sourcesToFill, report.MaxNodes)
 	}
 

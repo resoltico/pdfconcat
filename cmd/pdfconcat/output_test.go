@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package main_test
 
@@ -34,7 +34,7 @@ func TestTextFormatIsAHumanRenderingOfTheSameResult(t *testing.T) {
 
 		human := res.stdout
 		if args[0] == commandReport {
-			_, human, _ = strings.Cut(human, "\n")
+			human = queryResultBody(human)
 		}
 
 		if (strings.HasPrefix(human, "{") != slices.Contains(args, flagDetails)) || res.stdout == "" {
@@ -64,7 +64,7 @@ func TestTextFormatIsAHumanRenderingOfTheSameResult(t *testing.T) {
 
 		human := res.stdout
 		if args[0] == commandReport {
-			_, human, _ = strings.Cut(human, "\n")
+			human = queryResultBody(human)
 		}
 
 		if (strings.HasPrefix(human, "{") != slices.Contains(args, flagDetails)) || res.stdout == "" {
@@ -250,7 +250,7 @@ func TestSavedReportsAreUntrustedAndQueriesFailCleanly(t *testing.T) {
 	requireExit(t, run(t, dir, "", commandCheck, flagReport, failedReportPath, fileA, flagBlank, fileMissing), 1)
 
 	saved := string(readFile(t, filepath.Join(dir, successfulReportPath)))
-	writeFile(t, dir, "oldversion.json", strings.Replace(saved, `"format_version":2`, `"format_version":1`, 1))
+	writeFile(t, dir, "oldversion.json", strings.Replace(saved, `"format_version":3`, `"format_version":2`, 1))
 	writeFile(t, dir, "trailing.json", saved+"x")
 	writeFile(t, dir, "empty.json", "")
 	writeFile(t, dir, "unknown.json", strings.Replace(saved, `"kind":"report"`, `"kind":"report","extra":1`, 1))
@@ -338,4 +338,14 @@ func TestSchemasAndHelpAreStructured(t *testing.T) {
 			t.Errorf("version lacks %s: %v", key, version)
 		}
 	}
+}
+
+func queryResultBody(human string) string {
+	for _, prefix := range []string{"report query ", "selected diagnostic records:", "diagnostics reference:"} {
+		if strings.HasPrefix(human, prefix) {
+			_, human, _ = strings.Cut(human, "\n")
+		}
+	}
+
+	return human
 }

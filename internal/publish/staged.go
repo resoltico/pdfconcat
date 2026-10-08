@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package publish
 
@@ -15,6 +15,16 @@ import (
 )
 
 type (
+	// stagingWriter sends each bounded chunk to disk immediately, retaining no content.
+	stagingWriter struct {
+		file        io.Writer
+		failure     error
+		interrupted func() error
+		ops         operations
+		remaining   int64
+		size        int64
+	}
+
 	// Policy says how an existing destination is treated.
 	Policy struct {
 		// Overwrite allows replacing an existing regular file.
@@ -123,7 +133,62 @@ func Stage(ctx context.Context, target string, src io.Reader, maxBytes int64) (*
 	return stageWith(ctx, realOperations(), target, src, maxBytes)
 }
 
+// StageProduced streams content directly into the owned private staging file. produce must
+// return after writing and must not retain the writer. Writes are bounded and cancellable;
+// producer, close and flush failures discard only content whose identity remains owned.
+func StageProduced(ctx context.Context, target string, maxBytes int64, produce func(io.Writer) error) (*Staged, error) {
+	return stageProducedWith(ctx, realOperations(), target, maxBytes, produce)
+}
+
 func stageWith(ctx context.Context, ops operations, target string, src io.Reader, maxBytes int64) (*Staged, error) {
+	return stageContentWith(ctx, ops, target, func(file *os.File) (int64, error) {
+		return copyChunks(ctx, ops, file, src, maxBytes)
+	})
+}
+
+func stageProducedWith(ctx context.Context, ops operations, target string, maxBytes int64, produce func(io.Writer) error) (*Staged, error) {
+	return stageContentWith(ctx, ops, target, func(file *os.File) (int64, error) {
+		writer := &stagingWriter{interrupted: ctx.Err, ops: ops, file: file, remaining: maxBytes}
+		err := produce(writer)
+
+		return writer.size, errors.Join(err, writer.failure, ctx.Err())
+	})
+}
+
+func (w *stagingWriter) Write(content []byte) (int, error) {
+	written := 0
+
+	for len(content) > 0 {
+		if w.failure != nil {
+			return written, w.failure
+		}
+
+		if err := w.interrupted(); err != nil {
+			w.failure = err
+			return written, fmt.Errorf("write interrupted: %w", err)
+		}
+
+		count := min(len(content), stageChunkSize)
+		if int64(count) > w.remaining {
+			w.failure = &SizeLimitError{Limit: w.size + w.remaining}
+			return written, w.failure
+		}
+
+		if err := w.ops.writeChunk(w.file, content[:count]); err != nil {
+			w.failure = err
+			return written, err
+		}
+
+		w.size += int64(count)
+		w.remaining -= int64(count)
+		written += count
+		content = content[count:]
+	}
+
+	return written, nil
+}
+
+func stageContentWith(ctx context.Context, ops operations, target string, produce func(*os.File) (int64, error)) (*Staged, error) {
 	if !filepath.IsAbs(target) {
 		return nil, fmt.Errorf("%w: %q", ErrNotAbsolute, target)
 	}
@@ -153,7 +218,7 @@ func stageWith(ctx context.Context, ops operations, target string, src io.Reader
 		return nil, &StageError{Target: target, Err: errors.Join(pinErr, cleanupErr, original.Close())}
 	}
 
-	size, err := fillStaged(ctx, ops, file, src, maxBytes)
+	size, err := finishStaged(file, produce)
 	if err == nil {
 		err = ops.syncFile(file.Name())
 	}
@@ -179,21 +244,18 @@ func stageWith(ctx context.Context, ops operations, target string, src io.Reader
 	return &Staged{ops: ops, path: file.Name(), target: target, size: size, owner: owner}, nil
 }
 
-// fillStaged copies src into file in bounded chunks, checking cancellation and the size limit
-// before each write, and closes file.
-func fillStaged(ctx context.Context, ops operations, file *os.File, src io.Reader, maxBytes int64) (int64, error) {
-	size, err := copyChunks(ctx, ops, file, src, maxBytes)
+// finishStaged preserves independent production and close failures.
+func finishStaged(file *os.File, produce func(*os.File) (int64, error)) (int64, error) {
+	size, err := produce(file)
 
 	closeErr := file.Close()
 	if closeErr != nil {
 		closeErr = fmt.Errorf("close: %w", closeErr)
 	}
 
-	if err != nil || closeErr != nil {
-		return 0, errors.Join(err, closeErr)
-	}
+	err = errors.Join(err, closeErr)
 
-	return size, nil
+	return size, err
 }
 
 func copyChunks(ctx context.Context, ops operations, dst io.Writer, src io.Reader, maxBytes int64) (int64, error) {

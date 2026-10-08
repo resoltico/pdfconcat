@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package cli_test
 
@@ -122,12 +122,12 @@ func acceptedReport() []accepted {
 		accept("report literal file", "report -- --r.json", new(cli.Command{Name: cli.NameReport, ReportFile: "--r.json"})),
 		accept("report part", "report r.json --part /items/42",
 			new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, Part: "/items/42"})),
-		accept("report page", "report r.json --page=5001", new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, Page: 5001})),
+		accept("report page", "report r.json --page=5001", new(cli.Command{
+			Name: cli.NameReport, ReportFile: reportFile, Page: 5001, HasPage: true,
+		})),
 		accept("report view with paging", "report r.json --view diagnostics --offset 0 --limit 20", new(cli.Command{
 			Name: cli.NameReport, ReportFile: reportFile, View: "diagnostics", HasOffset: true, HasLimit: true, Limit: 20,
 		})),
-		accept("a page size outside 1 to 100 is the report package's to judge", "report r.json --view=parts --limit=0",
-			new(cli.Command{Name: cli.NameReport, ReportFile: reportFile, View: "parts", HasLimit: true})),
 	}
 }
 
@@ -154,6 +154,10 @@ func acceptedHelp() []accepted {
 			want: new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameHelp}),
 		},
 		accept("help flag on a command", "report --help", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameReport})),
+		accept("report help skips missing selection for details", "report --details --help",
+			new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameReport})),
+		accept("report help skips missing view for paging", "report --offset 1 --help",
+			new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameReport})),
 		accept("help flag after a valid plan", "build --plan a.json -h", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameBuild})),
 		accept("help flag needs no plan source", "check --help", new(cli.Command{Name: cli.NameHelp, HelpFor: cli.NameCheck})),
 		accept("help does not enforce what a build would", "build --base-dir=d a.pdf --help",
@@ -313,8 +317,13 @@ func planRejections() []rejected {
 
 func reportRejections() []rejected {
 	return []rejected{
+		reject("report help rejects page zero", "report --help --page 0", report.CodeInvalidNumber, 2, "1-based"),
+		reject("report help rejects unknown view", "report --view unknown --help", report.CodeUnknownView, 1, "parts or diagnostics"),
+		reject("zero limit", "report r --view parts --limit 0", report.CodeInvalidPaging, 4, "between 1 and 100"),
+		reject("excess limit", "report r --view parts --limit 101", report.CodeInvalidPaging, 4, "between 1 and 100"),
+		reject("invalid expectation", "report r --expect-attempt bad", report.CodeInvalidExpectation, 2, "base32"),
 		reject("part then page", "report r --part x --page 1", report.CodeSelectionConflict, 4,
-			"--page cannot be combined with --part (argv:2)"),
+			"mutually exclusive"),
 		reject("page then view", "report r --page=1 --view=parts", report.CodeSelectionConflict, 3, ""),
 		reject("view then part", "report r --view parts --part x", report.CodeSelectionConflict, 4, ""),
 		reject("offset without view", "report r --offset 1", report.CodePagingNeedsView, 2, argView),
@@ -327,7 +336,7 @@ func reportRejections() []rejected {
 		reject("page overflow", "report r --page=9223372036854775808", report.CodeInvalidNumber, 2, ""),
 		reject("offset not a number", "report r --view=parts --offset=1.5", report.CodeInvalidNumber, 3, ""),
 		reject("limit overflow", "report r --view=parts --limit=99999999999999999999", report.CodeInvalidNumber, 3, ""),
-		reject("negative limit", "report r --view=parts --limit=-1", report.CodeInvalidPaging, 3, "--limit must not be negative"),
+		reject("negative limit", "report r --view=parts --limit=-1", report.CodeInvalidPaging, 3, "--limit must be between"),
 		reject("negative offset", "report r --view=parts --offset=-1", report.CodeInvalidPaging, 3, ""),
 	}
 }

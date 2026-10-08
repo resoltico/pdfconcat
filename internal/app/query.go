@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package app
 
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/capture"
@@ -20,9 +21,18 @@ var errNotRegularReport = errors.New("a saved report must be a regular file")
 // runQuery answers the report command from a saved report. The file is untrusted input, decoded under the
 // report package's limits; no PDF is opened and nothing is written.
 func runQuery(ctx context.Context, command *cli.Command, env Env) int {
+	return runQueryWith(ctx, command, env, openInput)
+}
+
+func runQueryWith(ctx context.Context, command *cli.Command, env Env, open func(context.Context, string) (*os.File, error)) int {
+	request := command.ReportRequest()
+	if err := request.Validate(); err != nil {
+		return queryFailure(env, command, err)
+	}
+
 	path := absolutePath(env.WorkingDir, command.ReportFile)
 
-	file, err := openInput(ctx, path)
+	file, err := open(ctx, path)
 	if err != nil {
 		nonregularError, ok := errors.AsType[*capture.NotRegularFileError](err)
 		if ok {
@@ -45,28 +55,14 @@ func runQuery(ctx context.Context, command *cli.Command, env Env) int {
 		return queryFailure(env, command, err)
 	}
 
-	if command.ExpectAttempt != "" && command.ExpectAttempt != saved.AttemptID {
-		return emitError(
-			env,
-			command.Format,
-			string(command.Name),
-			report.StatusInvalid,
-			report.Diagnostic{
-				Stage:    report.StageRead,
-				Code:     "report_attempt_mismatch",
-				Location: argumentLocation(env, "--expect-attempt"),
-				Message:  "The saved report belongs to a different attempt; use the report for the expected attempt.",
-				Recovery: &report.Recovery{Action: "inspect_report", ReportFrom: "original_argv.report_operand"},
-			},
-		)
-	}
-
-	response, err := saved.Query(requestOf(command))
+	response, err := saved.Query(request)
 	if err != nil {
 		return queryFailure(env, command, err)
 	}
 
-	err = writeResponse(env.Stdout, command.Format, report.NewResponse(report.QueryResultOf(saved, response, env.Executable, path)))
+	query := report.QueryResultOf(saved, response, env.Executable, path)
+
+	err = writeResponse(env.Stdout, command.Format, report.NewResponse(query))
 	if err != nil {
 		return stdoutFailed(env, err)
 	}
@@ -91,8 +87,17 @@ func readFailure(env Env, command *cli.Command, path, message string, err error)
 func queryFailure(env Env, command *cli.Command, err error) int {
 	if reportErr, ok := report.AsError(err); ok {
 		diagnostic := reportErr.Diagnostic
+		if diagnostic.Location == nil && reportErr.Option != "" {
+			diagnostic.Location = argumentLocation(env, reportErr.Option)
+		}
+
 		if diagnostic.Code == report.CodeUnsupportedVersion {
 			diagnostic.Recovery = &report.Recovery{Action: "choose_new_report", ReportFrom: "unused_report_target"}
+		}
+
+		if diagnostic.Code == report.CodeAttemptMismatch {
+			diagnostic.Stage = report.StageRead
+			diagnostic.Recovery = &report.Recovery{Action: "inspect_report", ReportFrom: "original_argv.report_operand"}
 		}
 
 		return emitError(env, command.Format, string(command.Name), reportErr.Status(), diagnostic)
@@ -101,29 +106,6 @@ func queryFailure(env Env, command *cli.Command, err error) int {
 	found := classify(stageInput, err)
 
 	return emitError(env, command.Format, string(command.Name), found.status, found.diagnostic)
-}
-
-// requestOf converts the parsed selectors into a query request.
-func requestOf(command *cli.Command) report.Request {
-	request := report.Request{View: command.View, Details: command.Details}
-
-	if command.Part != "" {
-		request.Part = &command.Part
-	}
-
-	if command.Page != 0 {
-		request.Page = &command.Page
-	}
-
-	if command.HasOffset {
-		request.Offset = &command.Offset
-	}
-
-	if command.HasLimit {
-		request.Limit = &command.Limit
-	}
-
-	return request
 }
 
 func argumentLocation(env Env, option string) *report.Location {

@@ -1,7 +1,7 @@
 //go:build unix
 
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Ervins
+// Copyright (c) 2026 Ervins Strauhmanis
 
 package capture_test
 
@@ -70,6 +70,16 @@ func checkRegistryInaccessibleCWD(t *testing.T) {
 	}
 
 	registry := capture.NewRegistry()
+	checkRelativeRegistrations(t, registry)
+}
+
+func checkRelativeRegistrations(t *testing.T, registry *capture.Registry) {
+	t.Helper()
+
+	if err := registry.ProtectOutput("relative.pdf"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("protected relative artifact lost cwd failure: %v", err)
+	}
+
 	if _, err := registry.Add(capture.RoleOutput, "relative.pdf"); !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("relative artifact did not retain cwd failure: %v", err)
 	}

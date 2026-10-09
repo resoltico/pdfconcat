@@ -1202,6 +1202,16 @@ linters:
         path: ^tools/qualitygate/process_fuzz_linux\.go$
         source: '"golang\.org/x/sys/unix"'
         text: 'import ''golang\.org/x/sys/unix'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - containedctx
+        path: ^cmd/pdfconcat/progress_boundary_windows_test\.go$
+        source: context\.Context
+        text: found a struct that contains a context\.Context field
+      - linters:
+          - wrapcheck
+        path: ^cmd/pdfconcat/progress_boundary_windows_test\.go$
+        source: return ctx\.Context\.Err\(\)
+        text: 'error returned from interface method should be wrapped: sig: func \(context\.Context\)\.Err\(\) error'
 
 formatters:
   enable:

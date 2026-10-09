@@ -94,6 +94,13 @@ func assertProgressHeldConsoleCancellation(t *testing.T, fixture *progressConsol
 	go func() { result <- transport.WriteRecord(ctx, []byte(progressAbandonedText)) }()
 
 	assertProgressNativePending(t, observer, result)
+	canceled, cancelSchedule := context.WithCancel(t.Context())
+	cancelSchedule()
+	// The real worker is held in native I/O, so no receiver can admit this second request.
+	attempted, scheduleErr := transport.writeNativeRecord(canceled, []byte(progressTestRecord))
+	if attempted || !errors.Is(scheduleErr, context.Canceled) {
+		t.Fatalf("canceled scheduling against the held native worker admitted output: %v", scheduleErr)
+	}
 
 	wanted := context.DeadlineExceeded
 	if scenario == "caller-cancel" {

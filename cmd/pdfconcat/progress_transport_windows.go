@@ -185,6 +185,12 @@ func (transport *progressTransport) run(ready chan<- error) {
 }
 
 func (transport *progressTransport) cancelWrite(ctx context.Context, result <-chan error) error {
+	select {
+	case err := <-result:
+		return progressNativeResult(ctx, err)
+	default:
+	}
+
 	// Cancellation can race the worker entering WriteFile. Retry until the
 	// particular operation completes; never leave that native writer behind.
 	ticker := time.NewTicker(time.Millisecond)
@@ -200,14 +206,18 @@ func (transport *progressTransport) cancelWrite(ctx context.Context, result <-ch
 
 		select {
 		case completedErr := <-result:
-			if completedErr == nil && failure == nil {
-				return nil
-			}
-
-			return errors.Join(fmt.Errorf("progress write deadline: %w", ctx.Err()), completedErr, failure)
+			return progressCancellationResult(ctx, completedErr, failure)
 		case <-ticker.C:
 		}
 	}
+}
+
+func progressCancellationResult(ctx context.Context, completedErr, cancellationErr error) error {
+	if completedErr == nil && cancellationErr == nil {
+		return nil
+	}
+
+	return errors.Join(fmt.Errorf("progress write deadline: %w", ctx.Err()), completedErr, cancellationErr)
 }
 
 func duplicateProgressHandle(file *os.File, volumeQuery *windows.LazyProc) (windows.Handle, bool, error) {
@@ -256,12 +266,6 @@ func (transport *progressTransport) writeNativeRecord(ctx context.Context, recor
 	case err := <-result:
 		return true, progressNativeResult(ctx, err)
 	case <-ctx.Done():
-		select {
-		case err := <-result:
-			return true, progressNativeResult(ctx, err)
-		default:
-		}
-
 		return true, transport.cancelWrite(ctx, result)
 	}
 }

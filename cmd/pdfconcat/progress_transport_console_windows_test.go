@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"runtime"
 	"slices"
@@ -27,6 +28,7 @@ const (
 // console-global; restore it before leaving this scope.
 func assertProgressConsoleUnicodeReadback(t *testing.T) {
 	t.Helper()
+	assertProgressConsoleInputRefusal(t)
 
 	originalCodepage, err := windows.GetConsoleOutputCP()
 	requireProgressNoError(t, err)
@@ -40,7 +42,21 @@ func assertProgressConsoleUnicodeReadback(t *testing.T) {
 	var originalMode uint32
 	requireProgressNoError(t, windows.GetConsoleMode(handle, &originalMode))
 	requireProgressNoError(t, windows.SetConsoleCursorPosition(handle, windows.Coord{}))
+
 	transport := progressNativeTransport(t, file)
+
+	encodingErr := transport.WriteRecord(t.Context(), []byte{0xff})
+	if !errors.Is(encodingErr, errProgressRecordEncoding) || transport.Interrupted() {
+		t.Fatalf("invalid console encoding changed the healthy channel: %v", encodingErr)
+	}
+
+	aborted := make(chan struct{})
+	close(aborted)
+
+	abortErr := writeProgressConsoleRecord(aborted, handle, []byte(progressAbandonedText))
+	if !errors.Is(abortErr, errProgressRecordAborted) {
+		t.Fatalf("abandoned console record entered native output: %v", abortErr)
+	}
 	// Legacy screen-buffer readback is an exact oracle only for spacing BMP text.
 	// Non-BMP/combining output needs a validated VT/display observation separately.
 	text := "café Ж"
@@ -61,6 +77,20 @@ func assertProgressConsoleUnicodeReadback(t *testing.T) {
 	if mode != originalMode || codepage != progressConsoleOEMCodepage {
 		t.Fatal("native progress changed caller console modes or codepage")
 	}
+}
+
+func assertProgressConsoleInputRefusal(t *testing.T) {
+	t.Helper()
+
+	null, err := os.OpenFile("NUL", os.O_RDWR, 0)
+	requireProgressNoError(t, err)
+	closeProgressResource(t, null)
+	assertProgressProducerRefused(t, null)
+
+	input, err := os.OpenFile("CONIN$", os.O_RDWR, 0)
+	requireProgressNoError(t, err)
+	closeProgressResource(t, input)
+	assertProgressProducerRefused(t, input)
 }
 
 func progressPrivateConsoleBuffer(t *testing.T) *os.File {

@@ -42,11 +42,15 @@ func qualifyProgressPipe(handle windows.Handle, volumeQuery *windows.LazyProc) e
 		return err
 	}
 
-	device, information, err := progressPipeBackend(handle, volumeQuery)
-	if err != nil {
-		return err
+	device, information, backendErr := progressPipeBackend(handle, volumeQuery)
+	if backendErr != nil {
+		return backendErr
 	}
 
+	return qualifyProgressPipeBackend(device, information)
+}
+
+func qualifyProgressPipeBackend(device progressPipeDevice, information uintptr) error {
 	if information != progressPipeDeviceBytes || device.deviceType != progressNamedPipeDevice ||
 		device.characteristics&progressRemoteDevice != 0 {
 		return errProgressUnsupportedHandle

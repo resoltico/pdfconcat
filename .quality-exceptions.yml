@@ -2537,3 +2537,147 @@ exceptions:
     source: "\"golang\\.org/x/sys/unix\""
     goos: linux
     retained_property: native process observation retains leader identity until owned group cleanup completes
+
+  # GetNamedPipeInfo and the synchronous FileModeInformation query have already admitted the owned byte pipe. The pinned volume query then fails only on a native object/query fault; actual invalid handles, asynchronous and message pipes remain tested.
+  - id: coverage-progress-windows-pipe-backend-native-query
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_pipe_windows.go
+    function: qualifyProgressPipe
+    anchor: 'return backendErr'
+    retained_property: failed native backend observation refuses admission before writing
+
+  # Supported Windows amd64 and arm64 use an eight-byte device result and a sixteen-byte IO_STATUS_BLOCK with Information at offset eight. These compile-time sizes are checked before passing native pointers; a changed ABI remains refused.
+  - id: coverage-progress-windows-pipe-supported-abi
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_pipe_windows.go
+    function: progressPipeBackend
+    anchor: 'return device, 0, errProgressUnsupportedHandle'
+    retained_property: unsupported native ABI cannot expose an incorrectly sized buffer
+
+  # Supported Windows systems export kernel32 CancelSynchronousIo. The system-DLL loader and exact procedure are fixed; a broken loader or unavailable native export remains an admission error, not a tested operating-system fault.
+  - id: coverage-progress-windows-cancellation-export
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: newProgressTransport
+    anchor: 'return nil, fmt.Errorf("load native progress cancellation: %w", err)'
+    retained_property: unavailable native cancellation prevents transport construction
+
+  # Supported Windows systems export the fixed ntdll NtQueryVolumeInformationFile procedure. No caller chooses a DLL or symbol. Native loader/export faults remain visible before transport ownership begins.
+  - id: coverage-progress-windows-volume-query-export
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: newProgressTransport
+    anchor: 'return nil, fmt.Errorf("load native pipe device query: %w", err)'
+    retained_property: unavailable native backend qualification prevents transport construction
+
+  # The worker opens its own current thread with THREAD_TERMINATE and retains the handle until joined. Native allocation/security failure is propagated through ready; construction waits for worker exit and closes its owned sink. This qualifies the native-fault cleanup only.
+  - id: coverage-progress-windows-thread-startup-cleanup
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: newProgressTransport
+    anchor: '<-transport.stopped'
+    retained_property: failed native worker admission is joined and its duplicate is closed
+
+  # The locked worker supplies its real current thread ID and fixed THREAD_TERMINATE access, not a caller-selected thread. A native allocation/security failure remains a startup error. Real blocked writers and cancellation use this admitted handle without substituting an API provider.
+  - id: coverage-progress-windows-current-thread-admission
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: progressTransport.run
+    anchor: 'ready <- fmt.Errorf("own native progress thread: %w", err)'
+    retained_property: native thread admission failure prevents accepting requests
+
+  # Cancellation targets the valid owned THREAD_TERMINATE handle before joining or closing it. ERROR_NOT_FOUND is a normal completion race and remains handled; other native cancellation faults stay joined with completion and deadline facts. This is not a universal driver return-time guarantee.
+  - id: coverage-progress-windows-owned-thread-cancellation-fault
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: progressTransport.cancelWrite
+    anchor: 'failure = fmt.Errorf("cancel native progress write: %w", cancelErr)'
+    retained_property: unexpected native cancellation faults remain visible while the writer is joined
+
+  # RawControl holds the real caller handle while classification and DuplicateHandle run; a successful callback has no control error. Retain cleanup if a failed native duplication nevertheless supplies a nonzero output. The API does not promise a zero output on failure; this is a defensive native-fault boundary, not an immutable-output claim.
+  - id: coverage-progress-windows-duplicate-admission-fault-cleanup
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: duplicateProgressHandle
+    anchor: 'err = errors.Join(err, windows.CloseHandle(handle))'
+    retained_property: a partial native admission cannot leak an owned duplicate or conceal cleanup failure
+
+  # WriteFile reports bytes transferred from the supplied buffer, bounded by its requested byte count. Keep an overcount guard against a native contract fault. Actual full PIPE_NOWAIT zero counts and broken-pipe errors remain real controls.
+  - id: coverage-progress-windows-pipe-native-overcount
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: writeProgressWindowsRecord
+    anchor: 'return errProgressNativeCount'
+    retained_property: an impossible native byte count stops slicing and poisons the admitted record
+
+  # The console receives a nonempty bounded UTF-16 buffer. A successful zero count is retained as a native progress-fault guard; no documented strict-positive guarantee is claimed. Actual console delivery, cancellation and invalid console handles remain tested.
+  - id: coverage-progress-windows-console-native-zero-progress
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: writeProgressConsoleRecord
+    anchor: 'return io.ErrNoProgress'
+    retained_property: a console native progress fault cannot spin or claim a completed record
+
+  # WriteConsole reports characters transferred from its requested UTF-16 buffer; an overcount violates that native count contract. Preserve the defense independently of actual console delivery and cancellation controls.
+  - id: coverage-progress-windows-console-native-overcount
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_transport_windows.go
+    function: writeProgressConsoleRecord
+    anchor: 'return errProgressNativeCount'
+    retained_property: an impossible native character count cannot index outside the owned buffer
+
+  # The transport owns its thread and sink duplicates and joins the worker before its sole native closes. Caller inputs cannot retire these private handles. Native close faults remain truthful telemetry-unavailable state; deliberately closing a stale numeric handle in a test could close an unrelated reused handle and is not a safe oracle.
+  - id: coverage-progress-windows-owned-transport-close-fault
+    tool: coverage
+    kind: unreachable-branch
+    goos: windows
+    path: cmd/pdfconcat/progress_owner.go
+    function: progressOwner.release
+    anchor: 'owner.unavailable = true'
+    retained_property: a native cleanup failure marks requested telemetry unavailable
+
+  # This test-only admission context retains the genuine WithCancel base. Its Err checkpoint invokes the real CancelFunc, then delegates; Deadline, Done and Value remain that same context rather than manufactured cancellation state.
+  - id: lint-progress-windows-admission-context-base
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: containedctx
+    goos: windows
+    path: cmd/pdfconcat/progress_boundary_windows_test.go
+    message: 'found a struct that contains a context\.Context field'
+    source: 'context\.Context'
+    retained_property: actual cancellation after admission restores the token while the same genuine Done channel closes
+
+  # Context.Err returns its exact sticky base error. This test checkpoint performs actual cancellation and returns the delegated Err; wrapping would violate the context contract and conceal the cancellation identity under test.
+  - id: lint-progress-windows-admission-context-error-contract
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: wrapcheck
+    goos: windows
+    path: cmd/pdfconcat/progress_boundary_windows_test.go
+    message: 'error returned from interface method should be wrapped: sig: func \(context\.Context\)\.Err\(\) error'
+    source: 'return ctx\.Context\.Err\(\)'
+    retained_property: cancellation cause and delegated lifecycle remain one real context contract

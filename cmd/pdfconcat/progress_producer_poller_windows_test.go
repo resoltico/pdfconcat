@@ -39,10 +39,14 @@ func assertProgressGoPollerProducer(t *testing.T) {
 
 func assertProgressPendingReadDeadline(t *testing.T, source *os.File) {
 	t.Helper()
-	requireProgressNoError(t, source.SetReadDeadline(time.Now().Add(5*time.Second)))
+
+	stackBuffer := make([]byte, 1<<20)
+	initialDeadline := time.Now().Add(5 * time.Second)
+	requireProgressNoError(t, source.SetReadDeadline(initialDeadline))
 
 	result := make(chan error, 1)
 	done := make(chan struct{})
+	readStarted := make(chan struct{})
 	readCount := 0
 
 	go func() {
@@ -52,6 +56,8 @@ func assertProgressPendingReadDeadline(t *testing.T, source *os.File) {
 			buffer [1]byte
 			err    error
 		)
+
+		close(readStarted)
 
 		readCount, err = source.Read(buffer[:])
 		result <- err
@@ -69,7 +75,14 @@ func assertProgressPendingReadDeadline(t *testing.T, source *os.File) {
 		}
 	}()
 
-	assertProgressSDKReadPending(t, result)
+	// Dispatch acknowledgement is setup evidence; two actual SDK wait snapshots remain required.
+	select {
+	case <-readStarted:
+	case <-time.After(time.Until(initialDeadline)):
+		t.Fatal("read goroutine did not start before its original native read deadline")
+	}
+
+	assertProgressSDKReadPending(t, result, stackBuffer)
 
 	started := time.Now()
 	requireProgressNoError(t, source.SetReadDeadline(started.Add(25*time.Millisecond)))
@@ -84,10 +97,27 @@ func assertProgressPendingReadDeadline(t *testing.T, source *os.File) {
 	requireProgressNoError(t, source.SetReadDeadline(time.Time{}))
 }
 
-func assertProgressSDKReadPending(t *testing.T, result <-chan error) {
+func assertProgressSDKReadPending(t *testing.T, result <-chan error, buffer []byte) {
 	t.Helper()
 
-	deadline := time.Now().Add(100 * time.Millisecond)
+	started := time.Now()
+	deadline := started.Add(100 * time.Millisecond)
+	queries := 0
+
+	var lastStack string
+
+	var queryStarted, queryFinished time.Time
+
+	query := func() bool {
+		queryStarted = time.Now()
+		pending, stack := progressSDKReadParked(t, buffer)
+		queryFinished = time.Now()
+		queries++
+		lastStack = stack
+
+		return pending
+	}
+
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-result:
@@ -95,13 +125,17 @@ func assertProgressSDKReadPending(t *testing.T, result <-chan error) {
 		default:
 		}
 
-		if progressSDKReadParked(t) {
+		if query() {
+			t.Logf("actual SDK read pending: elapsed=%s queries=%d query_duration=%s",
+				time.Since(started), queries, queryFinished.Sub(queryStarted))
+
 			select {
 			case err := <-result:
 				t.Fatalf("SDK pending snapshot raced completion: %v", err)
 			case <-time.After(20 * time.Millisecond):
-				if !progressSDKReadParked(t) {
-					t.Fatal("SDK read did not remain parked on its actual IOCP request")
+				if !query() {
+					t.Fatalf("SDK read did not remain parked on actual IOCP request: queries=%d result_ready=%t stack=%s",
+						queries, len(result) != 0, lastStack)
 				}
 
 				return
@@ -111,13 +145,13 @@ func assertProgressSDKReadPending(t *testing.T, result <-chan error) {
 		time.Sleep(time.Millisecond)
 	}
 
-	t.Fatal("SDK overlapped read never entered its actual IOCP wait")
+	t.Fatalf("SDK read did not enter IOCP wait: elapsed=%s queries=%d last_query=%s..%s result_ready=%t stack=%s",
+		time.Since(started), queries,
+		queryStarted.Format(time.RFC3339Nano), queryFinished.Format(time.RFC3339Nano), len(result) != 0, lastStack)
 }
 
-func progressSDKReadParked(t *testing.T) bool {
+func progressSDKReadParked(t *testing.T, buffer []byte) (bool, string) {
 	t.Helper()
-
-	buffer := make([]byte, 1<<20)
 
 	count := runtime.Stack(buffer, true)
 	if count == len(buffer) {
@@ -125,11 +159,15 @@ func progressSDKReadParked(t *testing.T) bool {
 	}
 
 	matched := 0
+	all := string(buffer[:count])
+	owned := ""
 
-	for stack := range strings.SplitSeq(string(buffer[:count]), "\n\n") {
+	for stack := range strings.SplitSeq(all, "\n\n") {
 		if !strings.Contains(stack, ".assertProgressPendingReadDeadline.func1(") {
 			continue
 		}
+
+		owned = stack
 
 		if strings.Contains(stack, "[IO wait]") && strings.Contains(stack, "internal/poll.(*FD).Read(") &&
 			strings.Contains(stack, "internal/poll.(*FD).waitIO(") {
@@ -141,5 +179,9 @@ func progressSDKReadParked(t *testing.T) bool {
 		t.Fatal("SDK pending-read stack matched more than the owned read goroutine")
 	}
 
-	return matched == 1
+	if owned == "" {
+		owned = all
+	}
+
+	return matched == 1, owned
 }

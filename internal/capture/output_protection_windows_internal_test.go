@@ -74,7 +74,7 @@ func TestWindowsUnresolvableProtectedDeviceLinkRefusesReportAndRetainsClaims(t *
 	}
 
 	var source *SourceError
-	if !errors.As(err, &source) || source.Path != output || source.Operation != "identify output" {
+	if !errors.As(err, &source) || source.Path != output || source.Operation != "identify "+RoleOutput.String() {
 		t.Fatalf("failed protected observation lost its path or operation: %v", err)
 	}
 }

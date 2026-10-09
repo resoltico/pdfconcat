@@ -17,6 +17,7 @@ func TestRequestedProgressIsSchemaValidNDJSONSeparateFromFinalResult(t *testing.
 	writePDFs(t, dir, 1, "a")
 	schema := schemaFromExecutable(t, dir, "response")
 	observed := run(t, dir, "", commandCheck, "--progress=json", fileA, flagBlank)
+	t.Logf("complete observed progress stderr: %q", observed.stderr)
 	requireExit(t, observed, 0)
 	validateContract(t, schema, observed.stdout)
 	lines := strings.Split(strings.TrimSpace(observed.stderr), "\n")

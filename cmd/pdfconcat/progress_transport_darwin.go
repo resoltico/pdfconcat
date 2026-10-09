@@ -178,28 +178,33 @@ func (transport *progressTransport) writeInterruptiblePipe(ctx context.Context, 
 	case err := <-result:
 		return true, err
 	case <-ctx.Done():
-		select {
-		case err := <-result:
-			return true, err
-		default:
-		}
-
-		// Retiring the descriptor makes every later record unavailable, even if
-		// this completed native write raced its result notification with cancellation.
-		transport.poison()
-		interruptErr := interruptProgressPipe(transport.fd, transport.guard)
-
-		joinedErr := <-result // Join native write before releasing the reserved descriptor slot.
-
-		transport.closeDescriptor()
-
-		retirementErr := errors.Join(interruptErr, transport.closeErr)
-		if joinedErr == nil {
-			return true, retirementErr
-		}
-
-		return true, errors.Join(fmt.Errorf("interrupt progress write: %w", ctx.Err()), joinedErr, retirementErr)
+		return transport.retireInterruptiblePipe(ctx, result)
 	}
+}
+
+// retireInterruptiblePipe accepts a completed native result before retiring a still-pending writer.
+func (transport *progressTransport) retireInterruptiblePipe(ctx context.Context, result <-chan error) (bool, error) {
+	select {
+	case err := <-result:
+		return true, err
+	default:
+	}
+
+	// Retiring the descriptor makes every later record unavailable, even if
+	// this completed native write raced its result notification with cancellation.
+	transport.poison()
+	interruptErr := interruptProgressPipe(transport.fd, transport.guard)
+
+	joinedErr := <-result // Join native write before releasing the reserved descriptor slot.
+
+	transport.closeDescriptor()
+
+	retirementErr := errors.Join(interruptErr, transport.closeErr)
+	if joinedErr == nil {
+		return true, retirementErr
+	}
+
+	return true, errors.Join(fmt.Errorf("interrupt progress write: %w", ctx.Err()), joinedErr, retirementErr)
 }
 
 func (transport *progressTransport) writeNativeRecord(ctx context.Context, record []byte) (bool, error) {

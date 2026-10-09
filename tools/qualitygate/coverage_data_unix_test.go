@@ -30,3 +30,32 @@ func TestExecutableCoverageRejectsSymbolicLinkInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutableCoverageMetadataReconciliationRejectsSymbolicLinks(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"temporary", "canonical"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			pair := realCoverageMetadataPair(t)
+
+			path, target := pair.temporary, pair.canonical
+			if name == "canonical" {
+				path, target = target, path
+			}
+
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+
+			if inputs, err := executableCoverageInputs(pair.directory); err == nil {
+				t.Fatalf("symbolic metadata alias reconciled: %s/%v", name, inputs)
+			}
+		})
+	}
+}

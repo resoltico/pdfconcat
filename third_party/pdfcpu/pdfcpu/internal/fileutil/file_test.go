@@ -20,7 +20,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"testing"
 )
@@ -191,22 +190,12 @@ func TestWriteFilePublicationFailureCleansStaging(t *testing.T) {
 
 // TestWriteFileUnwritableDirectory verifies a real permission failure preserves the destination without staging debris.
 func TestWriteFileUnwritableDirectory(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("requires Unix directory permissions enforced for a non-root user")
-	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")
 	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := os.Chmod(dir, 0700); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := os.Chmod(dir, 0500); err != nil {
-		t.Fatal(err)
-	}
+	denyFileCreation(t, dir)
 	if err := WriteFile(path, []byte("replacement"), 0600); !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("expected permission error, got %v", err)
 	}

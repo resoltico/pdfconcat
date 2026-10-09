@@ -4,11 +4,14 @@
 package main_test
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/resoltico/pdfconcat/internal/report"
 )
@@ -19,6 +22,8 @@ type agentSession struct {
 	dir   string
 	items []any
 }
+
+const largeGoodReport = "good.report.json"
 
 // TestAgentWorkflowFromGeneratedPlanToQueriedPublication follows the loop an agent runs: generate a plan,
 // check and save the report, fetch exactly the failing locations, edit the plan, check again, build, and
@@ -193,31 +198,29 @@ func pointersOf(tb testing.TB, res result) []string {
 
 // TestOutputStaysBoundedOnLargeJobs checks the agent-facing economy on a 10,000-entry job: the success
 // summary is under 2 KiB, a failure summary does not grow with the number of problems, and paged
-// queries stay within their byte bound.
+// queries stay within their byte bound. Repeated uses of one PDF preserve the receipt volume;
+// distinct physical-source capacity belongs to the independent scale acceptance fixtures.
 func TestOutputStaysBoundedOnLargeJobs(t *testing.T) {
 	t.Parallel()
 
-	const sources = 5000
+	const occurrences = 5000
 
 	dir := tempDir(t)
+	writePDFsAt(t, filepath.Join(dir, "shared-source.pdf"), "repeated source occurrence")
 
-	for index := range sources {
-		writePDFsAt(t, filepath.Join(dir, "src", fmt.Sprintf("%05d.pdf", index)), fmt.Sprintf("s%d", index))
-	}
+	good := make([]any, 0, 2*occurrences)
+	bad := make([]any, 0, 2*occurrences)
 
-	good := make([]any, 0, 2*sources)
-	bad := make([]any, 0, 2*sources)
-
-	for index := range sources {
+	for index := range occurrences {
 		blank := obj{keyBlank: obj{keyText: obj{keyValue: fmt.Sprintf("Section %d", index)}}}
-		good = append(good, fmt.Sprintf("src/%05d.pdf", index), blank)
+		good = append(good, "shared-source.pdf", blank)
 		bad = append(bad, fmt.Sprintf("absent/%05d.pdf", index), blank)
 	}
 
 	writeFile(t, dir, "good.json", planJSON(t, itemsOf(good...)))
 	writeFile(t, dir, fileBadPlan, planJSON(t, itemsOf(bad...)))
 
-	checked := run(t, dir, "", commandCheck, flagPlan, "good.json", flagReport, "good.report.json")
+	checked := runMeasuredLargeCheck(t, dir, "good.json", largeGoodReport)
 	requireExit(t, checked, 0)
 
 	if len(checked.stdout) >= 2048 {
@@ -226,26 +229,70 @@ func TestOutputStaysBoundedOnLargeJobs(t *testing.T) {
 
 	t.Logf("success summary of a 10,000-entry job: %d bytes", len(checked.stdout))
 
-	if parsed := summaryOf(t, checked); parsed.PartCount != 2*sources || *parsed.Counts.Total != 2*sources {
+	if parsed := summaryOf(t, checked); parsed.PartCount != 2*occurrences || *parsed.Counts.Total != 2*occurrences {
 		t.Errorf(summaryFailureFormat, parsed)
 	}
 
-	failed := run(t, dir, "", commandCheck, flagPlan, fileBadPlan, flagReport, "bad.report.json", jobsFlag, "4")
+	requireLargeSummaryContrast(t, dir)
+
+	failed := runMeasuredLargeCheck(t, dir, fileBadPlan, "bad.report.json", jobsFlag, "4")
 	requireExit(t, failed, 1)
 
 	parsed := summaryOf(t, failed)
-	if parsed.DiagnosticCount != sources || len(parsed.Diagnostics) > 5 || len(failed.stdout) > 2048 {
+	if parsed.DiagnosticCount != occurrences || len(parsed.Diagnostics) > 5 || !compactLargeOutput(failed.stdout) {
 		t.Errorf("failure summary: %d diagnostics, %d shown, %d bytes", parsed.DiagnosticCount, len(parsed.Diagnostics), len(failed.stdout))
 	}
 
-	if seen := pagedDiagnostics(t, dir, "bad.report.json", sources); seen != sources {
-		t.Errorf("paging saw %d of %d diagnostics", seen, sources)
+	if seen := pagedDiagnostics(t, dir, "bad.report.json", occurrences); seen != occurrences {
+		t.Errorf("paging saw %d of %d diagnostics", seen, occurrences)
 	}
 
-	last := generic(t, run(t, dir, "", commandReport, "good.report.json", flagPage, strconv.Itoa(2*sources)).stdout)
-	if textAt(t, last, partField, "id") != fmt.Sprintf(itemIDFormat, 2*sources-1) {
+	last := generic(t, run(t, dir, "", commandReport, largeGoodReport, flagPage, strconv.Itoa(2*occurrences)).stdout)
+	if textAt(t, last, partField, "id") != fmt.Sprintf(itemIDFormat, 2*occurrences-1) {
 		t.Errorf("last page: %v", last)
 	}
+}
+
+func compactLargeOutput(output string) bool { return len(output) <= 2048 }
+
+func requireLargeSummaryContrast(t *testing.T, dir string) {
+	t.Helper()
+
+	complete := readFile(t, filepath.Join(dir, largeGoodReport))
+	if compactLargeOutput(string(complete)) {
+		t.Fatal("complete saved report did not establish an oversized-output negative control")
+	}
+
+	details := run(t, dir, "", commandReport, largeGoodReport, flagView, viewParts, limitFlag, "100", flagDetails)
+	requireExit(t, details, 0)
+
+	if compactLargeOutput(details.stdout) {
+		t.Fatal("expanded report query did not establish an oversized-output negative control")
+	}
+
+	t.Logf("oversized-output controls rejected: saved report=%d bytes, actual expanded query=%d bytes", len(complete), len(details.stdout))
+}
+
+func runMeasuredLargeCheck(t *testing.T, dir, plan, reportPath string, options ...string) result {
+	t.Helper()
+
+	path := binary(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), commandTimeout)
+	defer cancel()
+
+	args := append([]string{commandCheck, flagPlan, plan, flagReport, reportPath}, options...)
+	command := prepareCommand(ctx, t, dir, path, args...)
+
+	var stdout, stderr bytes.Buffer
+
+	command.Stdout, command.Stderr = &stdout, &stderr
+	started := time.Now()
+	runErr := command.Run()
+	t.Logf("large check %s: elapsed=%s context=%v run_error=%v process=%v", plan,
+		time.Since(started), ctx.Err(), runErr, command.ProcessState)
+
+	return outcome(t, runErr, &stdout, &stderr, tempOf(command))
 }
 
 // pagedDiagnostics reads every diagnostic of a saved report in pages of 100, checks each page against the byte

@@ -104,6 +104,12 @@ func start(tb testing.TB, dir string, args ...string) *exec.Cmd {
 	ctx, cancel := context.WithTimeout(tb.Context(), commandTimeout)
 	tb.Cleanup(cancel)
 
+	return prepareCommand(ctx, tb, dir, path, args...)
+}
+
+func prepareCommand(ctx context.Context, tb testing.TB, dir, path string, args ...string) *exec.Cmd {
+	tb.Helper()
+
 	command := exectest.Command(ctx, path, args...)
 	command.Dir = dir
 

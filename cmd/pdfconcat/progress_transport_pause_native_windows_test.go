@@ -20,22 +20,54 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type progressThreadObserver struct {
+	query  *windows.LazyProc
+	thread windows.Handle
+}
+
 var errProgressRawConsoleIncomplete = errors.New("independent native console write was incomplete")
 
-func observeProgressNativeThread(t *testing.T, threadID uint32) windows.Handle {
+func prepareProgressPendingQuery(t *testing.T) *windows.LazyProc {
+	t.Helper()
+
+	procedure := windows.NewLazySystemDLL(progressWindowsKernel).NewProc("GetThreadIOPendingFlag")
+	requireProgressNoError(t, procedure.Find())
+
+	return procedure
+}
+
+func observeProgressNativeThread(t *testing.T, threadID uint32) *progressThreadObserver {
 	t.Helper()
 
 	handle, err := windows.OpenThread(windows.THREAD_QUERY_INFORMATION, false, threadID)
 	requireProgressNoError(t, err)
 	t.Cleanup(func() { requireProgressNoError(t, windows.CloseHandle(handle)) })
 
-	return handle
+	return &progressThreadObserver{thread: handle, query: prepareProgressPendingQuery(t)}
 }
 
-func assertProgressNativePending(t *testing.T, thread windows.Handle, result <-chan error) {
+func assertProgressNativePending(t *testing.T, observer *progressThreadObserver, result <-chan error) {
 	t.Helper()
 
-	deadline := time.Now().Add(100 * time.Millisecond)
+	started := time.Now()
+	deadline := started.Add(100 * time.Millisecond)
+	queries, pendingSamples := 0, 0
+
+	var queryStarted, queryFinished time.Time
+
+	query := func() bool {
+		queryStarted = time.Now()
+		pending := progressThreadIOPending(t, observer)
+		queryFinished = time.Now()
+		queries++
+
+		if pending {
+			pendingSamples++
+		}
+
+		return pending
+	}
+
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-result:
@@ -43,12 +75,15 @@ func assertProgressNativePending(t *testing.T, thread windows.Handle, result <-c
 		default:
 		}
 
-		if progressThreadIOPending(t, thread) {
+		if query() {
+			t.Logf("actual native pending: elapsed=%s queries=%d query_duration=%s",
+				time.Since(started), queries, queryFinished.Sub(queryStarted))
+
 			select {
 			case err := <-result:
 				t.Fatalf("native pending snapshot raced completion: %v", err)
 			case <-time.After(20 * time.Millisecond):
-				if !progressThreadIOPending(t, thread) {
+				if !query() {
 					t.Fatal("console pending I/O did not remain held")
 				}
 
@@ -59,10 +94,12 @@ func assertProgressNativePending(t *testing.T, thread windows.Handle, result <-c
 		time.Sleep(time.Millisecond)
 	}
 
-	t.Fatal("Pause fixture never established actual native pending I/O before the transport deadline")
+	t.Fatalf("native pending not established: elapsed=%s queries=%d pending_samples=%d last_query=%s..%s result_ready=%t",
+		time.Since(started), queries, pendingSamples,
+		queryStarted.Format(time.RFC3339Nano), queryFinished.Format(time.RFC3339Nano), len(result) != 0)
 }
 
-func progressThreadIOPending(t *testing.T, thread windows.Handle) bool {
+func progressThreadIOPending(t *testing.T, observer *progressThreadObserver) bool {
 	t.Helper()
 
 	var pending int32
@@ -72,7 +109,7 @@ func progressThreadIOPending(t *testing.T, thread windows.Handle) bool {
 	pin.Pin(&pending)
 	defer pin.Unpin()
 
-	procedure := windows.NewLazySystemDLL(progressWindowsKernel).NewProc("GetThreadIOPendingFlag")
+	thread, procedure := observer.thread, observer.query
 	queried, _, queryErr := procedure.Call(uintptr(thread), uintptr(unsafe.Pointer(&pending)))
 	runtime.KeepAlive(&pending)
 
@@ -83,8 +120,9 @@ func progressThreadIOPending(t *testing.T, thread windows.Handle) bool {
 	return pending != 0
 }
 
-func startProgressConsoleNativeWrite(t *testing.T, file *os.File, text string) (windows.Handle, <-chan error, <-chan struct{}) {
+func startProgressConsoleNativeWrite(t *testing.T, file *os.File, text string) (*progressThreadObserver, <-chan error, <-chan struct{}) {
 	t.Helper()
+	query := prepareProgressPendingQuery(t)
 
 	ready := make(chan windows.Handle, 1)
 	result := make(chan error, 1)
@@ -126,7 +164,7 @@ func startProgressConsoleNativeWrite(t *testing.T, file *os.File, text string) (
 		requireProgressNoError(t, windows.CloseHandle(thread))
 	})
 
-	return thread, result, stopped
+	return &progressThreadObserver{thread: thread, query: query}, result, stopped
 }
 
 func writeIndependentProgressConsole(t *testing.T, handle windows.Handle, units []uint16) error {
@@ -172,7 +210,7 @@ func assertProgressRawConsoleBoundary(t *testing.T, fixture *progressConsolePaus
 	assertProgressNativePending(t, thread, result)
 
 	if scenario == progressNativeCancelScenario {
-		assertProgressNativeConsoleAbort(t, thread, result)
+		assertProgressNativeConsoleAbort(t, thread.thread, result)
 		<-stopped
 		assertProgressJoinedConsoleCallerAccess(t, fixture)
 

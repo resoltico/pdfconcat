@@ -1,15 +1,19 @@
+diff --git a/.gitignore b/.gitignore
+index 7cac853..d47b07b 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -2,4 +2,5 @@
+@@ -2,4 +2,5 @@ reader/test/*
  apidemo/test/*
  reader/profile/*
  contentstream/test/*.pdf
 +!contentstream/test/kerning.pdf
  parser/test/inline_images.pdf
 \ No newline at end of file
+diff --git a/contentstream/appearance_test.go b/contentstream/appearance_test.go
+index 9abae28..05e77f9 100644
 --- a/contentstream/appearance_test.go
 +++ b/contentstream/appearance_test.go
-@@ -2,6 +2,7 @@
+@@ -2,6 +2,7 @@ package contentstream
  
  import (
  	"fmt"
@@ -17,7 +21,7 @@
  	"testing"
  
  	"github.com/benoitkugler/pdf/fonts"
-@@ -49,7 +50,7 @@
+@@ -49,7 +50,7 @@ func TestKerning(t *testing.T) {
  	doc.Catalog.Pages.Kids = []model.PageNode{
  		a.toPageObject(),
  	}
@@ -26,7 +30,7 @@
  	if err != nil {
  		t.Fatal(err)
  	}
-@@ -74,7 +75,7 @@
+@@ -74,7 +75,7 @@ func TestImages(t *testing.T) {
  		doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  	}
  
@@ -35,7 +39,7 @@
  	if err != nil {
  		t.Fatal(err)
  	}
-@@ -95,7 +96,7 @@
+@@ -95,7 +96,7 @@ func TestRoundedRect(t *testing.T) {
  
  	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  
@@ -44,6 +48,8 @@
  	if err != nil {
  		t.Fatal(err)
  	}
+diff --git a/contentstream/gradients_test.go b/contentstream/gradients_test.go
+index 8bf38c0..f8153ce 100644
 --- a/contentstream/gradients_test.go
 +++ b/contentstream/gradients_test.go
 @@ -1,6 +1,7 @@
@@ -54,7 +60,7 @@
  	"testing"
  
  	"github.com/benoitkugler/pdf/model"
-@@ -45,7 +46,7 @@
+@@ -45,7 +46,7 @@ func TestGradient(t *testing.T) {
  
  	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  
@@ -63,7 +69,7 @@
  	if err != nil {
  		t.Fatal(err)
  	}
-@@ -104,7 +105,7 @@
+@@ -104,7 +105,7 @@ func TestGradientTransform(t *testing.T) {
  
  	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  
@@ -72,7 +78,7 @@
  	if err != nil {
  		t.Fatal(err)
  	}
-@@ -143,7 +144,7 @@
+@@ -143,7 +144,7 @@ func TestMultiGradient(t *testing.T) {
  
  	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  
@@ -81,7 +87,7 @@
  	if err != nil {
  		t.Fatal(err)
  	}
-@@ -209,7 +210,7 @@
+@@ -209,7 +210,7 @@ func TestGradientOpacity(t *testing.T) {
  
  	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  
@@ -90,23 +96,20 @@
  	if err != nil {
  		t.Fatal(err)
  	}
-@@ -228,8 +229,8 @@
+@@ -228,7 +229,7 @@ func TestOpacity(t *testing.T) {
  
  	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
  
 -	err := doc.WriteFile("/tmp/opa.pdf", nil)
--	if err != nil {
--		t.Fatal(err)
--	}
--}
 +	err := doc.WriteFile(filepath.Join(t.TempDir(), "opa.pdf"), nil)
-+	if err != nil {
-+		t.Fatal(err)
-+	}
-+}
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/model/encryption_test.go b/model/encryption_test.go
+index 9f9ba61..b04bc2d 100644
 --- a/model/encryption_test.go
 +++ b/model/encryption_test.go
-@@ -4,6 +4,7 @@
+@@ -4,6 +4,7 @@ import (
  	"bytes"
  	"crypto/rc4"
  	"os"
@@ -114,7 +117,7 @@
  	"strings"
  	"testing"
  
-@@ -30,6 +31,7 @@
+@@ -30,6 +31,7 @@ func TestRC4Basic(t *testing.T) {
  		{Stream: mo.Stream{Content: []byte(strings.Repeat("dlmskd", 10))}},
  	}}}
  	up, op := "dlà&#mks", "elmzk89.ek"
@@ -122,7 +125,7 @@
  	for _, v := range [...]mo.EncryptionAlgorithm{mo.EaRC440, mo.EaRC4Ext} {
  		for _, p := range [...]mo.UserPermissions{
  			mo.PermissionPrint,
-@@ -43,7 +45,7 @@
+@@ -43,7 +45,7 @@ func TestRC4Basic(t *testing.T) {
  		} {
  			enc := mo.Encrypt{V: v, P: p}
  			enc = doc.UseStandardEncryptionHandler(enc, op, up, true)
@@ -131,7 +134,7 @@
  			if err != nil {
  				t.Fatal(err)
  			}
-@@ -53,19 +55,19 @@
+@@ -53,19 +55,19 @@ func TestRC4Basic(t *testing.T) {
  			}
  			f.Close()
  
@@ -155,9 +158,11 @@
  			if err == nil {
  				t.Errorf("expected error")
  			}
+diff --git a/model/model_test.go b/model/model_test.go
+index 44bd2ed..79c9f93 100644
 --- a/model/model_test.go
 +++ b/model/model_test.go
-@@ -3,6 +3,7 @@
+@@ -3,6 +3,7 @@ package model
  import (
  	"bytes"
  	"os"
@@ -165,7 +170,7 @@
  	"reflect"
  	"testing"
  )
-@@ -81,7 +82,7 @@
+@@ -81,10 +82,16 @@ func TestOpenAction(t *testing.T) {
  	d.Catalog.OpenAction = Action{ActionType: ActionGoTo{D: DestinationExplicitIntern{
  		Page: p3, Location: DestinationLocationFit("Fit"),
  	}}}
@@ -174,6 +179,18 @@
  	if err != nil {
  		t.Fatal(err)
  	}
++	defer func() {
++		if err := f.Close(); err != nil {
++			t.Error(err)
++		}
++	}()
++
+ 	err = d.Write(f, nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+diff --git a/reader/parser/bounded.go b/reader/parser/bounded.go
+new file mode 100644
+index 0000000..e360e6e
 --- /dev/null
 +++ b/reader/parser/bounded.go
 @@ -0,0 +1,119 @@
@@ -296,6 +313,9 @@
 +func (p *Parser) Statistics() ContentStatistics {
 +	return ContentStatistics{Tokens: p.tokens.TokenCount(), Objects: p.bounded.objects, Operations: p.bounded.operations, InlineWorkBytes: p.bounded.inlineWork}
 +}
+diff --git a/reader/parser/bounded_image.go b/reader/parser/bounded_image.go
+new file mode 100644
+index 0000000..8d255b6
 --- /dev/null
 +++ b/reader/parser/bounded_image.go
 @@ -0,0 +1,127 @@
@@ -426,6 +446,9 @@
 +	}
 +	return limit
 +}
+diff --git a/reader/parser/bounded_test.go b/reader/parser/bounded_test.go
+new file mode 100644
+index 0000000..4951b51
 --- /dev/null
 +++ b/reader/parser/bounded_test.go
 @@ -0,0 +1,182 @@
@@ -611,9 +634,11 @@
 +		t.Fatalf("checked row product: %v", err)
 +	}
 +}
+diff --git a/reader/parser/content.go b/reader/parser/content.go
+index 52c6583..695912a 100644
 --- a/reader/parser/content.go
 +++ b/reader/parser/content.go
-@@ -12,6 +12,12 @@
+@@ -12,6 +12,12 @@ import (
  // should be checked before calling with method.
  // See `ParseContent` for a convenient way of parsing a whole content stream.
  func (pr *Parser) ParseContentElement(res model.ResourcesColorSpace) (cs.Operation, error) {
@@ -626,7 +651,7 @@
  	for {
  		if pr.tokens.IsEOF() {
  			return nil, fmt.Errorf("unexpected end of content stream")
-@@ -35,6 +41,9 @@
+@@ -35,6 +41,9 @@ func (pr *Parser) ParseContentElement(res model.ResourcesColorSpace) (cs.Operati
  				// the command arguments
  				cmd, err = parseCommand(string(obj), pr.opsStack)
  				if err != nil {
@@ -636,7 +661,7 @@
  					return nil, fmt.Errorf("invalid command %s with args %v: %s", obj, pr.opsStack, err)
  				}
  			}
-@@ -42,6 +51,9 @@
+@@ -42,6 +51,9 @@ func (pr *Parser) ParseContentElement(res model.ResourcesColorSpace) (cs.Operati
  			return cmd, nil
  		default:
  			// store the object
@@ -646,9 +671,11 @@
  			pr.opsStack = append(pr.opsStack, obj)
  		}
  	}
+diff --git a/reader/parser/content_commands.go b/reader/parser/content_commands.go
+index 553d8c8..7e84d08 100644
 --- a/reader/parser/content_commands.go
 +++ b/reader/parser/content_commands.go
-@@ -24,7 +24,7 @@
+@@ -24,7 +24,7 @@ func assertOneName(stack []Object) (model.ObjName, error) {
  	}
  	name, ok := stack[0].(Name)
  	if !ok {
@@ -657,7 +684,7 @@
  	}
  	return model.ObjName(name), nil
  }
-@@ -36,7 +36,7 @@
+@@ -36,7 +36,7 @@ func assertOneString(stack []Object) (string, error) {
  	st := stack[0]
  	s, ok := model.IsString(st)
  	if !ok {
@@ -666,7 +693,7 @@
  	}
  	return s, nil
  }
-@@ -44,7 +44,7 @@
+@@ -44,7 +44,7 @@ func assertOneString(stack []Object) (string, error) {
  func assertNumber(t Object) (Fl, error) {
  	f, ok := model.IsNumber(t)
  	if !ok {
@@ -675,7 +702,7 @@
  	}
  	return f, nil
  }
-@@ -97,7 +97,7 @@
+@@ -97,7 +97,7 @@ func parsePropertyList(p Object) (cs.PropertyList, error) {
  		}
  		return cs.PropertyListDict(p), nil
  	default:
@@ -684,7 +711,7 @@
  	}
  }
  
-@@ -108,7 +108,7 @@
+@@ -108,7 +108,7 @@ func parseTextSpaces(stack []Object) (cs.OpShowSpaceText, error) {
  	}
  	args, ok := stack[0].(Array)
  	if !ok {
@@ -693,7 +720,7 @@
  	}
  	// we "normalize" the entry by adding consecutive spaces
  	var (
-@@ -130,7 +130,7 @@
+@@ -130,7 +130,7 @@ func parseTextSpaces(stack []Object) (cs.OpShowSpaceText, error) {
  			current.SpaceSubtractedAfter += int(f)
  			last = 2
  		} else {
@@ -702,7 +729,7 @@
  		}
  	}
  	if current.CharCodes != nil || current.SpaceSubtractedAfter != 0 {
-@@ -367,7 +367,7 @@
+@@ -367,7 +367,7 @@ func parseCommand(command string, stack []Object) (cs.Operation, error) {
  		}
  		arr, ok := stack[0].(Array)
  		if !ok {
@@ -711,7 +738,7 @@
  		}
  		dash, err := assertNumbers(arr, -1)
  		if err != nil {
-@@ -509,7 +509,7 @@
+@@ -509,7 +509,7 @@ func parseCommand(command string, stack []Object) (cs.Operation, error) {
  		}
  		return cs.OpCurveTo{X1: nbs[0], Y1: nbs[1], X3: nbs[2], Y3: nbs[3]}, nil
  	default:
@@ -720,7 +747,7 @@
  	}
  }
  
-@@ -517,7 +517,7 @@
+@@ -517,7 +517,7 @@ func parseCommand(command string, stack []Object) (cs.Operation, error) {
  func checkPropertyValue(v Object) error {
  	switch v := v.(type) {
  	case nil, Command, IndirectRef, model.ObjStream:
@@ -729,9 +756,11 @@
  	case Array:
  		for _, av := range v {
  			if err := checkPropertyValue(av); err != nil {
+diff --git a/reader/parser/content_commands_test.go b/reader/parser/content_commands_test.go
+index 1aa55df..e530c89 100644
 --- a/reader/parser/content_commands_test.go
 +++ b/reader/parser/content_commands_test.go
-@@ -7,6 +7,7 @@
+@@ -7,6 +7,7 @@ import (
  	"image/jpeg"
  	"math/rand"
  	"os"
@@ -739,7 +768,7 @@
  	"reflect"
  	"testing"
  
-@@ -329,7 +330,7 @@
+@@ -329,10 +330,16 @@ func TestForgePDFInlineData(t *testing.T) {
  				Contents: []model.ContentStream{{Stream: model.Stream{Content: contentStream}}},
  			})
  	}
@@ -748,9 +777,20 @@
  	if err != nil {
  		t.Fatal(err)
  	}
++	defer func() {
++		if err := f.Close(); err != nil {
++			t.Error(err)
++		}
++	}()
++
+ 	err = doc.Write(f, nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+diff --git a/reader/parser/content_inline_image.go b/reader/parser/content_inline_image.go
+index 6905c48..92c0c6e 100644
 --- a/reader/parser/content_inline_image.go
 +++ b/reader/parser/content_inline_image.go
-@@ -64,6 +64,9 @@
+@@ -64,6 +64,9 @@ func parseOneImgField(name Name, value Object, img *contentstream.OpBeginImage)
  		if !ok {
  			return nil, nil, errBIExpressionCorrupt
  		}
@@ -760,7 +800,7 @@
  		img.Image.BitsPerComponent = uint8(i)
  	case "Width", "W":
  		i, ok := value.(Integer)
-@@ -119,7 +122,7 @@
+@@ -119,7 +122,7 @@ func parseOneImgField(name Name, value Object, img *contentstream.OpBeginImage)
  
  func processPoints(arr Array) ([][2]Fl, error) {
  	if len(arr)%2 != 0 {
@@ -769,7 +809,7 @@
  	}
  	out := make([][2]Fl, len(arr)/2)
  	for i := range out {
-@@ -267,6 +270,10 @@
+@@ -267,6 +270,10 @@ func (pr *Parser) parseImageData(img *contentstream.OpBeginImage, fils, decodePa
  		return err
  	}
  
@@ -780,7 +820,7 @@
  	// to read the binary data, there are 2 cases
  	// 	- if the data is not filtered, we use the image metadata to deduce the length
  	//	- if the data is filtered, we have to rely on the filter format End Of Data marker
-@@ -303,7 +310,7 @@
+@@ -303,7 +310,7 @@ func (pr *Parser) parseImageData(img *contentstream.OpBeginImage, fils, decodePa
  		return err
  	}
  	if o != Command("EI") {
@@ -789,6 +829,8 @@
  	}
  	return nil
  }
+diff --git a/reader/parser/filters/ascii85Decode.go b/reader/parser/filters/ascii85Decode.go
+index 5f48034..2ebdabd 100644
 --- a/reader/parser/filters/ascii85Decode.go
 +++ b/reader/parser/filters/ascii85Decode.go
 @@ -1,6 +1,8 @@
@@ -800,7 +842,7 @@
  	"io"
  )
  
-@@ -8,11 +10,82 @@
+@@ -8,11 +10,82 @@ type SkipperAscii85 struct{}
  
  const eodASCII85 = "~>"
  
@@ -887,6 +929,8 @@
 +	}
 +	return nil
 +}
+diff --git a/reader/parser/filters/asciiHexDecode.go b/reader/parser/filters/asciiHexDecode.go
+index df5fc36..229da67 100644
 --- a/reader/parser/filters/asciiHexDecode.go
 +++ b/reader/parser/filters/asciiHexDecode.go
 @@ -1,6 +1,7 @@
@@ -897,7 +941,7 @@
  	"io"
  )
  
-@@ -8,11 +9,41 @@
+@@ -8,11 +9,41 @@ type SkipperAsciiHex struct{}
  
  const eodHexDecode = '>'
  
@@ -935,7 +979,7 @@
 +			return origin.totalRead, errors.New("inline decoded byte limit exceeded")
 +		}
 +	}
- }
++}
 +func pdfFilterWhitespace(next byte) bool {
 +	switch next {
 +	case 0, 9, 10, 12, 13, 32:
@@ -943,7 +987,10 @@
 +	default:
 +		return false
 +	}
-+}
+ }
+diff --git a/reader/parser/filters/bounded.go b/reader/parser/filters/bounded.go
+new file mode 100644
+index 0000000..e9c68d7
 --- /dev/null
 +++ b/reader/parser/filters/bounded.go
 @@ -0,0 +1,121 @@
@@ -1068,9 +1115,11 @@
 +	}
 +	return nil
 +}
+diff --git a/reader/parser/filters/ccittDecode.go b/reader/parser/filters/ccittDecode.go
+index d7fd15d..4ffe757 100644
 --- a/reader/parser/filters/ccittDecode.go
 +++ b/reader/parser/filters/ccittDecode.go
-@@ -18,7 +18,7 @@
+@@ -18,7 +18,7 @@ func (f SkipperCCITT) Skip(encoded io.Reader) (int, error) {
  	if err != nil {
  		return 0, err
  	}
@@ -1079,9 +1128,11 @@
  	return r.totalRead, err
  }
  
+diff --git a/reader/parser/filters/dctDecode.go b/reader/parser/filters/dctDecode.go
+index 05995e9..b523a6e 100644
 --- a/reader/parser/filters/dctDecode.go
 +++ b/reader/parser/filters/dctDecode.go
-@@ -11,8 +11,19 @@
+@@ -11,8 +11,19 @@ type SkipperDCT struct{}
  // Skip implements Skipper for DCT filter (JPEG).
  func (d SkipperDCT) Skip(encoded io.Reader) (int, error) {
  	r := newCountReader(encoded)
@@ -1102,9 +1153,11 @@
  	return r.totalRead, err
  }
  
+diff --git a/reader/parser/filters/filters_test.go b/reader/parser/filters/filters_test.go
+index b753081..bf4311d 100644
 --- a/reader/parser/filters/filters_test.go
 +++ b/reader/parser/filters/filters_test.go
-@@ -80,7 +80,10 @@
+@@ -80,7 +80,10 @@ func TestInvalid(t *testing.T) {
  			_, _ = rand.Read(input)
  
  			// random data may actually be valid since the eod ASCIIHex is easy to get
@@ -1116,7 +1169,7 @@
  				input = bytes.ReplaceAll(input, []byte{eodHexDecode}, []byte{eodHexDecode + 1})
  			} else if fi == RunLength {
  				input = bytes.ReplaceAll(input, []byte{eodRunLength}, []byte{eodRunLength + 1})
-@@ -128,3 +131,36 @@
+@@ -128,3 +131,36 @@ func TestInvalid(t *testing.T) {
  // 		}
  // 	}
  // }
@@ -1153,9 +1206,11 @@
 +		}
 +	}
 +}
+diff --git a/reader/parser/filters/flateDecode.go b/reader/parser/filters/flateDecode.go
+index 9df83a4..7caba52 100644
 --- a/reader/parser/filters/flateDecode.go
 +++ b/reader/parser/filters/flateDecode.go
-@@ -18,7 +18,8 @@
+@@ -18,7 +18,8 @@ func (f SkipperFlate) Skip(encoded io.Reader) (int, error) {
  	if err != nil {
  		return 0, err
  	}
@@ -1165,9 +1220,11 @@
  	if err != nil {
  		return 0, err
  	}
+diff --git a/reader/parser/filters/lzwDecode.go b/reader/parser/filters/lzwDecode.go
+index d94faaa..aea3805 100644
 --- a/reader/parser/filters/lzwDecode.go
 +++ b/reader/parser/filters/lzwDecode.go
-@@ -15,7 +15,8 @@
+@@ -15,7 +15,8 @@ func (f SkipperLZW) Skip(encoded io.Reader) (int, error) {
  	r := newCountReader(encoded)
  
  	rc := lzwDecoder(f.EarlyChange, r)
@@ -1177,9 +1234,11 @@
  	if err != nil {
  		return 0, err
  	}
+diff --git a/reader/parser/filters/runLengthDecode.go b/reader/parser/filters/runLengthDecode.go
+index f057da2..3fe693a 100644
 --- a/reader/parser/filters/runLengthDecode.go
 +++ b/reader/parser/filters/runLengthDecode.go
-@@ -34,7 +34,9 @@
+@@ -34,7 +34,9 @@ func decodeRunLength(w io.ByteWriter, src io.ByteReader) error {
  				if err != nil {
  					return unexpectedEOF(err) // EOF here is an error
  				}
@@ -1190,7 +1249,7 @@
  			}
  			continue
  		}
-@@ -44,7 +46,9 @@
+@@ -44,7 +46,9 @@ func decodeRunLength(w io.ByteWriter, src io.ByteReader) error {
  			return unexpectedEOF(err) // EOF here is an error
  		}
  		for j := 0; j < c; j++ {
@@ -1201,7 +1260,7 @@
  		}
  	}
  }
-@@ -53,7 +57,15 @@
+@@ -53,7 +57,15 @@ func decodeRunLength(w io.ByteWriter, src io.ByteReader) error {
  func (f SkipperRunLength) Skip(encoded io.Reader) (int, error) {
  	// we make sure not to read passed EOD
  	r := newCountReader(encoded)
@@ -1218,9 +1277,11 @@
  	return r.totalRead, err
  }
  
+diff --git a/reader/parser/parser.go b/reader/parser/parser.go
+index 5a74d60..2f4be60 100644
 --- a/reader/parser/parser.go
 +++ b/reader/parser/parser.go
-@@ -47,6 +47,7 @@
+@@ -47,6 +47,7 @@ type Parser struct {
  	ContentStreamMode bool
  
  	opsStack []Object // only used in content stream
@@ -1228,7 +1289,7 @@
  }
  
  // NewParser uses a byte slice as input.
-@@ -69,9 +70,21 @@
+@@ -69,11 +70,23 @@ func ParseObject(data []byte) (Object, error) {
  // ParseObject read one of the (potentially) many objects
  // in the input data (See NewParser).
  func (p *Parser) ParseObject() (Object, error) {
@@ -1241,16 +1302,18 @@
  	tk, err := p.tokens.NextToken()
  	if err != nil {
  		return nil, err
-+	}
-+
+ 	}
+ 
 +	if p.bounded != nil {
 +		if err := p.bounded.token(tk); err != nil {
 +			return nil, err
 +		}
- 	}
- 
++	}
++
  	var value Object
-@@ -96,7 +109,7 @@
+ 
+ 	switch tk.Kind {
+@@ -96,7 +109,7 @@ func (p *Parser) ParseObject() (Object, error) {
  		// which will be almost always successful
  		save := p.tokens.CurrentPosition()
  		dict, err := p.parseDict(false)

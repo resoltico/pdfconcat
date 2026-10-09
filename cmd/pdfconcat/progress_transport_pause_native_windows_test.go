@@ -7,6 +7,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -111,23 +113,7 @@ func startProgressConsoleNativeWrite(t *testing.T, file *os.File, text string) (
 			return
 		}
 
-		requested := uint32(len(units))
-
-		var written uint32
-
-		var pin runtime.Pinner
-		pin.Pin(&units[0])
-		pin.Pin(&written)
-		err = windows.WriteConsole(windows.Handle(file.Fd()), &units[0], requested, &written, nil)
-
-		pin.Unpin()
-		runtime.KeepAlive(units)
-
-		if err == nil && written != requested {
-			err = errProgressRawConsoleIncomplete
-		}
-
-		result <- err
+		result <- writeIndependentProgressConsole(t, windows.Handle(file.Fd()), units)
 	}()
 
 	thread := <-ready
@@ -141,6 +127,42 @@ func startProgressConsoleNativeWrite(t *testing.T, file *os.File, text string) (
 	})
 
 	return thread, result, stopped
+}
+
+func writeIndependentProgressConsole(t *testing.T, handle windows.Handle, units []uint16) error {
+	t.Helper()
+
+	var written uint32
+
+	var pin runtime.Pinner
+	pin.Pin(&units[0])
+
+	pin.Pin(&written)
+	defer pin.Unpin()
+
+	for len(units) > 0 {
+		requested := uint32(len(units))
+		written = 0
+		err := windows.WriteConsole(handle, &units[0], requested, &written, nil)
+		runtime.KeepAlive(units)
+		t.Logf("independent WriteConsoleW requested=%d written=%d error=%v", requested, written, err)
+
+		if err != nil {
+			return fmt.Errorf("independent WriteConsoleW: %w", err)
+		}
+
+		if written == 0 {
+			return io.ErrNoProgress
+		}
+
+		if written > requested {
+			return errProgressRawConsoleIncomplete
+		}
+
+		units = units[written:]
+	}
+
+	return nil
 }
 
 func assertProgressRawConsoleBoundary(t *testing.T, fixture *progressConsolePause, scenario string) {

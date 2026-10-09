@@ -10,7 +10,7 @@
     "module_sum": "h1:FDatswON2irQJv2+02Q2ojKqoUPbwPxIbLguX4kBExM=",
     "go_mod_sum": "h1:r6/Weo/I6C80KgkJhnfbvlIygvj2sl/rWcTPWJdbfMs=",
     "patch": "third_party/benoitkugler/patches/pdf-content-limits.patch",
-    "patch_sha256": "f90210902dc93ccc3e32485846604ab1bc15860fb06a378b1eb6aac21a2df6f7",
+    "patch_sha256": "700bb5b1c0c8bb369bfa695e80f40d4a4c8e1e22d2905402aacf97af10c45cc0",
     "license": "third_party/benoitkugler/pdf/LICENSE",
     "completeness": "Go module ZIP plus exact local patch; not a full Git tree claim"
   },

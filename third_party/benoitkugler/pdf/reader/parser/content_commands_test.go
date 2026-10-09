@@ -334,6 +334,12 @@ func TestForgePDFInlineData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	err = doc.Write(f, nil)
 	if err != nil {
 		t.Fatal(err)

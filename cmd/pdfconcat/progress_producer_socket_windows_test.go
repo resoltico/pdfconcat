@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -40,7 +41,12 @@ func assertProgressSocketProducer(t *testing.T) {
 
 	file, err := client.File()
 	requireProgressNoError(t, err)
-	closeProgressResource(t, file)
+	t.Cleanup(func() {
+		// This exact duplicated file is intentionally closed below before the final socket exchange.
+		if closeErr := file.Close(); closeErr != nil && !errors.Is(closeErr, os.ErrClosed) && !errors.Is(closeErr, net.ErrClosed) {
+			t.Error(closeErr)
+		}
+	})
 	// File() itself changes SDK IOCP setup; the working baseline starts afterward.
 	assertProgressSocketExchange(t, client, peer)
 	kind, err := windows.GetFileType(progressProducerHandle(t, file))

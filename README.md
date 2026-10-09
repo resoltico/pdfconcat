@@ -12,10 +12,10 @@ Agents are the primary audience. Every command prints compact JSON on standard o
 
 ## Install
 
-Build the checked-out source with the Go toolchain required by [`go.mod`](go.mod). Published releases provide source; executable packaging is configured separately and is not evidence of a published binary:
+Build the v0.2.0 release source with the Go toolchain required by [`go.mod`](go.mod). This is a source-only release; executable packaging is configured separately and does not provide uploaded binaries:
 
 ```text
-git clone https://github.com/resoltico/pdfconcat
+git clone --branch v0.2.0 https://github.com/resoltico/pdfconcat
 cd pdfconcat
 go build -o ./bin/ ./cmd/pdfconcat
 ./bin/pdfconcat version

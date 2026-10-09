@@ -28,8 +28,24 @@ runs:
       run: |
         set -euo pipefail
         . tools/versions.env
-        choco install qpdf --yes --no-progress --version "$CHOCO_QPDF_VERSION"
-        choco install poppler --yes --no-progress --version "$CHOCO_POPPLER_VERSION"
+        install_qa_package() {
+          local package="$1" version="$2" attempt status delay
+          for attempt in 1 2 3; do
+            if choco install "$package" --yes --no-progress --version "$version"; then
+              return 0
+            else
+              status=$?
+            fi
+            printf 'Chocolatey acquisition of %s %s failed on attempt %s/3 (exit %s).\n' \
+              "$package" "$version" "$attempt" "$status" >&2
+            if [ "$attempt" -eq 3 ]; then return "$status"; fi
+            delay=$((attempt * 5))
+            printf 'Retrying acquisition in %s seconds.\n' "$delay" >&2
+            sleep "$delay"
+          done
+        }
+        install_qa_package qpdf "$CHOCO_QPDF_VERSION"
+        install_qa_package poppler "$CHOCO_POPPLER_VERSION"
         echo "C:/ProgramData/chocolatey/bin" >> "$GITHUB_PATH"
 
     - name: Verify versions

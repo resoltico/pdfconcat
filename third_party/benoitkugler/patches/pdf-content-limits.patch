@@ -1,0 +1,1261 @@
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,4 +2,5 @@
+ apidemo/test/*
+ reader/profile/*
+ contentstream/test/*.pdf
++!contentstream/test/kerning.pdf
+ parser/test/inline_images.pdf
+\ No newline at end of file
+--- a/contentstream/appearance_test.go
++++ b/contentstream/appearance_test.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"fmt"
++	"path/filepath"
+ 	"testing"
+ 
+ 	"github.com/benoitkugler/pdf/fonts"
+@@ -49,7 +50,7 @@
+ 	doc.Catalog.Pages.Kids = []model.PageNode{
+ 		a.toPageObject(),
+ 	}
+-	err = doc.WriteFile("test/kerning.pdf", nil)
++	err = doc.WriteFile(filepath.Join(t.TempDir(), "kerning.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -74,7 +75,7 @@
+ 		doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 	}
+ 
+-	err := doc.WriteFile("test/images.pdf", nil)
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "images.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -95,7 +96,7 @@
+ 
+ 	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 
+-	err := doc.WriteFile("test/rectangles.pdf", nil)
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "rectangles.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+--- a/contentstream/gradients_test.go
++++ b/contentstream/gradients_test.go
+@@ -1,6 +1,7 @@
+ package contentstream
+ 
+ import (
++	"path/filepath"
+ 	"testing"
+ 
+ 	"github.com/benoitkugler/pdf/model"
+@@ -45,7 +46,7 @@
+ 
+ 	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 
+-	err := doc.WriteFile("test/gradients.pdf", nil)
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "gradients.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -104,7 +105,7 @@
+ 
+ 	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 
+-	err := doc.WriteFile("test/gradient_transform.pdf", nil)
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "gradient_transform.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -143,7 +144,7 @@
+ 
+ 	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 
+-	err := doc.WriteFile("test/gradient_multi.pdf", nil)
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "gradient_multi.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -209,7 +210,7 @@
+ 
+ 	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 
+-	err := doc.WriteFile("test/gradient_opacity.pdf", nil)
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "gradient_opacity.pdf"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -228,8 +229,8 @@
+ 
+ 	doc.Catalog.Pages.Kids = append(doc.Catalog.Pages.Kids, a.toPageObject())
+ 
+-	err := doc.WriteFile("/tmp/opa.pdf", nil)
+-	if err != nil {
+-		t.Fatal(err)
+-	}
+-}
++	err := doc.WriteFile(filepath.Join(t.TempDir(), "opa.pdf"), nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++}
+--- a/model/encryption_test.go
++++ b/model/encryption_test.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"crypto/rc4"
+ 	"os"
++	"path/filepath"
+ 	"strings"
+ 	"testing"
+ 
+@@ -30,6 +31,7 @@
+ 		{Stream: mo.Stream{Content: []byte(strings.Repeat("dlmskd", 10))}},
+ 	}}}
+ 	up, op := "dlà&#mks", "elmzk89.ek"
++	outputPath := filepath.Join(t.TempDir(), "rc4.pdf")
+ 	for _, v := range [...]mo.EncryptionAlgorithm{mo.EaRC440, mo.EaRC4Ext} {
+ 		for _, p := range [...]mo.UserPermissions{
+ 			mo.PermissionPrint,
+@@ -43,7 +45,7 @@
+ 		} {
+ 			enc := mo.Encrypt{V: v, P: p}
+ 			enc = doc.UseStandardEncryptionHandler(enc, op, up, true)
+-			f, err := os.Create("test/rc4.pdf")
++			f, err := os.Create(outputPath)
+ 			if err != nil {
+ 				t.Fatal(err)
+ 			}
+@@ -53,19 +55,19 @@
+ 			}
+ 			f.Close()
+ 
+-			_, err = file.ReadFile("test/rc4.pdf", &file.Configuration{Password: up})
++			_, err = file.ReadFile(outputPath, &file.Configuration{Password: up})
+ 			if err != nil {
+ 				t.Error(err)
+ 			}
+-			_, err = file.ReadFile("test/rc4.pdf", &file.Configuration{Password: op})
++			_, err = file.ReadFile(outputPath, &file.Configuration{Password: op})
+ 			if err != nil {
+ 				t.Error(err)
+ 			}
+-			_, err = file.ReadFile("test/rc4.pdf", &file.Configuration{Password: op + "4"})
++			_, err = file.ReadFile(outputPath, &file.Configuration{Password: op + "4"})
+ 			if err == nil {
+ 				t.Errorf("expected error")
+ 			}
+-			_, err = file.ReadFile("test/rc4.pdf", &file.Configuration{Password: up + "4"})
++			_, err = file.ReadFile(outputPath, &file.Configuration{Password: up + "4"})
+ 			if err == nil {
+ 				t.Errorf("expected error")
+ 			}
+--- a/model/model_test.go
++++ b/model/model_test.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"bytes"
+ 	"os"
++	"path/filepath"
+ 	"reflect"
+ 	"testing"
+ )
+@@ -81,7 +82,7 @@
+ 	d.Catalog.OpenAction = Action{ActionType: ActionGoTo{D: DestinationExplicitIntern{
+ 		Page: p3, Location: DestinationLocationFit("Fit"),
+ 	}}}
+-	f, err := os.Create("test/open_action.pdf")
++	f, err := os.Create(filepath.Join(t.TempDir(), "open_action.pdf"))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+--- /dev/null
++++ b/reader/parser/bounded.go
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 Ervins Strauhmanis
++
++package parser
++
++import (
++	"context"
++	"errors"
++	"math"
++	"strconv"
++	"strings"
++
++	tkn "github.com/benoitkugler/pstokenizer"
++)
++
++// ContentLimits bounds incremental content parsing, including binary inline-image work.
++// Every limit is positive; callers choose finite policy limits before parsing starts.
++type ContentLimits struct {
++	InlineWorkBytes                                                        int
++	ProgramBytes, TokenBytes, Tokens, Objects, Depth, Operands, Operations int
++	InlineEncodedBytes, InlineDecodedBytes, ImageDimension, ImagePixels    int
++}
++
++// Number records an original numeric token before float32 model conversion.
++type Number struct {
++	Value      float64
++	Start, End int
++	Spelling   string
++}
++
++// ContentSpan describes the most recently parsed operation and its original numeric tokens.
++type ContentSpan struct {
++	Start, End int
++	Numbers    []Number
++	Tokens     []tkn.Token
++}
++type boundedParser struct {
++	components                 func(string) (int, error)
++	ctx                        context.Context
++	limits                     ContentLimits
++	depth, objects, operations int
++	span                       ContentSpan
++	inlineWork                 int
++}
++
++// NewBoundedContentParser preserves the maintained grammar and incrementally parses checked bytes.
++func NewBoundedContentParser(ctx context.Context, data []byte, limits ContentLimits) (*Parser, error) {
++	if limits.Objects <= 0 || limits.Depth <= 0 || limits.Operands <= 0 || limits.Operations <= 0 || limits.InlineEncodedBytes <= 0 || limits.InlineDecodedBytes <= 0 || limits.InlineWorkBytes <= 0 || limits.ImageDimension <= 0 || limits.ImagePixels <= 0 {
++		return nil, errors.New("invalid content parser limits")
++	}
++	tk, err := tkn.NewBoundedTokenizer(ctx, data, tkn.Limits{ProgramBytes: limits.ProgramBytes, TokenBytes: limits.TokenBytes, Tokens: limits.Tokens})
++	if err != nil {
++		return nil, err
++	}
++	p := NewParserFromTokenizer(tk)
++	p.ContentStreamMode = true
++	p.bounded = &boundedParser{ctx: ctx, limits: limits}
++	return p, nil
++}
++
++// IsEOF reports the maintained tokenizer's end condition. ParseContentElement still checks errors.
++func (p *Parser) IsEOF() bool { return p.tokens.IsEOF() }
++
++// Span returns original numeric spellings and positions without reserializing the program.
++func (p *Parser) Span() ContentSpan { return p.bounded.span }
++func (b *boundedParser) enter() error {
++	if err := b.ctx.Err(); err != nil {
++		return err
++	}
++	if b.depth >= b.limits.Depth {
++		return errors.New("container depth limit exceeded")
++	}
++	if b.objects >= b.limits.Objects {
++		return errors.New("object count limit exceeded")
++	}
++	b.depth++
++	b.objects++
++	return nil
++}
++func (b *boundedParser) begin(start int) error {
++	if b.operations >= b.limits.Operations {
++		return errors.New("operation count limit exceeded")
++	}
++	b.operations++
++	b.span = ContentSpan{Start: start}
++	return b.ctx.Err()
++}
++func (b *boundedParser) token(t tkn.Token) error {
++	b.span.Tokens = append(b.span.Tokens, t)
++	if t.Kind == tkn.StartProc || t.Kind == tkn.EndProc || t.Kind == tkn.CharString {
++		return errors.New("PostScript token is not PDF content")
++	}
++	if !t.IsNumber() {
++		return nil
++	}
++	spelling := strings.TrimSpace(string(t.Raw))
++	if strings.ContainsAny(spelling, "eE#") {
++		return errors.New("nondecimal numeric token is not PDF content")
++	}
++	v, err := strconv.ParseFloat(spelling, 64)
++	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
++		return errors.New("numeric token is not finite float64")
++	}
++	b.span.Numbers = append(b.span.Numbers, Number{Value: v, Start: t.Start, End: t.End, Spelling: spelling})
++	return nil
++}
++
++// SetInlineColorResolver resolves only the used inline color-space component count in the original resource scope.
++func (p *Parser) SetInlineColorResolver(resolve func(string) (int, error)) {
++	p.bounded.components = resolve
++}
++
++// ContentStatistics records measured parser work, not viewer/rasterizer work.
++type ContentStatistics struct{ Tokens, Objects, Operations, InlineWorkBytes int }
++
++// Statistics returns current measured work under the named bounds.
++func (p *Parser) Statistics() ContentStatistics {
++	return ContentStatistics{Tokens: p.tokens.TokenCount(), Objects: p.bounded.objects, Operations: p.bounded.operations, InlineWorkBytes: p.bounded.inlineWork}
++}
+--- /dev/null
++++ b/reader/parser/bounded_image.go
+@@ -0,0 +1,127 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 Ervins Strauhmanis
++
++package parser
++
++import (
++	"bytes"
++	"errors"
++	"fmt"
++	"math"
++
++	cs "github.com/benoitkugler/pdf/contentstream"
++	"github.com/benoitkugler/pdf/model"
++	"github.com/benoitkugler/pdf/reader/parser/filters"
++	tkn "github.com/benoitkugler/pstokenizer"
++)
++
++func (pr *Parser) parseBoundedImageData(img *cs.OpBeginImage, res model.ResourcesColorSpace) error {
++	switch c := img.ColorSpace.(type) {
++	case cs.ImageColorSpaceName:
++		c.ColorSpaceName = inlineCSName(c.ColorSpaceName)
++		img.ColorSpace = c
++	case cs.ImageColorSpaceIndexed:
++		c.Base = inlineCSName(c.Base)
++		img.ColorSpace = c
++	}
++	l := pr.bounded.limits
++	w, h := img.Image.Width, img.Image.Height
++	if w <= 0 || h <= 0 || w > l.ImageDimension || h > l.ImageDimension || w > l.ImagePixels/h {
++		return errors.New("inline image dimension/pixel limit exceeded")
++	}
++	comps, bits := 1, 1
++	if !img.Image.ImageMask {
++		var err error
++		if c, ok := img.ColorSpace.(cs.ImageColorSpaceName); ok && pr.bounded.components != nil {
++			comps, err = pr.bounded.components(string(c.ColorSpaceName))
++			bits = int(img.Image.BitsPerComponent)
++		} else {
++			comps, bits, err = img.Metrics(res)
++		}
++		if err != nil {
++			return fmt.Errorf("inline image color space: %w", err)
++		}
++	}
++	if len(img.Image.Decode) > 0 && len(img.Image.Decode) != 2*comps {
++		return errors.New("inline Decode component count mismatch")
++	}
++	if comps <= 0 || comps > 32 || (bits != 1 && bits != 2 && bits != 4 && bits != 8 && bits != 16) {
++		return errors.New("invalid inline image components or bits")
++	}
++	if w > (math.MaxInt-7)/comps/bits {
++		return errors.New("inline row byte arithmetic overflow")
++	}
++	row := (w*comps*bits + 7) / 8
++	if row > l.InlineDecodedBytes || h > l.InlineDecodedBytes/row {
++		return errors.New("inline image decoded byte limit exceeded")
++	}
++	separator, err := pr.tokens.SkipRawBytes(1)
++	if err != nil {
++		return err
++	}
++	if len(separator) != 1 || !tkn.IsAsciiWhitespace(separator[0]) {
++		return errors.New("inline image ID requires whitespace")
++	}
++	if separator[0] == '\r' && len(pr.tokens.Bytes()) > 0 && pr.tokens.Bytes()[0] == '\n' {
++		if _, err = pr.tokens.SkipRawBytes(1); err != nil {
++			return err
++		}
++	}
++	input := pr.tokens.Bytes()
++	n := row * h
++	discarded := 0
++	remainingWork := l.InlineWorkBytes - pr.bounded.inlineWork
++	if remainingWork <= 0 {
++		return errors.New("inline aggregate work byte limit exceeded")
++	}
++	if len(img.Image.Filter) > 0 {
++		fi := img.Image.Filter[0]
++		n, discarded, err = filters.SkipBounded(pr.bounded.ctx, string(fi.Name), fi.DecodeParms, bytes.NewReader(input), inlineRemainingLimit(l.InlineEncodedBytes, remainingWork), inlineRemainingLimit(l.InlineDecodedBytes, remainingWork), l.ImageDimension)
++		if err != nil {
++			return fmt.Errorf("inline image filter boundary: %w", err)
++		}
++	}
++	if n > remainingWork || discarded > remainingWork-n {
++		return errors.New("inline aggregate work byte limit exceeded")
++	}
++	pr.bounded.inlineWork += n + discarded
++	if n > l.InlineEncodedBytes || n > len(input) {
++		return errors.New("inline image encoded byte limit or input length exceeded")
++	}
++	if n >= len(input) || !tkn.IsAsciiWhitespace(input[n]) {
++		return errors.New("inline image EI requires preceding whitespace")
++	}
++	img.Image.Content = input[:n]
++	if _, err = pr.tokens.SkipRawBytes(n); err != nil {
++		return err
++	}
++	// The actual filter EOD (or checked unfiltered length), never a raw EI search, owns this boundary.
++	pr.tokens.SetPosition(pr.tokens.CurrentPosition())
++	o, err := pr.ParseObject()
++	if err != nil {
++		return err
++	}
++	if o != Command("EI") {
++		return errors.New("inline image EOD is not followed by EI")
++	}
++	return nil
++}
++
++func inlineCSName(n model.ColorSpaceName) model.ColorSpaceName {
++	switch n {
++	case "G":
++		return model.ColorSpaceGray
++	case "RGB":
++		return model.ColorSpaceRGB
++	case "CMYK":
++		return model.ColorSpaceCMYK
++	}
++	return n
++}
++
++func inlineRemainingLimit(limit, remaining int) int {
++	if remaining < limit {
++		return remaining
++	}
++	return limit
++}
+--- /dev/null
++++ b/reader/parser/bounded_test.go
+@@ -0,0 +1,182 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 Ervins Strauhmanis
++
++package parser
++
++import (
++	"bytes"
++	"compress/zlib"
++	"context"
++	"encoding/ascii85"
++	"math"
++	"os"
++	"strings"
++	"testing"
++
++	cs "github.com/benoitkugler/pdf/contentstream"
++	"github.com/benoitkugler/pdf/model"
++)
++
++func boundedLimits() ContentLimits {
++	return ContentLimits{ProgramBytes: 1 << 20, TokenBytes: 4096, Tokens: 4096, Objects: 4096, Depth: 16, Operands: 16, Operations: 128, InlineEncodedBytes: 4096, InlineDecodedBytes: 4096, InlineWorkBytes: 1 << 20, ImageDimension: 256, ImagePixels: 65536}
++}
++func parseBounded(t *testing.T, data []byte, limits ContentLimits) ([]cs.Operation, error) {
++	t.Helper()
++	p, err := NewBoundedContentParser(context.Background(), data, limits)
++	if err != nil {
++		return nil, err
++	}
++	var ops []cs.Operation
++	for !p.IsEOF() {
++		op, e := p.ParseContentElement(nil)
++		if e != nil {
++			return nil, e
++		}
++		ops = append(ops, op)
++	}
++	return ops, nil
++}
++func TestBoundedInlineBinaryIsNotTokenized(t *testing.T) {
++	payload := []byte(" EI BI /Self Do ")
++	data := append([]byte("BI /W 16 /H 1 /BPC 8 /CS /G ID "), payload...)
++	data = append(data, []byte(" EI /Actual Do")...)
++	ops, err := parseBounded(t, data, boundedLimits())
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(ops) != 2 || !bytes.Equal(ops[0].(cs.OpBeginImage).Image.Content, payload) || ops[1].(cs.OpXObject).XObject != "Actual" {
++		t.Fatalf("lost exact binary boundary: %#v", ops)
++	}
++}
++func TestBoundedFlateExpansionAndBoundary(t *testing.T) {
++	for _, n := range []int{4096, 4097} {
++		var encoded bytes.Buffer
++		z := zlib.NewWriter(&encoded)
++		_, _ = z.Write(bytes.Repeat([]byte{0}, n))
++		_ = z.Close()
++		data := append([]byte("BI /W 1 /H 1 /BPC 8 /CS /G /F /Fl ID "), encoded.Bytes()...)
++		data = append(data, []byte(" EI /Actual Do")...)
++		ops, err := parseBounded(t, data, boundedLimits())
++		if n == 4096 {
++			if err != nil || len(ops) != 2 {
++				t.Fatalf("exact limit: %v", err)
++			}
++		} else if err == nil || !strings.Contains(err.Error(), "decoded byte limit") {
++			t.Fatalf("limit+1 accepted: %v", err)
++		}
++	}
++}
++func TestBoundedContainerOperandsTokensAndCancellation(t *testing.T) {
++	cases := []struct {
++		name, data string
++		mutate     func(*ContentLimits)
++	}{
++		{"depth", "/Span << /K " + strings.Repeat("[", 17) + "0" + strings.Repeat("]", 17) + " >> BDC EMC", nil},
++		{"operands", strings.Repeat("1 ", 17) + " scn", nil},
++		{"token-bytes", "(" + strings.Repeat("x", 4097) + ") Tj", nil},
++		{"operations", strings.Repeat("q Q ", 65), nil},
++		{"tokens", strings.Repeat("q Q ", 50), func(l *ContentLimits) { l.Tokens = 99 }},
++		{"PostScript", "{ 1 }", nil},
++		{"overflow", "BI /W 99999999999999999999 /H 1 /BPC 8 /CS /G ID x EI", nil},
++		{"malformed-EOD", "BI /W 1 /H 1 /BPC 8 /CS /G ID x NO", nil},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			l := boundedLimits()
++			if c.mutate != nil {
++				c.mutate(&l)
++			}
++			if _, err := parseBounded(t, []byte(c.data), l); err == nil {
++				t.Fatal("negative control accepted")
++			}
++		})
++	}
++	data := []byte(strings.Repeat("% comment\n", 10000) + "q Q")
++	if _, err := parseBounded(t, data, boundedLimits()); err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if _, err := NewBoundedContentParser(ctx, data, boundedLimits()); err != context.Canceled {
++		t.Fatalf("cancelled parser: %v", err)
++	}
++}
++func TestBoundedNumericOriginalFloat64(t *testing.T) {
++	p, err := NewBoundedContentParser(context.Background(), []byte("10000000000000000000000000000000000000000 0 m"), boundedLimits())
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err = p.ParseContentElement(nil); err != nil {
++		t.Fatal(err)
++	}
++	if p.Span().Numbers[0].Value != 1e40 {
++		t.Fatalf("lost original numeric facts: %+v", p.Span())
++	}
++}
++
++func TestBoundedInlineMaintainedFilterMatrix(t *testing.T) {
++	for _, filter := range []model.Name{model.ASCII85, model.ASCIIHex, model.Flate, model.LZW, model.RunLength, model.DCT} {
++		t.Run(string(filter), func(t *testing.T) {
++			image, err := createImageStream(filter)
++			if err != nil {
++				t.Fatal(err)
++			}
++			var content bytes.Buffer
++			image.Add(&content)
++			// Upstream writer omits the required EOD/EI delimiter; construct the valid trailer explicitly.
++			program := append([]byte(nil), content.Bytes()[:content.Len()-2]...)
++			program = append(program, []byte(" EI /Actual Do")...)
++			operations, err := parseBounded(t, program, boundedLimits())
++			if err != nil {
++				t.Fatal(err)
++			}
++			if len(operations) != 2 || !bytes.Equal(operations[0].(cs.OpBeginImage).Image.Content, image.Image.Content) {
++				t.Fatal("filter EOD changed encoded bytes or hid following Do")
++			}
++		})
++	}
++	encoded, err := os.ReadFile("filters/ccitt/testdata/bw-gopher.ccitt_group3")
++	if err != nil {
++		t.Fatal(err)
++	}
++	program := append([]byte("BI /W 153 /H 55 /BPC 1 /CS /G /F /CCF /DP << /Columns 153 /Rows 55 >> ID "), encoded...)
++	program = append(program, []byte(" EI /Actual Do")...)
++	if operations, err := parseBounded(t, program, boundedLimits()); err != nil || len(operations) != 2 {
++		t.Fatalf("CCITT boundary: %v", err)
++	}
++	var compressed bytes.Buffer
++	writer := zlib.NewWriter(&compressed)
++	_, _ = writer.Write([]byte{0})
++	if err = writer.Close(); err != nil {
++		t.Fatal(err)
++	}
++	var ascii bytes.Buffer
++	encoder := ascii85.NewEncoder(&ascii)
++	_, _ = encoder.Write(compressed.Bytes())
++	if err = encoder.Close(); err != nil {
++		t.Fatal(err)
++	}
++	ascii.WriteString("~>")
++	program = append([]byte("BI /W 1 /H 1 /BPC 8 /CS /G /F [/A85 /Fl] ID "), ascii.Bytes()...)
++	program = append(program, []byte(" EI /Actual Do")...)
++	if operations, err := parseBounded(t, program, boundedLimits()); err != nil || len(operations) != 2 {
++		t.Fatalf("first-filter multifilter boundary: %v", err)
++	}
++}
++func TestBoundedInlineAggregateWorkAndRowOverflow(t *testing.T) {
++	limits := boundedLimits()
++	limits.InlineWorkBytes = 1
++	if _, err := parseBounded(t, []byte("BI /W 1 /H 1 /BPC 8 /CS /G ID x EI"), limits); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := parseBounded(t, []byte("BI /W 1 /H 1 /BPC 8 /CS /G ID x EI BI /W 1 /H 1 /BPC 8 /CS /G ID x EI"), limits); err == nil {
++		t.Fatal("aggregate work limit+1 accepted")
++	}
++	limits = boundedLimits()
++	limits.ImageDimension = math.MaxInt
++	limits.ImagePixels = math.MaxInt
++	limits.InlineDecodedBytes = math.MaxInt
++	if _, err := parseBounded(t, []byte("BI /W 1152921504606846976 /H 1 /BPC 16 /CS /RGB ID x EI"), limits); err == nil || !strings.Contains(err.Error(), "arithmetic overflow") {
++		t.Fatalf("checked row product: %v", err)
++	}
++}
+--- a/reader/parser/content.go
++++ b/reader/parser/content.go
+@@ -12,6 +12,12 @@
+ // should be checked before calling with method.
+ // See `ParseContent` for a convenient way of parsing a whole content stream.
+ func (pr *Parser) ParseContentElement(res model.ResourcesColorSpace) (cs.Operation, error) {
++	if pr.bounded != nil {
++		if err := pr.bounded.begin(pr.tokens.CurrentPosition()); err != nil {
++			return nil, err
++		}
++		defer func() { pr.bounded.span.End = pr.tokens.CurrentPosition() }()
++	}
+ 	for {
+ 		if pr.tokens.IsEOF() {
+ 			return nil, fmt.Errorf("unexpected end of content stream")
+@@ -35,6 +41,9 @@
+ 				// the command arguments
+ 				cmd, err = parseCommand(string(obj), pr.opsStack)
+ 				if err != nil {
++					if pr.bounded != nil {
++						return nil, fmt.Errorf("invalid command %.32s (%d operands)", obj, len(pr.opsStack))
++					}
+ 					return nil, fmt.Errorf("invalid command %s with args %v: %s", obj, pr.opsStack, err)
+ 				}
+ 			}
+@@ -42,6 +51,9 @@
+ 			return cmd, nil
+ 		default:
+ 			// store the object
++			if pr.bounded != nil && len(pr.opsStack) >= pr.bounded.limits.Operands {
++				return nil, fmt.Errorf("operand count limit exceeded")
++			}
+ 			pr.opsStack = append(pr.opsStack, obj)
+ 		}
+ 	}
+--- a/reader/parser/content_commands.go
++++ b/reader/parser/content_commands.go
+@@ -24,7 +24,7 @@
+ 	}
+ 	name, ok := stack[0].(Name)
+ 	if !ok {
+-		return "", fmt.Errorf("expected Name, got %v", stack[0])
++		return "", fmt.Errorf("expected Name, got %T", stack[0])
+ 	}
+ 	return model.ObjName(name), nil
+ }
+@@ -36,7 +36,7 @@
+ 	st := stack[0]
+ 	s, ok := model.IsString(st)
+ 	if !ok {
+-		return "", fmt.Errorf("expected string, got %v", st)
++		return "", fmt.Errorf("expected string, got %T", st)
+ 	}
+ 	return s, nil
+ }
+@@ -44,7 +44,7 @@
+ func assertNumber(t Object) (Fl, error) {
+ 	f, ok := model.IsNumber(t)
+ 	if !ok {
+-		return 0, fmt.Errorf("expected number, got %v", t)
++		return 0, fmt.Errorf("expected number, got %T", t)
+ 	}
+ 	return f, nil
+ }
+@@ -97,7 +97,7 @@
+ 		}
+ 		return cs.PropertyListDict(p), nil
+ 	default:
+-		return nil, fmt.Errorf("expected name or dictionary, got %v", p)
++		return nil, fmt.Errorf("expected name or dictionary, got %T", p)
+ 	}
+ }
+ 
+@@ -108,7 +108,7 @@
+ 	}
+ 	args, ok := stack[0].(Array)
+ 	if !ok {
+-		return out, fmt.Errorf("expected Array in TJ command, got %v", args)
++		return out, fmt.Errorf("expected Array in TJ command, got %T", args)
+ 	}
+ 	// we "normalize" the entry by adding consecutive spaces
+ 	var (
+@@ -130,7 +130,7 @@
+ 			current.SpaceSubtractedAfter += int(f)
+ 			last = 2
+ 		} else {
+-			return out, fmt.Errorf("invalid type in TJ array: %v %T", arg, arg)
++			return out, fmt.Errorf("invalid type in TJ array: %T %T", arg, arg)
+ 		}
+ 	}
+ 	if current.CharCodes != nil || current.SpaceSubtractedAfter != 0 {
+@@ -367,7 +367,7 @@
+ 		}
+ 		arr, ok := stack[0].(Array)
+ 		if !ok {
+-			return nil, fmt.Errorf("expected array, got %v", stack[0])
++			return nil, fmt.Errorf("expected array, got %T", stack[0])
+ 		}
+ 		dash, err := assertNumbers(arr, -1)
+ 		if err != nil {
+@@ -509,7 +509,7 @@
+ 		}
+ 		return cs.OpCurveTo{X1: nbs[0], Y1: nbs[1], X3: nbs[2], Y3: nbs[3]}, nil
+ 	default:
+-		return nil, fmt.Errorf("invalid command name %s", command)
++		return nil, fmt.Errorf("invalid command name %.32s", command)
+ 	}
+ }
+ 
+@@ -517,7 +517,7 @@
+ func checkPropertyValue(v Object) error {
+ 	switch v := v.(type) {
+ 	case nil, Command, IndirectRef, model.ObjStream:
+-		return fmt.Errorf("invalid property value %v (type %T not allowed)", v, v)
++		return fmt.Errorf("invalid property value %T (type %T not allowed)", v, v)
+ 	case Array:
+ 		for _, av := range v {
+ 			if err := checkPropertyValue(av); err != nil {
+--- a/reader/parser/content_commands_test.go
++++ b/reader/parser/content_commands_test.go
+@@ -7,6 +7,7 @@
+ 	"image/jpeg"
+ 	"math/rand"
+ 	"os"
++	"path/filepath"
+ 	"reflect"
+ 	"testing"
+ 
+@@ -329,7 +330,7 @@
+ 				Contents: []model.ContentStream{{Stream: model.Stream{Content: contentStream}}},
+ 			})
+ 	}
+-	f, err := os.Create("test/inline_images.pdf")
++	f, err := os.Create(filepath.Join(t.TempDir(), "inline_images.pdf"))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+--- a/reader/parser/content_inline_image.go
++++ b/reader/parser/content_inline_image.go
+@@ -64,6 +64,9 @@
+ 		if !ok {
+ 			return nil, nil, errBIExpressionCorrupt
+ 		}
++		if i != 1 && i != 2 && i != 4 && i != 8 && i != 16 {
++			return nil, nil, errBIExpressionCorrupt
++		}
+ 		img.Image.BitsPerComponent = uint8(i)
+ 	case "Width", "W":
+ 		i, ok := value.(Integer)
+@@ -119,7 +122,7 @@
+ 
+ func processPoints(arr Array) ([][2]Fl, error) {
+ 	if len(arr)%2 != 0 {
+-		return nil, fmt.Errorf("expected even length for array, got %v", arr)
++		return nil, fmt.Errorf("expected even length for array, got %T", arr)
+ 	}
+ 	out := make([][2]Fl, len(arr)/2)
+ 	for i := range out {
+@@ -267,6 +270,10 @@
+ 		return err
+ 	}
+ 
++	if pr.bounded != nil {
++		return pr.parseBoundedImageData(img, res)
++	}
++
+ 	// to read the binary data, there are 2 cases
+ 	// 	- if the data is not filtered, we use the image metadata to deduce the length
+ 	//	- if the data is filtered, we have to rely on the filter format End Of Data marker
+@@ -303,7 +310,7 @@
+ 		return err
+ 	}
+ 	if o != Command("EI") {
+-		return fmt.Errorf("expected end of inline image, got %v", o)
++		return fmt.Errorf("expected end of inline image, got %T", o)
+ 	}
+ 	return nil
+ }
+--- a/reader/parser/filters/ascii85Decode.go
++++ b/reader/parser/filters/ascii85Decode.go
+@@ -1,6 +1,8 @@
+ package filters
+ 
+ import (
++	"encoding/ascii85"
++	"errors"
+ 	"io"
+ )
+ 
+@@ -8,11 +10,82 @@
+ 
+ const eodASCII85 = "~>"
+ 
+-// Skip implements Skipper for an ASCII85Decode filter.
++// Skip validates the maintained ASCII85 grammar while recognizing its exact EOD.
++// The standard decoder receives only pre-EOD bytes; payload is never searched for PDF operators.
+ func (f SkipperAscii85) Skip(encoded io.Reader) (int, error) {
+-	// we make sure not to read passed EOD
+ 	origin := newCountReader(encoded)
+-	r := newReacher(origin, []byte(eodASCII85))
+-	_, err := io.ReadAll(r)
++	input := &ascii85EODReader{source: origin}
++	err := discardSkipped(ascii85.NewDecoder(input), encoded)
+ 	return origin.totalRead, err
+ }
++
++type ascii85EODReader struct {
++	source io.ByteReader
++	done   bool
++	digits int
++	value  uint64
++}
++
++func (r *ascii85EODReader) Read(p []byte) (int, error) {
++	if r.done {
++		return 0, io.EOF
++	}
++	for index := range p {
++		next, err := r.source.ReadByte()
++		if err != nil {
++			return index, unexpectedEOF(err)
++		}
++		if next == '~' {
++			end, readErr := r.source.ReadByte()
++			if readErr != nil {
++				return index, unexpectedEOF(readErr)
++			}
++			if end != '>' {
++				return index, errors.New("invalid ASCII85 EOD")
++			}
++			if r.digits == 1 {
++				return index, errors.New("invalid one-digit ASCII85 final group")
++			}
++			padded := r.value
++			if r.digits > 0 {
++				for digits := r.digits; digits < 5; digits++ {
++					padded = padded*85 + 84
++				}
++				if padded > 0xffffffff {
++					return index, errors.New("ASCII85 partial tuple exceeds 32-bit range")
++				}
++			}
++			r.done = true
++			return index, io.EOF
++		}
++		if err = r.validate(next); err != nil {
++			return index, err
++		}
++		p[index] = next
++	}
++	return len(p), nil
++}
++func (r *ascii85EODReader) validate(next byte) error {
++	if pdfFilterWhitespace(next) {
++		return nil
++	}
++	if next == 'z' {
++		if r.digits != 0 {
++			return errors.New("ASCII85 z inside a tuple")
++		}
++		return nil
++	}
++	if next < '!' || next > 'u' {
++		return errors.New("invalid ASCII85 digit")
++	}
++	r.value = r.value*85 + uint64(next-'!')
++	r.digits++
++	if r.digits == 5 {
++		if r.value > 0xffffffff {
++			return errors.New("ASCII85 tuple exceeds 32-bit range")
++		}
++		r.value = 0
++		r.digits = 0
++	}
++	return nil
++}
+--- a/reader/parser/filters/asciiHexDecode.go
++++ b/reader/parser/filters/asciiHexDecode.go
+@@ -1,6 +1,7 @@
+ package filters
+ 
+ import (
++	"errors"
+ 	"io"
+ )
+ 
+@@ -8,11 +9,41 @@
+ 
+ const eodHexDecode = '>'
+ 
+-// Skip implements Skipper for an ASCIIHexDecode filter.
++// Skip validates hexadecimal bytes through the exact EOD, allowing an odd final nibble.
+ func (f SkipperAsciiHex) Skip(encoded io.Reader) (int, error) {
+-	// we make sure not to read passed EOD
+ 	origin := newCountReader(encoded)
+-	r := newReacher(origin, []byte{eodHexDecode})
+-	_, err := io.ReadAll(r)
+-	return origin.totalRead, err
++	digits := 0
++	for {
++		next, err := origin.ReadByte()
++		if err != nil {
++			return origin.totalRead, unexpectedEOF(err)
++		}
++		if next == eodHexDecode {
++			if bounded, ok := encoded.(*boundedInput); ok {
++				bounded.discarded = (digits + 1) / 2
++				if bounded.discarded > bounded.decoded {
++					return origin.totalRead, errors.New("inline decoded byte limit exceeded")
++				}
++			}
++			return origin.totalRead, nil
++		}
++		if pdfFilterWhitespace(next) {
++			continue
++		}
++		if !(next >= '0' && next <= '9' || next >= 'a' && next <= 'f' || next >= 'A' && next <= 'F') {
++			return origin.totalRead, errors.New("invalid ASCIIHex digit")
++		}
++		digits++
++		if bounded, ok := encoded.(*boundedInput); ok && (digits+1)/2 > bounded.decoded {
++			return origin.totalRead, errors.New("inline decoded byte limit exceeded")
++		}
++	}
+ }
++func pdfFilterWhitespace(next byte) bool {
++	switch next {
++	case 0, 9, 10, 12, 13, 32:
++		return true
++	default:
++		return false
++	}
++}
+--- /dev/null
++++ b/reader/parser/filters/bounded.go
+@@ -0,0 +1,121 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 Ervins Strauhmanis
++
++package filters
++
++import (
++	"context"
++	"errors"
++	"io"
++)
++
++// SkipBounded delegates EOD recognition to the maintained filter skipper while bounding
++// encoded consumption, decoded discard work, decoder allocations and cancellation.
++func SkipBounded(ctx context.Context, name string, params map[string]int, src io.Reader, encodedLimit, decodedLimit, dimensionLimit int) (int, int, error) {
++	if ctx == nil || encodedLimit <= 0 || decodedLimit <= 0 || dimensionLimit <= 0 {
++		return 0, 0, errors.New("invalid inline filter limits")
++	}
++	switch name {
++	case "AHx":
++		name = ASCIIHex
++	case "A85":
++		name = ASCII85
++	case "LZW":
++		name = LZW
++	case "Fl":
++		name = Flate
++	case "RL":
++		name = RunLength
++	case "CCF":
++		name = CCITTFax
++	case "DCT":
++		name = DCT
++	}
++	if name == CCITTFax {
++		columns := 1728
++		if n, ok := params["Columns"]; ok {
++			columns = n
++		}
++		rows := params["Rows"]
++		if columns <= 0 || columns > dimensionLimit || rows < 0 || rows > dimensionLimit {
++			return 0, 0, errors.New("CCITT dimension limit exceeded")
++		}
++	}
++	s, err := SkipperFromFilter(name, params)
++	if err != nil {
++		return 0, 0, err
++	}
++	input := &boundedInput{ctx: ctx, src: src, remaining: encodedLimit, decoded: decodedLimit}
++	encoded, err := s.Skip(input)
++	return encoded, input.discarded, err
++}
++
++type boundedInput struct {
++	ctx                context.Context
++	src                io.Reader
++	remaining, decoded int
++	discarded          int
++}
++
++func (r *boundedInput) Read(p []byte) (int, error) {
++	if err := r.ctx.Err(); err != nil {
++		return 0, err
++	}
++	if r.remaining <= 0 {
++		return 0, errors.New("inline encoded byte limit exceeded")
++	}
++	if len(p) > 1024 {
++		p = p[:1024]
++	}
++	if len(p) > r.remaining {
++		p = p[:r.remaining]
++	}
++	n, err := r.src.Read(p)
++	r.remaining -= n
++	return n, err
++}
++func discardSkipped(decoded io.Reader, encoded io.Reader) error {
++	if bounded, ok := encoded.(*boundedInput); ok {
++		n, err := io.Copy(io.Discard, io.LimitReader(&cancelReader{ctx: bounded.ctx, src: decoded}, int64(bounded.decoded)+1))
++		bounded.discarded = int(n)
++		if err != nil {
++			return err
++		}
++		if n > int64(bounded.decoded) {
++			return errors.New("inline decoded byte limit exceeded")
++		}
++		return nil
++	}
++	_, err := io.Copy(io.Discard, decoded)
++	return err
++}
++
++type cancelReader struct {
++	ctx context.Context
++	src io.Reader
++}
++
++func (r *cancelReader) Read(p []byte) (int, error) {
++	if err := r.ctx.Err(); err != nil {
++		return 0, err
++	}
++	if len(p) > 1024 {
++		p = p[:1024]
++	}
++	return r.src.Read(p)
++}
++
++type discardByteWriter struct {
++	remaining int
++	bounded   bool
++}
++
++func (w *discardByteWriter) WriteByte(byte) error {
++	if w.bounded {
++		if w.remaining <= 0 {
++			return errors.New("inline decoded byte limit exceeded")
++		}
++		w.remaining--
++	}
++	return nil
++}
+--- a/reader/parser/filters/ccittDecode.go
++++ b/reader/parser/filters/ccittDecode.go
+@@ -18,7 +18,7 @@
+ 	if err != nil {
+ 		return 0, err
+ 	}
+-	_, err = io.ReadAll(rc)
++	err = discardSkipped(rc, encoded)
+ 	return r.totalRead, err
+ }
+ 
+--- a/reader/parser/filters/dctDecode.go
++++ b/reader/parser/filters/dctDecode.go
+@@ -11,8 +11,19 @@
+ // Skip implements Skipper for DCT filter (JPEG).
+ func (d SkipperDCT) Skip(encoded io.Reader) (int, error) {
+ 	r := newCountReader(encoded)
++	first, err := r.ReadByte()
++	if err != nil {
++		return 0, unexpectedEOF(err)
++	}
++	second, err := r.ReadByte()
++	if err != nil {
++		return 0, unexpectedEOF(err)
++	}
++	if first != 0xff || second != 0xd8 {
++		return 0, errors.New("JPEG inline data requires SOI marker")
++	}
+ 	re := &jpegLimitedReader{source: r, scratch: &bytes.Buffer{}}
+-	_, err := io.ReadAll(re)
++	err = discardSkipped(re, encoded)
+ 	return r.totalRead, err
+ }
+ 
+--- a/reader/parser/filters/filters_test.go
++++ b/reader/parser/filters/filters_test.go
+@@ -80,7 +80,10 @@
+ 			_, _ = rand.Read(input)
+ 
+ 			// random data may actually be valid since the eod ASCIIHex is easy to get
+-			if fi == ASCIIHex {
++			if fi == ASCII85 {
++				// A random prefix can be a valid empty ASCII85 stream (~>); guarantee malformed grammar.
++				input[0] = 0xff
++			} else if fi == ASCIIHex {
+ 				input = bytes.ReplaceAll(input, []byte{eodHexDecode}, []byte{eodHexDecode + 1})
+ 			} else if fi == RunLength {
+ 				input = bytes.ReplaceAll(input, []byte{eodRunLength}, []byte{eodRunLength + 1})
+@@ -128,3 +131,36 @@
+ // 		}
+ // 	}
+ // }
++
++func TestASCII85CapturedInvalidPrefixBeforeEOD(t *testing.T) {
++	// Captured native failure contains a real ~> marker but no valid ASCII85 prefix.
++	input := []byte{172, 146, 184, 73, 191, 18, 139, 63, 16, 116, 207, 240, 41, 242, 86, 230, 55, 113, 195, 22, 128, 132, 223, 12, 218, 153, 114, 160, 31, 129, 161, 51, 39, 155, 170, 159, 186, 23, 85, 82, 254, 198, 101, 194, 12, 90, 112, 229, 124, 9, 93, 242, 144, 20, 94, 225, 235, 243, 111, 39, 113, 126, 62, 230, 161, 69, 154, 76, 17, 27, 164, 26, 179, 198, 140, 210, 88, 39, 239, 226}
++	if _, err := (SkipperAscii85{}).Skip(bytes.NewReader(input)); err == nil {
++		t.Fatal("captured invalid prefix accepted at incidental EOD")
++	}
++	for _, invalid := range []string{"!~>", "!z~>", "uuuuu~>", "!!!!!~x"} {
++		if _, err := (SkipperAscii85{}).Skip(bytes.NewBufferString(invalid)); err == nil {
++			t.Fatalf("malformed ASCII85 accepted: %q", invalid)
++		}
++	}
++	for _, valid := range []string{"~>", "z~>", "!!!!!~>", "!!~>", "! ! ! ! ! ~>"} {
++		length, err := (SkipperAscii85{}).Skip(bytes.NewBufferString(valid + " trailing"))
++		if err != nil || length != len(valid) {
++			t.Fatalf("valid exact EOD %q: length=%d error=%v", valid, length, err)
++		}
++	}
++}
++
++func TestASCIIHexRejectsInvalidPrefixAndKeepsOddNibble(t *testing.T) {
++	for _, invalid := range []string{"GG>", "012X>", "012\x01>", "012"} {
++		if _, err := (SkipperAsciiHex{}).Skip(bytes.NewBufferString(invalid)); err == nil {
++			t.Fatalf("invalid hexadecimal prefix accepted: %q", invalid)
++		}
++	}
++	for _, valid := range []string{">", "0>", "012>", "0 1 2 3>"} {
++		length, err := (SkipperAsciiHex{}).Skip(bytes.NewBufferString(valid + " trailing"))
++		if err != nil || length != len(valid) {
++			t.Fatalf("valid hex EOD %q: %d %v", valid, length, err)
++		}
++	}
++}
+--- a/reader/parser/filters/flateDecode.go
++++ b/reader/parser/filters/flateDecode.go
+@@ -18,7 +18,8 @@
+ 	if err != nil {
+ 		return 0, err
+ 	}
+-	_, err = io.ReadAll(rc)
++	defer rc.Close()
++	err = discardSkipped(rc, encoded)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+--- a/reader/parser/filters/lzwDecode.go
++++ b/reader/parser/filters/lzwDecode.go
+@@ -15,7 +15,8 @@
+ 	r := newCountReader(encoded)
+ 
+ 	rc := lzwDecoder(f.EarlyChange, r)
+-	_, err := io.ReadAll(rc)
++	defer rc.Close()
++	err := discardSkipped(rc, encoded)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+--- a/reader/parser/filters/runLengthDecode.go
++++ b/reader/parser/filters/runLengthDecode.go
+@@ -34,7 +34,9 @@
+ 				if err != nil {
+ 					return unexpectedEOF(err) // EOF here is an error
+ 				}
+-				w.WriteByte(nextChar)
++				if err := w.WriteByte(nextChar); err != nil {
++					return err
++				}
+ 			}
+ 			continue
+ 		}
+@@ -44,7 +46,9 @@
+ 			return unexpectedEOF(err) // EOF here is an error
+ 		}
+ 		for j := 0; j < c; j++ {
+-			w.WriteByte(nextChar)
++			if err := w.WriteByte(nextChar); err != nil {
++				return err
++			}
+ 		}
+ 	}
+ }
+@@ -53,7 +57,15 @@
+ func (f SkipperRunLength) Skip(encoded io.Reader) (int, error) {
+ 	// we make sure not to read passed EOD
+ 	r := newCountReader(encoded)
+-	err := decodeRunLength(&bytes.Buffer{}, r)
++	w := &discardByteWriter{}
++	if b, ok := encoded.(*boundedInput); ok {
++		w.bounded = true
++		w.remaining = b.decoded
++	}
++	err := decodeRunLength(w, r)
++	if b, ok := encoded.(*boundedInput); ok {
++		b.discarded = b.decoded - w.remaining
++	}
+ 	return r.totalRead, err
+ }
+ 
+--- a/reader/parser/parser.go
++++ b/reader/parser/parser.go
+@@ -47,6 +47,7 @@
+ 	ContentStreamMode bool
+ 
+ 	opsStack []Object // only used in content stream
++	bounded  *boundedParser
+ }
+ 
+ // NewParser uses a byte slice as input.
+@@ -69,9 +70,21 @@
+ // ParseObject read one of the (potentially) many objects
+ // in the input data (See NewParser).
+ func (p *Parser) ParseObject() (Object, error) {
++	if p.bounded != nil {
++		if err := p.bounded.enter(); err != nil {
++			return nil, err
++		}
++		defer func() { p.bounded.depth-- }()
++	}
+ 	tk, err := p.tokens.NextToken()
+ 	if err != nil {
+ 		return nil, err
++	}
++
++	if p.bounded != nil {
++		if err := p.bounded.token(tk); err != nil {
++			return nil, err
++		}
+ 	}
+ 
+ 	var value Object
+@@ -96,7 +109,7 @@
+ 		// which will be almost always successful
+ 		save := p.tokens.CurrentPosition()
+ 		dict, err := p.parseDict(false)
+-		if err != nil {
++		if err != nil && p.bounded == nil {
+ 			// try relaxed
+ 			p.tokens.SetPosition(save)
+ 			dict, err = p.parseDict(true)

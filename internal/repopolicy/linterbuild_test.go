@@ -21,7 +21,7 @@ func TestGolangciBuildIdentityBindsReviewedPatchAndStableUpstream(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	patch := readRepoFile(t, "tools/lint-patches/golangci-lint-physical-source.patch")
+	patch := readRepoFile(t, "tools/lint-patches/golangci-lint-source-contracts.patch")
 
 	digest := sha256.Sum256(patch)
 	if versions["GOLANGCI_LINT_PATCH_SHA256"] != hex.EncodeToString(digest[:]) {
@@ -33,7 +33,7 @@ func TestGolangciBuildIdentityBindsReviewedPatchAndStableUpstream(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if !strings.HasPrefix(identity.Version, strings.TrimPrefix(versions["GOLANGCI_LINT_VERSION"], "v")+"+physical-source.") ||
+	if !strings.HasPrefix(identity.Version, strings.TrimPrefix(versions["GOLANGCI_LINT_VERSION"], "v")+"+source-contracts.") ||
 		identity.Commit != "patch-sha256:"+versions["GOLANGCI_LINT_PATCH_SHA256"] ||
 		identity.Date != "upstream-source:"+versions["GOLANGCI_LINT_SOURCE_TIME"] {
 		t.Fatalf("tool identity misstates provenance: %+v", identity)
@@ -64,7 +64,7 @@ func TestGolangciPatchRejectsChangedCheckedInBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	patch := readRepoFile(t, "tools/lint-patches/golangci-lint-physical-source.patch")
+	patch := readRepoFile(t, "tools/lint-patches/golangci-lint-source-contracts.patch")
 	if err = repopolicy.VerifyGolangciPatch(patch, versions); err != nil {
 		t.Fatal(err)
 	}

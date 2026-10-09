@@ -90,7 +90,7 @@ func inheritedVariableStrings(ctx context.Context, pdf *model.Context, dict type
 
 	values := make([]string, 0, len(objects))
 	for _, object := range objects {
-		value, readErr := pdf.Dereference(object)
+		value, readErr := pdf.DereferenceContext(ctx, object)
 		if readErr != nil {
 			return nil, fmt.Errorf("%w: variable /%s: %w", errFormState, key, readErr)
 		}
@@ -203,15 +203,15 @@ func (p *variableAppearancePlan) readCombGlyphs(ctx context.Context, font *varia
 }
 
 func (p *variableAppearancePlan) readVariableProperties(ctx context.Context, pdf *model.Context, dict types.Dict) error {
-	if err := p.readVariableGeometry(pdf, dict); err != nil {
+	if err := p.readVariableGeometry(ctx, pdf, dict); err != nil {
 		return err
 	}
 
-	if err := p.readVariableCharacteristics(pdf, dict); err != nil {
+	if err := p.readVariableCharacteristics(ctx, pdf, dict); err != nil {
 		return err
 	}
 
-	if err := p.readVariableBorder(pdf, dict); err != nil {
+	if err := p.readVariableBorder(ctx, pdf, dict); err != nil {
 		return err
 	}
 

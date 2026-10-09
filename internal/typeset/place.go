@@ -78,6 +78,10 @@ type (
 	// OverflowError reports findings under OverflowReject policy.
 	OverflowError struct {
 		Findings []Finding
+		// WrapWidth and PageWidth retain the configured width and authored canvas
+		// for diagnostics; glyph-expanded block bounds cannot identify this cause.
+		WrapWidth float64
+		PageWidth float64
 	}
 
 	// Placed is a laid-out text block positioned on a page.
@@ -190,7 +194,30 @@ func (e *OverflowError) Error() string {
 		parts[i] = string(f.Kind) + ": " + f.Detail
 	}
 
+	if e.FixedWidthExceedsPage() {
+		return fmt.Sprintf("text block is wider than the page; reduce the effective text width (%g pt exceeds %g pt); ",
+			e.WrapWidth, e.PageWidth) + strings.Join(parts, "; ") +
+			`; address any remaining word or vertical overflow, or set overflow "allow" for deliberate off-page placement`
+	}
+
 	return "text overflows: " + strings.Join(parts, "; ") + `; shorten or wrap the text, move it, or set overflow "allow"`
+}
+
+// FixedWidthExceedsPage identifies a configured block that cannot fit even when
+// both horizontal edges receive the existing placement tolerance. It requires
+// an actual horizontal finding and does not classify glyph-expanded widths.
+func (e *OverflowError) FixedWidthExceedsPage() bool {
+	if e.WrapWidth <= e.PageWidth+2*boundsTolerance {
+		return false
+	}
+
+	for _, finding := range e.Findings {
+		if finding.Kind == FindingOutsidePageHorizontal {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Place shapes, wraps and positions params.Text with the font. Empty text yields no lines, zero bounds
@@ -232,7 +259,7 @@ func (s *Shaper) Place(font *Font, params Params) (*Placed, error) {
 	placed.layOut(font, params, lines)
 
 	if params.Overflow == OverflowReject && len(placed.Findings) > 0 {
-		return placed, &OverflowError{Findings: placed.Findings}
+		return placed, &OverflowError{Findings: placed.Findings, WrapWidth: params.WrapWidth, PageWidth: params.PageWidth}
 	}
 
 	return placed, nil
@@ -440,7 +467,7 @@ func anchorOrigin(params Params, width, height float64) (float64, float64) {
 	return left + params.OffsetX, top + params.OffsetY
 }
 
-func pageFindings(bounds Rect, params Params) []Finding {
+func pageFindings(bounds Rect, params Params, subject string) []Finding {
 	var findings []Finding
 
 	if bounds.X < -boundsTolerance || bounds.X+bounds.Width > params.PageWidth+boundsTolerance {
@@ -448,7 +475,8 @@ func pageFindings(bounds Rect, params Params) []Finding {
 			Kind: FindingOutsidePageHorizontal,
 			Line: -1,
 			Detail: fmt.Sprintf(
-				"text spans x %.2f to %.2f pt, the page is %.2f pt wide",
+				"%s spans x %.2f to %.2f pt, the page is %.2f pt wide",
+				subject,
 				bounds.X,
 				bounds.X+bounds.Width,
 				params.PageWidth,
@@ -461,7 +489,8 @@ func pageFindings(bounds Rect, params Params) []Finding {
 			Kind: FindingOutsidePageVertical,
 			Line: -1,
 			Detail: fmt.Sprintf(
-				"text spans y %.2f to %.2f pt, the page is %.2f pt high",
+				"%s spans y %.2f to %.2f pt, the page is %.2f pt high",
+				subject,
 				bounds.Y,
 				bounds.Y+bounds.Height,
 				params.PageHeight,
@@ -519,12 +548,12 @@ func (placed *Placed) includeGlyphInk(glyph Glyph, pen, baseline, scale float64)
 }
 
 func (placed *Placed) recordPageFindings(params Params) {
-	placed.Findings = append(placed.Findings, pageFindings(placed.Bounds, params)...)
+	placed.Findings = append(placed.Findings, pageFindings(placed.Bounds, params, "text block")...)
 	if placed.InkBounds == nil {
 		return
 	}
 
-	for _, finding := range pageFindings(*placed.InkBounds, params) {
+	for _, finding := range pageFindings(*placed.InkBounds, params, "glyph ink") {
 		known := false
 		for _, existing := range placed.Findings {
 			known = known || existing.Kind == finding.Kind

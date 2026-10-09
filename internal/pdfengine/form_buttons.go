@@ -5,6 +5,7 @@ package pdfengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -42,11 +43,11 @@ func compileButtonAppearance(ctx context.Context, pdf *model.Context, dict types
 	}
 
 	plan := &buttonAppearancePlan{}
-	if err := plan.readGeometry(pdf, dict); err != nil {
+	if err := plan.readGeometry(ctx, pdf, dict); err != nil {
 		return nil, err
 	}
 
-	if err := plan.readCharacteristics(pdf, dict); err != nil {
+	if err := plan.readCharacteristics(ctx, pdf, dict); err != nil {
 		return nil, err
 	}
 
@@ -76,17 +77,17 @@ func compileButtonAppearance(ctx context.Context, pdf *model.Context, dict types
 	return plan, nil
 }
 
-func (p *buttonAppearancePlan) readGeometry(pdf *model.Context, dict types.Dict) error {
-	rect, err := pdf.DereferenceArray(dict["Rect"])
+func (p *buttonAppearancePlan) readGeometry(ctx context.Context, pdf *model.Context, dict types.Dict) error {
+	rect, err := pdf.DereferenceArrayContext(ctx, dict["Rect"])
 	if err != nil || len(rect) != 4 {
-		return fmt.Errorf("%w: regenerated button needs a four-number rectangle", errFormState)
+		return errors.Join(err, fmt.Errorf("%w: regenerated button needs a four-number rectangle", errFormState))
 	}
 
 	values := make([]float64, len(rect))
 	for index, object := range rect {
-		value, readErr := pdf.DereferenceNumber(object)
+		value, readErr := pdf.DereferenceNumberContext(ctx, object)
 		if readErr != nil || math.IsNaN(value) || math.IsInf(value, 0) {
-			return fmt.Errorf("%w: regenerated button rectangle must be finite", errFormState)
+			return errors.Join(readErr, fmt.Errorf("%w: regenerated button rectangle must be finite", errFormState))
 		}
 
 		values[index] = value
@@ -97,50 +98,50 @@ func (p *buttonAppearancePlan) readGeometry(pdf *model.Context, dict types.Dict)
 		return fmt.Errorf("%w: regenerated buttons require a positive square rectangle", errFormState)
 	}
 
-	return p.readBorder(pdf, dict)
+	return p.readBorder(ctx, pdf, dict)
 }
 
-func (p *buttonAppearancePlan) readBorder(pdf *model.Context, dict types.Dict) error {
-	border, err := pdf.DereferenceDict(dict["BS"])
+func (p *buttonAppearancePlan) readBorder(ctx context.Context, pdf *model.Context, dict types.Dict) error {
+	border, err := pdf.DereferenceDictContext(ctx, dict["BS"])
 	if err != nil {
 		return fmt.Errorf("%w: button border: %w", errFormState, err)
 	}
 
-	style, _, err := pdf.DereferenceNameEntry(border, "S")
+	style, _, err := pdf.DereferenceNameEntryContext(ctx, border, "S")
 	if err != nil || style == nil || *style != "S" {
-		return fmt.Errorf("%w: regenerated buttons require an explicit solid border", errFormState)
+		return errors.Join(err, fmt.Errorf("%w: regenerated buttons require an explicit solid border", errFormState))
 	}
 
-	p.border, err = pdf.DereferenceNumber(border["W"])
+	p.border, err = pdf.DereferenceNumberContext(ctx, border["W"])
 	if err != nil || p.border <= 0 || math.IsNaN(p.border) || math.IsInf(p.border, 0) {
-		return fmt.Errorf("%w: regenerated button border must have finite positive width", errFormState)
+		return errors.Join(err, fmt.Errorf("%w: regenerated button border must have finite positive width", errFormState))
 	}
 
 	return nil
 }
 
-func (p *buttonAppearancePlan) readCharacteristics(pdf *model.Context, dict types.Dict) error {
-	characteristics, err := pdf.DereferenceDict(dict["MK"])
+func (p *buttonAppearancePlan) readCharacteristics(ctx context.Context, pdf *model.Context, dict types.Dict) error {
+	characteristics, err := pdf.DereferenceDictContext(ctx, dict["MK"])
 	if err != nil {
 		return fmt.Errorf("%w: button characteristics: %w", errFormState, err)
 	}
 
 	if rotation, found := characteristics.Find("R"); found {
-		value, readErr := pdf.DereferenceNumber(rotation)
+		value, readErr := pdf.DereferenceNumberContext(ctx, rotation)
 		if readErr != nil || value != 0 {
-			return fmt.Errorf("%w: rotated regenerated buttons are unsupported", errFormState)
+			return errors.Join(readErr, fmt.Errorf("%w: rotated regenerated buttons are unsupported", errFormState))
 		}
 	}
 
-	if colorErr := p.readColor(pdf, characteristics["BG"], &p.background); colorErr != nil {
+	if colorErr := p.readColor(ctx, pdf, characteristics["BG"], &p.background); colorErr != nil {
 		return colorErr
 	}
 
-	if colorErr := p.readColor(pdf, characteristics["BC"], &p.borderColor); colorErr != nil {
+	if colorErr := p.readColor(ctx, pdf, characteristics["BC"], &p.borderColor); colorErr != nil {
 		return colorErr
 	}
 
-	value, err := pdf.Dereference(characteristics["CA"])
+	value, err := pdf.DereferenceContext(ctx, characteristics["CA"])
 	if err != nil {
 		return fmt.Errorf("%w: button caption: %w", errFormState, err)
 	}
@@ -155,16 +156,16 @@ func (p *buttonAppearancePlan) readCharacteristics(pdf *model.Context, dict type
 	return nil
 }
 
-func (*buttonAppearancePlan) readColor(pdf *model.Context, object types.Object, color *[3]float64) error {
-	components, err := pdf.DereferenceArray(object)
+func (*buttonAppearancePlan) readColor(ctx context.Context, pdf *model.Context, object types.Object, color *[3]float64) error {
+	components, err := pdf.DereferenceArrayContext(ctx, object)
 	if err != nil || len(components) != len(color) {
-		return fmt.Errorf("%w: regenerated button requires explicit RGB background and border colors", errFormState)
+		return errors.Join(err, fmt.Errorf("%w: regenerated button requires explicit RGB background and border colors", errFormState))
 	}
 
 	for index, object := range components {
-		value, readErr := pdf.DereferenceNumber(object)
+		value, readErr := pdf.DereferenceNumberContext(ctx, object)
 		if readErr != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
-			return fmt.Errorf("%w: regenerated button color components must be finite in 0..1", errFormState)
+			return errors.Join(readErr, fmt.Errorf("%w: regenerated button color components must be finite in 0..1", errFormState))
 		}
 
 		color[index] = value
@@ -184,9 +185,9 @@ func (p *buttonAppearancePlan) readState(ctx context.Context, pdf *model.Context
 	flags := 0
 
 	if object != nil {
-		integer, readErr := pdf.DereferenceInteger(object)
+		integer, readErr := pdf.DereferenceIntegerContext(ctx, object)
 		if readErr != nil || integer == nil {
-			return fmt.Errorf("%w: button field flags are not an integer", errFormState)
+			return errors.Join(readErr, fmt.Errorf("%w: button field flags are not an integer", errFormState))
 		}
 
 		flags = integer.Value()
@@ -209,26 +210,26 @@ func (p *buttonAppearancePlan) readState(ctx context.Context, pdf *model.Context
 		return appearanceErr
 	}
 
-	if statesErr := p.readNormalStates(pdf, dict); statesErr != nil {
+	if statesErr := p.readNormalStates(ctx, pdf, dict); statesErr != nil {
 		return statesErr
 	}
 
 	return p.checkSelection(ctx, pdf, dict, flags)
 }
 
-func (p *buttonAppearancePlan) readNormalStates(pdf *model.Context, dict types.Dict) error {
-	appearance, err := pdf.DereferenceDict(dict["AP"])
+func (p *buttonAppearancePlan) readNormalStates(ctx context.Context, pdf *model.Context, dict types.Dict) error {
+	appearance, err := pdf.DereferenceDictContext(ctx, dict["AP"])
 	if err != nil {
 		return fmt.Errorf("%w: button appearance: %w", errFormState, err)
 	}
 
-	states, err := pdf.DereferenceDict(appearance["N"])
+	states, err := pdf.DereferenceDictContext(ctx, appearance["N"])
 	if err != nil || len(states) != 2 {
-		return fmt.Errorf("%w: regenerated button needs normal Off and one named on-state streams", errFormState)
+		return errors.Join(err, fmt.Errorf("%w: regenerated button needs normal Off and one named on-state streams", errFormState))
 	}
 
 	for name, object := range states {
-		value, readErr := pdf.Dereference(object)
+		value, readErr := pdf.DereferenceContext(ctx, object)
 		if readErr != nil {
 			return fmt.Errorf("%w: button state stream: %w", errFormState, readErr)
 		}
@@ -250,9 +251,9 @@ func (p *buttonAppearancePlan) readNormalStates(pdf *model.Context, dict types.D
 }
 
 func (p *buttonAppearancePlan) checkSelection(ctx context.Context, pdf *model.Context, dict types.Dict, flags int) error {
-	state, _, err := pdf.DereferenceNameEntry(dict, "AS")
+	state, _, err := pdf.DereferenceNameEntryContext(ctx, dict, "AS")
 	if err != nil || state == nil || *state != buttonOffState && *state != p.on {
-		return fmt.Errorf("%w: regenerated button AS must select a valid normal state", errFormState)
+		return errors.Join(err, fmt.Errorf("%w: regenerated button AS must select a valid normal state", errFormState))
 	}
 
 	property, valueErr := buttonInherited(ctx, pdf, dict, "V")
@@ -262,11 +263,11 @@ func (p *buttonAppearancePlan) checkSelection(ctx context.Context, pdf *model.Co
 		return valueErr
 	}
 
-	value, readErr := pdf.Dereference(valueObject)
+	value, readErr := pdf.DereferenceContext(ctx, valueObject)
 
 	selection, valid := value.(types.Name)
 	if readErr != nil || !valid {
-		return fmt.Errorf("%w: regenerated button V must be a valid name", errFormState)
+		return errors.Join(readErr, fmt.Errorf("%w: regenerated button V must be a valid name", errFormState))
 	}
 
 	selected := types.Name(buttonOffState)
@@ -294,7 +295,7 @@ func buttonInherited(ctx context.Context, pdf *model.Context, dict types.Dict, k
 		}
 
 		if value, found := dict.Find(key); found {
-			resolved, readErr := pdf.Dereference(value)
+			resolved, readErr := pdf.DereferenceContext(ctx, value)
 			if readErr != nil {
 				return buttonProperty{}, fmt.Errorf("%w: button inherited %s: %w", errFormState, key, readErr)
 			}
@@ -304,7 +305,7 @@ func buttonInherited(ctx context.Context, pdf *model.Context, dict types.Dict, k
 			}
 		}
 
-		parent, err := pdf.DereferenceDict(dict[keyParent])
+		parent, err := pdf.DereferenceDictContext(ctx, dict[keyParent])
 		if err != nil {
 			return buttonProperty{}, fmt.Errorf("%w: button parent: %w", errFormState, err)
 		}
@@ -324,7 +325,7 @@ func buttonDefaultAppearance(ctx context.Context, pdf *model.Context, dict types
 	}
 
 	if object == nil {
-		root, readErr := pdf.DereferenceDict(pdf.RootDict[keyAcroForm])
+		root, readErr := pdf.DereferenceDictContext(ctx, pdf.RootDict[keyAcroForm])
 		if readErr != nil {
 			return fmt.Errorf("%w: button form defaults: %w", errFormState, readErr)
 		}
@@ -332,7 +333,7 @@ func buttonDefaultAppearance(ctx context.Context, pdf *model.Context, dict types
 		object = root["DA"]
 	}
 
-	value, err := pdf.Dereference(object)
+	value, err := pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("%w: button default appearance: %w", errFormState, err)
 	}

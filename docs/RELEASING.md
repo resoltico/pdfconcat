@@ -29,6 +29,10 @@ The notes are the matching version section of `CHANGELOG.md`, not GitHub-generat
 
 ## Version metadata
 
+Application, plan, and output-format versions identify different contracts. The application version comes from `internal/app/version.txt`; the plan version comes from `internal/plan.Version`; the shared response and saved-report `format_version` comes from `internal/report.Version`. They need not have matching numbers. Published `v0.1.0` used plan version 1 and `report_version: 1`; the next output contract uses `format_version: 2`, while plans remain version 1.
+
+Allocate a new format number for an incompatible change to a published contract, including a published prerelease. Consolidate changes made before that next contract is published under its one pending number. Development iterations do not consume format numbers. Keep published tags, reports, and release history unchanged; an unsupported historical report is evidence to preserve, not a file to relabel or migrate.
+
 Ordinary source builds embed `internal/app/version.txt` and retain the Go toolchain's VCS revision, commit time and dirty-tree marker. `pdfconcat version` prints this metadata. A plain source archive without `.git` has unknown commit provenance; that is expected and does not change the configured application version. Module pseudo-versions do not replace the application version.
 
 GoReleaser snapshots derive their version from the same file and append `-SNAPSHOT-` plus Git's short commit. The packaging build sets `main.version` at link time and retains recorded linker arguments; it deliberately omits `-trimpath` because Go otherwise suppresses those arguments. Executables can contain compiler source/build paths, so byte reproducibility also requires a stable checkout path.

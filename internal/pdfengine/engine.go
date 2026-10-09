@@ -62,7 +62,39 @@ func (e *Engine) readContext(ctx context.Context, source int, path string) (*mod
 	return document.pdf, nil
 }
 
+// readDocument applies captured raw source admissibility before validator or writer repairs.
 func (e *Engine) readDocument(
+	ctx context.Context, source int, path string,
+	observe func(context.Context, *model.Context) ([]SourceFeature, error),
+) (*inspectedDocument, error) {
+	preflight := func(ctx context.Context, pdf *model.Context) ([]SourceFeature, error) {
+		if err := checkSourcePageRoles(ctx, pdf); err != nil {
+			return nil, err
+		}
+
+		if observe != nil {
+			return observe(ctx, pdf)
+		}
+
+		return nil, nil
+	}
+
+	return e.readFileDocument(ctx, source, path, preflight)
+}
+
+// readOutputContext validates our serialized deliverable, not a new captured source.
+// Undefined indirect nulls may be writer omissions; native validation, typed page
+// traversal, page counts and fitted-sheet verification still judge this output.
+func (e *Engine) readOutputContext(ctx context.Context, path string) (*model.Context, error) {
+	document, err := e.readFileDocument(ctx, NoSource, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return document.pdf, nil
+}
+
+func (e *Engine) readFileDocument(
 	ctx context.Context,
 	source int,
 	path string,
@@ -88,7 +120,7 @@ func (e *Engine) readDocument(
 		return nil, newError(CodeUnreadable, source, path, closeErr)
 	}
 
-	if renderingErr := checkRenderingState(pdfContext.pdf); renderingErr != nil {
+	if renderingErr := checkRenderingState(ctx, pdfContext.pdf); renderingErr != nil {
 		return nil, newError(CodeUnsupportedRendering, source, path, renderingErr)
 	}
 
@@ -100,35 +132,38 @@ func (e *Engine) readFrom(
 	reader io.ReadSeeker,
 	observe func(context.Context, *model.Context) ([]SourceFeature, error),
 ) (*inspectedDocument, error) {
-	pdfContext, err := api.ReadContext(ctx, reader, e.conf.Clone())
+	document := &inspectedDocument{}
+	inspectSource := func(ctx context.Context, pdfContext *model.Context) error {
+		// Source policy sees original declarations before normalization or metadata allocation.
+		if _, err := pdfContext.CatalogContext(ctx); err != nil {
+			return fmt.Errorf("catalog: %w", err)
+		}
+
+		for _, check := range []func(context.Context, *model.Context) error{
+			checkRenderingState, checkSignatureState, checkFormState,
+		} {
+			if err := check(ctx, pdfContext); err != nil {
+				return err
+			}
+		}
+
+		if observe != nil {
+			var err error
+
+			document.features, err = observe(ctx, pdfContext)
+
+			return err
+		}
+
+		return nil
+	}
+
+	pdfContext, err := api.ReadContextWithSourceInspection(ctx, reader, e.conf.Clone(), inspectSource)
 	if err != nil {
 		return nil, fmt.Errorf("read context: %w", err)
 	}
-	// Validation repairs some dictionaries, including deleting XFA-only AcroForms with no static
-	// fields. Capability rejection must see the original catalog before those repairs.
-	if _, catalogErr := pdfContext.Catalog(); catalogErr != nil {
-		return nil, fmt.Errorf("catalog: %w", catalogErr)
-	}
 
-	if renderingErr := checkRenderingState(pdfContext); renderingErr != nil {
-		return nil, renderingErr
-	}
-
-	if signatureErr := checkSignatureState(ctx, pdfContext); signatureErr != nil {
-		return nil, signatureErr
-	}
-
-	if formErr := checkFormState(ctx, pdfContext); formErr != nil {
-		return nil, formErr
-	}
-
-	document := &inspectedDocument{pdf: pdfContext}
-	if observe != nil {
-		document.features, err = observe(ctx, pdfContext)
-		if err != nil {
-			return nil, err
-		}
-	}
+	document.pdf = pdfContext
 
 	if validationErr := api.ValidateContext(ctx, pdfContext); validationErr != nil {
 		return nil, fmt.Errorf("validate context: %w", validationErr)
@@ -150,6 +185,8 @@ func classifyRead(ctx context.Context, source int, path string, err error) *Erro
 		return newError(CodeSignatureUnsupported, source, path, err)
 	case errors.Is(err, errFormState):
 		return newError(CodeFormUnsupported, source, path, err)
+	case errors.Is(err, errFitUnsupported):
+		return newError(CodeFitUnsupported, source, path, err)
 	default:
 		return newError(CodeInvalid, source, path, err)
 	}

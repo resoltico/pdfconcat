@@ -26,6 +26,10 @@ func lintPositionControls(ctx context.Context, root, binary string) ([]string, e
 	}
 	defer removeAll(scratch)
 
+	if copyErr := copyForeignInputs(ctx, root, scratch); copyErr != nil {
+		return nil, copyErr
+	}
+
 	for _, file := range []string{moduleFileName, "go.sum", lintConfigFileName} {
 		data, readErr := readInRoot(root, file)
 		if readErr != nil {
@@ -69,7 +73,7 @@ func positionControlIssues(ctx context.Context, root, binary string) ([]repopoli
 
 	args := []string{
 		runVerb,
-		serialLintRunners,
+		parallelLintRunners,
 		lintNoFixFlag,
 		configFlag,
 		filepath.Join(root, lintConfigFileName),
@@ -81,7 +85,7 @@ func positionControlIssues(ctx context.Context, root, binary string) ([]repopoli
 
 	checker := &command{
 		dir: root, name: binary, args: args,
-		env: []string{"GOLANGCI_LINT_CACHE=" + filepath.Join(root, "cache")},
+		env: []string{"GOLANGCI_LINT_CACHE=" + filepath.Join(root, lintFixtureCache)},
 	}
 	output, runErr := checker.output(ctx)
 

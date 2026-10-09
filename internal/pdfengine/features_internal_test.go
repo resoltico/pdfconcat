@@ -19,7 +19,6 @@ import (
 
 const (
 	featureJavaScript = "JavaScript"
-	featureKids       = "Kids"
 	featureScript     = "true"
 )
 
@@ -139,14 +138,14 @@ func TestFeatureTraversalRejectsCyclesDepthAndCancellation(t *testing.T) {
 	pdf := readUnvalidated(t, pdffixture.Plain("safe"))
 	observer := featureObserver{pdf: pdf, found: map[FeatureKind]bool{}}
 	ref := *types.NewIndirectRef(99, 0)
-	dict := types.Dict{"S": types.Name(featureJavaScript), "JS": types.StringLiteral(featureScript), "Next": ref}
+	dict := types.Dict{"S": types.Name(featureJavaScript), "JS": types.StringLiteral(featureScript), keyNext: ref}
 	pdf.Table[99] = model.NewXRefTableEntryGen0(dict)
 
 	if _, err := observer.action(t.Context(), ref, FeaturePageActions, map[types.IndirectRef]bool{}, 0); !errors.Is(err, errNodeRepeated) {
 		t.Fatalf("action cycle %v", err)
 	}
 
-	dict = types.Dict{featureKids: types.Array{ref}}
+	dict = types.Dict{keyKids: types.Array{ref}}
 
 	pdf.Table[99] = model.NewXRefTableEntryGen0(dict)
 
@@ -231,7 +230,7 @@ func TestEmptyCompressedJavaScriptStreamDoesNotWarn(t *testing.T) {
 
 		stream.Content = nil
 
-		material, err := materialScript(stream)
+		material, err := materialScript(t.Context(), stream)
 		if err != nil || material != (content != "") {
 			t.Fatalf("script %q: material=%v error=%v", content, material, err)
 		}

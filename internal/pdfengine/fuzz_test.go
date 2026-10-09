@@ -42,7 +42,7 @@ func TestInspectRenderingFailureMatchesInspectionContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := engine.Inspect(t.Context(), path)
+	_, err := engine.Inspect(t.Context(), path, nil)
 
 	failure := requireFailure(t, err, pdfengine.CodeUnsupportedRendering)
 	if !slices.Contains(knownCodes(), failure.Code) {
@@ -56,7 +56,7 @@ func TestInspectRenderingFailureMatchesInspectionContract(t *testing.T) {
 	valid, info := inspectDoc(t, engine, "static-after-rendering-rejection", pdffixture.Plain("AFTER REJECTION"))
 	requirePlausible(t, info)
 
-	again, inspectErr := engine.Inspect(t.Context(), valid)
+	again, inspectErr := engine.Inspect(t.Context(), valid, nil)
 	if inspectErr != nil || !reflect.DeepEqual(again, info) {
 		t.Fatalf("valid inspection changed after rejected rendering state: %+v %v", again, inspectErr)
 	}
@@ -101,7 +101,7 @@ func FuzzInspect(f *testing.F) {
 		defer cancel()
 
 		start := time.Now()
-		info, err := engine.Inspect(ctx, path)
+		info, err := engine.Inspect(ctx, path, nil)
 
 		if elapsed := time.Since(start); elapsed > fuzzDeadline {
 			t.Fatalf("Inspect took %v", elapsed)
@@ -117,7 +117,7 @@ func FuzzInspect(f *testing.F) {
 
 		requirePlausible(t, info)
 
-		again, err := engine.Inspect(ctx, path)
+		again, err := engine.Inspect(ctx, path, nil)
 		if err != nil || !reflect.DeepEqual(again, info) {
 			t.Fatalf("second Inspect differs: %+v %v vs %+v", again, err, info)
 		}
@@ -157,7 +157,7 @@ func FuzzAssembleOrder(f *testing.F) {
 	sources := make([]pdfengine.SourceFile, len(names))
 
 	for index, name := range names {
-		info, err := engine.Inspect(context.Background(), paths[name])
+		info, err := engine.Inspect(context.Background(), paths[name], nil)
 		if err != nil {
 			f.Fatal(err)
 		}

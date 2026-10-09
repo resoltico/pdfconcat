@@ -67,7 +67,7 @@ const (
 	pointerItemTwo          = "/items/2"
 
 	// JSON fragments of the sample documents that the corpus rows edit.
-	memberVersion   = `"format_version":3`
+	memberVersion   = `"format_version":2`
 	memberKind      = `"kind":"report",`
 	memberStatusOK  = `"status":"ok"`
 	memberFontName  = `"name":"NotoSans-Regular"`
@@ -81,7 +81,7 @@ const (
 
 	// completeCheck is a successful check: one PDF of three pages and one blank run of two pages. It is
 	// written out by hand so that it is an oracle independent of the Builder and the encoder.
-	completeCheck = `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"ok","command":"check",` +
+	completeCheck = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"ok","command":"check",` +
 		`"phases":{"instructions":"complete","input_inspection":"complete","layout":"complete","output_verification":"not_run"},` +
 		`"counts":{"source_pages":3,"generated_pages":2,"total_pages":5},` +
 		`"publication":{"report_status":"written","report_path":"/w/r.json","published":false},` +
@@ -105,7 +105,7 @@ const (
 		`{"severity":"error","stage":"usage","code":"bad_flag","location":{"file":"argv","argv_index":2},"message":"bad flag"}]`
 
 	// failedCheck is an incomplete run: layout is unknown, so counts and ranges are null.
-	failedCheck = `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"invalid","command":"check",` +
+	failedCheck = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"invalid","command":"check",` +
 		`"phases":{"instructions":"complete","input_inspection":"incomplete","layout":"not_run","output_verification":"not_run"},` +
 		`"counts":{"source_pages":null,"generated_pages":null,"total_pages":null},` +
 		`"publication":{"report_status":"not_requested","published":false},` +
@@ -115,7 +115,7 @@ const (
 
 	// richFailure is a failed build that exercises every optional member: published output, a failed report
 	// with a recovery file, a font file, a pointer and an argv location, and a path.
-	richFailure = `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"failed","command":"build",` +
+	richFailure = `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","status":"failed","command":"build",` +
 		`"phases":{"instructions":"complete","input_inspection":"complete","layout":"complete","output_verification":"complete"},` +
 		`"counts":{"source_pages":1,"generated_pages":1,"total_pages":2},` +
 		`"publication":{"output":"/w/out.pdf","report_status":"failed","report_path":"/w/r.json",` +

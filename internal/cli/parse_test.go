@@ -73,9 +73,9 @@ func acceptedPlanning() []accepted {
 		accept("stdin sentinel attached, base dir first", "build --base-dir=/p --plan=-",
 			new(cli.Command{Name: cli.NameBuild, PlanSource: cli.PlanStdin, BaseDir: "/p"})),
 		{
-			name: "inline plan", args: []string{argBuild, argPlanJSON, `{"version":1}`, "--base-dir=/p", "--output=o.pdf"},
+			name: "inline plan", args: []string{argBuild, argPlanJSON, `{argVersionCommand:1}`, "--base-dir=/p", "--output=o.pdf"},
 			want: new(cli.Command{
-				Name: cli.NameBuild, PlanSource: cli.PlanInline, PlanJSON: `{"version":1}`, BaseDir: "/p", Output: "o.pdf",
+				Name: cli.NameBuild, PlanSource: cli.PlanInline, PlanJSON: `{argVersionCommand:1}`, BaseDir: "/p", Output: "o.pdf",
 			}),
 		},
 		accept("empty inline plan is the decoder's to reject", "check --plan-json=",
@@ -135,7 +135,7 @@ func acceptedRootCommands() []accepted {
 	return []accepted{
 		accept("schema plan", "schema plan", new(cli.Command{Name: cli.NameSchema, SchemaName: "plan"})),
 		accept("schema report", "schema report", new(cli.Command{Name: cli.NameSchema, SchemaName: argReport})),
-		accept("version command", "version", new(cli.Command{Name: cli.NameVersion})),
+		accept("version command", argVersionCommand, new(cli.Command{Name: cli.NameVersion})),
 		accept("version command in text", "version --format text", new(cli.Command{Name: cli.NameVersion, Format: cli.FormatText})),
 		accept("explicit json format", "version --format=json", new(cli.Command{Name: cli.NameVersion})),
 		accept("version flag", argVersion, new(cli.Command{Name: cli.NameVersion})),
@@ -222,7 +222,7 @@ func commandRejections() []rejected {
 		reject("version and help", "--version -h", cli.CodeConflictingActions, 1, ""),
 		reject("version takes no operand", "version x", cli.CodeUnexpectedOperand, 1, ""),
 		reject("help takes one command", "help build check", cli.CodeUnexpectedOperand, 2, ""),
-		reject("schema needs a name", "schema", cli.CodeMissingOperand, -1, "plan"),
+		reject("schema needs a name", argSchemaCommand, cli.CodeMissingOperand, -1, "plan"),
 		reject("schema name is exact", "schema Plan", cli.CodeUnknownSchema, 1, "plan, report or response"),
 		reject("schema takes one name", "schema plan report", cli.CodeUnexpectedOperand, 2, ""),
 		reject("report needs a file", argReport, cli.CodeMissingOperand, -1, "FILE"),

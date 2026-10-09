@@ -35,7 +35,7 @@ func TestSourceAppearanceRejectsImageLossAndPlacementWithMarkerIntact(t *testing
 		t.Fatal(err)
 	}
 
-	info, err := engine.Inspect(context.Background(), source)
+	info, err := engine.Inspect(context.Background(), source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

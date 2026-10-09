@@ -62,7 +62,7 @@ func analyzeForm(ctx context.Context, pdf *model.Context) (*formState, error) {
 		return &formState{}, nil
 	}
 
-	root, err := pdf.DereferenceDict(object)
+	root, err := pdf.DereferenceDictContext(ctx, object)
 	if err != nil {
 		return nil, fmt.Errorf("%w: AcroForm: %w", errFormState, err)
 	}
@@ -72,11 +72,11 @@ func analyzeForm(ctx context.Context, pdf *model.Context) (*formState, error) {
 	}
 
 	state := &formState{root: root}
-	if flagErr := state.readRegeneration(pdf); flagErr != nil {
+	if flagErr := state.readRegeneration(ctx, pdf); flagErr != nil {
 		return nil, flagErr
 	}
 
-	if err = state.readResources(pdf); err != nil {
+	if err = state.readResources(ctx, pdf); err != nil {
 		return nil, fmt.Errorf("%w: %w", errFormState, err)
 	}
 
@@ -87,7 +87,7 @@ func analyzeForm(ctx context.Context, pdf *model.Context) (*formState, error) {
 
 	state.defaults = append(state.defaults, fieldDefaults{dict: root, defaults: defaults})
 
-	fields, err := pdf.DereferenceArray(root[keyFields])
+	fields, err := pdf.DereferenceArrayContext(ctx, root[keyFields])
 	if err != nil {
 		return nil, fmt.Errorf("%w: AcroForm Fields: %w", errFormState, err)
 	}
@@ -100,13 +100,13 @@ func analyzeForm(ctx context.Context, pdf *model.Context) (*formState, error) {
 	return state, nil
 }
 
-func (s *formState) readRegeneration(pdf *model.Context) error {
+func (s *formState) readRegeneration(ctx context.Context, pdf *model.Context) error {
 	flag, exists := s.root.Find("NeedAppearances")
 	if !exists || flag == nil {
 		return nil
 	}
 
-	value, err := pdf.Dereference(flag)
+	value, err := pdf.DereferenceContext(ctx, flag)
 	if err != nil {
 		return fmt.Errorf("%w: NeedAppearances: %w", errFormState, err)
 	}
@@ -130,11 +130,11 @@ func (s *formState) readDefaults(ctx context.Context, pdf *model.Context, dict t
 		return inherited, err
 	}
 
-	if err := inherited.readJustification(pdf, dict); err != nil {
+	if err := inherited.readJustification(ctx, pdf, dict); err != nil {
 		return inherited, err
 	}
 
-	kind, err := fieldKind(pdf, dict, inherited.kind)
+	kind, err := fieldKind(ctx, pdf, dict, inherited.kind)
 	if err != nil {
 		return inherited, err
 	}
@@ -149,7 +149,7 @@ func (d *formDefaults) readAppearance(ctx context.Context, pdf *model.Context, d
 		return nil
 	}
 
-	text, err := pdf.DereferenceStringEntryBytes(dict, "DA")
+	text, err := pdf.DereferenceStringEntryBytesContext(ctx, dict, "DA")
 	if err != nil {
 		return fmt.Errorf("default appearance: %w", err)
 	}
@@ -168,12 +168,12 @@ func (d *formDefaults) readAppearance(ctx context.Context, pdf *model.Context, d
 	return nil
 }
 
-func (d *formDefaults) readJustification(pdf *model.Context, dict types.Dict) error {
+func (d *formDefaults) readJustification(ctx context.Context, pdf *model.Context, dict types.Dict) error {
 	if _, found := dict.Find("Q"); !found {
 		return nil
 	}
 
-	value, err := pdf.Dereference(dict["Q"])
+	value, err := pdf.DereferenceContext(ctx, dict["Q"])
 	if err != nil {
 		return fmt.Errorf("field justification: %w", err)
 	}
@@ -229,7 +229,7 @@ func (w *formTraversal) field(
 	inherited formDefaults,
 	depth int,
 ) error {
-	dict, err := w.pdf.DereferenceDict(ref)
+	dict, err := w.pdf.DereferenceDictContext(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("form field %s: %w", ref.PDFString(), err)
 	}
@@ -258,7 +258,7 @@ func (w *formTraversal) field(
 
 	w.state.defaults = append(w.state.defaults, entry)
 
-	children, err := w.pdf.DereferenceArray(dict["Kids"])
+	children, err := w.pdf.DereferenceArrayContext(ctx, dict["Kids"])
 	if err != nil {
 		return fmt.Errorf("field %s Kids: %w", ref.PDFString(), err)
 	}
@@ -276,7 +276,7 @@ func (s *formState) fieldEntry(ctx context.Context, pdf *model.Context, dict typ
 		return entry, fmt.Errorf("%w: field has no effective font-bearing default appearance", errFormState)
 	}
 
-	subtype, _, err := pdf.DereferenceNameEntry(dict, keySubtype)
+	subtype, _, err := pdf.DereferenceNameEntryContext(ctx, dict, keySubtype)
 	if err != nil {
 		return entry, fmt.Errorf("%w: field subtype: %w", errFormState, err)
 	}
@@ -303,7 +303,7 @@ func (f *fieldDefaults) captureRegeneration(ctx context.Context, pdf *model.Cont
 		return nil
 	}
 
-	appearance, err := pdf.DereferenceDict(f.dict["AP"])
+	appearance, err := pdf.DereferenceDictContext(ctx, f.dict["AP"])
 	if err != nil {
 		return fmt.Errorf("%w: variable widget appearance: %w", errFormState, err)
 	}
@@ -404,7 +404,7 @@ func checkAlternateAppearance(ctx context.Context, pdf *model.Context, object ty
 		return fmt.Errorf("alternate appearance: %w", err)
 	}
 
-	value, err := pdf.Dereference(object)
+	value, err := pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("%w: alternate appearance: %w", errFormState, err)
 	}
@@ -414,7 +414,7 @@ func checkAlternateAppearance(ctx context.Context, pdf *model.Context, object ty
 		return nil
 	case types.Dict:
 		for _, state := range decoded {
-			entry, readErr := pdf.Dereference(state)
+			entry, readErr := pdf.DereferenceContext(ctx, state)
 			if readErr != nil {
 				return fmt.Errorf("%w: alternate state: %w", errFormState, readErr)
 			}

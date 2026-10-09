@@ -24,6 +24,819 @@ version: 1
 coverage_threshold_percent: 100
 
 exceptions:
+  # This startup-failure control uses only an owned missing path or fixed true
+  # executable with an already-canceled context. A real native Start failure proves
+  # prepared collector cleanup; no shell, arguments or user executable is accepted.
+  - id: lint-scale-native-failed-setup-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: test/scale/measure_setup_darwin_internal_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'fixture, err := startOwnedCollectorProcess\(t, exec\.CommandContext\(ctx, executable\)\)'
+    goos: darwin
+    retained_property: real failed process startup releases its owned native collector resources
+
+  # This test starts only its owned native child, compiled from fixed embedded
+  # source by the verified compiler. The real stopped/live zero-FD boundary needs
+  # a separate process; no shell, arguments or user executable are accepted.
+  - id: lint-scale-native-zero-child-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: test/scale/measure_zero_darwin_internal_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'fixture := ownCollectorProcess\(t, exec\.CommandContext\(ctx, binary\)\)'
+    goos: darwin
+    retained_property: actual stopped zero-descriptor child retains bounded owned-process lifecycle and native evidence
+
+  # This private parent uses its current executable, fixed selector and owned
+  # coverage arguments to prove a real completed write joins cancellation. A
+  # process boundary contains ForkLock/descriptor state; no shell is accepted.
+  - id: lint-progress-native-join-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_join_darwin_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressJoinSelector, progressNativeVerbose\)\.\.\.\)'
+    goos: darwin
+    retained_property: real native completion and cancellation remain attributable within a bounded private process
+
+  # This bounded parent invokes its current executable with an exact private
+  # selector and owned coverage arguments. The process boundary contains actual
+  # descriptor retirement and ForkLock ownership; no shell or user command exists.
+  - id: lint-progress-native-protection-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_protection_darwin_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressProtectionSelector, progressVerboseHelperArgument\)\.\.\.\)'
+    goos: darwin
+    retained_property: real native finalization failure has bounded private-process ownership and attributable results
+
+  # Only this isolated child retires the raw cancellation descriptor and checks
+  # native vacancy. Parallel test scheduling would weaken the descriptor-reuse
+  # observation; the ordinary parent still runs in parallel.
+  - id: lint-progress-native-protection-helper-sequential
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: cmd/pdfconcat/progress_transport_protection_darwin_test.go
+    message: Function TestProgressNativeProtectionHelper missing the call to method parallel
+    source: func TestProgressNativeProtectionHelper\(t \*testing\.T\) \{
+    goos: darwin
+    retained_property: actual retired-target finalization runs without parallel descriptor scheduling
+
+  # These bounded parents invoke their current test executable with a fixed
+  # private selector and verbose/owned coverage arguments. Checked scenario
+  # values select real native controls; no shell or user command is accepted.
+  - id: lint-progress-linux-failure-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_linux_failure_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\('
+    goos: linux
+    retained_property: actual private acquisition and wait failures retain bounded ownership and execution evidence
+
+  # The Darwin parent needs a private child to contain actual pipe/PTY ownership
+  # changes. Its current executable and fixed selector admit no external command;
+  # replacing this real process boundary would weaken lifecycle verification.
+  - id: lint-progress-darwin-phase-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_phase_darwin_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressPhaseSelector, progressNativeVerbose\)\.\.\.\)'
+    goos: darwin
+    retained_property: anchored private native phase controls preserve real descriptors and bounded lifecycle
+
+  # This parent invokes only its current test executable and an anchored private
+  # scenario selector. Actual child PASS, receipt, successful exit and watchdog
+  # establish execution; no shell or user-supplied command is accepted.
+  - id: lint-progress-relocation-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_relocation_boundary_unix_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressRelocationSelector, progressVerboseHelperArgument\)\.\.\.\)'
+    retained_property: anchored private native helper retains bounded lifecycle and attributable execution
+
+  # The isolated child retires stdin and observes raw descriptor vacancy before
+  # handing acquired ownership to the production finalizer. Test parallel
+  # scheduling would weaken that real descriptor-reuse observation.
+  - id: lint-progress-relocation-helper-sequential
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: cmd/pdfconcat/progress_relocation_boundary_unix_test.go
+    message: Function TestProgressRelocationBoundaryHelper missing the call to method parallel
+    source: func TestProgressRelocationBoundaryHelper\(t \*testing\.T\) \{
+    retained_property: private native retirement and ownership handoff run without parallel test scheduling
+
+  # This native policy test runs only the current executable and an anchored
+  # private scenario selector with verbose and owned coverage-directory arguments.
+  # Successful exit, actual helper PASS, scenario receipt and watchdog are required.
+  - id: lint-progress-native-zero-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_zero_policy_linux_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressZeroSelector, progressVerboseHelperArgument\)\.\.\.\)'
+    goos: linux
+    retained_property: exact private-child native controls preserve bounded lifecycle and attributable results
+
+  # The real constructor has already bounded this independently owned descriptor
+  # to signed 32-bit native FD range and the test rejects standard/caller slots.
+  # The BPF word intentionally represents that same FD on the reviewed little-endian
+  # Linux amd64/arm64 ABI; no unrelated numeric narrowing is exempted.
+  - id: lint-progress-native-zero-filter-descriptor-word
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_zero_policy_linux_test.go
+    message: 'G115: integer overflow conversion int -> uint32'
+    source: '\{Code: unix\.BPF_JMP \| unix\.BPF_JEQ \| unix\.BPF_K, K: uint32\(owned\), Jf: 1\},'
+    goos: linux
+    retained_property: native FD identity and reviewed filter branching preserve caller and diagnostic writes
+
+  # The producer parent runs only os.Executable with the exact private selector,
+  # verbose flag and owned coverage-directory arguments. A bounded child, scenario
+  # receipt and actual PASS/exit are required; no shell or user executable is selected.
+  - id: lint-progress-native-producer-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_producer_windows_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressProducerSelector, "-test\.v"\)\.\.\.\)'
+    goos: windows
+    retained_property: actual private producer scenarios and joined cleanup are proved without selectable commands
+
+  # This one private helper observes its genuinely inherited process stderr handle.
+  # Wrapping another handle would not test inheritance. It borrows through SyscallConn,
+  # does not replace standard handles or call Fd, and the parent drains and joins it.
+  - id: lint-progress-native-producer-inherited-stderr
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: cmd/pdfconcat/progress_producer_windows_test.go
+    message: 'use of `os\.Stderr` forbidden'
+    source: 'source := os\.Stderr'
+    goos: windows
+    retained_property: genuine inherited-handle admission preserves caller configuration and process ownership
+
+  # The class 16 information query is always synchronous, even on async handles. Its four-byte
+  # scalar output and status block are independently pinned/retained through return. Exact native
+  # success, Information == 4 and synchronous mode are required.
+  - id: lint-progress-pipe-mode-native-buffer
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_pipe_windows.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'queryErr := windows\.NtQueryInformationFile\(handle, &status, \(\*byte\)\(unsafe\.Pointer\(&mode\)\), fileModeBytes, fileModeInformation\)'
+    goos: windows
+    retained_property: scalar pinning and exact native payload qualification preserve caller ownership
+
+  # This class 4 call borrows the same positively qualified synchronous original file object. The
+  # independent eight-byte output and sixteen-byte status block are pinned/retained, with checked
+  # Windows64 sizes and Information offset eight. Both pointer expressions belong to this exact
+  # five-argument call; unfinished-query ownership is not claimed.
+  - id: lint-progress-pipe-backend-native-buffers
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_pipe_windows.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'returned, _, _ := query\.Call\(uintptr\(handle\), uintptr\(unsafe\.Pointer\(&status\)\), uintptr\(unsafe\.Pointer\(&device\)\),'
+    goos: windows
+    retained_property: checked native ABI and synchronous scalar-buffer lifetime precede owned duplication
+
+  # NtQueryVolumeInformationFile reports errors through the returned NTSTATUS, explicitly checked
+  # for exact STATUS_SUCCESS. LazyProc.Call GetLastError is not authoritative for this routine and
+  # must not replace the actual native failure.
+  - id: lint-progress-pipe-backend-status-authority
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: errcheck
+    path: cmd/pdfconcat/progress_pipe_windows.go
+    message: 'Error return value of `query\.Call` is not checked'
+    source: 'returned, _, _ := query\.Call\(uintptr\(handle\), uintptr\(unsafe\.Pointer\(&status\)\), uintptr\(unsafe\.Pointer\(&device\)\),'
+    goos: windows
+    retained_property: exact native status and payload checks retain real failures before admission
+
+  # NTSTATUS is a native 32-bit return carried in uintptr. Taking its low word is the intended ABI
+  # operation, including sign-extended failures. Numeric range rejection would misinterpret them;
+  # exact zero admits and every nonzero native status is retained.
+  - id: lint-progress-pipe-backend-status-word
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_pipe_windows.go
+    message: 'G115: integer overflow conversion uintptr -> uint32'
+    source: 'code := windows\.NTStatus\(returned\)'
+    goos: windows
+    retained_property: native low-word status semantics preserve exact success and failure classification
+
+  # This private native Linux helper installs exactly nine reviewed instructions on its
+  # locked thread. Both SockFprog and its filter array are pinned and kept alive through
+  # the synchronous kernel copy; no native pointer survives the syscall.
+  - id: lint-progress-private-close-policy-native-program
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_seccomp_linux_test.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: '_, _, errno := unix\.Syscall6\(unix\.SYS_PRCTL, unix\.PR_SET_SECCOMP, unix\.SECCOMP_MODE_FILTER, uintptr\(unsafe\.Pointer\(&program\)\), 0, 0, 0\)'
+    goos: linux
+    retained_property: pinned native ABI and private locked-thread lifetime preserve memory and policy ownership
+
+  # Only the current test executable and the fixed close-policy helper selector are
+  # launched, with a bounded context and an exact scenario environment. No shell or
+  # user-selected command participates in this real constructor-failure control.
+  - id: lint-progress-private-close-policy-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_close_policy_linux_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressClosePolicySelector, progressVerboseHelperArgument\)\.\.\.\)'
+    goos: linux
+    retained_property: actual private-process refusal and cleanup are required without changing parent policy
+
+  # The native sandbox fixture runs only the current test executable and one fixed selector.
+  # Verbose output and the owned coverage-directory prefix supply receipts, not user commands.
+  # Real process isolation is required because the applied kernel policy is irreversible.
+  - id: lint-progress-native-sandbox-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_sandbox_darwin_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressSandboxSelector, progressNativeVerbose\)\.\.\.\)'
+    goos: darwin
+    retained_property: actual private-process kernel refusal and cleanup are proved without changing parent policy
+
+  # This child uses os.Executable with fixed signal test/verbose flags and one owned atomic
+  # coverage directory. No shell or executable/selector from user input is involved; separate
+  # processes keep temporary native signal disposition and each retry counter attributable.
+  - id: lint-progress-native-signal-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_signal_darwin_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressSignalSelector, progressNativeVerbose, "-test\.gocoverdir="\+directory\)'
+    goos: darwin
+    retained_property: each actual native signal scenario has isolated lifecycle and original counter evidence
+
+  # LookPath chooses the installed Go tool, whose version/platform must match this compiled
+  # test's runtime. This fixed version invocation validates that prerequisite before conversion;
+  # no shell or selectable operation is accepted.
+  - id: lint-progress-native-coverage-tool-version
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_signal_coverage_darwin_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, tool, "version"\)'
+    goos: darwin
+    retained_property: native child coverage is decoded by the same verified SDK and platform
+
+  # The verified Go tool executes only covdata textfmt with fixed flags and owned input/output
+  # paths. The conversion preserves original metadata and counters; an invented profile cannot
+  # replace this actual child-specific EINTR receipt.
+  - id: lint-progress-native-coverage-tool-conversion
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_signal_coverage_darwin_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, tool, "tool", "covdata", "textfmt", "-i="\+directory, "-o="\+profile\)'
+    goos: darwin
+    retained_property: original per-child atomic counters prove the actual retry branch before merging
+
+  # The authoritative coverage gate supplies an owned evidence root. Each unique scenario
+  # directory must live there to retain original child metadata after test.TempDir cleanup;
+  # without that gate root the fixture already uses the testing-owned temporary directory.
+  - id: lint-progress-native-child-coverage-evidence-directory
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: usetesting
+    path: cmd/pdfconcat/progress_transport_signal_coverage_darwin_test.go
+    message: 'os\.MkdirTemp\(\) could be replaced by t\.TempDir\(\) in progressSignalCoverDirectory'
+    source: 'directory, err := os\.MkdirTemp\(root, "native-signal-"\+scenario\+"-"\)'
+    goos: darwin
+    retained_property: each real child profile remains attributable and recoverable after the test finishes
+
+  # Successful native open/duplicate producers return a nonnegative C-int descriptor; failed
+  # admission returns first. Keep this owned-descriptor range backstop for future ABI changes.
+  # Caller-range rejection remains real and independently tested; this is only the admitted sink.
+  - id: coverage-progress-owned-native-range-darwin
+    tool: coverage
+    kind: unreachable-branch
+    path: cmd/pdfconcat/progress_transport_unix.go
+    function: newProgressTransport
+    anchor: 'return nil, errors.Join(errProgressDescriptorRange, unix.Close(sink.fd))'
+    goos: darwin
+    retained_property: a future out-of-range owned sink is closed and refused before native polling
+
+  # Constructor nil rejection precedes this helper. Go1.27.2 File.SyscallConn checks only the
+  # File pointer, then newRawConn unconditionally returns nil error. Closed/native-bad files fail
+  # later RawControl, which stays covered; no artificial nil helper caller supplies this branch.
+  - id: coverage-progress-admitted-syscall-connection-darwin
+    tool: coverage
+    kind: unreachable-branch
+    path: cmd/pdfconcat/progress_transport_unix.go
+    function: nativeProgressDescriptor
+    anchor: 'return 0, fmt.Errorf("access stderr descriptor: %w", err)'
+    goos: darwin
+    retained_property: any future native connection API failure prevents borrowing or mutating caller descriptors
+
+  # Successful native open/duplicate producers return a nonnegative C-int descriptor; failed
+  # admission returns first. Keep this owned-descriptor range backstop for future ABI changes.
+  # Caller-range rejection remains real and independently tested; this is only the admitted sink.
+  - id: coverage-progress-owned-native-range-linux
+    tool: coverage
+    kind: unreachable-branch
+    path: cmd/pdfconcat/progress_transport_unix.go
+    function: newProgressTransport
+    anchor: 'return nil, errors.Join(errProgressDescriptorRange, unix.Close(sink.fd))'
+    goos: linux
+    retained_property: a future out-of-range owned sink is closed and refused before native polling
+
+  # Constructor nil rejection precedes this helper. Go1.27.2 File.SyscallConn checks only the
+  # File pointer, then newRawConn unconditionally returns nil error. Closed/native-bad files fail
+  # later RawControl, which stays covered; no artificial nil helper caller supplies this branch.
+  - id: coverage-progress-admitted-syscall-connection-linux
+    tool: coverage
+    kind: unreachable-branch
+    path: cmd/pdfconcat/progress_transport_unix.go
+    function: nativeProgressDescriptor
+    anchor: 'return 0, fmt.Errorf("access stderr descriptor: %w", err)'
+    goos: linux
+    retained_property: any future native connection API failure prevents borrowing or mutating caller descriptors
+
+  # Successful F_GETPATH constructs and copies a MAXPATHLEN-bounded path including its trailing
+  # NUL into this pinned initialized buffer. Keep malformed-success defense for future kernel/API
+  # changes; actual F_GETPATH errors remain reachable and are not excluded. Published XNU/API
+  # contract review is not a claim that the installed kernel was built from that source revision.
+  - id: coverage-progress-successful-terminal-path-terminator-darwin
+    tool: coverage
+    kind: unreachable-branch
+    path: cmd/pdfconcat/progress_transport_darwin.go
+    function: progressTerminalPath
+    anchor: 'return "", errProgressTerminalPath'
+    goos: darwin
+    retained_property: malformed native terminal paths cannot be reopened as owned telemetry descriptors
+
+  # These native Poll resource controls run only os.Executable's current test binary with a
+  # fixed helper selector and -test.v. The sole optional extra argv item is the owned prefixed
+  # coverage directory; no shell or user command is involved. Process isolation is necessary to
+  # lower the actual FD limit after runtime startup without changing the parent process.
+  - id: lint-progress-native-poll-limit-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_poll_darwin_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressPollLimitSelector, progressNativeVerbose\)\.\.\.\)'
+    goos: darwin
+    retained_property: actual post-runtime kernel Poll failure is exercised with bounded owned-child cleanup
+
+  # Darwin dev_t is signed; this conversion encodes native identity modulo 2^64, exactly matching
+  # the launcher's C(uintmax_t) stat field including negative values. It is not size arithmetic.
+  # Rejecting negative device IDs would change identity semantics; the owned file's full stat and
+  # digest are checked independently before the verified same-process launch.
+  - id: lint-scale-native-device-identity-word
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: test/scale/descriptor_identity_darwin.go
+    message: 'G115: integer overflow conversion int32 -> uint64'
+    source: 'return uint64\(stat\.Dev\)'
+    goos: darwin
+    retained_property: native signed device identity preserves every bit in the matching preparation record
+
+  # This private exec fixture must read real inherited stdin to prove stdio survives kernel exec
+  # hygiene while the original attestation pipe reaches EOF. Injected readers cannot prove native
+  # descriptor inheritance; the parent uses owned subprocess pipes and checked release/cleanup.
+  - id: lint-scale-exec-fixture-native-stdin
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: test/scale/descriptor_launch_unix_internal_test.go
+    message: 'use of `os\.Stdin` forbidden'
+    source: 'input := bufio\.NewReader\(os\.Stdin\)'
+    retained_property: actual inherited stdin delivers the live-child and release witnesses
+
+  # The private initialized child writes this exact witness to inherited stderr; replacing it
+  # with an injected writer would not establish that same-process exec preserved descriptor2.
+  - id: lint-scale-exec-fixture-native-stderr
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: test/scale/descriptor_launch_unix_internal_test.go
+    message: 'use of `os\.Stderr` forbidden'
+    source: 'if _, err = fmt\.Fprintln\(os\.Stderr, "stderr after exec"\); err != nil \{'
+    retained_property: actual stderr inheritance is witnessed with checked native output
+
+  # This stdout acknowledgement proves the same initialized child remains alive after original
+  # control-pipe EOF. A mock or a descriptor-number check cannot establish that ordering because
+  # Go may reuse descriptor3 for its own runtime poller after exec.
+  - id: lint-scale-exec-fixture-native-stdout
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: forbidigo
+    path: test/scale/descriptor_launch_unix_internal_test.go
+    message: 'use of `os\.Stdout` forbidden'
+    source: 'if _, err = fmt\.Fprintln\(os\.Stdout, "alive after exec"\); err != nil \{'
+    retained_property: actual stdout acknowledgement establishes live-child ordering and inheritance
+
+  # This test-only context decorator retains the actual WithCancel base so Deadline/Done/Value
+  # and Err remain one consistent context. Method closures or manufactured sentinel errors would
+  # hide that ownership and violate the independently reviewed cancellation-fixture contract.
+  - id: lint-pdfengine-checkpoint-context-base
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: containedctx
+    path: internal/pdfengine/context_checkpoint_internal_test.go
+    message: 'found a struct that contains a context\.Context field'
+    source: 'context\.Context'
+    retained_property: real cancellation closes the same delegated Done channel and preserves parent values and deadlines
+
+  # Context.Err must return its exact base error, not a wrapped substitute. This actual cancellable
+  # test decorator invokes CancelFunc at a checkpoint and then delegates Err; wrapping the result
+  # would change the context interface contract rather than improve error provenance.
+  - id: lint-pdfengine-checkpoint-context-error-contract
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: wrapcheck
+    path: internal/pdfengine/context_checkpoint_internal_test.go
+    message: 'error returned from interface method should be wrapped: sig: func \(context\.Context\)\.Err\(\) error'
+    source: 'return c\.Context\.Err\(\)'
+    retained_property: exact sticky context cancellation/deadline errors remain consistent with the delegated lifecycle
+
+  # Darwin TIOCPTYGNAME requires a 128-byte output pointer; x/sys exposes no typed name getter.
+  # On both supported Darwin64 architectures IoctlSetInt preserves the pinned address through its
+  # uintptr libSystem ioctl carrier. The synchronous call has KeepAlive, bounded NUL validation and
+  # no escaping pointer. Replacing it with deprecated raw SYS_IOCTL would bypass the maintained ABI.
+  - id: lint-progress-native-pty-name-buffer
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_pty_darwin_test.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'err := unix\.IoctlSetInt\(master, unix\.TIOCPTYGNAME, int\(uintptr\(unsafe\.Pointer\(&name\[0\]\)\)\)\)'
+    goos: darwin
+    retained_property: fixed pinned native output buffer and exact request ABI safely obtain the real PTY slave path
+
+  # These post-runtime native FD-limit cases run only os.Executable's current test binary with
+  # the fixed local selector and -test.v. The sole appended flag is the prefixed owned coverage
+  # directory; no shell or selectable executable is involved. Real process isolation protects
+  # the parent descriptors and distinguishes constructor EMFILE from runtime-startup failure.
+  - id: lint-progress-native-descriptor-limit-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_limits_darwin_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressDescriptorLimitSelector, "-test\.v"\)\.\.\.\)'
+    goos: darwin
+    retained_property: fixed self-test subprocess exercises actual native FD exhaustion without changing parent limits
+
+  # Flatten validates the target before copying it; the sole app override already passed resolveFit.
+  # The immutable declaration repeats the same pure named-paper resolution here. Keep generic API
+  # error propagation for future failures rather than discarding an error solely to reach coverage.
+  # Separate producer/challenge proof: /Users/erst/Downloads/pdfconcat-generated-fit-contract-review-2026-10-09/recommendation.md
+  - id: coverage-assembly-resolved-fit-target-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/assembly/layout.go
+    function: Flattened.Resolve
+    anchor: 'return nil, Errors{errorAt(f.Source, f.FitTo.Origin, "/fit_to", StageGeometry, CodeSizeOutOfRange, err, "%v", err)}'
+    retained_property: any future target resolution failure prevents generated layout acceptance
+
+  # Successful layout admits finite canvas sides in [1,14400] points, origin zero, Unit1 and no
+  # rotation; implicit/inherit sizes use A4/Legal directly. The complete rounded/construction bound
+  # is below 2^-39 pt while the minimum precision budget exceeds 3.9e-11 pt. Thus CanvasFit cannot
+  # fail for this owned producer. Keep the generic API propagation; its wider inputs remain fallible.
+  # Separate numerical challenge: /Users/erst/Downloads/pdfconcat-generated-fit-contract-review-2026-10-09/challenge-review.md
+  - id: coverage-app-resolved-generated-fit-propagation-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/app/pipeline.go
+    function: pipeline.resolveLayout
+    anchor: 'return fitErr'
+    retained_property: any future generated fitting failure stops before layout or PDF publication
+
+  # These isolated native tests execute only os.Executable's current test binary, with a fixed
+  # test selector. progressHelperArgs appends at most one -test.gocoverdir=<directory> argv item
+  # from the existing owned coverage protocol; there is no shell or selectable executable/flag.
+  # Real subprocess isolation protects the parent standard descriptors while preserving child coverage.
+  - id: lint-progress-idle-descriptor-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_owner_boundary_unix_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\("-test\.run=\^TestProgressIdleDescriptorCloseFaultHelper\$"\)\.\.\.\)'
+    retained_property: fixed self-test subprocess safely isolates actual owned-descriptor close faults
+
+  # This fixed os.Executable self-test needs process isolation for closed stderr; its sole variable
+  # argument is the owned -test.gocoverdir path. Replacing the real boundary with a mock weakens proof.
+  - id: lint-progress-closed-stderr-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_owner_boundary_unix_test.go
+    message: 'G204: Subprocess launched with variable'
+    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\("-test\.run=\^TestProgressClosedCallerStderrHelper\$"\)\.\.\.\)'
+    retained_property: fixed self-test subprocess safely isolates genuinely closed caller stderr
+
+  # Closing real standard descriptors must run in this exact self-test subprocess. The coverage
+  # directory remains one prefixed argv item, with no shell; an in-process fake cannot prove ownership.
+  # This file has one CommandContext call; the diagnostic anchors its formatted opening physical line.
+  - id: lint-progress-closed-standard-descriptor-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_standard_unix_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\('
+    retained_property: fixed self-test subprocess proves standard-descriptor ownership without closing parent descriptors
+
+  # This Windows fixture runs the current os.Executable test binary with a fixed console selector
+  # and -test.v; its only appended argument is one prefixed owned coverage-directory flag. Process
+  # isolation is required for the actual console boundary; substituting a mock weakens that proof.
+  # This file has one CommandContext call; the diagnostic anchors its formatted opening physical line.
+  - id: lint-progress-console-pause-helper-command
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_pause_windows_test.go
+    message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+    source: 'command := exec\.CommandContext\('
+    goos: windows
+    retained_property: fixed self-test subprocess isolates console pause and owned native writer lifetime
+
+  # The same closed progressRecord has only strings, integers and scalar-int pointers, without
+  # custom marshalers, floats or recursive values. errchkjson's independent unchecked-error
+  # diagnostic cannot represent a real encoding failure at this exact typed expression.
+  - id: lint-progress-record-infallible-json-check
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: errchkjson
+    path: internal/app/progress_render.go
+    message: 'Error return value of `encoding/json\.Marshal` is not checked'
+    source: 'encoded, _ := json\.Marshal\(record\)'
+    retained_property: closed typed progress records always encode; actual transport failures remain checked
+
+  # NewStreamDictForBuf in maintained pdfcpu 0.16.1 unconditionally returns a fresh fixed-Flate
+  # stream dictionary and nil error. Keep this API guard for future dependency failures; artificial
+  # constructor fault machinery would only exercise an error that the pinned implementation cannot return.
+  - id: coverage-pdfengine-fit-wrapper-constructor-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/fit_content.go
+    function: fitPageContent
+    anchor: 'return fmt.Errorf("fit wrapper: %w", err)'
+    retained_property: wrapper construction failure prevents fitted page publication
+
+  # The same maintained pdfcpu 0.16.1 constructor unconditionally creates the fresh fixed-Flate
+  # source Form dictionary with nil error. Preserve the future dependency-error guard without
+  # introducing a test-only constructor failure into production.
+  - id: coverage-pdfengine-fit-source-form-constructor-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/fit_content.go
+    function: fitForm
+    anchor: 'return nil, fmt.Errorf("fit form: %w", err)'
+    retained_property: source Form construction failure prevents clipping/resource publication
+
+  # Fitting constructs both source Form and wrapper with the pinned NewStreamDictForBuf:
+  # fixed Flate, no decode parameters, bytes.Reader input and bytes.Buffer output. No source-chosen
+  # codec or external I/O enters Encode; this exact maintained in-memory path cannot return failure.
+  # Retain the backend API guard so a future failure prevents incomplete content publication.
+  - id: coverage-pdfengine-fit-stream-encoding-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/fit_content.go
+    function: storeFitStream
+    anchor: 'return nil, fmt.Errorf("encode fitted content: %w", err)'
+    retained_property: encoding failure prevents publication of incomplete fitted content
+
+  # Native reading and validation establish a valid private free/recycle xref list. Fitting adds
+  # valid objects through the maintained allocator and never modifies that list independently;
+  # IndRefForNewObject can return failure only for an inconsistent list. No external writer reaches
+  # this graph. Preserve the allocator guard against future backend/internal-state disagreement.
+  - id: coverage-pdfengine-fit-stream-allocation-backstop
+    tool: coverage
+    kind: unreachable-branch
+    path: internal/pdfengine/fit_content.go
+    function: storeFitStream
+    anchor: 'return nil, fmt.Errorf("store fitted content: %w", err)'
+    retained_property: allocation failure prevents publication of incomplete fitted content
+
+  # The actual foreign-stage constructor acquires its directory through process-wide TMPDIR/TMP/TEMP.
+  # This security control isolates those variables to an owned parent and proves late authenticated
+  # archive failures leave no stage/modfile/compiler handoff. Parallel execution would change other
+  # tests' temporary acquisition and make ownership observations unreliable.
+  - id: lint-paralleltest-foreign-constructor-late-cleanup
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: paralleltest
+    path: tools/qualitygate/foreign_constructor_cleanup_internal_test.go
+    message: Function TestForeignConstructorLateFailureNeverHandsOffOwnedStage missing the call to method parallel
+    source: func TestForeignConstructorLateFailureNeverHandsOffOwnedStage\(t \*testing\.T\) \{
+    retained_property: authenticated late archive failures clean the entire owned stage before compiler handoff
+
+  # progressRecord is a closed DTO containing only strings, integers and pointers to scalar ints.
+  # It has no custom marshalers, floats or recursive values, so json.Marshal cannot fail for this
+  # exact expression. Ignoring that impossible error removes unreachable suppression branches;
+  # actual transport writes still check errors and report channel interruption.
+  - id: lint-progress-record-infallible-encoding
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: errcheck
+    path: internal/app/progress_render.go
+    message: 'Error return value of `json\.Marshal` is not checked'
+    source: 'encoded, _ := json\.Marshal\(record\)'
+    retained_property: closed typed progress records always encode; actual transport failures remain checked
+
+  # Complete foreign source scans repeatedly reconstruct the same reviewed immutable base+patch.
+  # Measured same-process reconstruction reuse removes about 240 ms per repeated benoit pdf scan.
+  # Only expected file identities are cached, at most one per approved root; ZIP/patch identities
+  # and every observed source byte are rechecked on every call. A changed source regression still
+  # fails after warming the cache. A local cache would be discarded between ownership scans.
+  - id: lint-foreign-source-reconstruction-cache
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gochecknoglobals
+    path: internal/repopolicy/foreign_tree.go
+    message: foreignReconstructions is a global variable
+    source: '^var foreignReconstructions ='
+    retained_property: bounded expected-tree reuse never caches observed-source validation success
+
+  # The selected maintained reader rejects repeated decoded raw dictionary keys before values/nulls
+  # can conceal them. This exact local patch is reconstructed from its immutable module ZIP and
+  # checked against the complete source tree and effective dependency/binary replacement. Returning
+  # to the cache source would restore ambiguous last-wins parsing in strict and relaxed paths.
+  - id: lint-pdf-reader-source
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gomoddirectives
+    path: go.mod
+    message: 'local replacement are not allowed: github\.com/pdfcpu/pdfcpu'
+    source: '^replace github\.com/pdfcpu/pdfcpu => \./third_party/pdfcpu/pdfcpu$'
+    retained_property: immutable reader source and native duplicate-key rejection controls prevent concealed dictionary values
+
+  # These exact local replacements select the reviewed maintained content parser/tokenizer patches.
+  # ForeignSources reconstructs immutable module ZIP plus exact patch and checks the complete tree;
+  # actual dependency discovery rejects cache/outside/workspace substitutions. Removing replacement
+  # would discard required preallocation/cancellation bounds. No other local replace is allowed.
+  - id: lint-pdf-content-parser-source
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gomoddirectives
+    path: go.mod
+    message: 'local replacement are not allowed: github\.com/benoitkugler/pdf'
+    source: '^replace github\.com/benoitkugler/pdf => \./third_party/benoitkugler/pdf$'
+    retained_property: immutable base plus exact patch and effective dependency resolution bind the compiled bounded parser
+
+  # The maintained parser uses the locally patched tokenizer transitively; selecting the cache copy
+  # would lose token/depth/cancellation guards. The exact source reconstruction and actual module
+  # resolution gate cover this root independently. Broad local replacements remain forbidden.
+  - id: lint-pdf-tokenizer-source
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gomoddirectives
+    path: go.mod
+    message: 'local replacement are not allowed: github\.com/benoitkugler/pstokenizer'
+    source: '^replace github\.com/benoitkugler/pstokenizer => \./third_party/benoitkugler/pstokenizer$'
+    retained_property: complete tokenizer source identity and direct/transitive replacement checks retain bounded tokenization
+
+  # Each console request encodes at most 16000 runes, hence at most 32000 UTF-16 units.
+  # Residual writes shrink that same slice and native counts are checked before slicing.
+  # The DWORD conversion cannot overflow; another counter or impossible-size branch would
+  # duplicate this invariant. Unicode/count controls retain the native adapter boundary.
+  - id: lint-gosec-progress-console-count
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_windows.go
+    message: 'G115: integer overflow conversion int -> uint32'
+    source: 'requested := uint32\(len\(units\)\)'
+    goos: windows
+    retained_property: bounded rune chunks and validated residual counts preserve exact console accounting
+
+  # x/sys has no F_GETPATH buffer wrapper. The native call writes at most MAXPATHLEN (1024)
+  # into a heap buffer pinned for the entire syscall; no pointer survives it. Resolving the actual
+  # terminal device is necessary to reopen an independent descriptor without changing parent/stdout
+  # O_NONBLOCK flags. Real PTY and shared-descriptor negative controls protect that ownership boundary.
+  - id: lint-gosec-progress-terminal-path
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_darwin.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'unix\.FcntlInt\(descriptor, unix\.F_GETPATH, int\(uintptr\(unsafe\.Pointer\(&path\[0\]\)\)\)\)'
+    goos: darwin
+    retained_property: bounded pinned native buffer and independent terminal descriptor preserve caller flags
+
+  # These Windows-only fixtures call documented synchronous console APIs with fixed-size
+  # runtime.Pinner-owned buffers and counts. KeepAlive extends their lifetime through each
+  # call, returned counts are checked, and no pointer escapes to asynchronous native work.
+  - id: lint-progress-console-readback-native-buffer
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_console_windows_test.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'uintptr\(handle\), uintptr\(unsafe\.Pointer\(&units\[0\]\)\), uintptr\(len\(units\)\), 0, uintptr\(unsafe\.Pointer\(&count\)\),'
+    goos: windows
+    retained_property: fixed 64-unit pinned readback buffer and native count bound preserve memory ownership
+
+  # WriteConsoleInputW requires a native INPUT_RECORD pointer: one 20-byte checked ABI record
+  # and count are pinned through this synchronous call; an ordinary Go interface cannot replace it.
+  - id: lint-progress-console-input-native-record
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_pause_fixture_windows_test.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'input\.Fd\(\), uintptr\(unsafe\.Pointer\(&record\)\), 1, uintptr\(unsafe\.Pointer\(&count\)\),'
+    goos: windows
+    retained_property: one pinned native input record and checked accepted count isolate the private console fixture
+
+  # GetThreadIOPendingFlag requires a native BOOL pointer. The int32 storage is pinned through
+  # the synchronous query; the owned query-only handle cannot observe or control another writer.
+  - id: lint-progress-console-pending-native-bool
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_pause_native_windows_test.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'queried, _, queryErr := procedure\.Call\(uintptr\(thread\), uintptr\(unsafe\.Pointer\(&pending\)\)\)'
+    goos: windows
+    retained_property: pinned int32 BOOL observes only the owned native thread through a query-only handle
+
   # The private imported context has just passed the same shared form analysis during readDocument.
   # No caller can mutate its graph between that boundary and preparation. Non-cancellation failures
   # here defend against future validator/analysis disagreement; cancellation is independently tested
@@ -35,18 +848,6 @@ exceptions:
     function: pool.importDocument
     anchor: 'return nil, newError(CodeFormUnsupported, source, path, err)'
     retained_property: form-analysis disagreement prevents assembly and remains a located policy error
-
-  # Preparation installs dictionary-shaped DR categories in the private source graph before a
-  # successful backend merge renumbers references. The pool and imported forms are private and no
-  # job can substitute a scalar between those operations. Keep the exact resource-merge failure
-  # guard for backend regressions; malformed graph and binding controls test the helper directly.
-  - id: coverage-pdfengine-normalized-form-resource-merge-disagreement
-    tool: coverage
-    kind: unreachable-branch
-    path: internal/pdfengine/pool.go
-    function: pool.importDocument
-    anchor: 'return nil, assemblyError(ctx, source, path, resourceErr)'
-    retained_property: invalid merged resource graphs prevent output publication rather than losing defaults
 
   # Both state streams use fixed in-memory Flate encoding and a validated private xref graph.
   # Their construction cannot fail for an accepted plan in the pinned backend; preserve separate
@@ -70,17 +871,6 @@ exceptions:
     function: buttonAppearancePlan.apply
     anchor: 'return onErr'
     retained_property: on-state construction failure prevents form materialization and publication
-
-  # Analysis resolved and validated this AP dictionary in the same private graph. State-stream
-  # allocations cannot invalidate its live reference, and other widgets clone rather than mutate
-  # shared AP dictionaries. Retain the lookup guard against internal graph disagreement.
-  - id: coverage-pdfengine-button-appearance-lookup-backstop
-    tool: coverage
-    kind: unreachable-branch
-    path: internal/pdfengine/form_button_streams.go
-    function: buttonAppearancePlan.apply
-    anchor: 'return fmt.Errorf("button AP: %w", err)'
-    retained_property: unexpected private appearance lookup failure prevents publication
 
   # IndRefForNewObject in pdfcpu 0.16.1 can fail only on an inconsistent free/recycle xref list.
   # Reading and validation establish that list before this private materializer runs; normalization
@@ -486,7 +1276,7 @@ exceptions:
     linter: gochecknoglobals
     path: internal/exectest/exectest.go
     message: cache is a global variable
-    retained_property: no other package-level mutable state exists in the project
+    retained_property: test executables are shared under a mutex and released by explicit cleanup
 
   # tb\\.TempDir is removed when the test that first called Build ends, which would delete the
   # executable under every later test. The directory must outlive any single test, so Build creates
@@ -689,7 +1479,7 @@ exceptions:
     tool: coverage
     kind: unreachable-branch
     path: internal/pdfengine/engine.go
-    function: Engine.readDocument
+    function: Engine.readFileDocument
     anchor: 'return nil, newError(CodeUnreadable, source, path, closeErr)'
     retained_property: a failed close is reported as an unreadable source
 
@@ -704,16 +1494,6 @@ exceptions:
     function: pipeline.run
     anchor: 'found := classify(stageInput, err)'
     retained_property: a stage that fails without recording its failure still ends the run as a failure
-
-  # reorder rereads the page-tree root the compile step just built and fails only if that root
-  # vanished from the pool, an internal inconsistency no input can create.
-  - id: coverage-pdfengine-reorder-after-compile
-    tool: coverage
-    kind: unreachable-branch
-    path: internal/pdfengine/assemble.go
-    function: Engine.writePool
-    anchor: 'return assemblyError(ctx, NoSource, req.Destination, reorderErr)'
-    retained_property: an inconsistent pool is reported as an assembly error
 
   # readContext and inspectContext return only *Error values by construction, so the fallback for a
   # foreign error type is defensive and cannot be reached through them.
@@ -812,110 +1592,6 @@ exceptions:
     message: 'fieldalignment: TextDetail has 200 leading bytes of pointer data but optimal value is 160'
     source: 'TextDetail struct \{'
     retained_property: standard flattened JSON and idiomatic embedding retain measured object sizes
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-background
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field background is unused'
-    source: 'background\s+string'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-size
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field size is unused'
-    source: 'size\s+PageSize'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-bounds
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field bounds is unused'
-    source: 'bounds, inkBounds Rect'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-ink-bounds
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field inkBounds is unused'
-    source: 'bounds, inkBounds Rect'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-has-bounds
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field hasBounds is unused'
-    source: 'hasBounds, hasInk bool'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-has-ink
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field hasInk is unused'
-    source: 'hasBounds, hasInk bool'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-has-text
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field hasText is unused'
-    source: 'hasText\s+bool'
-    retained_property: style interning distinguishes this field through native map-key equality
-
-  # Native map[styleKey]int equality reads this field implicitly while interning complete styles.
-  # The pinned unused analyzer counts explicit reads only with field-writes-are-uses false; varying
-  # each key field in builder tests proves that distinct semantic values remain distinct snapshots.
-  - id: lint-unused-style-key-font
-    tool: golangci-lint
-    kind: false-positive
-    effect: exclude-diagnostic
-    linter: unused
-    path: internal/report/builder.go
-    message: 'field font is unused'
-    source: 'font\s+int'
-    retained_property: style interning distinguishes this field through native map-key equality
 
   # The pinned unused analyzer reports the blank identifier and descriptive names in interface and
   # function-type signatures as unused variables when this option is false. Those are not unused
@@ -1616,8 +2292,8 @@ exceptions:
     anchor: 'workingDir = "" // the command reports the missing working directory when it needs one'
     retained_property: a native working-directory failure prevents path-resolving actions and remains a diagnostic
 
-  # This one native test replaces the process stderr variable and may allocate an owned console.
-  # Parallel execution would race every progressStream user and the process console lifecycle.
+  # This one native test may allocate an owned process console before opening its actual output.
+  # Parallel execution would race console allocation and release; supplied pipe handles are independent.
   # Keep it sequential; all unrelated CLI tests retain the mandatory parallel-test rule.
   - id: lint-cli-windows-progress-console-sequential
     tool: golangci-lint
@@ -1628,21 +2304,7 @@ exceptions:
     path: cmd/pdfconcat/progress_windows_internal_test.go
     message: 'Function TestProgressUsesWindowsConsoleAndRejectsPipe missing the call to method parallel'
     source: 'func TestProgressUsesWindowsConsoleAndRejectsPipe\(t \*testing\.T\) \{'
-    retained_property: real console-versus-pipe progress detection is tested without racing process-global streams
-
-  # The sole test in this exact file installs and restores real console/pipe stderr handles for
-  # progressStream, whose product boundary intentionally examines os.Stderr. An injected writer
-  # would not prove native terminal detection. Production stream access remains confined to wiring.
-  - id: lint-cli-windows-progress-real-stderr
-    tool: golangci-lint
-    kind: intended-pattern
-    effect: exclude-diagnostic
-    linter: forbidigo
-    goos: windows
-    path: cmd/pdfconcat/progress_windows_internal_test.go
-    message: 'use of `os\.Stderr` forbidden because "process streams are wired in cmd/pdfconcat and injected"'
-    source: 'os\.Stderr'
-    retained_property: native progress goes to an actual terminal and is refused for an actual redirected pipe
+    retained_property: actual console-versus-pipe progress detection is tested without racing process console ownership
 
   # This exact >1 to >=1 boundary mutation cannot remove a supported bounded primary: the
   # encoded-byte previews and schema-valid name/Recovery/location fields fit the JSON line bound

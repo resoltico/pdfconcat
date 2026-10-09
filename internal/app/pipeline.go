@@ -9,12 +9,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"time"
+	"sync/atomic"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/cli"
 	"github.com/resoltico/pdfconcat/internal/layout"
+	"github.com/resoltico/pdfconcat/internal/observation"
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
 	"github.com/resoltico/pdfconcat/internal/report"
 	"github.com/resoltico/pdfconcat/internal/typeset"
@@ -26,7 +27,7 @@ type (
 		app      *App
 		env      Env
 		command  *cli.Command
-		progress *progress
+		progress *Progress
 		builder  *report.Builder
 		registry *capture.Registry
 		// workspace owns every scratch file of the run; nil until the destination is checked.
@@ -36,12 +37,14 @@ type (
 		// resource is the generated-pages document; nil when the job has no generated page.
 		resource *pdfengine.ResourceDocument
 
-		job    *assembly.Job
-		flat   *assembly.Flattened
-		fonts  loadedFonts
-		files  []inspectedSource
-		layout *assembly.Layout
-		placed []*typeset.Placed
+		job           *assembly.Job
+		target        *pdfengine.PageSize
+		generatedFits []pdfengine.PageFit
+		flat          *assembly.Flattened
+		fonts         loadedFonts
+		files         []inspectedSource
+		layout        *assembly.Layout
+		placed        []*typeset.Placed
 
 		// output and reportPath are absolute; empty when not named.
 		outputDigest string
@@ -62,6 +65,7 @@ type (
 		// inventoryComplete is true once every plan, source, font, output and report file is known and
 		// has passed the alias checks; failure reports may overwrite only after that.
 		inventoryComplete bool
+		capturedSources   atomic.Int64
 	}
 
 	// loadedFonts are the fonts of the job, loaded once, by absolute file path; the empty path is the
@@ -80,7 +84,6 @@ func (a *App) assemble(ctx context.Context, command *cli.Command, env Env) int {
 		app:      a,
 		env:      env,
 		command:  command,
-		progress: newProgress(env.Progress, time.Now),
 		builder:  report.NewBuilder(string(command.Name)),
 		registry: capture.NewRegistry(),
 		status:   report.StatusOK,
@@ -91,15 +94,36 @@ func (a *App) assemble(ctx context.Context, command *cli.Command, env Env) int {
 		publication: report.Publication{ReportStatus: report.ReportNotRequested},
 	}
 
-	rep := current.run(ctx)
-
-	current.progress.erase()
-
-	for _, warning := range current.warnings {
-		warn(env, warning)
+	if env.NewProgress != nil && command.Progress != cli.ProgressNone {
+		current.progress = env.NewProgress(ctx, command.Progress, current.builder.AttemptID())
+		if current.progress != nil {
+			current.env.ProgressSequence = current.progress.NextSequence
+			env.ProgressSequence = current.progress.NextSequence
+		}
 	}
 
-	return finishCommand(env, command, rep)
+	if command.Progress == cli.ProgressJSON && current.progress == nil {
+		env.ProgressInterrupted = func() bool { return true }
+		current.env.ProgressInterrupted = env.ProgressInterrupted
+	}
+
+	rep := current.run(ctx)
+
+	if current.progress != nil {
+		current.progress.Stop()
+
+		initialHealth := env.ProgressInterrupted
+		env.ProgressInterrupted = func() bool { return current.progress.Interrupted() || initialHealth != nil && initialHealth() }
+		current.env.ProgressInterrupted = env.ProgressInterrupted
+	}
+
+	for _, warning := range current.warnings {
+		if err := warn(ctx, env, command, rep, warning); err != nil {
+			env.ProgressInterrupted = func() bool { return true }
+		}
+	}
+
+	return finishCommand(ctx, env, command, rep)
 }
 
 func (p *pipeline) isBuild() bool { return p.command.Name == cli.NameBuild }
@@ -114,6 +138,8 @@ func (p *pipeline) run(ctx context.Context) *report.Report {
 		p.builder.AddDiagnostic(0, found.diagnostic)
 		p.status = found.status
 	}
+
+	p.observePhase(observation.Finalization)
 
 	return p.conclude(ctx)
 }
@@ -134,10 +160,10 @@ func (p *pipeline) execute(ctx context.Context) error {
 		return p.stopWith(problem{diagnostic: *diagnostic, status: report.StatusFailed})
 	}
 
-	p.progress.enter(stagePrepare)
+	p.observePhase(observation.Preparation)
 
 	steps := []func() error{
-		p.resolveCommandPaths, func() error { return p.loadJob(ctx) }, p.resolveOutput, p.flatten, p.checkDestinations,
+		p.resolveCommandPaths, func() error { return p.loadJob(ctx) }, p.resolveFit, p.resolveOutput, p.flatten, p.checkDestinations,
 	}
 
 	for _, step := range steps {
@@ -157,7 +183,7 @@ func (p *pipeline) executeResources(ctx context.Context) error {
 		return err
 	}
 
-	defer p.closeWorkspace()
+	defer func() { p.observePhase(observation.Finalization); p.closeWorkspace() }()
 
 	inputSteps := []func() error{func() error { return p.loadFonts(ctx) }, func() error { return p.validateText(ctx) }, p.registerSources}
 	for _, step := range inputSteps {
@@ -306,6 +332,8 @@ func (p *pipeline) closeWorkspace() {
 
 // resolveLayout resolves page geometry and then lays out the text of each distinct generated page.
 func (p *pipeline) resolveLayout(ctx context.Context) error {
+	p.observePhase(observation.Layout)
+
 	geometry := make([]assembly.SourceGeometry, len(p.files))
 	for index := range p.files {
 		info := &p.files[index].info
@@ -322,6 +350,9 @@ func (p *pipeline) resolveLayout(ctx context.Context) error {
 	}
 
 	p.layout = resolved
+	if fitErr := p.captureGeneratedFits(); fitErr != nil {
+		return fitErr
+	}
 	// Backend policy is source-known and must precede placement/rendering in check and build.
 	if policyErr := p.assemblyPlan().Validate(); policyErr != nil {
 		return p.stopWith(p.assembleProblem(policyErr))
@@ -338,7 +369,12 @@ func (p *pipeline) resolveLayout(ctx context.Context) error {
 		return p.placeResources(ctx)
 	}
 
-	p.placed, err = place(ctx, resolved, p.fonts.lookup)
+	var observer observation.Observer
+	if p.progress != nil {
+		observer = p.progress
+	}
+
+	p.placed, err = place(ctx, resolved, p.fonts.lookup, observer)
 	if err != nil {
 		return p.stopAssembly(stageLayout, err)
 	}
@@ -371,6 +407,8 @@ func (p *pipeline) finishCheck(ctx context.Context) error {
 		return nil
 	}
 
+	p.observePhase(observation.Publication)
+
 	staged, err := p.stageReport(ctx)
 	if err != nil {
 		return err
@@ -394,4 +432,16 @@ func (p *pipeline) validateText(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (p *pipeline) observePhase(phase observation.Phase) {
+	if p.progress != nil {
+		p.progress.Observe(observation.Milestone{Phase: phase})
+	}
+}
+
+func (p *pipeline) observeCount(phase observation.Phase, unit observation.Unit, completed, total int64) {
+	if p.progress != nil {
+		p.progress.Observe(observation.Milestone{Phase: phase, Unit: unit, Completed: completed, Total: total, TotalKnown: true})
+	}
 }

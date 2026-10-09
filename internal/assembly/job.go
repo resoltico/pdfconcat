@@ -50,6 +50,8 @@ type (
 		Base string
 		// Output is the declared output path; unset when the job names none. It resolves against Base.
 		Output Field[string]
+		// FitTo is the optional global portrait target.
+		FitTo Field[FitTarget]
 		// Dir is the declared directory for the top-level items, relative to Base.
 		Dir Field[string]
 		// Defaults is the style every blank layers over. Its font resolves against Base.
@@ -150,6 +152,12 @@ func styleNodes(style *BlankStyle) int {
 func (j *Job) Validate() error {
 	if j.Source == nil {
 		return fmt.Errorf("%w: job has no source", ErrInvalidJob)
+	}
+
+	if j.FitTo.IsSet() {
+		if _, err := j.FitTo.Value.Dim(); err != nil {
+			return err
+		}
 	}
 
 	var walk jobWalk

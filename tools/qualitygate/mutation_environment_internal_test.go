@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -60,11 +59,11 @@ func TestMutationSnapshotFindsIgnoredParentCheckerThroughPath(t *testing.T) {
 	}
 }
 
-func TestPackageMutationDoesNotRequireWholeSuiteChecker(t *testing.T) {
+func TestPackageMutationRequiresBaselineChecker(t *testing.T) {
 	t.Parallel()
 
-	env, err := mutationEnvironment(t.Context(), &mutationOptions{root: t.TempDir()}, nil)
-	if err != nil || !slices.Equal(env, []string{readonlyGoFlags}) {
-		t.Fatalf("package mutation environment: %v, %v", env, err)
+	_, err := mutationEnvironment(t.Context(), &mutationOptions{root: t.TempDir()}, nil)
+	if err == nil {
+		t.Fatal("package mutation accepted missing whole-module baseline checker")
 	}
 }

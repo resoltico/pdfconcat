@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/report/response.schema.json",
-  "title": "PDFConcat structured responses, format 3",
+  "title": "PDFConcat structured responses, format 2",
   "oneOf": [
     {
       "$ref": "#/$defs/error"
@@ -23,6 +23,12 @@
     },
     {
       "$ref": "#/$defs/committed_state"
+    },
+    {
+      "$ref": "#/$defs/progress"
+    },
+    {
+      "$ref": "#/$defs/cleanup_warning"
     }
   ],
   "$defs": {
@@ -508,6 +514,12 @@
             "null"
           ],
           "minimum": 0
+        },
+        "geometries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/geometry_range"
+          }
         }
       },
       "required": [
@@ -544,7 +556,8 @@
           "enum": [
             "explicit",
             "following_source",
-            "preceding_source"
+            "preceding_source",
+            "fit_target"
           ]
         },
         "width": {
@@ -713,6 +726,13 @@
         },
         "text": {
           "$ref": "#/$defs/text"
+        },
+        "geometry": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_text": {
+          "$ref": "#/$defs/text_placement"
         }
       },
       "required": [
@@ -975,7 +995,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "report"
@@ -1051,6 +1071,19 @@
         "warning_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "fit": {
+          "$ref": "#/$defs/fit"
+        },
+        "geometries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/geometry"
+          }
+        },
+        "progress_interrupted": {
+          "type": "boolean",
+          "description": "Records observed interruption of requested progress. Absence or false is not proof of complete delivery; a prestaged report may predate the observation."
         }
       },
       "required": [
@@ -1218,7 +1251,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "summary"
@@ -1307,6 +1340,16 @@
         "warning_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "fit_target": {
+          "enum": [
+            "A4",
+            "Legal"
+          ]
+        },
+        "progress_interrupted": {
+          "type": "boolean",
+          "description": "Records observed interruption of requested progress. Absence or false is not proof of complete delivery; a prestaged report may predate the observation."
         }
       },
       "required": [
@@ -1442,7 +1485,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "error"
@@ -1548,7 +1591,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "help"
@@ -1679,7 +1722,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "version"
@@ -1837,6 +1880,15 @@
         },
         "text": {
           "$ref": "#/$defs/text_detail"
+        },
+        "canvas_size": {
+          "$ref": "#/$defs/size"
+        },
+        "geometry": {
+          "$ref": "#/$defs/geometry"
+        },
+        "final_text": {
+          "$ref": "#/$defs/text_placement"
         }
       },
       "required": [
@@ -1939,6 +1991,18 @@
         "warning_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "fit": {
+          "$ref": "#/$defs/fit"
+        },
+        "final_size": {
+          "$ref": "#/$defs/size"
+        },
+        "geometries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/geometry_entry"
+          }
         }
       },
       "required": [
@@ -1955,7 +2019,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "part"
@@ -1975,7 +2039,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "page"
@@ -1988,6 +2052,9 @@
         },
         "page_in_part": {
           "type": "integer"
+        },
+        "geometry": {
+          "$ref": "#/$defs/geometry"
         }
       },
       "required": [
@@ -2003,7 +2070,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "view"
@@ -2062,7 +2129,7 @@
       "type": "object",
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "kind": {
           "const": "report_query"
@@ -2168,7 +2235,7 @@
           ]
         },
         "format_version": {
-          "const": 3
+          "const": 2
         },
         "attempt_id": {
           "type": "string",
@@ -2243,6 +2310,11 @@
               }
             ]
           }
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shared machine stderr sequence when JSON progress was requested."
         }
       },
       "required": [
@@ -2465,6 +2537,362 @@
           }
         }
       ]
+    },
+    "fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paper": {
+          "enum": [
+            "A4",
+            "Legal"
+          ]
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "paper",
+        "size",
+        "location"
+      ]
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "media_box": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "crop_box": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "visible_box": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "matrix": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "number"
+          }
+        },
+        "original_width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "original_height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "physical_scale": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "user_unit": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rotation": {
+          "enum": [
+            0,
+            90,
+            180,
+            270
+          ]
+        },
+        "has_crop_box": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "media_box",
+        "crop_box",
+        "visible_box",
+        "matrix",
+        "original_width",
+        "original_height",
+        "physical_scale",
+        "user_unit",
+        "rotation",
+        "has_crop_box"
+      ]
+    },
+    "geometry_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "last": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "geometry": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "first",
+        "last",
+        "geometry"
+      ]
+    },
+    "text_placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ink_bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_size": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "bounds",
+        "ink_bounds",
+        "font_size"
+      ]
+    },
+    "geometry_entry": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/index"
+        },
+        "geometry": {
+          "$ref": "#/$defs/geometry"
+        }
+      },
+      "required": [
+        "index",
+        "geometry"
+      ],
+      "additionalProperties": false
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "kind",
+        "event",
+        "attempt_id",
+        "sequence",
+        "phase",
+        "elapsed_ms",
+        "phase_age_ms",
+        "work_age_ms",
+        "completed",
+        "total"
+      ],
+      "properties": {
+        "format_version": {
+          "const": 2
+        },
+        "kind": {
+          "const": "progress"
+        },
+        "event": {
+          "enum": [
+            "phase",
+            "counter",
+            "liveness"
+          ]
+        },
+        "attempt_id": {
+          "type": "string",
+          "minLength": 26,
+          "maxLength": 26,
+          "pattern": "^[A-Z2-7]{26}$"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "phase": {
+          "enum": [
+            "preparation",
+            "input_inspection",
+            "layout",
+            "assembly",
+            "optimization",
+            "output_writing",
+            "output_verification",
+            "publication",
+            "finalization"
+          ]
+        },
+        "elapsed_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phase_age_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "work_age_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "completed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit": {
+          "enum": [
+            "captured_sources",
+            "processed_sources",
+            "processed_generated_specs",
+            "imported_sources",
+            "compiled_pages"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "const": "counter"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "unit"
+            ],
+            "properties": {
+              "completed": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": [
+                "unit"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "completed": {
+                "type": "null"
+              },
+              "total": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "cleanup_warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "kind",
+        "attempt_id",
+        "sequence",
+        "message",
+        "saved_run",
+        "publication"
+      ],
+      "properties": {
+        "format_version": {
+          "const": 2
+        },
+        "kind": {
+          "const": "cleanup_warning"
+        },
+        "attempt_id": {
+          "type": "string",
+          "minLength": 26,
+          "maxLength": 26,
+          "pattern": "^[A-Z2-7]{26}$"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "saved_run": {
+          "$ref": "#/$defs/saved_run"
+        },
+        "publication": {
+          "$ref": "#/$defs/publication"
+        }
+      }
     }
   }
 }

@@ -131,7 +131,7 @@ func TestSourceLimitScanCoversPhysicalOwnedSources(t *testing.T) {
 		}
 	}
 
-	issues, err := repopolicy.ScanSourceLimits(root)
+	issues, err := repopolicy.ScanSourceLimits(t.Context(), root)
 	if err != nil || len(issues) != len(names) {
 		t.Fatalf("owned sourceLimit discovery: %v, %v", issues, err)
 	}
@@ -144,11 +144,11 @@ func TestSourceLimitsFailWhenSourceCannotBeEstablished(t *testing.T) {
 		t.Fatal("malformed source accepted")
 	}
 
-	if _, err := repopolicy.ScanSourceLimits(t.TempDir()); err == nil {
+	if _, err := repopolicy.ScanSourceLimits(t.Context(), t.TempDir()); err == nil {
 		t.Fatal("empty source inventory accepted")
 	}
 
-	if _, err := repopolicy.ScanSourceLimits(filepath.Join(t.TempDir(), "missing")); err == nil {
+	if _, err := repopolicy.ScanSourceLimits(t.Context(), filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("unavailable root accepted")
 	}
 }

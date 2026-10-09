@@ -4,34 +4,44 @@
 package scale
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/resoltico/pdfconcat/internal/exectest"
 )
 
-type processSampler struct {
-	collector string
-	exit      processExitObserver
-	pid       int
-}
-
-func prepareProcessSampler() (*processSampler, error) {
-	sampler := &processSampler{}
-
-	collector, err := exec.LookPath("lsof")
-	if err != nil {
-		return nil, fmt.Errorf("required descriptor collector lsof unavailable: %w", err)
+type (
+	descriptorCollectorReply struct {
+		count       int64
+		nativeError uint64
+		growth      uint64
 	}
+	processSampler struct {
+		collector string
+		directory string
+		identity  *DescriptorCollectorIdentity
+		exit      processExitObserver
+		pid       int
+	}
+)
 
-	sampler.collector = collector
+const (
+	descriptorCollectorInitialSlots  = 16
+	descriptorCollectorMaximumGrowth = 12
+	descriptorCollectorMaximumSlots  = descriptorCollectorInitialSlots << descriptorCollectorMaximumGrowth
+)
 
-	return sampler, nil
+func prepareProcessSampler(ctx context.Context) (*processSampler, error) {
+	return compileDescriptorCollector(ctx)
 }
 
 func (s *processSampler) attach(ctx context.Context, pid int) error {
@@ -42,14 +52,21 @@ func (s *processSampler) attach(ctx context.Context, pid int) error {
 	return err
 }
 
-func (s *processSampler) release() error { return s.exit.release() }
+func (s *processSampler) release() error {
+	exitErr := s.exit.release()
+	directory := s.directory
+
+	s.directory = ""
+	if directory == "" {
+		return exitErr
+	}
+
+	return errors.Join(exitErr, os.RemoveAll(directory))
+}
 
 // sample requires a positive process-gone probe before classifying a failed query as terminal.
 func (s *processSampler) sample(ctx context.Context) processSample {
 	started := time.Now()
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return collectorObservation(started, time.Now(), "", "", ctxErr.Error(), phaseLiveError)
-	}
 
 	proof, exited, probeErr := s.exit.confirm(ctx, s.pid)
 	if probeErr != nil {
@@ -57,17 +74,34 @@ func (s *processSampler) sample(ctx context.Context) processSample {
 	}
 
 	if exited {
-		return collectorObservation(started, time.Now(), "", proof, "owned process exited before descriptor query", phaseTerminal)
+		return collectorObservation(started, time.Now(), "", proof, "owned process unobservable before descriptor query", phaseTerminal)
 	}
 
-	output, err := exectest.Command(ctx, s.collector, "-p", strconv.Itoa(s.pid), "-Ff").Output()
+	output, stderr, err := s.queryDescriptorCollector(ctx)
 
 	finished := time.Now()
 	if err != nil {
-		return s.failedCollectorRead(ctx, started, finished, output, err)
+		reading := s.failedCollectorRead(ctx, started, finished, output, err)
+		reading.failures[0].Stderr = stderr
+
+		return reading
 	}
 
-	count, valid := collectorDescriptorCount(string(output), s.pid)
+	if stderr != "" {
+		reading := collectorObservation(
+			started,
+			finished,
+			string(output),
+			"",
+			"descriptor collector wrote diagnostic stderr",
+			phaseLiveError,
+		)
+		reading.failures[0].Stderr = stderr
+
+		return reading
+	}
+
+	reply, valid := parseDescriptorCollectorReply(string(output), s.pid)
 	if !valid {
 		return collectorObservation(
 			started,
@@ -79,27 +113,48 @@ func (s *processSampler) sample(ctx context.Context) processSample {
 		)
 	}
 
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return collectorObservation(started, finished, string(output), "", ctxErr.Error(), phaseLiveError)
+	return s.attributeDescriptorReply(ctx, started, finished, string(output), reply)
+}
+
+func (s *processSampler) attributeDescriptorReply(
+	ctx context.Context, started, finished time.Time, output string, reply descriptorCollectorReply,
+) processSample {
+	if reply.nativeError != 0 {
+		return s.failedNativeDescriptorRead(ctx, started, finished, output, reply.nativeError)
 	}
 
-	proof, exited, probeErr = s.exit.confirm(ctx, s.pid)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return collectorObservation(started, finished, output, "", ctxErr.Error(), phaseLiveError)
+	}
+
+	proof, exited, probeErr := s.exit.confirm(ctx, s.pid)
 	if probeErr != nil {
-		return collectorObservation(started, finished, string(output), proof, probeErr.Error(), phaseLiveError)
+		return collectorObservation(started, finished, output, proof, probeErr.Error(), phaseLiveError)
 	}
 
 	if exited {
 		return collectorObservation(
 			started,
 			finished,
-			string(output),
+			output,
 			proof,
 			"collector reply cannot be attributed after owned process exited",
 			phaseTerminal,
 		)
 	}
 
-	return processSample{descriptors: count, descriptorAt: finished}
+	return processSample{descriptors: reply.count, descriptorAt: finished}
+}
+
+func (s *processSampler) queryDescriptorCollector(ctx context.Context) ([]byte, string, error) {
+	query := exectest.Command(ctx, s.collector, "-p", strconv.Itoa(s.pid))
+
+	var stderr bytes.Buffer
+
+	query.Stderr = &stderr
+	output, err := query.Output()
+
+	return output, stderr.String(), err
 }
 
 func collectorObservation(started, finished time.Time, stdout, proof, cause, phase string) processSample {
@@ -116,55 +171,42 @@ func collectorObservation(started, finished time.Time, stdout, proof, cause, pha
 	return processSample{descriptors: -1, terminal: phase == phaseTerminal, failures: []ReadingFailure{failure}}
 }
 
-// collectorDescriptorCount accepts one complete -Ff process record. Named mappings are not
-// numbered descriptors; a well-formed record containing only mappings is a known zero reading.
-func collectorDescriptorCount(output string, pid int) (int64, bool) {
-	if !strings.HasSuffix(output, "\n") {
+// parseDescriptorCollectorReply accepts exactly one PID/count/native-errno/growth frame.
+// An aligned libproc result is an observed lower bound, not a simultaneous inventory.
+func parseDescriptorCollectorReply(output string, pid int) (descriptorCollectorReply, bool) {
+	lines := strings.Split(output, "\n")
+	if len(lines) != 5 || lines[4] != "" || lines[0] != "p"+strconv.Itoa(pid) || pid <= 0 {
+		return descriptorCollectorReply{}, false
+	}
+
+	count, countOK := collectorUnsignedField(lines[1], "c")
+	nativeError, errorOK := collectorUnsignedField(lines[2], "e")
+
+	growth, growthOK := collectorUnsignedField(lines[3], "g")
+	if !countOK || count >= descriptorCollectorMaximumSlots || !errorOK || !growthOK {
+		return descriptorCollectorReply{}, false
+	}
+
+	reply := descriptorCollectorReply{count: int64(count), nativeError: nativeError, growth: growth}
+
+	if !reply.valid() {
+		return descriptorCollectorReply{}, false
+	}
+
+	return reply, true
+}
+
+func (reply descriptorCollectorReply) valid() bool {
+	return reply.nativeError <= 2147483647 && reply.growth <= descriptorCollectorMaximumGrowth &&
+		reply.count < descriptorCollectorInitialSlots<<reply.growth && (reply.nativeError == 0 || reply.count == 0)
+}
+
+func collectorUnsignedField(line, prefix string) (uint64, bool) {
+	field, found := strings.CutPrefix(line, prefix)
+	if !found || field == "" {
 		return 0, false
 	}
 
-	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "p"+strconv.Itoa(pid) {
-		return 0, false
-	}
-
-	descriptors := make(map[uint64]struct{})
-
-	for _, line := range lines[1:] {
-		if !strings.HasPrefix(line, "f") || len(line) < 2 {
-			return 0, false
-		}
-
-		field := line[1:]
-		if collectorMapping(field) {
-			continue
-		}
-
-		number, valid := unsignedDescriptor(field)
-		if !valid {
-			return 0, false
-		}
-
-		if _, duplicate := descriptors[number]; duplicate {
-			return 0, false
-		}
-
-		descriptors[number] = struct{}{}
-	}
-
-	return int64(len(descriptors)), true
-}
-
-func collectorMapping(field string) bool {
-	switch field {
-	case "cwd", "txt", "mem", "rtd":
-		return true
-	default:
-		return false
-	}
-}
-
-func unsignedDescriptor(field string) (uint64, bool) {
 	for _, digit := range field {
 		if digit < '0' || digit > '9' {
 			return 0, false
@@ -174,6 +216,41 @@ func unsignedDescriptor(field string) (uint64, bool) {
 	number, err := strconv.ParseUint(field, 10, 64)
 
 	return number, err == nil
+}
+
+func (s *processSampler) failedNativeDescriptorRead(
+	ctx context.Context,
+	started, finished time.Time,
+	output string,
+	nativeError uint64,
+) processSample {
+	proofStarted := time.Now()
+
+	proof, exited, probeErr := s.exit.confirm(ctx, s.pid)
+	if nativeError == uint64(unix.ESRCH) && !exited && probeErr == nil {
+		proof, exited, probeErr = s.exit.awaitExitProof(ctx, s.pid)
+	}
+
+	proofFinished := time.Now()
+
+	phase := phaseLiveError
+	if nativeError == uint64(unix.ESRCH) && exited && probeErr == nil && ctx.Err() == nil {
+		phase = phaseTerminal
+	}
+
+	reading := collectorObservation(started, finished, output, proof, fmt.Sprintf("native descriptor query errno %d", nativeError), phase)
+
+	reading.failures[0].NativeCode = nativeError
+	if nativeError == uint64(unix.ESRCH) {
+		reading.failures[0].ProofWaitStarted = proofStarted
+		reading.failures[0].ProofWaitFinished = proofFinished
+	}
+
+	if probeErr != nil {
+		reading.failures[0].Cause = fmt.Sprintf("native descriptor query errno %d; %v", nativeError, probeErr)
+	}
+
+	return reading
 }
 
 func (s *processSampler) failedCollectorRead(ctx context.Context, started, finished time.Time, output []byte, err error) processSample {
@@ -186,36 +263,25 @@ func (s *processSampler) failedCollectorRead(ctx context.Context, started, finis
 		ReadFinished: finished,
 	}
 	exit, exited := errors.AsType[*exec.ExitError](err)
-	terminal := false
 
 	if exited {
 		failure.ExitCode = exit.ExitCode()
 
 		failure.Stderr = string(exit.Stderr)
-		terminal = s.confirmTerminalCollector(ctx, exit, &failure)
 	}
 
-	if terminal {
-		failure.Phase = phaseTerminal
-	}
-
-	return processSample{descriptors: -1, terminal: terminal, failures: []ReadingFailure{failure}}
-}
-
-func (s *processSampler) confirmTerminalCollector(ctx context.Context, exit *exec.ExitError, failure *ReadingFailure) bool {
-	if exit.ExitCode() != 1 || len(exit.Stderr) != 0 || failure.Stdout != "" || ctx.Err() != nil {
-		return false
-	}
-
-	proof, exited, err := s.exit.confirm(ctx, s.pid)
-
+	// A later owned exit records lifecycle information, but cannot establish why
+	// this earlier query failed while the process was still observable.
+	proof, _, probeErr := s.exit.confirm(ctx, s.pid)
 	failure.Probe = proof
-	if err != nil {
-		failure.Cause = errors.Join(exit, err).Error()
-		return false
+
+	if probeErr != nil {
+		failure.Cause = errors.Join(err, probeErr).Error()
 	}
 
-	return exited
+	return processSample{descriptors: -1, failures: []ReadingFailure{failure}}
 }
 
 func (s *processSampler) retryEvidence() ObserverRetryEvidence { return s.exit.retries }
+
+func (s *processSampler) collectorIdentity() *DescriptorCollectorIdentity { return s.identity }

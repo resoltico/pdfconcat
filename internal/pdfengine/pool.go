@@ -11,6 +11,8 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+
+	"github.com/resoltico/pdfconcat/internal/observation"
 )
 
 type (
@@ -24,10 +26,12 @@ type (
 	// pool is the merged object graph that the final page order is cut from. The first imported document
 	// is its base: pdfcpu merges later documents into the context of an already read one.
 	pool struct {
-		engine         *Engine
-		pdf            *model.Context
-		version        model.Version
-		formOccurrence int
+		observer        observation.Observer
+		engine          *Engine
+		pdf             *model.Context
+		version         model.Version
+		formOccurrence  int
+		importedSources int64
 	}
 )
 
@@ -39,12 +43,12 @@ var (
 // importDocument merges the document at path into the pool and returns its pages in order. A document
 // that has changed since inspection (a different page count) is an error, because the order was
 // compiled against the inspected page count.
-func (p *pool) importDocument(ctx context.Context, source int, path string, pages int) ([]*poolPage, error) {
+func (p *pool) importDocument(ctx context.Context, source int, path string, pages int, target *PageSize) ([]*poolPage, error) {
 	if err := canceled(ctx, source, path); err != nil {
 		return nil, err
 	}
 
-	imported, err := p.engine.readContext(ctx, source, path)
+	imported, err := p.readImport(ctx, source, path, target)
 	if err != nil {
 		return nil, err
 	}
@@ -66,10 +70,10 @@ func (p *pool) importDocument(ctx context.Context, source int, path string, page
 
 	if p.pdf == nil {
 		p.adopt(imported)
-		top, _, err = p.root()
+		top, _, err = p.root(ctx)
 	} else {
 		if err = p.merge(ctx, source, path, imported); err == nil {
-			top, err = p.lastTree()
+			top, err = p.lastTree(ctx)
 		}
 	}
 
@@ -77,13 +81,24 @@ func (p *pool) importDocument(ctx context.Context, source int, path string, page
 		return nil, assemblyError(ctx, source, path, err)
 	}
 
-	if resourceErr := mergeFormResources(p.pdf, form); resourceErr != nil {
+	if resourceErr := mergeFormResources(ctx, p.pdf, form); resourceErr != nil {
 		return nil, assemblyError(ctx, source, path, resourceErr)
 	}
 
+	collected, err := p.collectImportedPages(ctx, source, path, top, pages)
+	if err != nil {
+		return nil, err
+	}
+
+	p.recordSourceImport(source)
+
+	return collected, nil
+}
+
+func (p *pool) collectImportedPages(ctx context.Context, source int, path string, top types.IndirectRef, pages int) ([]*poolPage, error) {
 	var collected []*poolPage
 
-	err = walkPages(ctx, p.pdf, top, func(ref types.IndirectRef, page types.Dict, inherited inheritedAttrs) error {
+	err := walkPages(ctx, p.pdf, top, func(ref types.IndirectRef, page types.Dict, inherited inheritedAttrs) error {
 		inherited.materialize(page)
 		page.Delete("StructParents")
 
@@ -139,13 +154,13 @@ func (p *pool) applyVersion() {
 }
 
 // root returns the pool's page-tree root reference and dictionary.
-func (p *pool) root() (types.IndirectRef, types.Dict, error) {
-	ref, err := p.pdf.Pages()
+func (p *pool) root(ctx context.Context) (types.IndirectRef, types.Dict, error) {
+	ref, err := p.pdf.PagesContext(ctx)
 	if err != nil {
 		return types.IndirectRef{}, nil, fmt.Errorf(pageTreeRootFailureFormat, err)
 	}
 
-	dict, err := p.pdf.DereferenceDict(*ref)
+	dict, err := p.pdf.DereferenceDictContext(ctx, *ref)
 	if err != nil {
 		return types.IndirectRef{}, nil, fmt.Errorf(pageTreeRootFailureFormat, err)
 	}
@@ -154,13 +169,13 @@ func (p *pool) root() (types.IndirectRef, types.Dict, error) {
 }
 
 // lastTree returns the page-tree node that the latest merge appended to the pool's root.
-func (p *pool) lastTree() (types.IndirectRef, error) {
-	_, root, err := p.root()
+func (p *pool) lastTree(ctx context.Context) (types.IndirectRef, error) {
+	_, root, err := p.root(ctx)
 	if err != nil {
 		return types.IndirectRef{}, err
 	}
 
-	kids, err := p.pdf.DereferenceArray(root["Kids"])
+	kids, err := p.pdf.DereferenceArrayContext(ctx, root["Kids"])
 	if err != nil {
 		return types.IndirectRef{}, fmt.Errorf("page tree root kids: %w", err)
 	}
@@ -231,8 +246,8 @@ func keepsCatalogKey(key string) bool {
 //
 // The root keeps no inheritable attributes: every page carries its own, and a stale /Rotate or /CropBox
 // on the base document's root would otherwise apply to pages that have none.
-func (p *pool) reorder(final []*poolPage) error {
-	rootRef, root, err := p.root()
+func (p *pool) reorder(ctx context.Context, final []*poolPage) error {
+	rootRef, root, err := p.root(ctx)
 	if err != nil {
 		return err
 	}
@@ -257,7 +272,7 @@ func (p *pool) reorder(final []*poolPage) error {
 		}
 	}
 
-	if namesErr := p.keepOnlyDestinationNames(); namesErr != nil {
+	if namesErr := p.keepOnlyDestinationNames(ctx); namesErr != nil {
 		return namesErr
 	}
 
@@ -269,14 +284,14 @@ func (p *pool) reorder(final []*poolPage) error {
 // keepOnlyDestinationNames drops every name tree except the destinations: attachments, JavaScript and the
 // other trees collide by name across documents and are not carried over. The catalog always has a /Names
 // entry because adopt seeds one.
-func (p *pool) keepOnlyDestinationNames() error {
+func (p *pool) keepOnlyDestinationNames(ctx context.Context) error {
 	for tree := range p.pdf.Names {
 		if tree != keyDests {
 			delete(p.pdf.Names, tree)
 		}
 	}
 
-	names, err := p.pdf.DereferenceDict(p.pdf.RootDict[keyNames])
+	names, err := p.pdf.DereferenceDictContext(ctx, p.pdf.RootDict[keyNames])
 	if err != nil {
 		return fmt.Errorf("catalog /Names: %w", err)
 	}
@@ -288,4 +303,17 @@ func (p *pool) keepOnlyDestinationNames() error {
 	}
 
 	return nil
+}
+
+func (p *pool) observe(milestone observation.Milestone) {
+	observation.Emit(p.observer, milestone)
+}
+
+func (p *pool) recordSourceImport(source int) {
+	if source == NoSource {
+		return
+	}
+
+	p.importedSources++
+	p.observe(observation.Milestone{Phase: observation.Assembly, Unit: observation.ImportedSources, Completed: p.importedSources})
 }

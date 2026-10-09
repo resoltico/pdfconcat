@@ -17,6 +17,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/genpage"
 	"github.com/resoltico/pdfconcat/internal/layout"
+	"github.com/resoltico/pdfconcat/internal/observation"
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
 	"github.com/resoltico/pdfconcat/internal/publish"
 	"github.com/resoltico/pdfconcat/internal/report"
@@ -175,7 +176,7 @@ func (p *pipeline) build(ctx context.Context) error {
 		return err
 	}
 
-	p.progress.enter(stagePersist)
+	p.observePhase(observation.Publication)
 
 	return p.publishAll(ctx, staged)
 }
@@ -203,16 +204,27 @@ func (p *pipeline) assemblyPlan() pdfengine.AssemblyPlan {
 	}
 
 	return pdfengine.AssemblyPlan{
-		Sources: sources, Order: p.order(), GeneratedSpecs: len(p.layout.Specs), ExpectedPages: toInt(p.layout.Totals.Total),
+		Sources:        sources,
+		Order:          p.order(),
+		GeneratedSpecs: len(p.layout.Specs),
+		ExpectedPages:  toInt(p.layout.Totals.Total),
+		FitTarget:      p.target,
 	}
 }
 
 // merge assembles the staged file and verifies it (the engine reads it back and compares its page count).
 func (p *pipeline) merge(ctx context.Context, staged string) error {
-	p.progress.enter(stageMerge)
+	p.observePhase(observation.Assembly)
 
 	plan := p.assemblyPlan()
+
+	var observer observation.Observer
+	if p.progress != nil {
+		observer = p.progress
+	}
+
 	request := &pdfengine.AssembleRequest{
+		FitTarget: plan.FitTarget, Observer: observer,
 		Sources: plan.Sources, Resource: p.resource, Order: plan.Order,
 		Destination: staged, ExpectedPages: plan.ExpectedPages,
 	}
@@ -440,7 +452,7 @@ func (p *pipeline) beforePublish() {
 
 // placeResources emits each distinct shaped page immediately, retaining only report geometry.
 func (p *pipeline) placeResources(ctx context.Context) error {
-	p.progress.enter(stageRender)
+	p.observePhase(observation.Layout)
 
 	count := len(p.layout.Specs)
 	if count == 0 {
@@ -469,6 +481,8 @@ func (p *pipeline) produceResource(ctx context.Context, path string, file io.Wri
 
 	p.placed = make([]*typeset.Placed, count)
 	writeErr := writeResource(ctx, file, count, p.resourceFonts(), func(index int) (genpage.Page, error) {
+		defer p.observeCount(observation.Layout, observation.ProcessedGeneratedSpecs, int64(index+1), int64(count))
+
 		placed, placementErr := layout.PlaceSpec(&shaper, p.layout, index, p.fonts.lookup)
 		if placementErr != nil {
 			problems = append(problems, assembly.Diagnostics(placementErr)...)

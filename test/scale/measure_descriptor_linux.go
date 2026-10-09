@@ -19,7 +19,7 @@ type processSampler struct {
 
 var errDescriptorDirectory = errors.New("owned process descriptor directory unavailable")
 
-func prepareProcessSampler() (*processSampler, error) { return &processSampler{}, nil }
+func prepareProcessSampler(_ context.Context) (*processSampler, error) { return &processSampler{}, nil }
 
 // attach opens this owned child's proc inode before the command wait may reap it. Holding this
 // directory avoids new pathname permission checks and prevents PID reuse from changing its identity.
@@ -95,3 +95,5 @@ func descriptorReadFailure(started time.Time, err error) processSample {
 }
 
 func (*processSampler) retryEvidence() ObserverRetryEvidence { return ObserverRetryEvidence{} }
+
+func (*processSampler) collectorIdentity() *DescriptorCollectorIdentity { return nil }

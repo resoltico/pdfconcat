@@ -26,12 +26,13 @@ const (
 	executableFixtureMode          = 0o700
 	descriptorCollectorFixtureName = "collector"
 	successfulChildExecutable      = "/usr/bin/true"
+	failedCollectorExecutable      = "/usr/bin/false"
 )
 
 func TestDescriptorCollectorPreservesConfirmedTerminalFailure(t *testing.T) {
 	t.Parallel()
 
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(t.Context())
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
 	}
@@ -82,7 +83,7 @@ func TestDescriptorCollectorFailureWhileProcessLivesRemainsInvalid(t *testing.T)
 		}
 	})
 
-	sampler, err := prepareProcessSampler()
+	sampler, err := prepareProcessSampler(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestDescriptorCollectorFailureWhileProcessLivesRemainsInvalid(t *testing.T)
 		}
 	})
 
-	sampler.collector = "/usr/bin/false"
+	sampler.collector = failedCollectorExecutable
 
 	reading := sampler.sample(t.Context())
 	if reading.terminal || len(reading.failures) != 1 || reading.failures[0].Phase != "live_error" {
@@ -117,8 +118,8 @@ func TestDescriptorCollectorFailureWhileProcessLivesRemainsInvalid(t *testing.T)
 func TestDescriptorCollectorMissingPrerequisiteFailsBeforeProcessLaunch(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	if sampler, err := prepareProcessSampler(); err == nil || sampler != nil {
-		t.Fatalf("missing lsof prerequisite accepted: %v %+v", err, sampler)
+	if sampler, err := prepareProcessSampler(t.Context()); err == nil || sampler != nil {
+		t.Fatalf("missing native compiler prerequisite accepted: %v %+v", err, sampler)
 	}
 }
 
@@ -126,7 +127,8 @@ func assertTerminalReadingCause(t *testing.T, reading processSample) {
 	t.Helper()
 
 	failure := reading.failures[0]
-	if failure.Phase != "terminal" || (failure.Probe != "owned_NOTE_EXIT" && failure.Probe != "owned_exit_before_registration: ESRCH") ||
+	if failure.Phase != "terminal" ||
+		(failure.Probe != ownedExitProof && failure.Probe != "owned_exit_unobservable_at_registration: ESRCH") ||
 		failure.Stderr != "" ||
 		failure.Cause == "" ||
 		failure.ReadFinished.Before(failure.ReadStarted) {
@@ -196,7 +198,7 @@ func TestExitedProcessDoesNotLaunderCollectorStderr(t *testing.T) {
 func samplerForLiveChild(t *testing.T) *processSampler {
 	t.Helper()
 
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(t.Context())
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
 	}
@@ -327,7 +329,7 @@ func TestOwnedExitObserverRegistrationAfterTermination(t *testing.T) {
 	})
 
 	probe, exited, probeErr := observer.confirm(t.Context(), child.Process.Pid)
-	if probeErr != nil || !exited || probe != "owned_exit_before_registration: ESRCH" {
+	if probeErr != nil || !exited || probe != "owned_exit_unobservable_at_registration: ESRCH" {
 		t.Fatalf("post-exit registration: %s %v", probe, exited)
 	}
 
@@ -460,7 +462,7 @@ func TestScratchAndCollectorCleanupFailuresBothRemainVisible(t *testing.T) {
 func samplerForCurrentProcess(t *testing.T) *processSampler {
 	t.Helper()
 
-	sampler, err := prepareProcessSampler()
+	sampler, err := prepareProcessSampler(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

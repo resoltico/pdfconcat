@@ -1,0 +1,4970 @@
+--- a/pkg/api/api.go
++++ b/pkg/api/api.go
+@@ -79,6 +79,12 @@
+ 
+ // ReadContext uses an io.ReadSeeker to build an internal PDF context and supports cancellation.
+ func ReadContext(c context.Context, rs io.ReadSeeker, conf *model.Configuration) (ctx *model.Context, err error) {
++	return ReadContextWithSourceInspection(c, rs, conf, nil)
++}
++
++// ReadContextWithSourceInspection applies source policy before preserving null references
++// and allocating direct metadata. The callback must not insert or delete objects.
++func ReadContextWithSourceInspection(c context.Context, rs io.ReadSeeker, conf *model.Configuration, inspect func(context.Context, *model.Context) error) (ctx *model.Context, err error) {
+ 	defer fault.Catch(&err)
+ 	if err := contextutil.Check(c); err != nil {
+ 		return nil, err
+@@ -86,7 +92,7 @@
+ 	if rs == nil {
+ 		return nil, ErrMissingPDFReadSeeker
+ 	}
+-	return pdfcpu.Read(c, rs, conf)
++	return pdfcpu.ReadWithSourceInspection(c, rs, conf, inspect)
+ }
+ 
+ // ReadContextFile returns inFile's validated context and supports cancellation.
+--- a/pkg/filter/ascii85Decode.go
++++ b/pkg/filter/ascii85Decode.go
+@@ -52,19 +52,30 @@
+ 
+ // DecodeLength implements decoding for an ASCII85Decode filter with a maximum output length.
+ func (f ascii85Decode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+-	bb, err := getReaderBytes(r)
++	bb, err := f.readerBytes(r)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+-	i := bytes.Index(bb, []byte(eodASCII85))
++	i := -1
++	for index := 0; index+1 < len(bb); index++ {
++		if index%DecodeWorkChunk == 0 {
++			if err := f.contextError(); err != nil {
++				return nil, err
++			}
++		}
++		if bb[index] == '~' && bb[index+1] == '>' {
++			i = index
++			break
++		}
++	}
+ 	if i < 0 {
+ 		return nil, errors.New("ASCII85 decode: missing eod marker")
+ 	}
+ 
+ 	bb = bb[:i]
+ 
+-	decoder := ascii85.NewDecoder(bytes.NewReader(bb))
++	decoder := ascii85.NewDecoder(ContextReader(f.ctx, bytes.NewReader(bb)))
+ 
+ 	b2, err := f.copyDecoded(decoder, maxLen)
+ 	if err != nil {
+--- a/pkg/filter/asciiHexDecode.go
++++ b/pkg/filter/asciiHexDecode.go
+@@ -56,7 +56,7 @@
+ 
+ // DecodeLength implements decoding for an ASCIIHexDecode filter with a maximum output length.
+ func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+-	bb, err := getReaderBytes(r)
++	bb, err := f.readerBytes(r)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -65,6 +65,11 @@
+ 
+ 	// Remove any white space and cut off on eod
+ 	for i := range bb {
++		if i%DecodeWorkChunk == 0 {
++			if err := f.contextError(); err != nil {
++				return nil, err
++			}
++		}
+ 		if bb[i] == eodHexDecode {
+ 			break
+ 		}
+@@ -93,7 +98,17 @@
+ 	}
+ 	dst := make([]byte, maxLen)
+ 
+-	if _, err := hex.Decode(dst, p[:maxLen*2]); err != nil {
++	for index := 0; index < len(dst); {
++		if err := f.contextError(); err != nil {
++			return nil, err
++		}
++		end := min(index+DecodeWorkChunk/2, len(dst))
++		if _, err := hex.Decode(dst[index:end], p[index*2:end*2]); err != nil {
++			return nil, err
++		}
++		index = end
++	}
++	if err := f.contextError(); err != nil {
+ 		return nil, err
+ 	}
+ 
+--- a/pkg/filter/ccittDecode.go
++++ b/pkg/filter/ccittDecode.go
+@@ -85,7 +85,7 @@
+ 	if k < 0 {
+ 		mode = ccitt.Group4
+ 	}
+-	rd := ccitt.NewReader(r, ccitt.MSB, mode, cols, rows, opts)
++	rd := ccitt.NewReader(ContextReader(f.ctx, r), ccitt.MSB, mode, cols, rows, opts)
+ 
+ 	b, err := f.copyDecoded(rd, maxLen)
+ 	if err != nil {
+--- /dev/null
++++ b/pkg/filter/context.go
+@@ -0,0 +1,103 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package filter
++
++import (
++	"bytes"
++	"context"
++	"io"
++)
++
++// DecodeWorkChunk bounds one cooperative reader/scanner work interval, not PDF size or memory.
++const DecodeWorkChunk = 32 << 10
++
++type contextReader struct {
++	reader io.Reader
++	ctx    context.Context
++}
++
++// ContextReader deliberately exposes only Read: neither WriterTo nor an embedded reader can bypass
++// context checks or allow a growing Buffer.ReadFrom request to become unbounded codec work.
++func ContextReader(c context.Context, r io.Reader) io.Reader { return contextReader{reader: r, ctx: c} }
++func (r contextReader) Read(p []byte) (int, error) {
++	if r.ctx != nil && r.ctx.Err() != nil {
++		return 0, r.ctx.Err()
++	}
++	if len(p) > DecodeWorkChunk {
++		p = p[:DecodeWorkChunk]
++	}
++	n, err := r.reader.Read(p)
++	if r.ctx != nil && r.ctx.Err() != nil {
++		return n, r.ctx.Err()
++	}
++	return n, err
++}
++
++// FullDecodeLimit normalizes the maintained full-decode rule; a negative value remains unlimited.
++func FullDecodeLimit(limit int64) int64 {
++	if limit == 0 {
++		return DefaultMaxDecodeBytes
++	}
++	return limit
++}
++func (f baseFilter) contextError() error {
++	if f.ctx != nil {
++		return f.ctx.Err()
++	}
++	return nil
++}
++func (f baseFilter) readerBytes(r io.Reader) ([]byte, error) {
++	if err := f.contextError(); err != nil {
++		return nil, err
++	}
++	// Keep the original bytes.Buffer alias rather than wrapping it into a materializing copy.
++	if _, buffer := r.(*bytes.Buffer); !buffer {
++		r = ContextReader(f.ctx, r)
++	}
++	data, err := getReaderBytes(r)
++	if err != nil {
++		return nil, err
++	}
++	if err = f.contextError(); err != nil {
++		return nil, err
++	}
++	return data, nil
++}
++
++// decodeContextWriter prevents oversized materialized results before append and checks encoder writes.
++type decodeContextWriter struct {
++	writer    io.Writer
++	filter    baseFilter
++	remaining int64
++}
++
++func (w *decodeContextWriter) Write(p []byte) (int, error) {
++	if err := w.filter.contextError(); err != nil {
++		return 0, err
++	}
++	if w.remaining >= 0 && int64(len(p)) > w.remaining {
++		return 0, ErrDecodeLimitExceeded
++	}
++	total := 0
++	for len(p) > 0 {
++		chunk := p[:min(len(p), DecodeWorkChunk)]
++		n, err := w.writer.Write(chunk)
++		total += n
++		if w.remaining >= 0 {
++			w.remaining -= int64(n)
++		}
++		if err != nil {
++			return total, err
++		}
++		if cancelErr := w.filter.contextError(); cancelErr != nil {
++			return total, cancelErr
++		}
++		if n != len(chunk) {
++			return total, io.ErrShortWrite
++		}
++		p = p[n:]
++	}
++	return total, nil
++}
+--- /dev/null
++++ b/pkg/filter/context_decode_test.go
+@@ -0,0 +1,164 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package filter
++
++import (
++	"bytes"
++	"compress/zlib"
++	"context"
++	"errors"
++	"io"
++	"sync/atomic"
++	"testing"
++)
++
++type decodeCheckpointContext struct {
++	context.Context
++	remaining atomic.Int64
++}
++
++func (c *decodeCheckpointContext) Err() error {
++	if c.remaining.Add(-1) < 0 {
++		return context.Canceled
++	}
++	return nil
++}
++
++type cancelDecodedRead struct {
++	reader  io.Reader
++	cancel  context.CancelFunc
++	largest int
++}
++
++func (r *cancelDecodedRead) Read(p []byte) (int, error) {
++	r.largest = max(r.largest, len(p))
++	n, err := r.reader.Read(p)
++	if n > 0 {
++		r.cancel()
++	}
++	return n, err
++}
++
++func TestContextDecodedCopyInterruptsBufferedExpansionAndCapsWork(t *testing.T) {
++	payload := bytes.Repeat([]byte("a"), 1<<20)
++	var encoded bytes.Buffer
++	writer := zlib.NewWriter(&encoded)
++	if _, err := writer.Write(payload); err != nil {
++		t.Fatal(err)
++	}
++	if err := writer.Close(); err != nil {
++		t.Fatal(err)
++	}
++	for _, safe := range []bool{false, true} {
++		ctx, cancel := context.WithCancel(t.Context())
++		codec, err := zlib.NewReader(ContextReader(ctx, bytes.NewReader(encoded.Bytes())))
++		if err != nil {
++			t.Fatal(err)
++		}
++		output := &cancelDecodedRead{reader: codec, cancel: cancel}
++		var result *bytes.Buffer
++		if safe {
++			result, err = (baseFilter{ctx: ctx, maxDecodeBytes: int64(len(payload))}).copyDecoded(output, -1)
++		} else {
++			result = &bytes.Buffer{}
++			_, err = io.Copy(result, output)
++		}
++		if closeErr := codec.Close(); closeErr != nil {
++			t.Fatal(closeErr)
++		}
++		cancel()
++		if safe {
++			if !errors.Is(err, context.Canceled) || result.Len() > DecodeWorkChunk || output.largest > DecodeWorkChunk {
++				t.Fatalf("buffered expansion did not stop at decoded work boundary: len=%d largest=%d err=%v", result.Len(), output.largest, err)
++			}
++		} else if err != nil || result.Len() != len(payload) || ctx.Err() == nil {
++			t.Fatalf("raw-only negative control must expand completely after cancellation: %d %v", result.Len(), err)
++		}
++	}
++}
++
++func TestContextCopyNChecksCancellationAtExactReadBoundary(t *testing.T) {
++	ctx, cancel := context.WithCancel(t.Context())
++	reader := &cancelDecodedRead{reader: bytes.NewReader([]byte("1234")), cancel: cancel}
++	_, err := (baseFilter{ctx: ctx}).copyDecoded(reader, 4)
++	if !errors.Is(err, context.Canceled) {
++		t.Fatalf("CopyN suppressed terminal cancellation: %v", err)
++	}
++}
++
++func TestContextPredictorReadFullChecksExactBoundaryCancellation(t *testing.T) {
++	ctx, cancel := context.WithCancel(t.Context())
++	reader := &cancelDecodedRead{reader: bytes.NewReader([]byte{0, 1, 2, 3}), cancel: cancel}
++	_, err := (flate{baseFilter{ctx: ctx, maxDecodeBytes: 3}}).decodePostProcessRows(reader, -1, 4, PredictorNone, 1, 1)
++	if !errors.Is(err, context.Canceled) {
++		t.Fatalf("ReadFull suppressed terminal cancellation: %v", err)
++	}
++}
++
++func TestContextChecksASCIIAndRunLengthMaterializedScans(t *testing.T) {
++	for _, kind := range []string{ASCII85, ASCIIHex, RunLength} {
++		ctx := &decodeCheckpointContext{Context: t.Context()}
++		ctx.remaining.Store(4)
++		codec, err := NewFilterWithContext(ctx, kind, nil, 1<<20)
++		if err != nil {
++			t.Fatal(err)
++		}
++		data := append(bytes.Repeat([]byte(" "), 1<<20), []byte("z~>")...)
++		if kind == ASCIIHex {
++			data = append(bytes.Repeat([]byte(" "), 1<<20), []byte("00>")...)
++		}
++		if kind == RunLength {
++			data = bytes.Repeat([]byte{129, 1}, 1<<13)
++		}
++		_, err = codec.Decode(bytes.NewBuffer(data))
++		if !errors.Is(err, context.Canceled) {
++			t.Fatalf("%s materialized scan ignored active cancellation: %v", kind, err)
++		}
++	}
++}
++
++func TestContextTIFFChecksLargeInnerColorLoops(t *testing.T) {
++	ctx := &decodeCheckpointContext{Context: t.Context()}
++	ctx.remaining.Store(4)
++	colors := 1 << 18
++	_, err := applyHorDiffWithContext(ctx, make([]byte, colors*2), colors)
++	if !errors.Is(err, context.Canceled) {
++		t.Fatalf("TIFF inner loop ignored active cancellation: %v", err)
++	}
++}
++
++type paethMutationContext struct {
++	context.Context
++	row []byte
++}
++
++func (c paethMutationContext) Err() error {
++	if c.row[3] != 1 {
++		return context.Canceled
++	}
++	return nil
++}
++
++func TestContextPaethWorkCounterChecksStridedInnerLoop(t *testing.T) {
++	row := bytes.Repeat([]byte{1}, 1<<20)
++	previous := make([]byte, len(row))
++	ctx := paethMutationContext{Context: t.Context(), row: row}
++	err := filterPaethWithContext(ctx, row, previous, 2)
++	if !errors.Is(err, context.Canceled) || row[len(row)-1] != 1 {
++		t.Fatalf("strided Paeth column ran through cancellation: err=%v last=%d", err, row[len(row)-1])
++	}
++}
++
++func TestPredictorExactOutputCapExcludesPNGPrefixAndRejectsNextRowBeforeAppend(t *testing.T) {
++	f := flate{baseFilter{ctx: t.Context(), maxDecodeBytes: 3}}
++	buffer, err := f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3}), -1, 4, PredictorNone, 1, 1)
++	if err != nil || !bytes.Equal(buffer.Bytes(), []byte{1, 2, 3}) {
++		t.Fatalf("exact output cap wrongly charged row prefix/EOF: %v %v", buffer, err)
++	}
++	_, err = f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3, 0, 4, 5, 6}), -1, 4, PredictorNone, 1, 1)
++	if !errors.Is(err, ErrDecodeLimitExceeded) {
++		t.Fatalf("next row exceeded remaining output cap: %v", err)
++	}
++}
+--- a/pkg/filter/dctDecode.go
++++ b/pkg/filter/dctDecode.go
+@@ -42,12 +42,12 @@
+ 
+ // DecodeLength implements decoding for a DCTDecode filter with a maximum output length.
+ func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+-	bb, err := getReaderBytes(r)
++	bb, err := f.readerBytes(r)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+-	cfg, err := jpeg.DecodeConfig(bytes.NewReader(bb))
++	cfg, err := jpeg.DecodeConfig(ContextReader(f.ctx, bytes.NewReader(bb)))
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -64,18 +64,21 @@
+ 		return nil, ErrDecodeLimitExceeded
+ 	}
+ 
+-	im, err := jpeg.Decode(bytes.NewReader(bb))
++	im, err := jpeg.Decode(ContextReader(f.ctx, bytes.NewReader(bb)))
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+ 	var b bytes.Buffer
+ 
+-	enc := gob.NewEncoder(&b)
++	if err := f.contextError(); err != nil {
++		return nil, err
++	}
++	enc := gob.NewEncoder(&decodeContextWriter{writer: &b, filter: f.baseFilter, remaining: f.decodeLimit(maxLen)})
+ 
+ 	if err := enc.Encode(im); err != nil {
+ 		return nil, err
+ 	}
+ 
+-	return &b, nil
++	return &b, f.contextError()
+ }
+--- a/pkg/filter/filter.go
++++ b/pkg/filter/filter.go
+@@ -19,6 +19,7 @@
+ 
+ import (
+ 	"bytes"
++	"context"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -64,7 +65,17 @@
+ }
+ 
+ // NewFilter returns a filter for given filterName and an optional parameter dictionary.
+-func NewFilter(filterName string, parms map[string]int, maxDecodeBytes ...int64) (filter Filter, err error) {
++func NewFilter(filterName string, parms map[string]int, maxDecodeBytes ...int64) (Filter, error) {
++	return NewFilterWithContext(context.Background(), filterName, parms, maxDecodeBytes...)
++}
++
++// NewFilterWithContext carries cooperative decoding cancellation through input, output and scans.
++// Codec work between I/O/checkpoints is not an arbitrary wall-clock interruption guarantee.
++func NewFilterWithContext(c context.Context, filterName string, parms map[string]int, maxDecodeBytes ...int64) (filter Filter, err error) {
++	if c != nil && c.Err() != nil {
++		return nil, c.Err()
++	}
++
+ 	limit := DefaultMaxDecodeBytes
+ 	if len(maxDecodeBytes) > 0 {
+ 		limit = maxDecodeBytes[0]
+@@ -72,25 +83,25 @@
+ 	switch filterName {
+ 
+ 	case ASCII85:
+-		filter = ascii85Decode{baseFilter{maxDecodeBytes: limit}}
++		filter = ascii85Decode{baseFilter{maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case ASCIIHex:
+-		filter = asciiHexDecode{baseFilter{maxDecodeBytes: limit}}
++		filter = asciiHexDecode{baseFilter{maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case RunLength:
+-		filter = runLengthDecode{baseFilter{parms: parms, maxDecodeBytes: limit}}
++		filter = runLengthDecode{baseFilter{parms: parms, maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case LZW:
+-		filter = lzwDecode{baseFilter{parms: parms, maxDecodeBytes: limit}}
++		filter = lzwDecode{baseFilter{parms: parms, maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case Flate:
+-		filter = flate{baseFilter{parms: parms, maxDecodeBytes: limit}}
++		filter = flate{baseFilter{parms: parms, maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case CCITTFax:
+-		filter = ccittDecode{baseFilter{parms: parms, maxDecodeBytes: limit}}
++		filter = ccittDecode{baseFilter{parms: parms, maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case DCT:
+-		filter = dctDecode{baseFilter{parms: parms, maxDecodeBytes: limit}}
++		filter = dctDecode{baseFilter{parms: parms, maxDecodeBytes: limit, ctx: c}}
+ 
+ 	case JBIG2:
+ 		// Unsupported
+@@ -117,6 +128,7 @@
+ }
+ 
+ type baseFilter struct {
++	ctx            context.Context
+ 	parms          map[string]int
+ 	maxDecodeBytes int64
+ }
+@@ -146,38 +158,40 @@
+ 	if maxLen >= 0 {
+ 		return maxLen
+ 	}
+-	if f.maxDecodeBytes == 0 {
+-		return DefaultMaxDecodeBytes
+-	}
+-	return f.maxDecodeBytes
++	return FullDecodeLimit(f.maxDecodeBytes)
+ }
+ 
+ func (f baseFilter) copyDecoded(r io.Reader, maxLen int64) (*bytes.Buffer, error) {
++	if err := f.contextError(); err != nil {
++		return nil, err
++	}
++	r = ContextReader(f.ctx, r)
++
+ 	if maxLen >= 0 {
+ 		var b bytes.Buffer
+ 		_, err := io.CopyN(&b, r, maxLen)
+-		return &b, err
++		return &b, errors.Join(err, f.contextError())
+ 	}
+ 
+ 	limit := f.decodeLimit(maxLen)
+ 	if limit < 0 {
+ 		var b bytes.Buffer
+ 		_, err := io.Copy(&b, r)
+-		return &b, err
++		return &b, errors.Join(err, f.contextError())
+ 	}
+ 	if limit == maxInt64 {
+ 		var b bytes.Buffer
+ 		_, err := io.Copy(&b, r)
+-		return &b, err
++		return &b, errors.Join(err, f.contextError())
+ 	}
+ 
+ 	lr := &io.LimitedReader{R: r, N: limit + 1}
+ 	var b bytes.Buffer
+ 	if _, err := io.Copy(&b, lr); err != nil {
+-		return &b, err
++		return &b, errors.Join(err, f.contextError())
+ 	}
+ 	if int64(b.Len()) > limit {
+ 		return nil, ErrDecodeLimitExceeded
+ 	}
+-	return &b, nil
++	return &b, f.contextError()
+ }
+--- a/pkg/filter/flateDecode.go
++++ b/pkg/filter/flateDecode.go
+@@ -20,6 +20,7 @@
+ 	"bytes"
+ 	stdflate "compress/flate"
+ 	"compress/zlib"
++	"context"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -197,7 +198,7 @@
+ 		log.Trace.Println("DecodeFlate begin")
+ 	}
+ 
+-	rc, err := acquireZlibReader(r)
++	rc, err := acquireZlibReader(ContextReader(f.ctx, r))
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -330,9 +331,20 @@
+ // }
+ 
+ func applyHorDiff(row []byte, colors int) ([]byte, error) {
++	return applyHorDiffWithContext(context.Background(), row, colors)
++}
++func applyHorDiffWithContext(c context.Context, row []byte, colors int) ([]byte, error) {
++	if c != nil && c.Err() != nil {
++		return nil, c.Err()
++	}
++	processed := 0
+ 	// This works for 8 bits per color only.
+ 	for i := 1; i < len(row)/colors; i++ {
+ 		for j := range colors {
++			if processed%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
++			processed++
+ 			row[i*colors+j] += row[(i-1)*colors+j]
+ 		}
+ 	}
+@@ -340,8 +352,14 @@
+ }
+ 
+ func processRow(pr, cr []byte, p, colors, bytesPerPixel int) ([]byte, error) {
++	return processRowWithContext(context.Background(), pr, cr, p, colors, bytesPerPixel)
++}
++func processRowWithContext(c context.Context, pr, cr []byte, p, colors, bytesPerPixel int) ([]byte, error) {
++	if c != nil && c.Err() != nil {
++		return nil, c.Err()
++	}
+ 	if p == PredictorTIFF {
+-		return applyHorDiff(cr, colors)
++		return applyHorDiffWithContext(c, cr, colors)
+ 	}
+ 
+ 	// Apply the filter.
+@@ -361,11 +379,17 @@
+ 
+ 	case PNGSub:
+ 		for i := bytesPerPixel; i < len(cdat); i++ {
++			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
+ 			cdat[i] += cdat[i-bytesPerPixel]
+ 		}
+ 
+ 	case PNGUp:
+ 		for i, p := range pdat {
++			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
+ 			cdat[i] += p
+ 		}
+ 
+@@ -373,19 +397,30 @@
+ 		// The average of the two neighboring pixels (left and above).
+ 		// Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
+ 		for i := range bytesPerPixel {
++			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
+ 			cdat[i] += pdat[i] / 2
+ 		}
+ 		for i := bytesPerPixel; i < len(cdat); i++ {
++			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
+ 			cdat[i] += uint8((int(cdat[i-bytesPerPixel]) + int(pdat[i])) / 2)
+ 		}
+ 
+ 	case PNGPaeth:
+-		filterPaeth(cdat, pdat, bytesPerPixel)
++		if err := filterPaethWithContext(c, cdat, pdat, bytesPerPixel); err != nil {
++			return nil, err
++		}
+ 
+ 	default:
+ 		return nil, fmt.Errorf("flate decode: unexpected PNG predictor %d", f)
+ 	}
+ 
++	if c != nil && c.Err() != nil {
++		return nil, c.Err()
++	}
+ 	return cdat, nil
+ }
+ 
+@@ -440,6 +475,10 @@
+ }
+ 
+ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, colors, bytesPerPixel int) (*bytes.Buffer, error) {
++	if err := f.contextError(); err != nil {
++		return nil, err
++	}
++	r = ContextReader(f.ctx, r)
+ 	// cr and pr are the bytes for the current and previous row.
+ 	cr := make([]byte, m)
+ 	pr := make([]byte, m)
+@@ -451,6 +490,9 @@
+ 
+ 		// Read decompressed bytes for one pixel row.
+ 		n, err := io.ReadFull(r, cr)
++		if cancelErr := f.contextError(); cancelErr != nil {
++			return nil, cancelErr
++		}
+ 		if err != nil {
+ 			if err == io.ErrUnexpectedEOF && n == 0 {
+ 				logUnexpectedEOFFlateDecode()
+@@ -469,15 +511,19 @@
+ 			return nil, fmt.Errorf("flate decode: read error, expected %d bytes, got: %d", m, n)
+ 		}
+ 
+-		if err := process(&b, pr, cr, predictor, colors, bytesPerPixel); err != nil {
+-			return nil, err
+-		}
+-
++		row, processErr := processRowWithContext(f.ctx, pr, cr, predictor, colors, bytesPerPixel)
++		if processErr != nil {
++			return nil, processErr
++		}
+ 		if maxLen < 0 {
+-			if limit := f.decodeLimit(maxLen); limit >= 0 && int64(b.Len()) > limit {
++			if limit := f.decodeLimit(maxLen); limit >= 0 && int64(len(row)) > limit-int64(b.Len()) {
+ 				return nil, ErrDecodeLimitExceeded
+ 			}
+ 		}
++		if cancelErr := f.contextError(); cancelErr != nil {
++			return nil, cancelErr
++		}
++		b.Write(row)
+ 
+ 		if err == io.EOF {
+ 			break
+@@ -486,7 +532,7 @@
+ 		pr, cr = cr, pr
+ 	}
+ 
+-	return &b, nil
++	return &b, f.contextError()
+ }
+ 
+ func (f flate) decodePostProcess(r io.Reader, maxLen int64) (io.Reader, error) {
+@@ -509,7 +555,7 @@
+ 		return nil, err
+ 	}
+ 
+-	if limit := f.decodeLimit(-1); limit >= 0 && int64(rowLen) > limit {
++	if limit := f.decodeLimit(-1); limit >= 0 && int64(rowSize) > limit {
+ 		return nil, ErrDecodeLimitExceeded
+ 	}
+ 
+--- a/pkg/filter/lzwDecode.go
++++ b/pkg/filter/lzwDecode.go
+@@ -78,7 +78,7 @@
+ 		ec = 1
+ 	}
+ 
+-	rc := lzw.NewReader(r, ec == 1)
++	rc := lzw.NewReader(ContextReader(f.ctx, r), ec == 1)
+ 	defer rc.Close()
+ 
+ 	b, err := f.copyDecoded(rc, maxLen)
+--- a/pkg/filter/paeth.go
++++ b/pkg/filter/paeth.go
+@@ -6,6 +6,8 @@
+ // The PNG Paeth filter is documented here: www.w3.org/TR/PNG-Filters.html
+ 
+ package filter
++
++import "context"
+ 
+ // intSize is either 32 or 64.
+ // Disabled intSize 64 for govet.
+@@ -49,10 +51,21 @@
+ // filterPaeth applies the Paeth filter to the cdat slice.
+ // cdat is the current row's data, pdat is the previous row's data.
+ func filterPaeth(cdat, pdat []byte, bytesPerPixel int) {
++	_ = filterPaethWithContext(context.Background(), cdat, pdat, bytesPerPixel)
++}
++func filterPaethWithContext(ctx context.Context, cdat, pdat []byte, bytesPerPixel int) error {
++	if ctx != nil && ctx.Err() != nil {
++		return ctx.Err()
++	}
++	processed := 0
+ 	var a, b, c, pa, pb, pc int
+ 	for i := 0; i < bytesPerPixel; i++ {
+ 		a, c = 0, 0
+ 		for j := i; j < len(cdat); j += bytesPerPixel {
++			if processed%DecodeWorkChunk == 0 && ctx != nil && ctx.Err() != nil {
++				return ctx.Err()
++			}
++			processed++
+ 			b = int(pdat[j])
+ 			pa = b - c
+ 			pb = a - c
+@@ -72,4 +85,9 @@
+ 			c = b
+ 		}
+ 	}
++
++	if ctx != nil {
++		return ctx.Err()
++	}
++	return nil
+ }
+--- a/pkg/filter/runLengthDecode.go
++++ b/pkg/filter/runLengthDecode.go
+@@ -30,10 +30,13 @@
+ 	limit := f.decodeLimit(maxLen)
+ 
+ 	for i := 0; i < len(src); {
++		if err := f.contextError(); err != nil {
++			return err
++		}
+ 		b := src[i]
+ 		if b == 0x80 {
+ 			// eod
+-			return nil
++			return f.contextError()
+ 		}
+ 		i++
+ 		if b < 0x80 {
+@@ -72,7 +75,7 @@
+ 		}
+ 		i++
+ 	}
+-	return nil
++	return f.contextError()
+ }
+ 
+ func detect(i, start, maxLen int, b byte, src []byte) int {
+@@ -165,7 +168,7 @@
+ // DecodeLength implements decoding for a RunLengthDecode filter with a maximum output length.
+ func (f runLengthDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+ 
+-	b1, err := getReaderBytes(r)
++	b1, err := f.readerBytes(r)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+--- /dev/null
++++ b/pkg/pdfcpu/complete_object_policy_test.go
+@@ -0,0 +1,125 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package pdfcpu_test
++
++import (
++	"bytes"
++	"encoding/binary"
++	"fmt"
++	"strings"
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/api"
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++func packedPolicyPDF(body string) []byte {
++	var output bytes.Buffer
++	output.WriteString("%PDF-1.7\n")
++	offsets := make([]int, 8)
++	add := func(number int, value string) {
++		offsets[number] = output.Len()
++		fmt.Fprintf(&output, "%d 0 obj\n%s\nendobj\n", number, value)
++	}
++	add(1, "<< /Type /Catalog /Pages 2 0 R /Probe 6 0 R >>")
++	add(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
++	add(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> >>")
++	add(4, "null")
++	stream := "6 0 " + body
++	add(5, fmt.Sprintf("<< /Type /ObjStm /N 1 /First 4 /Length %d >>\nstream\n%s\nendstream", len(stream), stream))
++	offsets[7] = output.Len()
++	var xref bytes.Buffer
++	for number := 0; number < 8; number++ {
++		var entry [7]byte
++		switch number {
++		case 0:
++			binary.BigEndian.PutUint16(entry[5:], 65535)
++		case 6:
++			entry[0] = 2
++			binary.BigEndian.PutUint32(entry[1:5], 5)
++		default:
++			entry[0] = 1
++			binary.BigEndian.PutUint32(entry[1:5], uint32(offsets[number]))
++		}
++		xref.Write(entry[:])
++	}
++	fmt.Fprintf(&output, "7 0 obj\n<< /Type /XRef /Size 8 /Root 1 0 R /W [1 4 2] /Length %d >>\nstream\n", xref.Len())
++	output.Write(xref.Bytes())
++	fmt.Fprintf(&output, "\nendstream\nendobj\nstartxref\n%d\n%%%%EOF\n", offsets[7])
++	return output.Bytes()
++}
++
++func readPolicyObject(t *testing.T, body string, mode int, packed bool) (types.Object, *model.Context, error) {
++	t.Helper()
++	configuration := model.NewDefaultConfiguration()
++	configuration.ValidationMode = mode
++	if packed {
++		pdf, err := api.ReadContext(t.Context(), bytes.NewReader(packedPolicyPDF(body)), configuration)
++		if err != nil {
++			return nil, pdf, err
++		}
++		value, err := pdf.DereferenceContext(t.Context(), *types.NewIndirectRef(6, 0))
++		return value, pdf, err
++	}
++	pdf, err := model.NewContext(bytes.NewReader([]byte("1 0 obj\n"+body+"\nendobj\n")), configuration)
++	if err != nil {
++		return nil, pdf, err
++	}
++	value, err := pdfcpu.ParseObject(t.Context(), pdf, 0, 1, 0)
++	return value, pdf, err
++}
++
++func TestCompleteSourceBodiesRejectMaterialSuffixAcrossPackedAndOrdinaryReaders(t *testing.T) {
++	for _, body := range []string{"1.0 junk", "1.0 1,5", "1 0 Rgarbage", "[1] false", "<< /Value 1 >> /extra"} {
++		for _, mode := range []int{model.ValidationStrict, model.ValidationRelaxed} {
++			for _, packed := range []bool{false, true} {
++				if _, _, err := readPolicyObject(t, body, mode, packed); err == nil || !strings.Contains(err.Error(), "material trailing data") {
++					t.Fatalf("complete body suffix accepted mode%d packed%t %q: %v", mode, packed, body, err)
++				}
++			}
++		}
++	}
++}
++
++func TestCompleteSourceBodiesRetainCommentSeparatedReferencesAndCommentTails(t *testing.T) {
++	for _, body := range []string{"<< /Value 1%first\n0 R >>", "<< /Value 1 0%second\nR >>", "[1 0%second\nR]", "1.0 \t%comment with junk /key 1,5"} {
++		for _, mode := range []int{model.ValidationStrict, model.ValidationRelaxed} {
++			for _, packed := range []bool{false, true} {
++				value, pdf, err := readPolicyObject(t, body, mode, packed)
++				if err != nil || value == nil || len(pdf.ValidationReport().Notices()) != 0 {
++					t.Fatalf("valid comment tokenization changed mode%d packed%t %q: %v %v", mode, packed, body, value, err)
++				}
++				if strings.HasPrefix(body, "<<") {
++					dict, ok := value.(types.Dict)
++					if !ok || dict["Value"] != *types.NewIndirectRef(1, 0) {
++						t.Fatalf("reference identity lost: %v", value)
++					}
++				}
++			}
++		}
++	}
++}
++
++func TestPackedDictionaryPolicyMatchesStrictRefusalAndClassifiedRelaxedNotice(t *testing.T) {
++	for _, packed := range []bool{false, true} {
++		if _, _, err := readPolicyObject(t, "<< /Value 1 0 Rgarbage >>", model.ValidationStrict, packed); err == nil {
++			t.Fatalf("strict packed%t accepted malformed dictionary without policy", packed)
++		}
++		value, pdf, err := readPolicyObject(t, "<< /Value 1 0 Rgarbage >>", model.ValidationRelaxed, packed)
++		if err != nil || value == nil || len(pdf.ValidationReport().Notices()) != 1 {
++			t.Fatalf("relaxed packed%t lost classified notice: %v %v", packed, value, err)
++		}
++	}
++}
++
++func TestMaintainedPrefixParserStillReturnsRemainingMaterial(t *testing.T) {
++	source := "1.0 remaining"
++	value, err := model.ParseObject(t.Context(), &source, 0)
++	if err != nil || value != types.Float(1) || strings.TrimSpace(source) != "remaining" {
++		t.Fatalf("complete-source check changed maintained prefix API: %v %q %v", value, source, err)
++	}
++}
+--- a/pkg/pdfcpu/model/dereference.go
++++ b/pkg/pdfcpu/model/dereference.go
+@@ -97,6 +97,13 @@
+ }
+ 
+ func (xRefTable *XRefTable) indRefToObject(ir *types.IndirectRef, decodeLazy bool) (types.Object, int, error) {
++	return xRefTable.indRefToObjectContext(context.Background(), ir, decodeLazy)
++}
++
++func (xRefTable *XRefTable) indRefToObjectContext(c context.Context, ir *types.IndirectRef, decodeLazy bool) (types.Object, int, error) {
++	if err := c.Err(); err != nil {
++		return nil, 0, err
++	}
+ 	if ir == nil {
+ 		return nil, 0, errors.New("input argument is nil")
+ 	}
+@@ -110,7 +117,7 @@
+ 	}
+ 
+ 	if l, ok := entry.Object.(types.LazyObjectStreamObject); ok && decodeLazy {
+-		ob, err := l.DecodedObject(context.TODO())
++		ob, err := l.DecodedObject(c)
+ 		if err != nil {
+ 			return nil, 0, err
+ 		}
+@@ -118,6 +125,9 @@
+ 		if err := ProcessRefCountsWithError(xRefTable, ob); err != nil {
+ 			return nil, 0, err
+ 		}
++		if err := c.Err(); err != nil {
++			return nil, 0, err
++		}
+ 		entry.Object = ob
+ 	}
+ 
+@@ -127,42 +137,65 @@
+ 
+ // Dereference resolves an indirect object and returns the resulting PDF object.
+ func (xRefTable *XRefTable) Dereference(o types.Object) (types.Object, error) {
++	return xRefTable.DereferenceContext(context.Background(), o)
++}
++
++// DereferenceContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceContext(c context.Context, o types.Object) (types.Object, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	ir, ok := o.(types.IndirectRef)
+ 	if !ok {
+ 		// Nothing do dereference.
+ 		return o, nil
+ 	}
+ 
+-	obj, _, err := xRefTable.indRefToObject(&ir, true)
++	obj, _, err := xRefTable.indRefToObjectContext(c, &ir, true)
+ 	return obj, err
+ }
+ 
+ // DereferenceWithIncr dereferences obj and increments reference counts.
+ func (xRefTable *XRefTable) DereferenceWithIncr(o types.Object) (types.Object, int, error) {
++	return xRefTable.DereferenceWithIncrContext(context.Background(), o)
++}
++
++// DereferenceWithIncrContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceWithIncrContext(c context.Context, o types.Object) (types.Object, int, error) {
+ 	ir, ok := o.(types.IndirectRef)
+ 	if !ok {
+ 		// Nothing do dereference.
+ 		return o, 0, nil
+ 	}
+ 
+-	return xRefTable.indRefToObject(&ir, true)
++	return xRefTable.indRefToObjectContext(c, &ir, true)
+ }
+ 
+ // DereferenceForWrite dereferences obj for writing.
+ func (xRefTable *XRefTable) DereferenceForWrite(o types.Object) (types.Object, error) {
++	return xRefTable.DereferenceForWriteContext(context.Background(), o)
++}
++
++// DereferenceForWriteContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceForWriteContext(c context.Context, o types.Object) (types.Object, error) {
+ 	ir, ok := o.(types.IndirectRef)
+ 	if !ok {
+ 		// Nothing do dereference.
+ 		return o, nil
+ 	}
+ 
+-	obj, _, err := xRefTable.indRefToObject(&ir, false)
++	obj, _, err := xRefTable.indRefToObjectContext(c, &ir, false)
+ 	return obj, err
+ }
+ 
+ // DereferenceBoolean resolves and validates a boolean object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceBoolean(o types.Object, sinceVersion Version) (*types.Boolean, error) {
+-	o, err := xRefTable.Dereference(o)
++	return xRefTable.DereferenceBooleanContext(context.Background(), o, sinceVersion)
++}
++
++// DereferenceBooleanContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceBooleanContext(c context.Context, o types.Object, sinceVersion Version) (*types.Boolean, error) {
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -182,7 +215,12 @@
+ 
+ // DereferenceBooleanEntry resolves a direct or indirect boolean dictionary entry.
+ func (xRefTable *XRefTable) DereferenceBooleanEntry(d types.Dict, key string) (*types.Boolean, bool, error) {
+-	o, found, objNr, err := xRefTable.dereferenceEntry(d, key)
++	return xRefTable.DereferenceBooleanEntryContext(context.Background(), d, key)
++}
++
++// DereferenceBooleanEntryContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceBooleanEntryContext(c context.Context, d types.Dict, key string) (*types.Boolean, bool, error) {
++	o, found, objNr, err := xRefTable.dereferenceEntry(c, d, key)
+ 	if err != nil || !found || o == nil {
+ 		return nil, found, err
+ 	}
+@@ -195,7 +233,10 @@
+ 	return &b, true, nil
+ }
+ 
+-func (xRefTable *XRefTable) dereferenceEntry(d types.Dict, key string) (types.Object, bool, int, error) {
++func (xRefTable *XRefTable) dereferenceEntry(c context.Context, d types.Dict, key string) (types.Object, bool, int, error) {
++	if err := c.Err(); err != nil {
++		return nil, false, 0, err
++	}
+ 	o, found := d.Find(key)
+ 	if !found {
+ 		return nil, false, 0, nil
+@@ -214,7 +255,7 @@
+ 		}
+ 	}
+ 
+-	o, err := xRefTable.Dereference(o)
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil {
+ 		err = fmt.Errorf("entry=%s: %w", key, err)
+ 		return nil, true, objNr, WithValidationErrorObject(err, objNr)
+@@ -230,7 +271,12 @@
+ 
+ // DereferenceInteger resolves and validates an integer object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceInteger(o types.Object) (*types.Integer, error) {
+-	o, err := xRefTable.Dereference(o)
++	return xRefTable.DereferenceIntegerContext(context.Background(), o)
++}
++
++// DereferenceIntegerContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceIntegerContext(c context.Context, o types.Object) (*types.Integer, error) {
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -245,7 +291,12 @@
+ 
+ // DereferenceIntegerEntry resolves a direct or indirect integer dictionary entry.
+ func (xRefTable *XRefTable) DereferenceIntegerEntry(d types.Dict, key string) (*types.Integer, bool, error) {
+-	o, found, objNr, err := xRefTable.dereferenceEntry(d, key)
++	return xRefTable.DereferenceIntegerEntryContext(context.Background(), d, key)
++}
++
++// DereferenceIntegerEntryContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceIntegerEntryContext(c context.Context, d types.Dict, key string) (*types.Integer, bool, error) {
++	o, found, objNr, err := xRefTable.dereferenceEntry(c, d, key)
+ 	if err != nil || !found || o == nil {
+ 		return nil, found, err
+ 	}
+@@ -260,12 +311,17 @@
+ 
+ // DereferenceNumber resolves a number object, which may be an indirect reference and returns a float64.
+ func (xRefTable *XRefTable) DereferenceNumber(o types.Object) (float64, error) {
++	return xRefTable.DereferenceNumberContext(context.Background(), o)
++}
++
++// DereferenceNumberContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceNumberContext(c context.Context, o types.Object) (float64, error) {
+ 	var (
+ 		f   float64
+ 		err error
+ 	)
+ 
+-	o, err = xRefTable.Dereference(o)
++	o, err = xRefTable.DereferenceContext(c, o)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+@@ -288,7 +344,12 @@
+ 
+ // DereferenceNumberEntry resolves a direct or indirect number dictionary entry.
+ func (xRefTable *XRefTable) DereferenceNumberEntry(d types.Dict, key string) (*float64, bool, error) {
+-	o, found, objNr, err := xRefTable.dereferenceEntry(d, key)
++	return xRefTable.DereferenceNumberEntryContext(context.Background(), d, key)
++}
++
++// DereferenceNumberEntryContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceNumberEntryContext(c context.Context, d types.Dict, key string) (*float64, bool, error) {
++	o, found, objNr, err := xRefTable.dereferenceEntry(c, d, key)
+ 	if err != nil || !found || o == nil {
+ 		return nil, found, err
+ 	}
+@@ -308,7 +369,12 @@
+ 
+ // DereferenceName resolves and validates a name object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceName(o types.Object, sinceVersion Version, validate func(string) bool) (n types.Name, err error) {
+-	o, err = xRefTable.Dereference(o)
++	return xRefTable.DereferenceNameContext(context.Background(), o, sinceVersion, validate)
++}
++
++// DereferenceNameContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceNameContext(c context.Context, o types.Object, sinceVersion Version, validate func(string) bool) (n types.Name, err error) {
++	o, err = xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return n, err
+ 	}
+@@ -333,7 +399,12 @@
+ 
+ // DereferenceNameEntry resolves a direct or indirect name dictionary entry.
+ func (xRefTable *XRefTable) DereferenceNameEntry(d types.Dict, key string) (*types.Name, bool, error) {
+-	o, found, objNr, err := xRefTable.dereferenceEntry(d, key)
++	return xRefTable.DereferenceNameEntryContext(context.Background(), d, key)
++}
++
++// DereferenceNameEntryContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceNameEntryContext(c context.Context, d types.Dict, key string) (*types.Name, bool, error) {
++	o, found, objNr, err := xRefTable.dereferenceEntry(c, d, key)
+ 	if err != nil || !found || o == nil {
+ 		return nil, found, err
+ 	}
+@@ -348,7 +419,12 @@
+ 
+ // DereferenceStringLiteral resolves and validates a string literal object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceStringLiteral(o types.Object, sinceVersion Version, validate func(string) bool) (s types.StringLiteral, err error) {
+-	o, err = xRefTable.Dereference(o)
++	return xRefTable.DereferenceStringLiteralContext(context.Background(), o, sinceVersion, validate)
++}
++
++// DereferenceStringLiteralContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceStringLiteralContext(c context.Context, o types.Object, sinceVersion Version, validate func(string) bool) (s types.StringLiteral, err error) {
++	o, err = xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return s, err
+ 	}
+@@ -379,7 +455,12 @@
+ 
+ // DereferenceStringOrHexLiteral resolves and validates a string or hex literal object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceStringOrHexLiteral(obj types.Object, sinceVersion Version, validate func(string) bool) (s string, err error) {
+-	o, err := xRefTable.Dereference(obj)
++	return xRefTable.DereferenceStringOrHexLiteralContext(context.Background(), obj, sinceVersion, validate)
++}
++
++// DereferenceStringOrHexLiteralContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceStringOrHexLiteralContext(c context.Context, obj types.Object, sinceVersion Version, validate func(string) bool) (s string, err error) {
++	o, err := xRefTable.DereferenceContext(c, obj)
+ 	if err != nil || o == nil {
+ 		return "", err
+ 	}
+@@ -418,7 +499,12 @@
+ 
+ // DereferenceStringEntry resolves a direct or indirect literal or hexadecimal string dictionary entry.
+ func (xRefTable *XRefTable) DereferenceStringEntry(d types.Dict, key string) (*string, bool, error) {
+-	o, found, objNr, err := xRefTable.dereferenceEntry(d, key)
++	return xRefTable.DereferenceStringEntryContext(context.Background(), d, key)
++}
++
++// DereferenceStringEntryContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceStringEntryContext(c context.Context, d types.Dict, key string) (*string, bool, error) {
++	o, found, objNr, err := xRefTable.dereferenceEntry(c, d, key)
+ 	if err != nil || !found || o == nil {
+ 		return nil, found, err
+ 	}
+@@ -452,7 +538,12 @@
+ 
+ // DereferenceText resolves and validates a string or hex literal object to a string.
+ func (xRefTable *XRefTable) DereferenceText(o types.Object) (string, error) {
+-	o, err := xRefTable.Dereference(o)
++	return xRefTable.DereferenceTextContext(context.Background(), o)
++}
++
++// DereferenceTextContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceTextContext(c context.Context, o types.Object) (string, error) {
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil {
+ 		return "", err
+ 	}
+@@ -466,7 +557,12 @@
+ 
+ // DereferenceCSVSafeText resolves and validates a string or hex literal object to a string.
+ func (xRefTable *XRefTable) DereferenceCSVSafeText(o types.Object) (string, error) {
+-	s, err := xRefTable.DereferenceText(o)
++	return xRefTable.DereferenceCSVSafeTextContext(context.Background(), o)
++}
++
++// DereferenceCSVSafeTextContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceCSVSafeTextContext(c context.Context, o types.Object) (string, error) {
++	s, err := xRefTable.DereferenceTextContext(c, o)
+ 	if err != nil {
+ 		return "", err
+ 	}
+@@ -475,7 +571,12 @@
+ 
+ // DereferenceArray resolves and validates an array object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceArray(o types.Object) (types.Array, error) {
+-	o, err := xRefTable.Dereference(o)
++	return xRefTable.DereferenceArrayContext(context.Background(), o)
++}
++
++// DereferenceArrayContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceArrayContext(c context.Context, o types.Object) (types.Array, error) {
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -490,8 +591,13 @@
+ 
+ // DereferenceDict resolves and validates a dictionary object, which may be an indirect reference.
+ func (xRefTable *XRefTable) DereferenceDict(o types.Object) (types.Dict, error) {
++	return xRefTable.DereferenceDictContext(context.Background(), o)
++}
++
++// DereferenceDictContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceDictContext(c context.Context, o types.Object) (types.Dict, error) {
+ 	rawObject := o
+-	o, err := xRefTable.Dereference(o)
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -521,8 +627,13 @@
+ // It also returns the number of the written PDF Increment this object is part of.
+ // The higher the increment number the older the object.
+ func (xRefTable *XRefTable) DereferenceDictWithIncr(o types.Object) (types.Dict, int, error) {
++	return xRefTable.DereferenceDictWithIncrContext(context.Background(), o)
++}
++
++// DereferenceDictWithIncrContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceDictWithIncrContext(c context.Context, o types.Object) (types.Dict, int, error) {
+ 	rawObject := o
+-	o, incr, err := xRefTable.DereferenceWithIncr(o)
++	o, incr, err := xRefTable.DereferenceWithIncrContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, 0, err
+ 	}
+@@ -537,7 +648,12 @@
+ 
+ // DereferenceFontDict returns the font dict referenced by indRef.
+ func (xRefTable *XRefTable) DereferenceFontDict(indRef types.IndirectRef) (types.Dict, error) {
+-	d, err := xRefTable.DereferenceDict(indRef)
++	return xRefTable.DereferenceFontDictContext(context.Background(), indRef)
++}
++
++// DereferenceFontDictContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceFontDictContext(c context.Context, indRef types.IndirectRef) (types.Dict, error) {
++	d, err := xRefTable.DereferenceDictContext(c, indRef)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -546,7 +662,7 @@
+ 	}
+ 
+ 	if xRefTable.ValidationMode == ValidationStrict {
+-		t, _, err := xRefTable.DereferenceNameEntry(d, "Type")
++		t, _, err := xRefTable.DereferenceNameEntryContext(c, d, "Type")
+ 		if err != nil {
+ 			return nil, fmt.Errorf("font dict Type: %w", err)
+ 		}
+@@ -562,8 +678,8 @@
+ 	return d, nil
+ }
+ 
+-func (xRefTable *XRefTable) dereferencePageNodeDictType(indRef types.IndirectRef) (types.Dict, *types.Name, error) {
+-	d, err := xRefTable.DereferenceDict(indRef)
++func (xRefTable *XRefTable) dereferencePageNodeDictType(c context.Context, indRef types.IndirectRef) (types.Dict, *types.Name, error) {
++	d, err := xRefTable.DereferenceDictContext(c, indRef)
+ 	if err != nil {
+ 		return nil, nil, err
+ 	}
+@@ -571,7 +687,7 @@
+ 		return nil, nil, errors.New("missing page node dict")
+ 	}
+ 
+-	dictType, _, err := xRefTable.DereferenceNameEntry(d, "Type")
++	dictType, _, err := xRefTable.DereferenceNameEntryContext(c, d, "Type")
+ 	if err != nil {
+ 		return nil, nil, err
+ 	}
+@@ -584,7 +700,12 @@
+ 
+ // DereferencePageNodeDict returns the page node dict referenced by indRef.
+ func (xRefTable *XRefTable) DereferencePageNodeDict(indRef types.IndirectRef) (types.Dict, error) {
+-	d, dictType, err := xRefTable.dereferencePageNodeDictType(indRef)
++	return xRefTable.DereferencePageNodeDictContext(context.Background(), indRef)
++}
++
++// DereferencePageNodeDictContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferencePageNodeDictContext(c context.Context, indRef types.IndirectRef) (types.Dict, error) {
++	d, dictType, err := xRefTable.dereferencePageNodeDictType(c, indRef)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -596,8 +717,8 @@
+ 	return d, nil
+ }
+ 
+-func (xRefTable *XRefTable) dereferenceDestArray(o types.Object) (types.Array, error) {
+-	o, err := xRefTable.Dereference(o)
++func (xRefTable *XRefTable) dereferenceDestArray(c context.Context, o types.Object) (types.Array, error) {
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -605,7 +726,7 @@
+ 	case types.Array:
+ 		return o, nil
+ 	case types.Dict:
+-		o1, err := xRefTable.DereferenceDictEntry(o, "D")
++		o1, err := xRefTable.DereferenceDictEntryContext(c, o, "D")
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -630,12 +751,12 @@
+ 			return nil, err
+ 		}
+ 		if ok {
+-			return xRefTable.dereferenceDestArray(o)
++			return xRefTable.dereferenceDestArray(c, o)
+ 		}
+ 	}
+ 
+ 	if o, ok := xRefTable.Dests[key]; ok {
+-		return xRefTable.dereferenceDestArray(o)
++		return xRefTable.dereferenceDestArray(c, o)
+ 	}
+ 
+ 	return nil, fmt.Errorf("invalid named destination for: %s", key)
+@@ -643,15 +764,31 @@
+ 
+ // DereferenceDictEntry returns a dereferenced dict entry.
+ func (xRefTable *XRefTable) DereferenceDictEntry(d types.Dict, key string) (types.Object, error) {
++	return xRefTable.DereferenceDictEntryContext(context.Background(), d, key)
++}
++
++// DereferenceDictEntryContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceDictEntryContext(c context.Context, d types.Dict, key string) (types.Object, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	o, found := d.Find(key)
+ 	if !found || o == nil {
+ 		return nil, fmt.Errorf("dict=%s entry=%s missing", d, key)
+ 	}
+-	return xRefTable.Dereference(o)
++	return xRefTable.DereferenceContext(c, o)
+ }
+ 
+ // DereferenceStringEntryBytes returns the bytes of a string entry of d.
+ func (xRefTable *XRefTable) DereferenceStringEntryBytes(d types.Dict, key string) ([]byte, error) {
++	return xRefTable.DereferenceStringEntryBytesContext(context.Background(), d, key)
++}
++
++// DereferenceStringEntryBytesContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DereferenceStringEntryBytesContext(c context.Context, d types.Dict, key string) ([]byte, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	o, found := d.Find(key)
+ 	if !found || o == nil {
+ 		return nil, nil
+@@ -660,7 +797,7 @@
+ 	if ir, ok := o.(types.IndirectRef); ok {
+ 		objNr = ir.ObjectNumber.Value()
+ 	}
+-	o, err := xRefTable.Dereference(o)
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil {
+ 		return nil, WithValidationErrorObject(err, objNr)
+ 	}
+@@ -682,7 +819,12 @@
+ 
+ // DestName returns the destination name for o.
+ func (xRefTable *XRefTable) DestName(obj types.Object) (string, error) {
+-	dest, err := xRefTable.Dereference(obj)
++	return xRefTable.DestNameContext(context.Background(), obj)
++}
++
++// DestNameContext resolves under the supplied operation context.
++func (xRefTable *XRefTable) DestNameContext(c context.Context, obj types.Object) (string, error) {
++	dest, err := xRefTable.DereferenceContext(c, obj)
+ 	if err != nil {
+ 		return "", err
+ 	}
+--- /dev/null
++++ b/pkg/pdfcpu/model/dereference_entry_context_test.go
+@@ -0,0 +1,106 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package model
++
++import (
++	"context"
++	"errors"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++type resolverCheckpointContext struct{ remaining atomic.Int64 }
++
++func (*resolverCheckpointContext) Deadline() (time.Time, bool) { return time.Time{}, false }
++func (*resolverCheckpointContext) Done() <-chan struct{}       { return nil }
++func (*resolverCheckpointContext) Value(any) any               { return nil }
++func (c *resolverCheckpointContext) Err() error {
++	if c.remaining.Add(-1) < 0 {
++		return context.Canceled
++	}
++	return nil
++}
++
++func lazyEntryResolverFixture(body string) (*XRefTable, types.Dict) {
++	stream := types.NewObjectStreamDict()
++	stream.Content = []byte(body)
++	lazy := types.NewLazyObjectStreamObject(stream, 0, -1, func(ctx context.Context, text string) (types.Object, error) { return ParseObject(ctx, &text, 0) })
++	xref := &XRefTable{Table: map[int]*XRefTableEntry{1: NewXRefTableEntryGen0(lazy)}}
++	return xref, types.Dict{"K": *types.NewIndirectRef(1, 0)}
++}
++
++func TestContextTypedEntryResolversRetainActualLazyParserLifetime(t *testing.T) {
++	tests := []struct {
++		name, body string
++		resolve    func(context.Context, *XRefTable, types.Dict) error
++	}{
++		{"boolean", "true", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, _, err := x.DereferenceBooleanEntryContext(c, d, "K")
++			return err
++		}},
++		{"integer", "12", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, _, err := x.DereferenceIntegerEntryContext(c, d, "K")
++			return err
++		}},
++		{"number", "12.5", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, _, err := x.DereferenceNumberEntryContext(c, d, "K")
++			return err
++		}},
++		{"name", "/Page", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, _, err := x.DereferenceNameEntryContext(c, d, "K")
++			return err
++		}},
++		{"string", "(source)", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, _, err := x.DereferenceStringEntryContext(c, d, "K")
++			return err
++		}},
++		{"page node", "<< /Type /Page >>", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, err := x.DereferencePageNodeDictContext(c, d["K"].(types.IndirectRef))
++			return err
++		}},
++		{"rectangle", "1", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, err := x.RectForArrayContext(c, types.Array{d["K"], types.Integer(2), types.Integer(4), types.Integer(8)})
++			return err
++		}},
++		{"dict entry", "<< /Type /Page >>", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, err := x.DereferenceDictEntryContext(c, d, "K")
++			return err
++		}},
++		{"string bytes", "(source)", func(c context.Context, x *XRefTable, d types.Dict) error {
++			_, err := x.DereferenceStringEntryBytesContext(c, d, "K")
++			return err
++		}},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			completed := false
++			for budget := range int64(200) {
++				xref, entry := lazyEntryResolverFixture(test.body)
++				c := &resolverCheckpointContext{}
++				c.remaining.Store(budget)
++				err := test.resolve(c, xref, entry)
++				if err == nil {
++					completed = true
++					break
++				}
++				if !errors.Is(err, context.Canceled) {
++					t.Fatalf("native entry lost cancellation budget%d: %v", budget, err)
++				}
++				if _, lazy := xref.Table[1].Object.(types.LazyObjectStreamObject); !lazy && test.name != "page node" && test.name != "rectangle" {
++					t.Fatal("canceled lazy entry published a resolved object")
++				}
++				if err = test.resolve(t.Context(), xref, entry); err != nil {
++					t.Fatalf("canceled native entry could not retry: %v", err)
++				}
++			}
++			if !completed {
++				t.Fatal("uncancelled native entry resolver never completed")
++			}
++		})
++	}
++}
+--- /dev/null
++++ b/pkg/pdfcpu/model/hex_parse_test.go
+@@ -0,0 +1,102 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++	http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package model
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++func TestHexStringRetainsCharacterAndGroupSemantics(t *testing.T) {
++	for _, test := range []struct {
++		input, expected string
++		valid           bool
++	}{
++		{"", "", true},
++		{"abcdef0123456789", "ABCDEF0123456789", true},
++		{"ABCDEF0123456789", "ABCDEF0123456789", true},
++		{"ab cd ef", "ABCDEF", true},
++		{"a b c", "A0B0C0", true},
++		{"a\tb\nc\rd\fe f", "A0B0C0D0E0F0", true},
++		{" \t\n\f\r ", "", true},
++		{"123", "1230", true},
++		{"A\x00B", "", false},
++		{"A\vB", "", false},
++		{"A\u00a0B", "", false},
++		{"ＡＢ", "", false},
++		{"ł", "", false},
++		{"\xc0\xaf", "", false},
++		{"\xe2\x82", "", false},
++		{"\uFFFD", "", false},
++		{"ß", "", false},
++		{"\xff", "", false},
++		{"0G", "", false},
++	} {
++		result, valid := hexString(test.input)
++		if valid != test.valid || valid && (result == nil || *result != test.expected) || !valid && result != nil {
++			t.Fatalf("input %q: value=%v valid=%v expected=%q valid=%v", test.input, result, valid, test.expected, test.valid)
++		}
++	}
++}
++
++func TestHexLiteralRetainsCallerRemainderAndInvalidSkip(t *testing.T) {
++	for _, test := range []struct {
++		input, value, remainder string
++		skip                    bool
++	}{
++		{"<>tail", "", "tail", false},
++		{"<a b> next", "A0B0", " next", false},
++		{"<A> >tail", "A0", " >tail", false},
++		{"<\vA\v>tail", "A0", "tail", false},
++		{"<\u00a0ab\u00a0>tail", "AB", "tail", false},
++		{"<G>tail", "", "tail", true},
++		{"<\xff>tail", "", "tail", true},
++	} {
++		line := test.input
++		value, err := parseHexLiteral(&line)
++		if err != nil || line != test.remainder {
++			t.Fatalf("input %q: %v remainder %q", test.input, err, line)
++		}
++		if test.skip {
++			if value != nil {
++				t.Fatalf("invalid literal returned %v", value)
++			}
++			continue
++		}
++		if value != types.HexLiteral(test.value) {
++			t.Fatalf("input %q returned %v expected %q", test.input, value, test.value)
++		}
++	}
++	for _, line := range []string{"<AB", ""} {
++		original := line
++		if _, err := parseHexLiteral(&line); err == nil || line != original {
++			t.Fatalf("invalid input %q advanced or accepted", original)
++		}
++	}
++}
++
++func TestCanceledHexObjectRetainsContextRefusal(t *testing.T) {
++	ctx, cancel := context.WithCancel(t.Context())
++	cancel()
++	line := "<abcdef> remainder"
++	if _, err := ParseObject(ctx, &line, 0); !errors.Is(err, context.Canceled) {
++		t.Fatalf("cancellation lost: %v", err)
++	}
++}
+--- a/pkg/pdfcpu/model/parse.go
++++ b/pkg/pdfcpu/model/parse.go
+@@ -20,6 +20,7 @@
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"math"
+ 	"strconv"
+ 	"strings"
+ 	"unicode"
+@@ -40,6 +41,7 @@
+ 	errArrayNotTerminated      = errors.New("parse: unterminated array")
+ 	errDictionaryNotTerminated = fmt.Errorf("parse: unterminated dictionary: %w", ErrDictionaryCorrupt)
+ 	errDictionaryDuplicateKey  = errors.New("parse: duplicate key")
++	errNumericObject           = errors.New("parse: invalid or unrepresentable numeric object")
+ 	errHexLiteralCorrupt       = errors.New("parse: corrupt hex literal")
+ 	errHexLiteralNotTerminated = errors.New("parse: hex literal not terminated")
+ 	errNameObjectCorrupt       = errors.New("parse: corrupt name object")
+@@ -163,25 +165,19 @@
+ 	i := 0
+ 
+ 	for _, c := range strings.ToUpper(s) {
+-		if strings.ContainsRune(" \x09\x0A\x0C\x0D", c) {
++		switch c {
++		case ' ', '\t', '\n', '\f', '\r':
+ 			if i%2 > 0 {
+ 				sb.WriteString("0")
+ 				i = 0
+ 			}
+ 			continue
+ 		}
+-		isHexChar := false
+-		for _, hexch := range "ABCDEF1234567890" {
+-			if c == hexch {
+-				isHexChar = true
+-				sb.WriteRune(c)
+-				i++
+-				break
+-			}
+-		}
+-		if !isHexChar {
++		if !('0' <= c && c <= '9') && !('A' <= c && c <= 'F') {
+ 			return nil, false
+ 		}
++		sb.WriteByte(byte(c))
++		i++
+ 	}
+ 
+ 	// If the final digit of a hexadecimal string is missing -
+@@ -555,28 +551,6 @@
+ 	return &nameObj, nil
+ }
+ 
+-func insertKey(d types.Dict, key string, val types.Object, relaxed bool) error {
+-	if _, found := d[key]; !found {
+-		d[key] = val
+-	} else {
+-
+-		// was: for now we ignore duplicate keys - config flag ?
+-
+-		// if !relaxed {
+-		// 	return errDictionaryDuplicateKey
+-		// }
+-
+-		d[key] = val
+-		ShowDigestedSpecViolation(fmt.Sprintf("duplicate key \"%s\"", key))
+-	}
+-
+-	if log.ParseEnabled() {
+-		log.Parse.Printf("ParseDict: dict[%s]=%v\n", key, val)
+-	}
+-
+-	return nil
+-}
+-
+ func dictString(l string) bool {
+ 	return len(l) > 0 && !strings.HasPrefix(l, ">>")
+ }
+@@ -585,6 +559,7 @@
+ 	l := *line
+ 	var eol bool
+ 	d := types.NewDict()
++	seen := map[string]struct{}{}
+ 
+ 	for dictString(l) {
+ 
+@@ -613,6 +588,12 @@
+ 			continue
+ 		}
+ 
++		key := string(*keyName)
++		if _, duplicate := seen[key]; duplicate {
++			return nil, fmt.Errorf("%w: %q", errDictionaryDuplicateKey, key)
++		}
++		seen[key] = struct{}{}
++
+ 		if len(l) == 0 {
+ 			// Only whitespace after key.
+ 			return nil, errDictionaryNotTerminated
+@@ -632,8 +613,9 @@
+ 		// Specifying the null object as the value of a dictionary entry (7.3.7, "Dictionary Objects")
+ 		// shall be equivalent to omitting the entry entirely.
+ 		if val != nil {
+-			if err := insertKey(d, string(*keyName), val, relaxed); err != nil {
+-				return nil, err
++			d[key] = val
++			if log.ParseEnabled() {
++				log.Parse.Printf("ParseDict: dict[%s]=%v\n", key, val)
+ 			}
+ 		}
+ 
+@@ -714,25 +696,6 @@
+ 		str = l[:i1]
+ 	}
+ 
+-	/*
+-		Integers are sometimes prefixed with any form of 0.
+-		Following is a list of valid prefixes that can be safely ignored:
+-			0
+-			0.000000000
+-	*/
+-	if len(str) > 1 && str[0] == '0' {
+-		switch str[1] {
+-		case '+', '-':
+-			str = str[1:]
+-		case '.':
+-			var i int
+-			for i = 2; len(str) > i && str[i] == '0'; i++ {
+-			}
+-			if len(str) > i && (str[i] == '+' || str[i] == '-') {
+-				str = str[i:]
+-			}
+-		}
+-	}
+ 	return str, l1, i1
+ }
+ 
+@@ -783,28 +746,34 @@
+ }
+ 
+ func parseFloat(s string) (types.Object, error) {
+-	// Replace ',' with '.' to accept comma as decimal separator
+-	s = strings.Replace(s, ",", ".", 1)
+-
+-	f, n := strconv.ParseFloat(s, 64)
+-	if n != nil {
+-		// Fallback: handle ".-" case (e.g., ".-5")
+-		s = strings.Replace(s, ".-", ".", 1)
+-		f, err := strconv.ParseFloat(s, 64)
+-		if err != nil {
+-			// Skip junk
+-			return nil, nil
+-		}
+-		if log.ParseEnabled() {
+-			log.Parse.Printf("parseFloat: value is: %f\n", f)
+-		}
+-		return types.Float(f), nil
+-	}
+-
++	if !validRealToken(s) {
++		return nil, errNumericObject
++	}
++	f, err := strconv.ParseFloat(s, 64)
++	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || f == 0 && strings.ContainsAny(s, "123456789") {
++		return nil, errNumericObject
++	}
+ 	if log.ParseEnabled() {
+ 		log.Parse.Printf("parseFloat: value is: %f\n", f)
+ 	}
+ 	return types.Float(f), nil
++}
++
++func validRealToken(s string) bool {
++	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
++		s = s[1:]
++	}
++	digits, dots := 0, 0
++	for _, c := range s {
++		if c == '.' {
++			dots++
++		} else if c >= '0' && c <= '9' {
++			digits++
++		} else {
++			return false
++		}
++	}
++	return digits > 0 && dots <= 1
+ }
+ 
+ func parseNumericOrIndRef(line *string) (types.Object, error) {
+@@ -818,15 +787,18 @@
+ 	// otherwise it has to be a float
+ 	// we have to check first for integer
+ 	s, l1, i1 := startParseNumericOrIndRef(l)
++	// Real tokens must be classified before Atoi: a large integral prefix
++	// can overflow before Atoi reaches the decimal point.
++	if strings.Contains(s, ".") {
++		*line = l1
++		return parseFloat(s)
++	}
+ 
+ 	// Try int
+ 	i, err := strconv.Atoi(s)
+ 	if err != nil {
+ 		if isRangeError(err) {
+-			// #407
+-			i = 0
+-			*line = l1
+-			return types.Integer(i), nil
++			return nil, errNumericObject
+ 		}
+ 		*line = l1
+ 		return parseFloat(s)
+@@ -854,7 +826,7 @@
+ 		return types.Integer(i), nil
+ 	}
+ 
+-	i2, _ := positionToNextWhitespaceOrChar(l, "/<([]>")
++	i2, _ := positionToNextWhitespaceOrChar(l, "/<([]>%")
+ 
+ 	// if only 2 token, can't be indirect reference.
+ 	// if not followed by whitespace return sole integer value.
+@@ -1010,6 +982,9 @@
+ 
+ 	// position to first non whitespace char
+ 	l, _ = trimLeftSpace(l, false)
++	if canceled := contextutil.Check(c); canceled != nil {
++		return nil, canceled
++	}
+ 	if len(l) == 0 {
+ 		// only whitespace
+ 		return nil, errBufNotAvailable
+@@ -1017,6 +992,9 @@
+ 
+ 	value, err := parseObjectValue(c, &l, level, depthLimit, relaxed)
+ 	if err != nil {
++		if canceled := contextutil.Check(c); canceled != nil {
++			return nil, canceled
++		}
+ 		return nil, err
+ 	}
+ 
+@@ -1058,7 +1036,7 @@
+ 	if err == nil {
+ 		return ParseObjectResult{Object: value}, nil
+ 	}
+-	if errors.Is(err, ErrMaxRecursionDepthExceeded) || c.Err() != nil {
++	if errors.Is(err, ErrMaxRecursionDepthExceeded) || errors.Is(err, errDictionaryDuplicateKey) || c.Err() != nil {
+ 		return ParseObjectResult{}, err
+ 	}
+ 	if !policyManagedParseError(err) {
+@@ -1090,7 +1068,7 @@
+ 	depthLimit := parseObjectDepthLimit(maxDepth)
+ 	original := *line
+ 	value, err := parseObject(c, line, level, depthLimit, false)
+-	if err == nil || errors.Is(err, ErrMaxRecursionDepthExceeded) || c.Err() != nil {
++	if err == nil || errors.Is(err, ErrMaxRecursionDepthExceeded) || errors.Is(err, errDictionaryDuplicateKey) || c.Err() != nil {
+ 		return value, err
+ 	}
+ 
+--- a/pkg/pdfcpu/model/parse_array_test.go
++++ b/pkg/pdfcpu/model/parse_array_test.go
+@@ -167,10 +167,10 @@
+ 	doTestParseArrayFail("[<ABc>    ", t)
+ 	doTestParseArrayFail("[<0ab> <bcf098>", t)
+ 
+-	doTestParseArrayOK("[a]", t)
+-
+-	doTestParseArrayOK("[<0ab> <bcf098>a]", t)
+-	doTestParseArrayOK("[<0ab> <bcf098> a]", t)
++	doTestParseArrayFail("[a]", t)
++
++	doTestParseArrayFail("[<0ab> <bcf098>a]", t)
++	doTestParseArrayFail("[<0ab> <bcf098> a]", t)
+ 
+ 	doTestParseArrayOK("[<AB >]", t)
+ 	doTestParseArrayOK("[<     AB >]", t)
+@@ -221,7 +221,7 @@
+ 	doTestParseArrayOK("[<004>]/Name[(abc)]]", t)
+ 
+ 	//	Numerics
+-	doTestParseArrayOK("[0.000000-16763662]", t) // = -16763662
++	doTestParseArrayFail("[0.000000-16763662]", t) // malformed number must not be repaired silently
+ 	doTestParseArrayOK("[1.09 2.00056]", t)
+ 	doTestParseArrayOK("[1.09 null true false [/Name1 2.00056]]", t)
+ 	doTestParseArrayOK("[[2.22 2.22	2.22][0.95043 1 1.09]]", t)
+--- /dev/null
++++ b/pkg/pdfcpu/model/parse_canonical_dictionary_test.go
+@@ -0,0 +1,39 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package model
++
++import (
++	"reflect"
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++func TestNativeParserAndWriterPreserveCanonicalDictionaryIdentity(t *testing.T) {
++	for _, mode := range []int{ValidationStrict, ValidationRelaxed} {
++		body := "<< /Cr#236fpBox [20 20 80 80] /CropBox [0 0 100 100] /unfinished#23 (private) >>"
++		parsed, err := ParseObjectWithPolicy(t.Context(), &body, 0, mode)
++		if err != nil {
++			t.Fatal(err)
++		}
++		d, ok := parsed.Object.(types.Dict)
++		if !ok {
++			t.Fatal("dictionary not parsed")
++		}
++		if len(d) != 3 || d["Cr#6fpBox"] == nil || d["CropBox"] == nil || d["unfinished#"] == nil {
++			t.Fatalf("canonical name identities lost: %v", d)
++		}
++		reencoded := d.PDFString()
++		again, err := ParseObjectWithPolicy(t.Context(), &reencoded, 0, mode)
++		if err != nil || !reflect.DeepEqual(again.Object, d) {
++			t.Fatalf("canonical literal-hash roundtrip: %v %v", again.Object, err)
++		}
++		for _, duplicate := range []string{"<< /Cr#6fpBox null /CropBox [0 0 1 1] >>", "<< /A#42 1 /AB 2 >>"} {
++			if _, err = ParseObjectWithPolicy(t.Context(), &duplicate, 0, mode); err == nil {
++				t.Fatal("true canonical duplicate accepted")
++			}
++		}
++	}
++}
+--- a/pkg/pdfcpu/model/parse_common_test.go
++++ b/pkg/pdfcpu/model/parse_common_test.go
+@@ -111,5 +111,5 @@
+ 	doTestParseObjectOK("<</n 1 0 R>>", t)
+ 	doTestParseObjectOK("(!\\(S:\\356[\\272H\\355>>R{sb\\007)", t)
+ 
+-	doTestParseObjectOK("18446744071963345064 0 R", t)
++	doTestParseObjectFail("18446744071963345064 0 R", t)
+ }
+--- a/pkg/pdfcpu/model/parse_dict_test.go
++++ b/pkg/pdfcpu/model/parse_dict_test.go
+@@ -126,7 +126,7 @@
+ 	// Numerics
+ 	doTestParseDictOK("<</Key1 16>>", t)
+ 	doTestParseDictOK("<</Key1 .034>>", t)
+-	doTestParseDictOK("<</Key1 ,034>>", t)
++	doTestParseDictFail("<</Key1 ,034>>", t)
+ }
+ 
+ func doTestParseDictIndirectRefs(t *testing.T) {
+--- /dev/null
++++ b/pkg/pdfcpu/model/parse_dictionary_keys_test.go
+@@ -0,0 +1,43 @@
++package model
++
++import (
++	"errors"
++	"testing"
++)
++
++func TestDictionaryDecodedKeyUniquenessBeforeNullOmission(t *testing.T) {
++	for _, input := range []string{
++		"<< /chapter 1 /chapter 2 >>",
++		"<< /chapter 1 /ch#61pter 2 >>",
++		"<< /A null /A 2 >>", "<< /A 1 /A null >>", "<< /A null /A null >>",
++		"<< /D << /D 1 /D 2 >> >>", "<< /S /URI /S /GoTo >>",
++		"<< /Group << /CS /DeviceRGB /CS /DeviceCMYK >> >>",
++	} {
++		for _, relaxed := range []bool{false, true} {
++			remaining := input
++			if _, err := parseObject(t.Context(), &remaining, 0, DefaultResourceLimits().MaxRecursionDepth, relaxed); !errors.Is(err, errDictionaryDuplicateKey) {
++				t.Fatalf("input=%q relaxed=%v: %v", input, relaxed, err)
++			}
++		}
++		for _, mode := range []int{ValidationStrict, ValidationRelaxed} {
++			remaining := input
++			if _, err := ParseObjectWithPolicy(t.Context(), &remaining, 0, mode); !errors.Is(err, errDictionaryDuplicateKey) {
++				t.Fatalf("policy input=%q mode=%d: %v", input, mode, err)
++			}
++		}
++	}
++	for _, input := range []string{
++		"<< /A null >>", "<< /Chapter 1 /chapter 2 >>",
++		"<< /A << /same 1 >> /B << /same 2 >> >>",
++		"<< /A (/chapter /chapter) % /chapter /chapter\n /B 1 >>",
++	} {
++		remaining := input
++		if _, err := ParseObject(t.Context(), &remaining, 0); err != nil {
++			t.Fatalf("unique input=%q: %v", input, err)
++		}
++	}
++	remaining := "<< junk /A 1 /A 2 >>"
++	if _, err := ParseObjectWithPolicy(t.Context(), &remaining, 0, ValidationRelaxed); !errors.Is(err, errDictionaryDuplicateKey) {
++		t.Fatalf("relaxed malformed-key retry concealed duplicate: %v", err)
++	}
++}
+--- /dev/null
++++ b/pkg/pdfcpu/model/parse_numbers_test.go
+@@ -0,0 +1,42 @@
++package model
++
++import (
++	"math"
++	"strings"
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++func TestFiniteRealNativeRoundTripPreservesTypeAndBits(t *testing.T) {
++	for _, value := range []float64{0, math.Copysign(0, -1), 1, -1, 1e-13, math.SmallestNonzeroFloat64, 1e20, math.MaxFloat64} {
++		token := types.Float(value).PDFString()
++		if strings.ContainsAny(token, "eE") || !strings.Contains(token, ".") {
++			t.Fatalf("not a PDF real token: %q", token)
++		}
++		for _, mode := range []int{ValidationStrict, ValidationRelaxed} {
++			remaining := token
++			result, err := ParseObjectWithPolicy(t.Context(), &remaining, 0, mode)
++			parsed, ok := result.Object.(types.Float)
++			if err != nil || !ok || math.Float64bits(float64(parsed)) != math.Float64bits(value) {
++				t.Fatalf("value=%g token=%s mode=%d: %T %v %v", value, token, mode, result.Object, result.Object, err)
++			}
++		}
++	}
++}
++
++func TestNumericInstructionsNeverBecomeFabricatedZeroOrAbsentValue(t *testing.T) {
++	for _, token := range []string{"100000000000000000000", "-100000000000000000000", "1e20", "1,5", ".-5", "0+5", "0.00-5", "1.2.3", ".", "+", "0." + strings.Repeat("0", 400) + "1", strings.Repeat("9", 400) + ".0"} {
++		for _, mode := range []int{ValidationStrict, ValidationRelaxed} {
++			remaining := "<< /Value " + token + " >>"
++			result, err := ParseObjectWithPolicy(t.Context(), &remaining, 0, mode)
++			if err == nil {
++				t.Fatalf("invalid numeric instruction admitted: token=%q mode=%d object=%v", token, mode, result.Object)
++			}
++		}
++	}
++	remaining := "1 0%comment\nR"
++	if _, err := ParseObject(t.Context(), &remaining, 0); err != nil {
++		t.Fatalf("valid indirect reference rejected: %v", err)
++	}
++}
+--- a/pkg/pdfcpu/model/parse_test.go
++++ b/pkg/pdfcpu/model/parse_test.go
+@@ -53,9 +53,9 @@
+ 	}
+ }
+ 
+-// TestParseObjectBoundsRelaxedFallback verifies relaxed parsing remains bounded.
+-func TestParseObjectBoundsRelaxedFallback(t *testing.T) {
+-	s := strings.Repeat("<</Differences[24/breve/quotesingle0 obj\r", 34)
++// TestParseObjectBoundsIncompleteArray verifies incomplete nested arrays remain bounded.
++func TestParseObjectBoundsIncompleteArray(t *testing.T) {
++	s := strings.Repeat("<</Differences[24/breve/quotesingle0\r", 34)
+ 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+ 	defer cancel()
+ 
+--- /dev/null
++++ b/pkg/pdfcpu/model/source_null.go
+@@ -0,0 +1,146 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package model
++
++import (
++	"context"
++	"fmt"
++	"maps"
++	"slices"
++
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++// PreserveSourceNullReferences freezes null source identities before any object is inserted.
++// Source policy must inspect original declarations first. Live indirect identities are retained;
++// direct containers are visited once per table entry without following indirect graph edges.
++func (x *XRefTable) PreserveSourceNullReferences(c context.Context) error {
++	if err := c.Err(); err != nil {
++		return err
++	}
++	numbers := slices.Sorted(maps.Keys(x.Table))
++	nullObjects := types.IntSet{}
++	for _, number := range numbers {
++		if err := c.Err(); err != nil {
++			return err
++		}
++		entry := x.Table[number]
++		if entry == nil || entry.Free {
++			continue
++		}
++		if lazy, ok := entry.Object.(types.LazyObjectStreamObject); ok {
++			object, err := lazy.DecodedObject(c)
++			if err != nil {
++				return fmt.Errorf("source object %d: %w", number, err)
++			}
++			if err := ProcessRefCountsWithError(x, object); err != nil {
++				return fmt.Errorf("source object %d: %w", number, err)
++			}
++			entry.Object = object
++		}
++		if entry.Object == nil {
++			nullObjects[number] = true
++		}
++	}
++	rewrite := sourceNullRewrite{x: x, nullObjects: nullObjects}
++	for _, number := range numbers {
++		entry := x.Table[number]
++		if entry == nil || entry.Free {
++			continue
++		}
++		object, err := rewrite.object(c, entry.Object, 0)
++		if err != nil {
++			return fmt.Errorf("source object %d: %w", number, err)
++		}
++		entry.Object = object
++	}
++	if x.Info != nil && rewrite.null(*x.Info) {
++		x.Info = nil
++	}
++	if _, err := rewrite.object(c, x.DirectInfoDict, 0); err != nil {
++		return fmt.Errorf("source direct Info: %w", err)
++	}
++	if _, err := rewrite.object(c, x.ID, 0); err != nil {
++		return fmt.Errorf("source ID: %w", err)
++	}
++	if x.AdditionalStreams != nil {
++		if _, err := rewrite.object(c, *x.AdditionalStreams, 0); err != nil {
++			return fmt.Errorf("source AdditionalStreams: %w", err)
++		}
++	}
++	return c.Err()
++}
++
++type sourceNullRewrite struct {
++	x           *XRefTable
++	nullObjects types.IntSet
++}
++
++func (r sourceNullRewrite) null(ref types.IndirectRef) bool {
++	entry, found := r.x.FindTableEntryForIndRef(&ref)
++	return !found || entry.Free || r.nullObjects[ref.ObjectNumber.Value()]
++}
++
++func (r sourceNullRewrite) object(c context.Context, object types.Object, depth int) (types.Object, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
++	if err := r.x.CheckRecursionDepth("source null references", depth); err != nil {
++		return nil, err
++	}
++	switch value := object.(type) {
++	case types.IndirectRef:
++		if r.null(value) {
++			return nil, nil
++		}
++	case types.Dict:
++		for _, key := range slices.Sorted(maps.Keys(value)) {
++			rewritten, err := r.object(c, value[key], depth+1)
++			if err != nil {
++				return nil, err
++			}
++			value[key] = rewritten
++		}
++	case types.Array:
++		for index, child := range value {
++			rewritten, err := r.object(c, child, depth+1)
++			if err != nil {
++				return nil, err
++			}
++			value[index] = rewritten
++		}
++	case types.StreamDict:
++		if _, err := r.object(c, value.Dict, depth); err != nil {
++			return nil, err
++		}
++		for index := range value.FilterPipeline {
++			if _, err := r.object(c, value.FilterPipeline[index].DecodeParms, depth); err != nil {
++				return nil, err
++			}
++		}
++	case types.ObjectStreamDict:
++		if _, err := r.object(c, value.StreamDict, depth); err != nil {
++			return nil, err
++		}
++		// ObjArray is parsing storage, not retained source objects; table entries own the decoded values.
++	case types.XRefStreamDict:
++		if _, err := r.object(c, value.StreamDict, depth); err != nil {
++			return nil, err
++		}
++	}
++	return object, nil
++}
+--- a/pkg/pdfcpu/model/xreftable.go
++++ b/pkg/pdfcpu/model/xreftable.go
+@@ -261,19 +261,29 @@
+ 
+ // ParseRootVersion returns a string representation for an optional Version entry in the root object.
+ // This entry overrides the header version.
+-// An unresolved catalog reference has no version override.
++// A null optional version, including an undefined indirect identity, has no override.
++// An unresolved catalog reference also has no version override; Catalog still requires a live root.
+ func (xRefTable *XRefTable) ParseRootVersion() (v *string, err error) {
+ 	rootDict, err := xRefTable.catalogDict()
+ 	if err != nil || rootDict == nil {
+ 		return nil, err
+ 	}
+ 
+-	n, _, err := xRefTable.DereferenceNameEntry(rootDict, "Version")
+-	if err != nil || n == nil {
++	declared := rootDict["Version"]
++	value, err := xRefTable.Dereference(declared)
++	if err != nil || value == nil {
+ 		return nil, err
+ 	}
+-
+-	s := n.Value()
++	name, ok := value.(types.Name)
++	if !ok {
++		objNr := 0
++		if ref, indirect := declared.(types.IndirectRef); indirect {
++			objNr = ref.ObjectNumber.Value()
++		}
++		return nil, scalarEntryTypeError("Version", "name", value, objNr)
++	}
++
++	s := name.Value()
+ 
+ 	return &s, nil
+ }
+@@ -390,7 +400,11 @@
+ 	if log.TraceEnabled() {
+ 		log.Trace.Printf("FindTableEntry: obj#:%d gen:%d \n", objNr, genNr)
+ 	}
+-	return xRefTable.Find(objNr)
++	entry, found := xRefTable.Find(objNr)
++	if !found || entry == nil || entry.Generation == nil || *entry.Generation != genNr {
++		return nil, false
++	}
++	return entry, true
+ }
+ 
+ // FindTableEntryForIndRef returns the XRefTable entry for given indirect reference.
+@@ -996,7 +1010,11 @@
+ 		xRefTable.Table[0] = head
+ 	}
+ 
+-	// verify generation of 56535
++	if !head.Free {
++		return errors.New("xref object 0 must be free")
++	}
++
++	// Repair the free-list head generation.
+ 	if *head.Generation != types.FreeHeadGeneration {
+ 		// Fix generation for obj 0.
+ 		*head.Generation = types.FreeHeadGeneration
+@@ -1192,6 +1210,15 @@
+ 
+ // DereferenceStreamDict resolves a stream dictionary object.
+ func (xRefTable *XRefTable) DereferenceStreamDict(o types.Object) (*types.StreamDict, bool, error) {
++	return xRefTable.DereferenceStreamDictContext(context.Background(), o)
++}
++func (xRefTable *XRefTable) DereferenceStreamDictContext(c context.Context, o types.Object) (*types.StreamDict, bool, error) {
++	if err := c.Err(); err != nil {
++		return nil, false, err
++	}
++	if _, err := xRefTable.DereferenceContext(c, o); err != nil {
++		return nil, false, err
++	}
+ 	// TODO Check if we still need the bool return value
+ 	indRef, ok := o.(types.IndirectRef)
+ 	if !ok {
+@@ -1251,7 +1278,13 @@
+ 
+ // Catalog returns the document catalog dictionary, which is non-nil on success.
+ func (xRefTable *XRefTable) Catalog() (types.Dict, error) {
+-	d, err := xRefTable.catalogDict()
++	return xRefTable.CatalogContext(context.Background())
++}
++func (xRefTable *XRefTable) CatalogContext(c context.Context) (types.Dict, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
++	d, err := xRefTable.catalogDictContext(c)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -1263,6 +1296,12 @@
+ 
+ // catalogDict resolves the catalog while preserving PDF null semantics for optional metadata lookup.
+ func (xRefTable *XRefTable) catalogDict() (types.Dict, error) {
++	return xRefTable.catalogDictContext(context.Background())
++}
++func (xRefTable *XRefTable) catalogDictContext(c context.Context) (types.Dict, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	if xRefTable.RootDict != nil {
+ 		return xRefTable.RootDict, nil
+ 	}
+@@ -1271,7 +1310,7 @@
+ 		return nil, errors.New("missing root dict")
+ 	}
+ 
+-	o, _, err := xRefTable.indRefToObject(xRefTable.Root, true)
++	o, _, err := xRefTable.indRefToObjectContext(c, xRefTable.Root, true)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -1320,7 +1359,10 @@
+ 
+ // Pages returns the Pages reference contained in the catalog, which is non-nil on success.
+ func (xRefTable *XRefTable) Pages() (*types.IndirectRef, error) {
+-	rootDict, err := xRefTable.Catalog()
++	return xRefTable.PagesContext(context.Background())
++}
++func (xRefTable *XRefTable) PagesContext(c context.Context) (*types.IndirectRef, error) {
++	rootDict, err := xRefTable.CatalogContext(c)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -1392,7 +1434,7 @@
+ }
+ 
+ func dumpDecodedStream(c context.Context, sd types.StreamDict, objNr, mode int) (string, error) {
+-	err := sd.Decode()
++	err := sd.DecodeWithContextAndLimit(c, filter.DefaultMaxDecodeBytes)
+ 	if ctxErr := c.Err(); ctxErr != nil {
+ 		return "", ctxErr
+ 	}
+@@ -1846,7 +1888,7 @@
+ 	}
+ 
+ 	// Remove empty names dict.
+-	rootDict, err := xRefTable.Catalog()
++	rootDict, err := xRefTable.CatalogContext(c)
+ 	if err != nil {
+ 		return fmt.Errorf("name tree %q: obtain catalog: %w", nameTreeName, err)
+ 	}
+@@ -1866,7 +1908,7 @@
+ 	if err := contextutil.Check(c); err != nil {
+ 		return err
+ 	}
+-	rootDict, err := xRefTable.Catalog()
++	rootDict, err := xRefTable.CatalogContext(c)
+ 	if err != nil {
+ 		return fmt.Errorf("portfolio: catalog: %w", err)
+ 	}
+@@ -1999,22 +2041,26 @@
+ }
+ 
+ func rect(xRefTable *XRefTable, a types.Array) (*types.Rectangle, error) {
+-	llx, err := xRefTable.DereferenceNumber(a[0])
++	return rectWithContext(context.Background(), xRefTable, a)
++}
++
++func rectWithContext(c context.Context, xRefTable *XRefTable, a types.Array) (*types.Rectangle, error) {
++	llx, err := xRefTable.DereferenceNumberContext(c, a[0])
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+-	lly, err := xRefTable.DereferenceNumber(a[1])
++	lly, err := xRefTable.DereferenceNumberContext(c, a[1])
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+-	urx, err := xRefTable.DereferenceNumber(a[2])
++	urx, err := xRefTable.DereferenceNumberContext(c, a[2])
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+-	ury, err := xRefTable.DereferenceNumber(a[3])
++	ury, err := xRefTable.DereferenceNumberContext(c, a[3])
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -2032,7 +2078,10 @@
+ }
+ 
+ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *InheritedPageAttrs) error {
+-	d, err := xRefTable.DereferenceDict(obj)
++	return xRefTable.consolidateResourcesContext(context.Background(), obj, pAttrs)
++}
++func (xRefTable *XRefTable) consolidateResourcesContext(c context.Context, obj types.Object, pAttrs *InheritedPageAttrs) error {
++	d, err := xRefTable.DereferenceDictContext(c, obj)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -2045,7 +2094,7 @@
+ 		// walking down from page root to leaf node representing the page in question.
+ 		pAttrs.Resources = d.Clone().(types.Dict)
+ 		for _, k := range slices.Sorted(maps.Keys(pAttrs.Resources)) {
+-			o, err := xRefTable.Dereference(pAttrs.Resources[k])
++			o, err := xRefTable.DereferenceContext(c, pAttrs.Resources[k])
+ 			if err != nil {
+ 				return fmt.Errorf("resource %s: %w", k, err)
+ 			}
+@@ -2065,7 +2114,7 @@
+ 		if k == "ProcSet" || v == nil {
+ 			continue
+ 		}
+-		d1, err := xRefTable.DereferenceDict(v)
++		d1, err := xRefTable.DereferenceDictContext(c, v)
+ 		if err != nil {
+ 			return fmt.Errorf("resource %s: %w", k, err)
+ 		}
+@@ -2090,6 +2139,9 @@
+ }
+ 
+ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs *InheritedPageAttrs, consolidateRes bool) error {
++	return xRefTable.checkInheritedPageAttrsContext(context.Background(), pageDict, pAttrs, consolidateRes)
++}
++func (xRefTable *XRefTable) checkInheritedPageAttrsContext(c context.Context, pageDict types.Dict, pAttrs *InheritedPageAttrs, consolidateRes bool) error {
+ 	// Return mediaBox, cropBox and rotate as inherited.
+ 	// if consolidateRes is true
+ 	// then consolidate all inherited resources as required by content stream
+@@ -2100,27 +2152,27 @@
+ 	)
+ 
+ 	if obj, found = pageDict.Find("MediaBox"); found {
+-		a, err := xRefTable.DereferenceArray(obj)
++		a, err := xRefTable.DereferenceArrayContext(c, obj)
+ 		if err != nil {
+ 			return err
+ 		}
+-		if pAttrs.MediaBox, err = rect(xRefTable, a); err != nil {
++		if pAttrs.MediaBox, err = rectWithContext(c, xRefTable, a); err != nil {
+ 			return err
+ 		}
+ 	}
+ 
+ 	if obj, found = pageDict.Find("CropBox"); found {
+-		a, err := xRefTable.DereferenceArray(obj)
++		a, err := xRefTable.DereferenceArrayContext(c, obj)
+ 		if err != nil {
+ 			return err
+ 		}
+-		if pAttrs.CropBox, err = rect(xRefTable, a); err != nil {
++		if pAttrs.CropBox, err = rectWithContext(c, xRefTable, a); err != nil {
+ 			return err
+ 		}
+ 	}
+ 
+ 	if obj, found = pageDict.Find("Rotate"); found {
+-		obj, err := xRefTable.Dereference(obj)
++		obj, err := xRefTable.DereferenceContext(c, obj)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -2145,7 +2197,7 @@
+ 
+ 	if !consolidateRes {
+ 		// Return resourceDict as is.
+-		d, err := xRefTable.DereferenceDict(obj)
++		d, err := xRefTable.DereferenceDictContext(c, obj)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -2154,11 +2206,15 @@
+ 	}
+ 
+ 	// Accumulate inherited resources.
+-	return xRefTable.consolidateResources(obj, pAttrs)
+-}
+-
+-func (xRefTable *XRefTable) decodeContentStream(sd *types.StreamDict, pageNr int) error {
+-	err := sd.Decode()
++	return xRefTable.consolidateResourcesContext(c, obj, pAttrs)
++}
++
++func (xRefTable *XRefTable) decodeContentStream(c context.Context, sd *types.StreamDict, pageNr int) error {
++	limit := filter.DefaultMaxDecodeBytes
++	if xRefTable.Conf != nil {
++		limit = xRefTable.Conf.Limits.MaxDecodeBytes
++	}
++	err := sd.DecodeWithContextAndLimit(c, limit)
+ 	if errors.Is(err, filter.ErrUnsupportedFilter) {
+ 		return fmt.Errorf("page %d content decode: %w", pageNr, err)
+ 	}
+@@ -2176,12 +2232,18 @@
+ 
+ // PageContent returns the content in PDF syntax for page dict d.
+ func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error) {
++	return xRefTable.PageContentContext(context.Background(), d, pageNr)
++}
++func (xRefTable *XRefTable) PageContentContext(c context.Context, d types.Dict, pageNr int) ([]byte, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	o, _ := d.Find("Contents")
+ 	if o == nil {
+ 		return nil, ErrNoContent
+ 	}
+ 
+-	o, err := xRefTable.Dereference(o)
++	o, err := xRefTable.DereferenceContext(c, o)
+ 	if err != nil || o == nil {
+ 		return nil, err
+ 	}
+@@ -2192,7 +2254,7 @@
+ 
+ 	case types.StreamDict:
+ 		// no further processing.
+-		if err := xRefTable.decodeContentStream(&o, pageNr); err != nil {
++		if err := xRefTable.decodeContentStream(c, &o, pageNr); err != nil {
+ 			return nil, err
+ 		}
+ 		bb = append(bb, o.Content...)
+@@ -2203,14 +2265,14 @@
+ 			if o == nil {
+ 				continue
+ 			}
+-			o, _, err := xRefTable.DereferenceStreamDict(o)
++			o, _, err := xRefTable.DereferenceStreamDictContext(c, o)
+ 			if err != nil {
+ 				return nil, fmt.Errorf("page %d content decode: %w", pageNr, err)
+ 			}
+ 			if o == nil {
+ 				continue
+ 			}
+-			if err := xRefTable.decodeContentStream(o, pageNr); err != nil {
++			if err := xRefTable.decodeContentStream(c, o, pageNr); err != nil {
+ 				return nil, err
+ 			}
+ 			bb = append(bb, o.Content...)
+@@ -2328,12 +2390,15 @@
+ }
+ 
+ func (xRefTable *XRefTable) consolidateResourcesWithContent(pageDict, resDict types.Dict, pageNr int, consolidateRes bool) error {
++	return xRefTable.consolidateResourcesWithContentContext(context.Background(), pageDict, resDict, pageNr, consolidateRes)
++}
++func (xRefTable *XRefTable) consolidateResourcesWithContentContext(c context.Context, pageDict, resDict types.Dict, pageNr int, consolidateRes bool) error {
+ 	if !consolidateRes {
+ 		return nil
+ 	}
+ 
+ 	contentContext := xRefTable.pageContentContext(pageDict)
+-	bb, err := xRefTable.PageContent(pageDict, pageNr)
++	bb, err := xRefTable.PageContentContext(c, pageDict, pageNr)
+ 	if err != nil {
+ 		if err == ErrNoContent {
+ 			return nil
+@@ -2358,12 +2423,15 @@
+ }
+ 
+ func (xRefTable *XRefTable) pageObjType(indRef types.IndirectRef) (string, error) {
+-	pageNodeDict, err := xRefTable.DereferenceDict(indRef)
++	return xRefTable.pageObjTypeContext(context.Background(), indRef)
++}
++func (xRefTable *XRefTable) pageObjTypeContext(c context.Context, indRef types.IndirectRef) (string, error) {
++	pageNodeDict, err := xRefTable.DereferenceDictContext(c, indRef)
+ 	if err != nil {
+ 		return "", err
+ 	}
+ 
+-	pageType, _, err := xRefTable.DereferenceNameEntry(pageNodeDict, "Type")
++	pageType, _, err := xRefTable.DereferenceNameEntryContext(c, pageNodeDict, "Type")
+ 	if err != nil {
+ 		return "", err
+ 	}
+@@ -2405,7 +2473,7 @@
+ 	if err := contextutil.Check(c); err != nil {
+ 		return nil, nil, err
+ 	}
+-	objType, err := xRefTable.pageObjType(indRef)
++	objType, err := xRefTable.pageObjTypeContext(c, indRef)
+ 	if err != nil {
+ 		return nil, nil, err
+ 	}
+@@ -2429,7 +2497,10 @@
+ }
+ 
+ func (xRefTable *XRefTable) dereferencePageCount(d types.Dict, ownerObjNr int) (*int, error) {
+-	i, _, err := xRefTable.DereferenceIntegerEntry(d, "Count")
++	return xRefTable.dereferencePageCountContext(context.Background(), d, ownerObjNr)
++}
++func (xRefTable *XRefTable) dereferencePageCountContext(c context.Context, d types.Dict, ownerObjNr int) (*int, error) {
++	i, _, err := xRefTable.DereferenceIntegerEntryContext(c, d, "Count")
+ 	if err != nil {
+ 		return nil, WithValidationErrorObject(err, ownerObjNr)
+ 	}
+@@ -2457,12 +2528,12 @@
+ 		return nil, nil, err
+ 	}
+ 
+-	d, err := xRefTable.DereferenceDict(*root)
++	d, err := xRefTable.DereferenceDictContext(c, *root)
+ 	if err != nil {
+ 		return nil, nil, err
+ 	}
+ 
+-	pageCount, err := xRefTable.dereferencePageCount(d, root.ObjectNumber.Value())
++	pageCount, err := xRefTable.dereferencePageCountContext(c, d, root.ObjectNumber.Value())
+ 	if err != nil {
+ 		return nil, nil, fmt.Errorf("page tree obj#%d Count: %w", root.ObjectNumber.Value(), err)
+ 	}
+@@ -2475,13 +2546,13 @@
+ 	}
+ 
+ 	// Return the current state of all page attributes that may be inherited.
+-	if err = xRefTable.checkInheritedPageAttrs(d, pAttrs, consolidateRes); err != nil {
++	if err = xRefTable.checkInheritedPageAttrsContext(c, d, pAttrs, consolidateRes); err != nil {
+ 		return nil, nil, err
+ 	}
+ 
+ 	kids := d.ArrayEntry("Kids")
+ 	if kids == nil {
+-		return d, root, xRefTable.consolidateResourcesWithContent(d, pAttrs.Resources, page, consolidateRes)
++		return d, root, xRefTable.consolidateResourcesWithContentContext(c, d, pAttrs.Resources, page, consolidateRes)
+ 	}
+ 	objNr := root.ObjectNumber.Value()
+ 	if err := visit.Enter(objNr); err != nil {
+@@ -2537,7 +2608,7 @@
+ 	}
+ 
+ 	// Get an indirect reference to the page tree root dict.
+-	pageRootDictIndRef, err := xRefTable.Pages()
++	pageRootDictIndRef, err := xRefTable.PagesContext(c)
+ 	if err != nil {
+ 		return nil, nil, nil, err
+ 	}
+@@ -2567,6 +2638,7 @@
+ }
+ 
+ func (xRefTable *XRefTable) consolidatePageResourcesForKid(
++	c context.Context,
+ 	o types.Object,
+ 	pAttrs InheritedPageAttrs,
+ 	pageNr *int,
+@@ -2578,14 +2650,14 @@
+ 		return errors.New("corrupt page node dict")
+ 	}
+ 
+-	objType, err := xRefTable.pageObjType(indRef)
++	objType, err := xRefTable.pageObjTypeContext(c, indRef)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	if objType != "Pages" && objType != "Page" {
+ 		return errForUnexpectedPageObjectType(xRefTable.ValidationMode, objType, indRef)
+ 	}
+-	return xRefTable.consolidatePageResourcesForNode(&indRef, pAttrs, pageNr, depth+1, visit)
++	return xRefTable.consolidatePageResourcesForNode(c, &indRef, pAttrs, pageNr, depth+1, visit)
+ }
+ 
+ type pageResourceContextError struct {
+@@ -2603,6 +2675,7 @@
+ }
+ 
+ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
++	c context.Context,
+ 	root *types.IndirectRef,
+ 	pAttrs InheritedPageAttrs,
+ 	pageNr *int,
+@@ -2613,7 +2686,7 @@
+ 		return err
+ 	}
+ 
+-	d, err := xRefTable.DereferenceDict(*root)
++	d, err := xRefTable.DereferenceDictContext(c, *root)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -2621,14 +2694,14 @@
+ 		return ErrPageNotFound
+ 	}
+ 	pAttrs = cloneInheritedPageAttrs(pAttrs)
+-	if err = xRefTable.checkInheritedPageAttrs(d, &pAttrs, true); err != nil {
++	if err = xRefTable.checkInheritedPageAttrsContext(c, d, &pAttrs, true); err != nil {
+ 		return err
+ 	}
+ 
+ 	kids := d.ArrayEntry("Kids")
+ 	if kids == nil {
+ 		currentPageNr := *pageNr + 1
+-		if err := xRefTable.consolidateResourcesWithContent(d, pAttrs.Resources, currentPageNr, true); err != nil {
++		if err := xRefTable.consolidateResourcesWithContentContext(c, d, pAttrs.Resources, currentPageNr, true); err != nil {
+ 			return &pageResourceContextError{
+ 				pageNr: currentPageNr,
+ 				objNr:  root.ObjectNumber.Value(),
+@@ -2652,7 +2725,7 @@
+ 		if o == nil {
+ 			continue
+ 		}
+-		if err := xRefTable.consolidatePageResourcesForKid(o, pAttrs, pageNr, depth, visit); err != nil {
++		if err := xRefTable.consolidatePageResourcesForKid(c, o, pAttrs, pageNr, depth, visit); err != nil {
+ 			return err
+ 		}
+ 	}
+@@ -2661,7 +2734,13 @@
+ 
+ // ConsolidatePageResources consolidates inherited resource dictionaries in one page-tree pass.
+ func (xRefTable *XRefTable) ConsolidatePageResources() error {
+-	root, err := xRefTable.Pages()
++	return xRefTable.ConsolidatePageResourcesContext(context.Background())
++}
++func (xRefTable *XRefTable) ConsolidatePageResourcesContext(c context.Context) error {
++	if err := c.Err(); err != nil {
++		return err
++	}
++	root, err := xRefTable.PagesContext(c)
+ 	if err != nil {
+ 		return fmt.Errorf("page 1: resource dict: %w", err)
+ 	}
+@@ -2671,6 +2750,7 @@
+ 
+ 	pageNr := 0
+ 	err = xRefTable.consolidatePageResourcesForNode(
++		c,
+ 		root,
+ 		InheritedPageAttrs{},
+ 		&pageNr,
+@@ -2698,7 +2778,7 @@
+ 	)
+ 
+ 	// Get an indirect reference to the page tree root dict.
+-	pageRootDictIndRef, err := xRefTable.Pages()
++	pageRootDictIndRef, err := xRefTable.PagesContext(c)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -2728,7 +2808,7 @@
+ 		return 0, err
+ 	}
+ 
+-	d, err := xRefTable.DereferenceDict(*root)
++	d, err := xRefTable.DereferenceDictContext(c, *root)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+@@ -2756,7 +2836,7 @@
+ 
+ 		objNr := indRef.ObjectNumber.Value()
+ 
+-		_, pageType, err := xRefTable.dereferencePageNodeDictType(indRef)
++		_, pageType, err := xRefTable.dereferencePageNodeDictType(c, indRef)
+ 		if err != nil {
+ 			return 0, fmt.Errorf("page tree kid obj#%d: %w", objNr, err)
+ 		}
+@@ -2795,7 +2875,7 @@
+ 		return 0, err
+ 	}
+ 	// Get an indirect reference to the page tree root dict.
+-	pageRootDict, err := xRefTable.Pages()
++	pageRootDict, err := xRefTable.PagesContext(c)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+@@ -2955,7 +3035,7 @@
+ 			return fmt.Errorf("page tree obj#%d: kid %d: expected indirect reference, got %T", parentObjNr, childIndex+1, o)
+ 		}
+ 
+-		pageNodeDict, err := xRefTable.DereferenceDict(indRef)
++		pageNodeDict, err := xRefTable.DereferenceDictContext(c, indRef)
+ 		if err != nil {
+ 			return fmt.Errorf("page tree obj#%d: kid %d obj#%d: dereference dict: %w",
+ 				parentObjNr, childIndex+1, indRef.ObjectNumber.Value(), err)
+@@ -2964,7 +3044,7 @@
+ 			return fmt.Errorf("page tree obj#%d: kid %d obj#%d: missing dict",
+ 				parentObjNr, childIndex+1, indRef.ObjectNumber.Value())
+ 		}
+-		pageType, _, err := xRefTable.DereferenceNameEntry(pageNodeDict, "Type")
++		pageType, _, err := xRefTable.DereferenceNameEntryContext(c, pageNodeDict, "Type")
+ 		if err != nil {
+ 			return fmt.Errorf("page tree obj#%d: kid %d obj#%d: Type: %w",
+ 				parentObjNr, childIndex+1, indRef.ObjectNumber.Value(), err)
+@@ -3054,7 +3134,7 @@
+ 		return err
+ 	}
+ 
+-	d, err := xRefTable.DereferenceDict(*root)
++	d, err := xRefTable.DereferenceDictContext(c, *root)
+ 	if err != nil {
+ 		return fmt.Errorf("page tree obj#%d: dereference dict: %w", root.ObjectNumber.Value(), err)
+ 	}
+@@ -3086,7 +3166,7 @@
+ 	if !found || o == nil {
+ 		return fmt.Errorf("page tree obj#%d: missing Kids", objNr)
+ 	}
+-	o, err = xRefTable.Dereference(o)
++	o, err = xRefTable.DereferenceContext(c, o)
+ 	if err != nil {
+ 		return fmt.Errorf("page tree obj#%d: Kids: dereference: %w", objNr, err)
+ 	}
+@@ -3120,7 +3200,7 @@
+ 	// }
+ 
+ 	// Get an indirect reference to the page tree root dict.
+-	root, err := xRefTable.Pages()
++	root, err := xRefTable.PagesContext(c)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("pages root: %w", err)
+ 	}
+@@ -3374,7 +3454,7 @@
+ 	}
+ 	defer visit.Leave(objNr)
+ 
+-	d, err := xRefTable.DereferenceDict(*parent)
++	d, err := xRefTable.DereferenceDictContext(c, *parent)
+ 	if err != nil {
+ 		return 0, fmt.Errorf("page tree obj#%d: dereference dict: %w", objNr, err)
+ 	}
+@@ -3383,7 +3463,7 @@
+ 	}
+ 
+ 	consolidateRes := false
+-	if err = xRefTable.checkInheritedPageAttrs(d, pAttrs, consolidateRes); err != nil {
++	if err = xRefTable.checkInheritedPageAttrsContext(c, d, pAttrs, consolidateRes); err != nil {
+ 		return 0, fmt.Errorf("page tree obj#%d: inherited attributes: %w", objNr, err)
+ 	}
+ 
+@@ -3416,7 +3496,7 @@
+ 	if err := contextutil.Check(c); err != nil {
+ 		return err
+ 	}
+-	root, err := xRefTable.Pages()
++	root, err := xRefTable.PagesContext(c)
+ 	if err != nil {
+ 		return fmt.Errorf("pages root: %w", err)
+ 	}
+@@ -3463,7 +3543,7 @@
+ 
+ 	defer visit.Leave(objNr)
+ 
+-	d, err := xRefTable.DereferenceDict(*parent)
++	d, err := xRefTable.DereferenceDictContext(c, *parent)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+@@ -3491,7 +3571,7 @@
+ 			return 0, fmt.Errorf("insertPagesDepth: corrupt page node dict")
+ 		}
+ 
+-		_, pageType, err := xRefTable.dereferencePageNodeDictType(ir)
++		_, pageType, err := xRefTable.dereferencePageNodeDictType(c, ir)
+ 		if err != nil {
+ 			return 0, fmt.Errorf("page tree kid obj#%d: %w", ir.ObjectNumber.Value(), err)
+ 		}
+@@ -3545,7 +3625,7 @@
+ 	}
+ 	// Create an intermediary page node containing kids array with indRefs For all ctx Pages fromPageNr - end
+ 
+-	rootPageDict, err := xRefTable.DereferenceDict(*rootPageIndRef)
++	rootPageDict, err := xRefTable.DereferenceDictContext(c, *rootPageIndRef)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+@@ -3598,7 +3678,7 @@
+ 
+ 	d["Kids"] = append(kids, *indRef1)
+ 
+-	rootPageCount, err := xRefTable.dereferencePageCount(rootPageDict, rootPageIndRef.ObjectNumber.Value())
++	rootPageCount, err := xRefTable.dereferencePageCountContext(c, rootPageDict, rootPageIndRef.ObjectNumber.Value())
+ 	if err != nil {
+ 		return 0, fmt.Errorf("page tree root Count: %w", err)
+ 	}
+@@ -3608,7 +3688,7 @@
+ 	pageCount := *rootPageCount + count
+ 	d["Count"] = types.Integer(pageCount)
+ 
+-	rootDict, err := xRefTable.Catalog()
++	rootDict, err := xRefTable.CatalogContext(c)
+ 	if err != nil {
+ 		return 0, err
+ 	}
+@@ -3644,7 +3724,10 @@
+ }
+ 
+ func appendToContentStream(sd *types.StreamDict, bb []byte) error {
+-	err := sd.Decode()
++	return appendToContentStreamContext(context.Background(), sd, bb, filter.DefaultMaxDecodeBytes)
++}
++func appendToContentStreamContext(c context.Context, sd *types.StreamDict, bb []byte, limit int64) error {
++	err := sd.DecodeWithContextAndLimit(c, limit)
+ 	if err == filter.ErrUnsupportedFilter {
+ 		if log.InfoEnabled() {
+ 			log.Info.Println("unsupported filter: unable to patch content with watermark.")
+@@ -3662,6 +3745,16 @@
+ 
+ // AppendContent appends bb to pageDict's content stream.
+ func (xRefTable *XRefTable) AppendContent(pageDict types.Dict, bb []byte) error {
++	return xRefTable.AppendContentContext(context.Background(), pageDict, bb)
++}
++func (xRefTable *XRefTable) AppendContentContext(c context.Context, pageDict types.Dict, bb []byte) error {
++	if err := c.Err(); err != nil {
++		return err
++	}
++	limit := filter.DefaultMaxDecodeBytes
++	if xRefTable.Conf != nil {
++		limit = xRefTable.Conf.Limits.MaxDecodeBytes
++	}
+ 	obj, found := pageDict.Find("Contents")
+ 	if !found {
+ 		return xRefTable.insertContent(pageDict, bb)
+@@ -3681,7 +3774,7 @@
+ 	switch o := obj.(type) {
+ 
+ 	case types.StreamDict:
+-		if err := appendToContentStream(&o, bb); err != nil {
++		if err := appendToContentStreamContext(c, &o, bb, limit); err != nil {
+ 			return err
+ 		}
+ 		entry.Object = o
+@@ -3694,7 +3787,7 @@
+ 		genNr := indRef.GenerationNumber.Value()
+ 		entry, _ = xRefTable.FindTableEntry(objNr, genNr)
+ 		sd, _ := (entry.Object).(types.StreamDict)
+-		if err := appendToContentStream(&sd, bb); err != nil {
++		if err := appendToContentStreamContext(c, &sd, bb, limit); err != nil {
+ 			return err
+ 		}
+ 		entry.Object = sd
+@@ -3966,25 +4059,9 @@
+ 
+ // RectForArray returns a new rectangle for given Array.
+ func (xRefTable *XRefTable) RectForArray(a types.Array) (*types.Rectangle, error) {
+-	llx, err := xRefTable.DereferenceNumber(a[0])
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	lly, err := xRefTable.DereferenceNumber(a[1])
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	urx, err := xRefTable.DereferenceNumber(a[2])
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	ury, err := xRefTable.DereferenceNumber(a[3])
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	return types.NewRectangle(llx, lly, urx, ury), nil
+-}
++	return xRefTable.RectForArrayContext(context.Background(), a)
++}
++
++func (xRefTable *XRefTable) RectForArrayContext(c context.Context, a types.Array) (*types.Rectangle, error) {
++	return rectWithContext(c, xRefTable, a)
++}
+--- a/pkg/pdfcpu/optimize.go
++++ b/pkg/pdfcpu/optimize.go
+@@ -1777,7 +1777,10 @@
+ }
+ 
+ func optimizeResourceDicts(ctx *model.Context) error {
+-	if err := ctx.ConsolidatePageResources(); err != nil {
++	return optimizeResourceDictsContext(context.Background(), ctx)
++}
++func optimizeResourceDictsContext(c context.Context, ctx *model.Context) error {
++	if err := ctx.ConsolidatePageResourcesContext(c); err != nil {
+ 		return err
+ 	}
+ 	// TODO Remove resource dicts from inner nodes.
+@@ -1854,7 +1857,7 @@
+ 
+ 	if shouldOptimizeResourceDicts(ctx) {
+ 		// Extra step with potential for performance hit when processing large files.
+-		if err := runOptimizationPhase(c, func() error { return optimizeResourceDicts(ctx) }); err != nil {
++		if err := runOptimizationPhase(c, func() error { return optimizeResourceDictsContext(c, ctx) }); err != nil {
+ 			return fmt.Errorf("optimize resources: %w", err)
+ 		}
+ 	}
+--- a/pkg/pdfcpu/read.go
++++ b/pkg/pdfcpu/read.go
+@@ -158,6 +158,12 @@
+ // an in-memory representation containing a cross reference table.
+ // If the passed Go context is cancelled, reading will be interrupted.
+ func Read(c context.Context, rs io.ReadSeeker, conf *model.Configuration) (*model.Context, error) {
++	return ReadWithSourceInspection(c, rs, conf, nil)
++}
++
++// ReadWithSourceInspection inspects the parsed source before null references are preserved
++// and direct PDF 2.0 metadata is allocated. Inspection must not insert or delete objects.
++func ReadWithSourceInspection(c context.Context, rs io.ReadSeeker, conf *model.Configuration, inspect func(context.Context, *model.Context) error) (*model.Context, error) {
+ 	if err := contextutil.Check(c); err != nil {
+ 		return nil, err
+ 	}
+@@ -202,6 +208,18 @@
+ 	if ctx.XRefTable.Size == nil || *ctx.XRefTable.Size != ctx.MaxObjNr+1 {
+ 		maxObjNr := ctx.MaxObjNr + 1
+ 		ctx.XRefTable.Size = &maxObjNr
++	}
++
++	if inspect != nil {
++		if err := inspect(c, ctx); err != nil {
++			return nil, err
++		}
++	}
++	if err := ctx.PreserveSourceNullReferences(c); err != nil {
++		return nil, fmt.Errorf("preserve source null references: %w", err)
++	}
++	if err := materializeDirectInfoDict(ctx.XRefTable); err != nil {
++		return nil, err
+ 	}
+ 
+ 	if log.ReadEnabled() {
+@@ -537,13 +555,28 @@
+ 	return line, nil
+ }
+ 
++// objectStreamDecoder binds immutable source identity/policy to a lazy body, while accepting the
++// actual operation context at resolution time rather than storing a mutable model context field.
++func objectStreamDecoder(pdf *model.Context, objNumber string) types.DecodeLazyObjectStreamObjectFunc {
++	return func(c context.Context, body string) (types.Object, error) {
++		objNr, err := strconv.Atoi(objNumber)
++		if err != nil {
++			return nil, fmt.Errorf("packed object number: %w", err)
++		}
++		return compressedObjectWithPolicy(c, pdf, objNr, body)
++	}
++}
++
+ // Parse compressed object.
+ func compressedObject(c context.Context, s string) (types.Object, error) {
++	return compressedObjectWithPolicy(c, nil, 0, s)
++}
++func compressedObjectWithPolicy(c context.Context, pdf *model.Context, objNr int, s string) (types.Object, error) {
+ 	if log.ReadEnabled() {
+ 		log.Read.Println("compressedObject: begin")
+ 	}
+ 
+-	o, err := model.ParseObject(c, &s, 0)
++	o, err := parseCompleteObject(c, pdf, &s, objNr)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -571,6 +604,7 @@
+ 
+ func buildObjectArrayForObjectStream(
+ 	c context.Context,
++	pdf *model.Context,
+ 	osd *types.ObjectStreamDict,
+ 	objs []string,
+ 	fullContent bool,
+@@ -601,12 +635,12 @@
+ 		}
+ 
+ 		if i > 0 {
+-			o := types.NewLazyObjectStreamObject(osd, offsetOld, offset, compressedObject)
++			o := types.NewLazyObjectStreamObject(osd, offsetOld, offset, objectStreamDecoder(pdf, objs[i-2]))
+ 			objArray = append(objArray, o)
+ 		}
+ 
+ 		if i == len(objs)-2 {
+-			o := types.NewLazyObjectStreamObject(osd, offset, -1, compressedObject)
++			o := types.NewLazyObjectStreamObject(osd, offset, -1, objectStreamDecoder(pdf, objs[i]))
+ 			objArray = append(objArray, o)
+ 		}
+ 
+@@ -618,16 +652,30 @@
+ 
+ // Parse all objects of an object stream and save them into objectStreamDict.ObjArray.
+ func parseObjectStream(c context.Context, osd *types.ObjectStreamDict, limits model.ResourceLimits) error {
++	return parseObjectStreamWithPolicy(c, nil, osd, limits)
++}
++func parseObjectStreamWithPolicy(c context.Context, pdf *model.Context, osd *types.ObjectStreamDict, limits model.ResourceLimits) error {
+ 	if log.ReadEnabled() {
+ 		log.Read.Printf("parseObjectStream begin: decoding %d objects.\n", osd.ObjCount)
+ 	}
+ 
++	if err := c.Err(); err != nil {
++		return err
++	}
++	if limit := filter.FullDecodeLimit(limits.MaxDecodeBytes); limit >= 0 && int64(osd.FirstObjOffset) > limit {
++		return filter.ErrDecodeLimitExceeded
++	}
+ 	decodedContent := osd.Content
++	if decodedContent != nil {
++		if limit := filter.FullDecodeLimit(limits.MaxDecodeBytes); limit >= 0 && int64(len(decodedContent)) > limit {
++			return filter.ErrDecodeLimitExceeded
++		}
++	}
+ 	fullContent := decodedContent != nil
+ 	if decodedContent == nil {
+ 		// The actual content will be decoded lazily, only decode the prolog here.
+ 		var err error
+-		decodedContent, err = osd.DecodeLengthWithLimit(int64(osd.FirstObjOffset), limits.MaxDecodeBytes)
++		decodedContent, err = osd.DecodeLengthWithContextAndLimit(c, int64(osd.FirstObjOffset), limits.MaxDecodeBytes)
+ 		if err != nil {
+ 			return fmt.Errorf("decode object stream prolog: %w", err)
+ 		}
+@@ -670,7 +718,7 @@
+ 
+ 	// e.g., 10 0 11 25 = 2 Objects: #10 @ offset 0, #11 @ offset 25
+ 
+-	objArray, err := buildObjectArrayForObjectStream(c, osd, objs, fullContent, decodedContent)
++	objArray, err := buildObjectArrayForObjectStream(c, pdf, osd, objs, fullContent, decodedContent)
+ 	if err != nil {
+ 		return fmt.Errorf("build object stream object array: %w", err)
+ 	}
+@@ -729,11 +777,13 @@
+ 		}
+ 		objNumberRef := int(c2)
+ 		objIndex := int(c3)
++		generation := 0 // Compressed objects have generation zero (ISO 32000, 7.5.7).
+ 
+ 		xRefTableEntry =
+ 			model.XRefTableEntry{
+ 				Free:            false,
+ 				Compressed:      true,
++				Generation:      &generation,
+ 				ObjectStream:    &objNumberRef,
+ 				ObjectStreamInd: &objIndex,
+ 				Incr:            incr}
+@@ -892,7 +942,7 @@
+ 	}
+ 
+ 	// Decode xrefstream content
+-	if err = saveDecodedStreamContent(nil, &sd, 0, 0, true); err != nil {
++	if err = saveDecodedStreamContentContext(c, nil, &sd, 0, 0, true, ctx.Configuration.Limits.MaxDecodeBytes); err != nil {
+ 		return nil, fmt.Errorf("xRefStreamDict: cannot decode stream for obj#:%d: %w", objNr, err)
+ 	}
+ 
+@@ -1684,6 +1734,10 @@
+ 		return 0, nil
+ 	}
+ 
++	if *objNr >= ctx.Configuration.Limits.MaxObjectCount {
++		return 0, fmt.Errorf("repair object number %d exceeds limit %d", *objNr, ctx.Configuration.Limits.MaxObjectCount)
++	}
++
+ 	off := *offset
+ 
+ 	obj, endInd, streamInd, streamOffset, err := object(c, ctx, off, *objNr, *generation)
+@@ -1750,7 +1804,7 @@
+ 			return false, nil
+ 		}
+ 		if entry.Object == nil && entry.Offset != nil {
+-			if _, err := dereferencedObject(c, ctx, ir.ObjectNumber.Value()); err != nil {
++			if _, err := dereferencedReference(c, ctx, ir); err != nil {
+ 				if errors.Is(err, errNilDereferencedObject) {
+ 					return false, nil
+ 				}
+@@ -1761,7 +1815,7 @@
+ 		return false, nil
+ 	}
+ 
+-	t, _, err := ctx.DereferenceNameEntry(d, "Type")
++	t, _, err := ctx.DereferenceNameEntryContext(c, d, "Type")
+ 	if err != nil {
+ 		return false, err
+ 	}
+@@ -1809,18 +1863,21 @@
+ 	return i == 0 || i > 0 && line[i-1] != 't'
+ }
+ 
+-func registerXRefEntry(ctx *model.Context, line string, offset int64, incr int) bool {
++func registerXRefEntry(ctx *model.Context, line string, offset int64, incr int) (bool, error) {
+ 	objNr, generation, err := model.ParseObjectAttributes(&line)
+ 	if err != nil || *objNr == 0 {
+-		return false
+-	}
+-
++		return false, nil
++	}
++
++	if *objNr >= ctx.Configuration.Limits.MaxObjectCount {
++		return false, fmt.Errorf("repair object number %d exceeds limit %d", *objNr, ctx.Configuration.Limits.MaxObjectCount)
++	}
+ 	ctx.Table[*objNr] = &model.XRefTableEntry{
+ 		Generation: generation,
+ 		Offset:     &offset,
+ 		Incr:       incr,
+ 	}
+-	return true
++	return true, nil
+ }
+ 
+ func registerXRefObjects(ctx *model.Context, incr int) error {
+@@ -1839,8 +1896,14 @@
+ 		rawLine := s.Text()
+ 		line := types.TrimLeadingComment(rawLine)
+ 		checkEndObj(&withinObj, &line)
+-		if objCandidate(withinObj, line) && registerXRefEntry(ctx, line, offset, incr) {
+-			withinObj = !strings.Contains(line, "endobj")
++		if objCandidate(withinObj, line) {
++			registered, err := registerXRefEntry(ctx, line, offset, incr)
++			if err != nil {
++				return err
++			}
++			if registered {
++				withinObj = !strings.Contains(line, "endobj")
++			}
+ 		}
+ 		offset += int64(len(rawLine) + 1)
+ 	}
+@@ -2472,7 +2535,7 @@
+ 	for i, o := range filterArray {
+ 		if ir, ok := o.(types.IndirectRef); ok {
+ 			var err error
+-			o, err = dereferencedObject(c, ctx, ir.ObjectNumber.Value())
++			o, err = dereferencedReference(c, ctx, ir)
+ 			if err != nil {
+ 				return nil, fmt.Errorf("filter pipeline entry %d obj#%d: %w", i, ir.ObjectNumber.Value(), err)
+ 			}
+@@ -2502,7 +2565,11 @@
+ 			if !ok {
+ 				return nil, fmt.Errorf("filter pipeline DecodeParms entry %d: %w", i, errCorruptDecodeParms)
+ 			}
+-			d, err := dereferencedDict(c, ctx, indRef.ObjectNumber.Value())
++			o, err := dereferencedReference(c, ctx, indRef)
++			d, ok := o.(types.Dict)
++			if err == nil && o != nil && !ok {
++				err = errCorruptDecodeParms
++			}
+ 			if err != nil {
+ 				return nil, fmt.Errorf("filter pipeline DecodeParms entry %d: %w", i, err)
+ 			}
+@@ -2529,10 +2596,14 @@
+ 	var err error
+ 
+ 	if indRef, ok := obj.(types.IndirectRef); ok {
+-		obj, err = dereferencedObject(c, ctx, indRef.ObjectNumber.Value())
++		obj, err = dereferencedReference(c, ctx, indRef)
+ 		if err != nil {
+ 			return nil, fmt.Errorf("single filter DecodeParms: %w", err)
+ 		}
++	}
++
++	if obj == nil {
++		return []types.PDFFilter{{Name: filterName}}, nil
+ 	}
+ 
+ 	if d, ok := obj.(types.Dict); ok {
+@@ -2549,7 +2620,17 @@
+ 		if len(arr) == 0 || arr[0] == nil {
+ 			return []types.PDFFilter{{Name: filterName}}, nil
+ 		}
+-		d, ok := arr[0].(types.Dict)
++		parameter := arr[0]
++		if ref, ok := parameter.(types.IndirectRef); ok {
++			parameter, err = dereferencedReference(c, ctx, ref)
++			if err != nil {
++				return nil, fmt.Errorf("single filter %s DecodeParms: %w", filterName, err)
++			}
++		}
++		if parameter == nil {
++			return []types.PDFFilter{{Name: filterName}}, nil
++		}
++		d, ok := parameter.(types.Dict)
+ 		if !ok {
+ 			return nil, fmt.Errorf("single filter %s DecodeParms: %w", filterName, errCorruptDecodeParms)
+ 		}
+@@ -2590,9 +2671,13 @@
+ 	var filterPipeline []types.PDFFilter
+ 
+ 	if indRef, ok := o.(types.IndirectRef); ok {
+-		if o, err = dereferencedObject(c, ctx, indRef.ObjectNumber.Value()); err != nil {
++		if o, err = dereferencedReference(c, ctx, indRef); err != nil {
+ 			return nil, fmt.Errorf("filter pipeline Filter: %w", err)
+ 		}
++	}
++
++	if o == nil {
++		return nil, nil
+ 	}
+ 
+ 	//fmt.Printf("dereferenced filter obj: %s\n", obj)
+@@ -2617,13 +2702,17 @@
+ 	// Optional array of decode parameter dicts.
+ 	var decodeParmsArr types.Array
+ 	decodeParms, found := dict.Find("DecodeParms")
+-	if found {
+-		if filterArraySupportsDecodeParms(ctx, names) {
++	if found && filterArraySupportsDecodeParms(ctx, names) {
++		if ref, indirect := decodeParms.(types.IndirectRef); indirect {
++			decodeParms, err = dereferencedReference(c, ctx, ref)
++			if err != nil {
++				return nil, fmt.Errorf("filter pipeline DecodeParms: %w", err)
++			}
++		}
++		if decodeParms != nil {
+ 			decodeParmsArr, ok = decodeParms.(types.Array)
+-			if ok {
+-				if len(decodeParmsArr) != len(filterArray) {
+-					return nil, fmt.Errorf("filter pipeline DecodeParms: %w", errCorruptDecodeParms)
+-				}
++			if !ok || len(decodeParmsArr) != len(filterArray) {
++				return nil, fmt.Errorf("filter pipeline DecodeParms: %w", errCorruptDecodeParms)
+ 			}
+ 		}
+ 	}
+@@ -2683,7 +2772,11 @@
+ }
+ 
+ func parseObjectWithValidationPolicy(c context.Context, ctx *model.Context, line *string, objNr int) (types.Object, error) {
+-	result, err := model.ParseObjectWithPolicy(c, line, 0, ctx.XRefTable.ValidationMode, recursionLimit(ctx))
++	mode := model.ValidationStrict
++	if ctx != nil && ctx.XRefTable != nil {
++		mode = ctx.XRefTable.ValidationMode
++	}
++	result, err := model.ParseObjectWithPolicy(c, line, 0, mode, recursionLimit(ctx))
+ 	if result.StrictFailure == nil {
+ 		return result.Object, err
+ 	}
+@@ -2702,6 +2795,46 @@
+ 	return result.Object, nil
+ }
+ 
++// parseCompleteObject adds a complete isolated-body boundary to the maintained prefix parser.
++func parseCompleteObject(c context.Context, pdf *model.Context, line *string, objNr int) (types.Object, error) {
++	value, err := parseObjectWithValidationPolicy(c, pdf, line, objNr)
++	if cancelErr := c.Err(); cancelErr != nil {
++		return nil, cancelErr
++	}
++	if err != nil {
++		return nil, err
++	}
++	if err = objectBodyRemainder(c, *line); err != nil {
++		return nil, model.WithValidationErrorObject(err, objNr)
++	}
++	return value, nil
++}
++func objectBodyRemainder(c context.Context, remainder string) error {
++	comment := false
++	for index := range len(remainder) {
++		if index%filter.DecodeWorkChunk == 0 {
++			if err := c.Err(); err != nil {
++				return err
++			}
++		}
++		b := remainder[index]
++		if comment {
++			if b == '\n' || b == '\r' {
++				comment = false
++			}
++			continue
++		}
++		switch b {
++		case 0, 9, 10, 12, 13, 32:
++		case '%':
++			comment = true
++		default:
++			return errors.New("material trailing data after complete object body")
++		}
++	}
++	return c.Err()
++}
++
+ func object(c context.Context, ctx *model.Context, offset int64, objNr, genNr int) (o types.Object, endInd, streamInd int, streamOffset int64, err error) {
+ 	var rd io.Reader
+ 
+@@ -2781,7 +2914,7 @@
+ 		return nil, endInd, streamInd, streamOffset, err
+ 	}
+ 
+-	o, err = parseObjectWithValidationPolicy(c, ctx, &l, objNr)
++	o, err = parseCompleteObject(c, ctx, &l, objNr)
+ 
+ 	return o, endInd, streamInd, streamOffset, err
+ }
+@@ -2848,6 +2981,22 @@
+ 	}
+ 
+ 	return resolveObject(c, ctx, obj, offset, objNr, genNr, endInd, streamInd, streamOffset)
++}
++
++// dereferencedReference resolves a serialized identity while objects are still being loaded.
++func dereferencedReference(c context.Context, ctx *model.Context, ref types.IndirectRef) (types.Object, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
++	entry, found := ctx.FindTableEntryForIndRef(&ref)
++	if !found || entry.Free {
++		return nil, nil
++	}
++	object, err := dereferencedObject(c, ctx, ref.ObjectNumber.Value())
++	if errors.Is(err, errNilDereferencedObject) {
++		return nil, nil
++	}
++	return object, err
+ }
+ 
+ func dereferencedObject(c context.Context, ctx *model.Context, objNr int) (types.Object, error) {
+@@ -3177,6 +3326,15 @@
+ 		return nil
+ 	}
+ 
++	if ref, ok := sd.Dict["Length"].(types.IndirectRef); ok {
++		entry, found := ctx.FindTableEntryForIndRef(&ref)
++		if !found || entry.Free {
++			if ctx.XRefTable.ValidationMode == model.ValidationStrict {
++				return errMissingStreamLength
++			}
++			return nil
++		}
++	}
+ 	streamLength, err := int64Object(c, ctx, *sd.StreamLengthObjNr)
+ 	if err != nil && !errors.Is(err, ErrReferenceDoesNotExist) {
+ 		return err
+@@ -3228,7 +3386,7 @@
+ 	return nil
+ }
+ 
+-func metadataStream(ctx *model.Context, sd *types.StreamDict) (bool, error) {
++func metadataStream(c context.Context, ctx *model.Context, sd *types.StreamDict) (bool, error) {
+ 	if sd == nil {
+ 		return false, nil
+ 	}
+@@ -3237,7 +3395,7 @@
+ 		return t != nil && *t == "Metadata", nil
+ 	}
+ 
+-	t, _, err := ctx.DereferenceNameEntry(sd.Dict, "Type")
++	t, _, err := ctx.DereferenceNameEntryContext(c, sd.Dict, "Type")
+ 	if err != nil {
+ 		return false, fmt.Errorf("metadata stream Type: %w", err)
+ 	}
+@@ -3259,20 +3417,33 @@
+ 	return errors.Is(err, errAESCiphertextTooShort) || errors.Is(err, errAESCiphertextUnaligned)
+ }
+ 
+-func validPlaintextMetadata(ctx *model.Context, sd *types.StreamDict) bool {
++func validPlaintextMetadata(c context.Context, ctx *model.Context, sd *types.StreamDict) (bool, error) {
++	if err := c.Err(); err != nil {
++		return false, err
++	}
+ 	probe := *sd
+ 	probe.Raw = bytes.Clone(sd.Raw)
+ 	probe.Content = nil
+-	if err := probe.DecodeWithLimit(decodeLimit(ctx)); err != nil {
+-		return false
++	if err := probe.DecodeWithContextAndLimit(c, decodeLimit(ctx)); err != nil {
++		if c.Err() != nil {
++			return false, c.Err()
++		}
++		return false, nil
+ 	}
+ 
+ 	var x model.XMPMeta
+-	return xml.Unmarshal(probe.Content, &x) == nil
+-}
+-
+-func decryptStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr int) error {
+-	metadata, err := metadataStream(ctx, sd)
++	valid := xml.Unmarshal(probe.Content, &x) == nil
++	if err := c.Err(); err != nil {
++		return false, err
++	}
++	return valid, nil
++}
++
++func decryptStreamContent(c context.Context, ctx *model.Context, sd *types.StreamDict, objNr, genNr int) error {
++	if err := c.Err(); err != nil {
++		return err
++	}
++	metadata, err := metadataStream(c, ctx, sd)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -3282,7 +3453,15 @@
+ 
+ 	raw, err := decryptStream(sd.Raw, objNr, genNr, ctx.EncKey, ctx.AES4Streams, ctx.E.R)
+ 	if err != nil {
+-		if repairablePlaintextMetadata(ctx, metadata, err) && validPlaintextMetadata(ctx, sd) {
++		valid := false
++		if repairablePlaintextMetadata(ctx, metadata, err) {
++			var probeErr error
++			valid, probeErr = validPlaintextMetadata(c, ctx, sd)
++			if probeErr != nil {
++				return probeErr
++			}
++		}
++		if valid {
+ 			model.ShowRepaired(fmt.Sprintf("plaintext metadata obj#%d", objNr))
+ 			return nil
+ 		}
+@@ -3294,11 +3473,15 @@
+ }
+ 
+ func isImageStreamDict(ctx *model.Context, sd *types.StreamDict) (bool, error) {
++	return isImageStreamDictContext(context.Background(), ctx, sd)
++}
++
++func isImageStreamDictContext(c context.Context, ctx *model.Context, sd *types.StreamDict) (bool, error) {
+ 	if ctx == nil {
+ 		return sd.Image(), nil
+ 	}
+ 
+-	t, _, err := ctx.DereferenceNameEntry(sd.Dict, "Type")
++	t, _, err := ctx.DereferenceNameEntryContext(c, sd.Dict, "Type")
+ 	if err != nil {
+ 		return false, fmt.Errorf("stream dict Type: %w", err)
+ 	}
+@@ -3306,7 +3489,7 @@
+ 		return false, nil
+ 	}
+ 
+-	subtype, _, err := ctx.DereferenceNameEntry(sd.Dict, "Subtype")
++	subtype, _, err := ctx.DereferenceNameEntryContext(c, sd.Dict, "Subtype")
+ 	if err != nil {
+ 		return false, fmt.Errorf("stream dict Subtype: %w", err)
+ 	}
+@@ -3314,8 +3497,25 @@
+ 	return subtype != nil && subtype.Value() == "Image", nil
+ }
+ 
++func publishRawStreamContent(c context.Context, sd *types.StreamDict, maxDecodeBytes int64) error {
++	if err := c.Err(); err != nil {
++		return err
++	}
++	if limit := filter.FullDecodeLimit(maxDecodeBytes); limit >= 0 && int64(len(sd.Raw)) > limit {
++		return filter.ErrDecodeLimitExceeded
++	}
++	sd.Content = sd.Raw
++	return nil
++}
++
+ // Decodes the raw encoded stream content and saves it to streamDict.Content.
+-func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr int, decode bool) (err error) {
++func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr int, decode bool) error {
++	return saveDecodedStreamContentContext(context.Background(), ctx, sd, objNr, genNr, decode, decodeLimit(ctx))
++}
++func saveDecodedStreamContentContext(c context.Context, ctx *model.Context, sd *types.StreamDict, objNr, genNr int, decode bool, maxDecodeBytes int64) (err error) {
++	if err := c.Err(); err != nil {
++		return err
++	}
+ 	if log.ReadEnabled() {
+ 		log.Read.Printf("saveDecodedStreamContent: begin decode=%t\n", decode)
+ 	}
+@@ -3323,20 +3523,18 @@
+ 	// If the "Identity" crypt filter is used we do not need to decrypt.
+ 	if ctx != nil && ctx.EncKey != nil {
+ 		if len(sd.FilterPipeline) == 1 && sd.FilterPipeline[0].Name == "Crypt" {
+-			sd.Content = sd.Raw
+-			return nil
++			return publishRawStreamContent(c, sd, maxDecodeBytes)
+ 		}
+ 	}
+ 
+ 	// Special case: If the length of the encoded data is 0, we do not need to decode anything.
+ 	if len(sd.Raw) == 0 {
+-		sd.Content = sd.Raw
+-		return nil
++		return publishRawStreamContent(c, sd, maxDecodeBytes)
+ 	}
+ 
+ 	// ctx gets created after XRefStream parsing.
+ 	// XRefStreams are not encrypted.
+-	if err := decryptStreamContent(ctx, sd, objNr, genNr); err != nil {
++	if err := decryptStreamContent(c, ctx, sd, objNr, genNr); err != nil {
+ 		return fmt.Errorf("decrypt stream content: %w", err)
+ 	}
+ 
+@@ -3344,7 +3542,7 @@
+ 		return nil
+ 	}
+ 
+-	image, err := isImageStreamDict(ctx, sd)
++	image, err := isImageStreamDictContext(c, ctx, sd)
+ 	if err != nil {
+ 		return fmt.Errorf("classify image stream: %w", err)
+ 	}
+@@ -3353,7 +3551,7 @@
+ 	}
+ 
+ 	// Actual decoding of stream data.
+-	err = sd.DecodeWithLimit(decodeLimit(ctx))
++	err = sd.DecodeWithContextAndLimit(c, maxDecodeBytes)
+ 	if errors.Is(err, filter.ErrUnsupportedFilter) {
+ 		err = nil
+ 	}
+@@ -3463,7 +3661,7 @@
+ 	}
+ 
+ 	// Parse all objects of this object stream and save them to ObjectStreamDict.ObjArray.
+-	if err = parseObjectStream(c, osd, ctx.Configuration.Limits); err != nil {
++	if err = parseObjectStreamWithPolicy(c, ctx, osd, ctx.Configuration.Limits); err != nil {
+ 		return nil, fmt.Errorf("object stream obj#%d: parse objects: %w", objNr, err)
+ 	}
+ 
+@@ -3509,7 +3707,7 @@
+ 	}
+ 
+ 	// Will only decrypt, the actual stream content is decoded later lazily.
+-	if err = saveDecodedStreamContent(ctx, &sd, objNr, *entry.Generation, false); err != nil {
++	if err = saveDecodedStreamContentContext(c, ctx, &sd, objNr, *entry.Generation, false, decodeLimit(ctx)); err != nil {
+ 		if log.ReadEnabled() {
+ 			log.Read.Printf("obj %d: %s", objNr, err)
+ 		}
+@@ -3546,7 +3744,7 @@
+ 	if !target.Compressed && (target.Object != nil || target.Offset == nil) {
+ 		return nil
+ 	}
+-	if _, err := dereferencedObject(c, ctx, ir.ObjectNumber.Value()); err != nil {
++	if _, err := dereferencedReference(c, ctx, ir); err != nil {
+ 		err = fmt.Errorf("object stream obj#%d Type: entry=Type: %w", objNr, err)
+ 		return model.WithValidationErrorObject(err, ir.ObjectNumber.Value())
+ 	}
+@@ -3568,7 +3766,7 @@
+ 		return err
+ 	}
+ 
+-	t, found, err := ctx.DereferenceNameEntry(osd.Dict, "Type")
++	t, found, err := ctx.DereferenceNameEntryContext(c, osd.Dict, "Type")
+ 	if err != nil {
+ 		return fmt.Errorf("object stream obj#%d Type: %w", objNr, err)
+ 	}
+@@ -3700,7 +3898,7 @@
+ 	}
+ 
+ 	// Decode stream content.
+-	if err := saveDecodedStreamContent(ctx, sd, objNr, genNr, ctx.DecodeAllStreams); err != nil {
++	if err := saveDecodedStreamContentContext(c, ctx, sd, objNr, genNr, ctx.DecodeAllStreams, decodeLimit(ctx)); err != nil {
+ 		return fmt.Errorf("stream obj#%d: decode content: %w", objNr, err)
+ 	}
+ 
+@@ -4113,9 +4311,6 @@
+ 	if err := identifyRootVersion(xRefTable); err != nil {
+ 		return err
+ 	}
+-	if err := materializeDirectInfoDict(xRefTable); err != nil {
+-		return err
+-	}
+ 
+ 	if log.ReadEnabled() {
+ 		log.Read.Println("dereferenceXRefTable: end")
+@@ -4255,6 +4450,10 @@
+ 
+ 	// Dereference encryptDict.
+ 	objNr := indRef.ObjectNumber.Value()
++	entry, found := ctx.FindTableEntryForIndRef(indRef)
++	if !found || entry.Free {
++		return fmt.Errorf("encryption dictionary obj#%d: %w", objNr, classifyEncryptionDictionaryError(ErrReferenceDoesNotExist))
++	}
+ 	d, err := dereferencedDict(c, ctx, objNr)
+ 	if err != nil {
+ 		return fmt.Errorf("encryption dictionary obj#%d: %w", objNr, classifyEncryptionDictionaryError(err))
+--- /dev/null
++++ b/pkg/pdfcpu/read_free_head_test.go
+@@ -0,0 +1,125 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package pdfcpu_test
++
++import (
++	"bytes"
++	"context"
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"strings"
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/api"
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++func classicFreeHeadPDF(head string, missing bool) []byte {
++	var out bytes.Buffer
++	out.WriteString("%PDF-1.7\n")
++	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Count 1 /Kids [3 0 R] >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>"}
++	offsets := make([]int, len(objects))
++	for index, object := range objects {
++		offsets[index] = out.Len()
++		fmt.Fprintf(&out, "%d 0 obj\n%s\nendobj\n", index+1, object)
++	}
++	xrefOffset := out.Len()
++	if missing {
++		out.WriteString("xref\n1 3\n")
++	} else {
++		fmt.Fprintf(&out, "xref\n0 4\n%s \n", head)
++	}
++	for _, offset := range offsets {
++		fmt.Fprintf(&out, "%010d 00000 n \n", offset)
++	}
++	fmt.Fprintf(&out, "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", xrefOffset)
++	return out.Bytes()
++}
++
++func packedFreeHeadPDF(kind byte) []byte {
++	source := packedPolicyPDF("null")
++	start := bytes.LastIndex(source, []byte("\nstream\n")) + len("\nstream\n")
++	clear(source[start : start+7])
++	source[start] = kind
++	if kind == 1 {
++		binary.BigEndian.PutUint32(source[start+1:start+5], 9)
++		binary.BigEndian.PutUint16(source[start+5:start+7], 65535)
++	} else {
++		binary.BigEndian.PutUint32(source[start+1:start+5], 5)
++	}
++	return source
++}
++
++func TestReadRejectsRetainedInUseFreeHeadAcrossClassicAndStreamEntries(t *testing.T) {
++	for name, source := range map[string][]byte{"classic": classicFreeHeadPDF("0000000009 65535 n", false), "stream type1": packedFreeHeadPDF(1), "stream type2": packedFreeHeadPDF(2)} {
++		t.Run(name, func(t *testing.T) {
++			original := bytes.Clone(source)
++			_, err := api.ReadContext(t.Context(), bytes.NewReader(source), nil)
++			if err == nil || !strings.Contains(err.Error(), "xref object 0 must be free") {
++				t.Fatalf("retained in-use head was not rejected before allocator/body materialization: %v", err)
++			}
++			if !bytes.Equal(source, original) {
++				t.Fatal("reader changed source bytes")
++			}
++			ctx, cancel := context.WithCancel(t.Context())
++			cancel()
++			if _, err = api.ReadContext(ctx, bytes.NewReader(source), nil); !errors.Is(err, context.Canceled) {
++				t.Fatalf("preexisting cancellation lost: %v", err)
++			}
++		})
++	}
++}
++
++func TestReadPreservesKnownClassicFreeHeadNormalizationAndRepairs(t *testing.T) {
++	for _, test := range []struct {
++		name, head string
++		missing    bool
++	}{
++		{"valid", "0000000000 65535 f", false},
++		{"generation repair", "0000000000 00000 f", false},
++		{"offset repair", "0000000099 65535 f", false},
++		{"zero in-use normalization", "0000000000 65535 n", false},
++		{"skipped low in-use offset", "0000000008 65535 n", false},
++		{"missing head", "", true},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			source := classicFreeHeadPDF(test.head, test.missing)
++			pdf, err := api.ReadContext(t.Context(), bytes.NewReader(source), nil)
++			if err != nil {
++				t.Fatal(err)
++			}
++			head, ok := pdf.Find(0)
++			if !ok || !head.Free || head.Offset == nil || *head.Offset != 0 || head.Generation == nil || *head.Generation != 65535 {
++				t.Fatalf("known repaired free head invalid: %+v", head)
++			}
++			if _, err = pdf.IndRefForNewObject(types.Integer(1)); err != nil {
++				t.Fatalf("repaired source cannot allocate: %v", err)
++			}
++		})
++	}
++}
++
++func TestReadPreservesActualRecycledFreeObjectInsertion(t *testing.T) {
++	source := classicFreeHeadPDF("0000000004 65535 f", false)
++	source = bytes.Replace(source, []byte("xref\n0 4\n"), []byte("xref\n0 5\n"), 1)
++	source = bytes.Replace(source, []byte("trailer\n<< /Size 4"), []byte("0000000000 00002 f \ntrailer\n<< /Size 5"), 1)
++	pdf, err := api.ReadContext(t.Context(), bytes.NewReader(source), nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ref, err := pdf.IndRefForNewObject(types.Integer(99))
++	if err != nil || ref.ObjectNumber != 4 {
++		t.Fatalf("actual free object was not recycled: %v %v", ref, err)
++	}
++	head, ok := pdf.Find(0)
++	if !ok || !head.Free || head.Offset == nil || *head.Offset != 0 {
++		t.Fatalf("recycled free-list head not consumed: %+v", head)
++	}
++	entry, ok := pdf.Find(4)
++	if !ok || entry.Free || entry.Object != types.Integer(99) {
++		t.Fatalf("actual recycled object payload invalid: %+v", entry)
++	}
++}
+--- a/pkg/pdfcpu/read_test.go
++++ b/pkg/pdfcpu/read_test.go
+@@ -236,6 +236,22 @@
+ }
+ 
+ func TestProcessObjectRejectsBoundedMalformedObjectStrict(t *testing.T) {
++	input := "1 0 obj\n<</D[0/a0\n<</E 1>>\nendobj\n"
++	conf := model.NewDefaultConfiguration()
++	conf.ValidationMode = model.ValidationStrict
++	ctx, err := model.NewContext(bytes.NewReader([]byte(input)), conf)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	var offset int64
++	_, err = processObject(t.Context(), ctx, "1 0 obj", &offset, 1, nil)
++	if err == nil || !strings.Contains(err.Error(), "unterminated array") {
++		t.Fatalf("got %v, want malformed object error", err)
++	}
++}
++
++func TestProcessObjectRejectsMalformedNumericTokenStrict(t *testing.T) {
+ 	input := "1 0 obj\n<</D[0/a0 obj\n<</E 1>>\nendobj\n"
+ 	conf := model.NewDefaultConfiguration()
+ 	conf.ValidationMode = model.ValidationStrict
+@@ -246,8 +262,8 @@
+ 
+ 	var offset int64
+ 	_, err = processObject(t.Context(), ctx, "1 0 obj", &offset, 1, nil)
+-	if err == nil || !strings.Contains(err.Error(), "unterminated array") {
+-		t.Fatalf("got %v, want malformed object error", err)
++	if err == nil || !strings.Contains(err.Error(), "invalid or unrepresentable numeric object") {
++		t.Fatalf("got %v, want malformed numeric token error", err)
+ 	}
+ }
+ 
+@@ -877,21 +893,32 @@
+ }
+ 
+ func TestCheckForEncryptionWrapsEncryptionDictionaryError(t *testing.T) {
+-	ctx, err := model.NewContext(bytes.NewReader(nil), nil)
+-	if err != nil {
+-		t.Fatal(err)
+-	}
+-	ctx.Encrypt = types.NewIndirectRef(7, 0)
+-
+-	err = checkForEncryption(t.Context(), ctx)
+-	if !errors.Is(err, errUnregisteredObject) {
+-		t.Fatalf("got %v, want %v", err, errUnregisteredObject)
+-	}
+-	if !errors.Is(err, ErrMalformedEncryption) {
+-		t.Fatalf("got %v, want %v", err, ErrMalformedEncryption)
+-	}
+-	if !strings.Contains(err.Error(), "encryption dictionary obj#7") {
+-		t.Fatalf("expected encryption dictionary context, got %q", err.Error())
++	for _, state := range []string{"missing", "free", "wrong generation"} {
++		t.Run(state, func(t *testing.T) {
++			ctx, err := model.NewContext(bytes.NewReader(nil), nil)
++			if err != nil {
++				t.Fatal(err)
++			}
++			ctx.Encrypt = types.NewIndirectRef(7, 0)
++			if state != "missing" {
++				generation := 0
++				if state == "wrong generation" {
++					generation = 1
++				}
++				ctx.Table[7] = &model.XRefTableEntry{Generation: &generation, Free: state == "free", Object: types.Dict{}}
++			}
++
++			err = checkForEncryption(t.Context(), ctx)
++			if !errors.Is(err, ErrReferenceDoesNotExist) {
++				t.Fatalf("got %v, want %v", err, ErrReferenceDoesNotExist)
++			}
++			if !errors.Is(err, ErrMalformedEncryption) {
++				t.Fatalf("got %v, want %v", err, ErrMalformedEncryption)
++			}
++			if !strings.Contains(err.Error(), "encryption dictionary obj#7") {
++				t.Fatalf("expected encryption dictionary context, got %q", err.Error())
++			}
++		})
+ 	}
+ }
+ 
+--- /dev/null
++++ b/pkg/pdfcpu/sign/ocsp_fixture_test.go
+@@ -0,0 +1,139 @@
++// Copyright 2026 The pdfcpu Authors.
++// SPDX-License-Identifier: Apache-2.0
++
++package sign
++
++import (
++	"bytes"
++	"crypto"
++	"crypto/rand"
++	"crypto/rsa"
++	"crypto/sha256"
++	"crypto/x509"
++	"crypto/x509/pkix"
++	"encoding/asn1"
++	"strings"
++	"testing"
++	"time"
++
++	"golang.org/x/crypto/ocsp"
++)
++
++type (
++	ocspFixtureEnvelope struct {
++		Status asn1.Enumerated
++		Bytes  ocspFixtureResponseBytes `asn1:"explicit,optional,tag:0"`
++	}
++	ocspFixtureResponseBytes struct {
++		Type     asn1.ObjectIdentifier
++		Response []byte
++	}
++	ocspFixtureResponseData struct {
++		Responder  asn1.RawValue
++		ProducedAt time.Time `asn1:"generalized"`
++		Responses  []asn1.RawValue
++	}
++	ocspFixtureBasicResponse struct {
++		Data         asn1.RawValue
++		Algorithm    pkix.AlgorithmIdentifier
++		Signature    asn1.BitString
++		Certificates []asn1.RawValue `asn1:"explicit,tag:0,optional"`
++	}
++)
++
++func archivedOCSPFixtureTime() time.Time {
++	return time.Date(2020, time.January, 2, 12, 0, 0, 0, time.UTC)
++}
++
++// CreateResponse ignores Response.ProducedAt and reads the current minute itself.
++// Archived fixtures need an explicit historical time, authenticated by the real
++// responder key, rather than racing certificate expiry against RSA generation.
++func testHistoricalOCSPResponse(t *testing.T, encoded []byte, key *rsa.PrivateKey, producedAt time.Time) []byte {
++	t.Helper()
++	envelope, basic := testOCSPFixtureProducedAt(t, encoded, producedAt)
++	digest := sha256.Sum256(basic.Data.FullBytes)
++	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
++	if err != nil {
++		t.Fatal(err)
++	}
++	basic.Signature = asn1.BitString{Bytes: signature, BitLength: len(signature) * 8}
++	return testEncodeOCSPFixture(t, envelope, basic)
++}
++
++func testOCSPFixtureProducedAt(t *testing.T, encoded []byte, producedAt time.Time) (*ocspFixtureEnvelope, *ocspFixtureBasicResponse) {
++	t.Helper()
++	parsed, err := ocsp.ParseResponse(encoded, nil)
++	if err != nil || parsed.SignatureAlgorithm != x509.SHA256WithRSA {
++		t.Fatalf("historical fixture requires an authenticated SHA256WithRSA response: %v", err)
++	}
++	var envelope ocspFixtureEnvelope
++	testUnmarshalOCSPFixture(t, encoded, &envelope)
++	testCanonicalOCSPFixture(t, encoded, envelope)
++	if envelope.Status != 0 || !envelope.Bytes.Type.Equal(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 1}) {
++		t.Fatal("historical fixture requires a successful BasicOCSPResponse")
++	}
++	var basic ocspFixtureBasicResponse
++	testUnmarshalOCSPFixture(t, envelope.Bytes.Response, &basic)
++	testCanonicalOCSPFixture(t, envelope.Bytes.Response, basic)
++	var data ocspFixtureResponseData
++	testUnmarshalOCSPFixture(t, basic.Data.FullBytes, &data)
++	testCanonicalOCSPFixture(t, basic.Data.FullBytes, data)
++	data.ProducedAt = producedAt.UTC()
++	basic.Data = asn1.RawValue{FullBytes: testMarshalOCSPFixture(t, data)}
++	return &envelope, &basic
++}
++
++func testUnmarshalOCSPFixture(t *testing.T, encoded []byte, value any) {
++	t.Helper()
++	remainder, err := asn1.Unmarshal(encoded, value)
++	if err != nil || len(remainder) != 0 {
++		t.Fatalf("invalid or trailing ASN.1 in historical OCSP fixture: %v", err)
++	}
++}
++
++func testCanonicalOCSPFixture(t *testing.T, encoded []byte, decoded any) {
++	t.Helper()
++	if !bytes.Equal(encoded, testMarshalOCSPFixture(t, decoded)) {
++		t.Fatal("unexpected fields or noncanonical ASN.1 in historical OCSP fixture")
++	}
++}
++
++func testMarshalOCSPFixture(t *testing.T, value any) []byte {
++	t.Helper()
++	encoded, err := asn1.Marshal(value)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return encoded
++}
++
++func testEncodeOCSPFixture(t *testing.T, envelope *ocspFixtureEnvelope, basic *ocspFixtureBasicResponse) []byte {
++	t.Helper()
++	envelope.Bytes.Response = testMarshalOCSPFixture(t, *basic)
++	return testMarshalOCSPFixture(t, *envelope)
++}
++
++func TestHistoricalOCSPFixtureRejectsUnsignedTimeChange(t *testing.T) {
++	producedAt := archivedOCSPFixtureTime()
++	_, issuer, responder, encoded := testArchivedOCSPFixture(
++		t, producedAt, producedAt.Add(-time.Hour), producedAt.Add(time.Hour), producedAt.Add(2*time.Hour),
++	)
++	parsed, err := ocsp.ParseResponse(encoded, issuer)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = parsed.CheckSignatureFrom(responder); err != nil {
++		t.Fatal(err)
++	}
++	if err = responder.CheckSignatureFrom(issuer); err != nil {
++		t.Fatal(err)
++	}
++	if !parsed.ProducedAt.Equal(producedAt) {
++		t.Fatal("authentic fixture did not retain its explicit ProducedAt")
++	}
++	envelope, basic := testOCSPFixtureProducedAt(t, encoded, producedAt.Add(time.Minute))
++	tampered := testEncodeOCSPFixture(t, envelope, basic)
++	if _, err = ocsp.ParseResponse(tampered, issuer); err == nil || !strings.Contains(err.Error(), "signature") {
++		t.Fatalf("unsigned historical time alteration was not rejected by cryptographic authentication: %v", err)
++	}
++}
+--- a/pkg/pdfcpu/sign/sign_test.go
++++ b/pkg/pdfcpu/sign/sign_test.go
+@@ -3273,12 +3273,13 @@
+ // TestArchivedOCSPDelegatedResponderValidityRemainsUnknown verifies an
+ // archived delegated responder is not validated at its asserted ProducedAt.
+ func TestArchivedOCSPDelegatedResponderValidityRemainsUnknown(t *testing.T) {
+-	now := time.Now().UTC()
+-	signingTime := now.Add(time.Hour)
++	producedAt := archivedOCSPFixtureTime()
++	signingTime := producedAt.Add(time.Hour)
+ 	cert, issuer, responder, bb := testArchivedOCSPFixture(
+ 		t,
+-		now.Add(-time.Hour),
+-		now.Add(-time.Nanosecond),
++		producedAt,
++		producedAt.Add(-time.Hour),
++		producedAt.Add(time.Minute),
+ 		signingTime.Add(time.Hour),
+ 	)
+ 	resp, err := ocsp.ParseResponse(bb, nil)
+@@ -3365,12 +3366,13 @@
+ // TestArchivedOCSPDoesNotAssessResponderAtProducedAt verifies archived
+ // responder certificate validity remains unknown without an assessment time.
+ func TestArchivedOCSPDoesNotAssessResponderAtProducedAt(t *testing.T) {
+-	now := time.Now().UTC()
+-	signingTime := now.Add(2 * time.Hour)
++	producedAt := archivedOCSPFixtureTime()
++	signingTime := producedAt.Add(2 * time.Hour)
+ 	cert, issuer, responder, bb := testArchivedOCSPFixture(
+ 		t,
+-		now.Add(time.Hour),
+-		now.Add(3*time.Hour),
++		producedAt,
++		producedAt.Add(time.Hour),
++		producedAt.Add(3*time.Hour),
+ 		signingTime.Add(time.Hour),
+ 	)
+ 	resp, err := ocsp.ParseResponse(bb, nil)
+@@ -3470,12 +3472,13 @@
+ 
+ // TestCheckCertViaOCSPRetainsInconclusiveArchivedEvidenceOffline verifies offline mode preserves observations.
+ func TestCheckCertViaOCSPRetainsInconclusiveArchivedEvidenceOffline(t *testing.T) {
+-	now := time.Now().UTC()
+-	signingTime := now.Add(time.Hour)
++	producedAt := archivedOCSPFixtureTime()
++	signingTime := producedAt.Add(time.Hour)
+ 	cert, issuer, _, bb := testArchivedOCSPFixture(
+ 		t,
+-		now.Add(-time.Hour),
+-		now.Add(2*time.Hour),
++		producedAt,
++		producedAt.Add(-time.Hour),
++		producedAt.Add(2*time.Hour),
+ 		signingTime.Add(time.Hour),
+ 	)
+ 
+@@ -4136,15 +4139,19 @@
+ 
+ func testArchivedOCSPFixture(
+ 	t *testing.T,
+-	responderNotBefore, responderNotAfter, nextUpdate time.Time,
++	producedAt, responderNotBefore, responderNotAfter, nextUpdate time.Time,
+ ) (*x509.Certificate, *x509.Certificate, *x509.Certificate, []byte) {
+ 	t.Helper()
+ 	issuerKey := testRSAKey(t)
+ 	issuerTemplate := testCertTemplate("OCSP Issuer", true)
++	issuerTemplate.NotBefore = producedAt.Add(-24 * time.Hour)
++	issuerTemplate.NotAfter = producedAt.Add(24 * time.Hour)
+ 	issuer := testCertificate(t, issuerTemplate, issuerTemplate, &issuerKey.PublicKey, issuerKey)
+ 
+ 	certKey := testRSAKey(t)
+ 	certTemplate := testCertTemplate("Certificate", false)
++	certTemplate.NotBefore = producedAt.Add(-time.Hour)
++	certTemplate.NotAfter = producedAt.Add(24 * time.Hour)
+ 	cert := testCertificate(t, certTemplate, issuer, &certKey.PublicKey, issuerKey)
+ 
+ 	responderKey := testRSAKey(t)
+@@ -4157,14 +4164,14 @@
+ 	bb, err := ocsp.CreateResponse(issuer, responder, ocsp.Response{
+ 		Status:       ocsp.Good,
+ 		SerialNumber: cert.SerialNumber,
+-		ThisUpdate:   time.Now().Add(-time.Minute),
++		ThisUpdate:   producedAt.Add(-time.Minute),
+ 		NextUpdate:   nextUpdate,
+ 		Certificate:  responder,
+ 	}, responderKey)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	return cert, issuer, responder, bb
++	return cert, issuer, responder, testHistoricalOCSPResponse(t, bb, responderKey, producedAt)
+ }
+ 
+ func testIssuerOCSPResponse(
+@@ -6222,12 +6229,13 @@
+ // and configuration-dependent local assessment for an archived delegated
+ // responder.
+ func TestLocalOCSPBehaviorCharacterization(t *testing.T) {
+-	now := time.Now().UTC()
++	producedAt := archivedOCSPFixtureTime()
+ 	cert, issuer, _, bb := testArchivedOCSPFixture(
+ 		t,
+-		now.Add(-time.Hour),
+-		now.Add(time.Hour),
+-		now.Add(time.Hour),
++		producedAt,
++		producedAt.Add(-time.Hour),
++		producedAt.Add(time.Hour),
++		producedAt.Add(time.Hour),
+ 	)
+ 
+ 	details, err := checkCertViaOCSP(
+--- a/pkg/pdfcpu/sign/validation_time_contract_test.go
++++ b/pkg/pdfcpu/sign/validation_time_contract_test.go
+@@ -106,12 +106,13 @@
+ // TestClaimedSigningTimeDoesNotEnableArchivedOCSPConclusion verifies archived
+ // OCSP applicability remains unknown without a certificate assessment time.
+ func TestClaimedSigningTimeDoesNotEnableArchivedOCSPConclusion(t *testing.T) {
+-	now := time.Now()
++	producedAt := archivedOCSPFixtureTime()
+ 	cert, issuer, _, response := testArchivedOCSPFixture(
+ 		t,
+-		now.Add(-time.Hour),
+-		now.Add(time.Hour),
+-		now.Add(time.Hour),
++		producedAt,
++		producedAt.Add(-time.Hour),
++		producedAt.Add(time.Hour),
++		producedAt.Add(time.Hour),
+ 	)
+ 	certDetails, result := assessRevocationWithoutTimestamp(t.Context(),
+ 		cert,
+--- a/pkg/pdfcpu/types/array.go
++++ b/pkg/pdfcpu/types/array.go
+@@ -127,9 +127,6 @@
+ 			v := "null"
+ 			if entry != nil {
+ 				v = entry.String()
+-				if n, ok := entry.(Name); ok {
+-					v, _ = DecodeName(string(n))
+-				}
+ 			}
+ 
+ 			logstr = append(logstr, fmt.Sprintf("%s%v", sepstr, v))
+--- a/pkg/pdfcpu/types/dict.go
++++ b/pkg/pdfcpu/types/dict.go
+@@ -91,22 +91,11 @@
+ 	}
+ }
+ 
+-// Find returns the Object for given key and PDFDict.
++// Find returns the exact canonical-byte key's value. Parsed names are decoded
++// once at the syntax boundary; literal hash bytes never acquire another identity.
+ func (d Dict) Find(key string) (Object, bool) {
+-	v, found := d[key]
+-	if found {
+-		return v, found
+-	}
+-	for n, v := range d {
+-		k, err := DecodeName(n)
+-		if err != nil {
+-			return nil, false
+-		}
+-		if k == key {
+-			return v, true
+-		}
+-	}
+-	return nil, false
++	value, found := d[key]
++	return value, found
+ }
+ 
+ // HasEntry returns true if key exists and maps to a non-nil object.
+@@ -121,7 +110,6 @@
+ 	if !found {
+ 		return nil
+ 	}
+-	// TODO Take encoded names into account.
+ 	delete(d, key)
+ 	return value
+ }
+@@ -475,9 +463,6 @@
+ 			val := "null"
+ 			if v != nil {
+ 				val = v.String()
+-				if n, ok := v.(Name); ok {
+-					val, _ = DecodeName(string(n))
+-				}
+ 			}
+ 
+ 			logstr = append(logstr, fmt.Sprintf("%s<%s, %v>\n", tabstr, k, val))
+--- /dev/null
++++ b/pkg/pdfcpu/types/dict_canonical_test.go
+@@ -0,0 +1,65 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package types
++
++import (
++	"reflect"
++	"strings"
++	"testing"
++)
++
++func TestDictionaryCanonicalBytesGovernEveryOperation(t *testing.T) {
++	for _, keys := range [][2]string{{"AB", "A#42"}, {"A#42", "AB"}} {
++		d := NewDict()
++		for _, key := range keys {
++			if !d.Insert(key, Name(key)) {
++				t.Fatalf("distinct canonical insertion refused %q", key)
++			}
++		}
++		if len(d) != 2 {
++			t.Fatal("distinct names collapsed")
++		}
++		for _, key := range keys {
++			value, found := d.Find(key)
++			if !found || value != Name(key) {
++				t.Fatalf("exact lookup %q=%v/%v", key, value, found)
++			}
++		}
++		for attempt := range 64 {
++			copy := d.Clone().(Dict)
++			if !reflect.DeepEqual(copy, d) {
++				t.Fatalf("clone lost canonical identity %d: %v", attempt, copy)
++			}
++		}
++		if removed := d.Delete("AB"); removed != Name("AB") || len(d) != 1 || d["A#42"] != Name("A#42") {
++			t.Fatalf("delete affected distinct private key: %v", d)
++		}
++		if value, found := d.Find("AB"); found || value != nil {
++			t.Fatal("private literal-hash key acquired another identity")
++		}
++		if !d.Insert("AB", Integer(2)) {
++			t.Fatal("absent exact key blocked by private name")
++		}
++		d.Update("AB", Integer(3))
++		if d["AB"] != Integer(3) || d["A#42"] != Name("A#42") {
++			t.Fatal("update collided with private name")
++		}
++	}
++}
++
++func TestCanonicalNamesPreserveLiteralHashesInSerializationAndDiagnostics(t *testing.T) {
++	for _, name := range []string{"Cr#6fpBox", "A#42", "unfinished#", "bad#gg"} {
++		d := Dict{name: Name(name)}
++		if _, found := d.Find("CropBox"); found {
++			t.Fatalf("unrelated canonical key %q influenced exact miss", name)
++		}
++		if name == "Cr#6fpBox" && !strings.Contains(d.PDFString(), "/Cr#236fpBox") {
++			t.Fatal("writer did not encode literal hash once")
++		}
++		if !strings.Contains(d.String(), name) || !strings.Contains(Array{Name(name)}.String(), name) {
++			t.Fatalf("diagnostic display invented decoded identity for %q", name)
++		}
++	}
++}
+--- a/pkg/pdfcpu/types/dict_test.go
++++ b/pkg/pdfcpu/types/dict_test.go
+@@ -46,7 +46,10 @@
+ 	if dict.HasEntry("D") {
+ 		t.Fatal("expected missing entry D to be absent")
+ 	}
+-	if !dict.HasEntry("C()") {
+-		t.Fatal("expected decoded entry C()")
++	if dict.HasEntry("C()") {
++		t.Fatal("literal canonical C#28#29 must not alias C()")
++	}
++	if !dict.HasEntry("C#28#29") {
++		t.Fatal("literal canonical key must remain present")
+ 	}
+ }
+--- a/pkg/pdfcpu/types/streamdict.go
++++ b/pkg/pdfcpu/types/streamdict.go
+@@ -22,6 +22,7 @@
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"math"
+ 
+ 	"github.com/pdfcpu/pdfcpu/pkg/filter"
+ 	"github.com/pdfcpu/pdfcpu/pkg/log"
+@@ -158,7 +159,12 @@
+ 
+ // GetData returns the stream data.
+ func (l *LazyObjectStreamObject) GetData() ([]byte, error) {
+-	if err := l.osd.DecodeWithLimit(l.osd.MaxDecodeBytes); err != nil {
++	return l.GetDataContext(context.Background())
++}
++
++// GetDataContext materializes lazy object-stream data under its operation context and full cap.
++func (l *LazyObjectStreamObject) GetDataContext(c context.Context) ([]byte, error) {
++	if err := l.osd.DecodeWithContextAndLimit(c, l.osd.MaxDecodeBytes); err != nil {
+ 		return nil, err
+ 	}
+ 
+@@ -179,8 +185,11 @@
+ 
+ // DecodedObject returns the decoded object at index i.
+ func (l *LazyObjectStreamObject) DecodedObject(c context.Context) (Object, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	if l.decodedObject == nil && l.decodedError == nil {
+-		data, err := l.GetData()
++		data, err := l.GetDataContext(c)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -189,7 +198,11 @@
+ 			log.Read.Printf("parseObjectStream: objString = %s\n", string(data))
+ 		}
+ 
+-		l.decodedObject, l.decodedError = l.decodeFunc(c, string(data))
++		value, parseErr := l.decodeFunc(c, string(data))
++		if err := c.Err(); err != nil {
++			return nil, err
++		}
++		l.decodedObject, l.decodedError = value, parseErr
+ 		if l.decodedError != nil {
+ 			return nil, l.decodedError
+ 		}
+@@ -341,141 +354,166 @@
+ }
+ 
+ func decodedContent(r io.Reader) ([]byte, error) {
++	return decodedContentWithContext(context.Background(), r, -1)
++}
++
++func decodedContentWithContext(c context.Context, r io.Reader, maxDecodeBytes int64) ([]byte, error) {
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
+ 	if r == nil {
+ 		return nil, errors.New("copy decoded content: missing reader")
+ 	}
+-	if bb, ok := r.(*bytes.Buffer); ok {
+-		return bb.Bytes(), nil
+-	}
+-	var buf bytes.Buffer
+-	if _, err := io.Copy(&buf, r); err != nil {
++	limit := filter.FullDecodeLimit(maxDecodeBytes)
++	if buffer, ok := r.(*bytes.Buffer); ok {
++		if limit >= 0 && int64(buffer.Len()) > limit {
++			return nil, filter.ErrDecodeLimitExceeded
++		}
++		return buffer.Bytes(), c.Err()
++	}
++	reader := filter.ContextReader(c, r)
++	if limit >= 0 && limit < math.MaxInt64 {
++		reader = io.LimitReader(reader, limit+1)
++	}
++	var buffer bytes.Buffer
++	if _, err := io.Copy(&buffer, reader); err != nil {
+ 		return nil, fmt.Errorf("copy decoded content: %w", err)
+ 	}
+-	return buf.Bytes(), nil
++	if err := c.Err(); err != nil {
++		return nil, err
++	}
++	if limit >= 0 && int64(buffer.Len()) > limit {
++		return nil, filter.ErrDecodeLimitExceeded
++	}
++	return buffer.Bytes(), nil
+ }
+ 
+ // Decode applies sd's filter pipeline to sd.Raw in order to produce sd.Content.
+ func (sd *StreamDict) Decode() error {
+-	_, err := sd.DecodeLengthWithLimit(-1, filter.DefaultMaxDecodeBytes)
++	return sd.DecodeWithContextAndLimit(context.Background(), filter.DefaultMaxDecodeBytes)
++}
++
++// DecodeWithLimit decodes a complete stream with the maintained full output cap.
++func (sd *StreamDict) DecodeWithLimit(limit int64) error {
++	return sd.DecodeWithContextAndLimit(context.Background(), limit)
++}
++
++// DecodeWithContextAndLimit enforces actual full output length on cached, aliased, eager and lazy
++// results while propagating cooperative decoding cancellation. The cap is not total memory usage.
++func (sd *StreamDict) DecodeWithContextAndLimit(c context.Context, limit int64) error {
++	_, err := sd.DecodeLengthWithContextAndLimit(c, -1, limit)
+ 	return err
+ }
+ 
+-// DecodeWithLimit decodes sd with resource limits.
+-func (sd *StreamDict) DecodeWithLimit(maxDecodeBytes int64) error {
+-	_, err := sd.DecodeLengthWithLimit(-1, maxDecodeBytes)
+-	return err
+-}
+-
+-func (sd *StreamDict) decodeLength(maxLen, maxDecodeBytes int64) ([]byte, error) {
+-	var b, c io.Reader
+-	b = bytes.NewReader(sd.Raw)
+-
+-	// Apply each filter in the pipeline to result of preceding filter.
+-	for idx, f := range sd.FilterPipeline {
+-
+-		if preserveEncodedImageFilter(f.Name) {
+-			if idx != len(sd.FilterPipeline)-1 {
+-				return nil, fmt.Errorf("stream filter[%d] %q: decode: %w", idx, f.Name, filter.ErrUnsupportedFilter)
++func (sd *StreamDict) decodeLengthContext(ctx context.Context, maxLen, maxDecodeBytes int64) ([]byte, error) {
++	var reader io.Reader = bytes.NewReader(sd.Raw)
++	for index, stage := range sd.FilterPipeline {
++		if err := ctx.Err(); err != nil {
++			return nil, err
++		}
++		opaque := preserveEncodedImageFilter(stage.Name) || stage.Name == filter.DCT && sd.CSComponents != 4
++		if opaque {
++			if index != len(sd.FilterPipeline)-1 {
++				return nil, fmt.Errorf("stream filter[%d] %q: decode: %w", index, stage.Name, filter.ErrUnsupportedFilter)
+ 			}
+-			c = b
+ 			break
+ 		}
+-
+-		if f.Name == filter.DCT {
+-			if sd.CSComponents != 4 {
+-				break
+-			}
+-			// if sd.CSComponents == 4 {
+-			// 	// Special case where we have to do real JPG decoding.
+-			// 	// Another option is using a dctDecode filter using gob - performance hit?
+-
+-			// 	im, err := jpeg.Decode(b)
+-			//  if err != nil {
+-			// 	 	return err
+-			// 	}
+-			// 	sd.DCTImage = im // hacky
+-			// 	return nil
+-			// }
+-		}
+-
+-		parms := parmsForFilter(f.DecodeParms)
+-		if err := fixParms(f, parms, sd); err != nil {
+-			return nil, fmt.Errorf("stream filter[%d] %q: prepare parameters: %w", idx, f.Name, err)
+-		}
+-
+-		fi, err := filter.NewFilter(f.Name, parms, maxDecodeBytes)
++		parms := parmsForFilter(stage.DecodeParms)
++		if err := fixParms(stage, parms, sd); err != nil {
++			return nil, fmt.Errorf("stream filter[%d] %q: prepare parameters: %w", index, stage.Name, err)
++		}
++		codec, err := filter.NewFilterWithContext(ctx, stage.Name, parms, maxDecodeBytes)
+ 		if err != nil {
+-			return nil, fmt.Errorf("stream filter[%d] %q: construct: %w", idx, f.Name, err)
+-		}
+-
+-		if maxLen >= 0 && idx == len(sd.FilterPipeline)-1 {
+-			c, err = fi.DecodeLength(b, maxLen)
++			return nil, fmt.Errorf("stream filter[%d] %q: construct: %w", index, stage.Name, err)
++		}
++		partial := maxLen >= 0 && index == len(sd.FilterPipeline)-1
++		if partial {
++			reader, err = codec.DecodeLength(reader, maxLen)
+ 		} else {
+-			c, err = fi.Decode(b)
++			reader, err = codec.Decode(reader)
+ 		}
+ 		if err != nil {
+-			return nil, fmt.Errorf("stream filter[%d] %q: decode: %w", idx, f.Name, err)
+-		}
+-
+-		//fmt.Printf("decodedStream after:%s\n%s\n", f.Name, hex.Dump(c.Bytes()))
+-		b = c
+-	}
+-
+-	data, err := decodedContent(c)
++			return nil, fmt.Errorf("stream filter[%d] %q: decode: %w", index, stage.Name, err)
++		}
++		stageLimit := maxDecodeBytes
++		if partial {
++			stageLimit = -1 // Partial codecs may return a full predictor row before slicing the prefix.
++		}
++		data, err := decodedContentWithContext(ctx, reader, stageLimit)
++		if err != nil {
++			return nil, fmt.Errorf("stream filter[%d] %q: output: %w", index, stage.Name, err)
++		}
++		reader = bytes.NewBuffer(data)
++	}
++	finalLimit := maxDecodeBytes
++	if maxLen >= 0 {
++		finalLimit = -1
++	} // Maintained partial-prefix semantics are distinct from full caps.
++	data, err := decodedContentWithContext(ctx, reader, finalLimit)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-
+-	if maxLen < 0 {
+-		sd.Content = data
+-		return data, nil
+-	}
+-	if maxLen > int64(len(data)) {
+-		return nil, io.ErrUnexpectedEOF
+-	}
+-
+-	return data[:maxLen], nil
+-}
+-
+-// DecodeLength decodes sd with a maximum output length.
++	if maxLen >= 0 {
++		if maxLen > int64(len(data)) {
++			return nil, io.ErrUnexpectedEOF
++		}
++		return data[:maxLen], ctx.Err()
++	}
++	if err = ctx.Err(); err != nil {
++		return nil, err
++	}
++	sd.Content = data
++	return data, nil
++}
++
++// DecodeLength decodes at least the requested prefix under the maintained partial semantics.
+ func (sd *StreamDict) DecodeLength(maxLen int64) ([]byte, error) {
+ 	return sd.DecodeLengthWithLimit(maxLen, filter.DefaultMaxDecodeBytes)
+ }
+ 
+-// DecodeLengthWithLimit decodes sd with a maximum output length and resource limits.
++// DecodeLengthWithLimit retains partial-prefix limit precedence; use the full method for a hard cap.
+ func (sd *StreamDict) DecodeLengthWithLimit(maxLen, maxDecodeBytes int64) ([]byte, error) {
++	return sd.DecodeLengthWithContextAndLimit(context.Background(), maxLen, maxDecodeBytes)
++}
++
++// DecodeLengthWithContextAndLimit carries cancellation through partial decode and full decode.
++func (sd *StreamDict) DecodeLengthWithContextAndLimit(ctx context.Context, maxLen, maxDecodeBytes int64) ([]byte, error) {
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
+ 	if sd.Content != nil {
+-		// This stream has already been decoded.
++		if maxLen < 0 && filter.FullDecodeLimit(maxDecodeBytes) >= 0 && int64(len(sd.Content)) > filter.FullDecodeLimit(maxDecodeBytes) {
++			return nil, filter.ErrDecodeLimitExceeded
++		}
++		if maxLen < 0 {
++			return sd.Content, ctx.Err()
++		}
++		if maxLen > int64(len(sd.Content)) {
++			return nil, io.ErrUnexpectedEOF
++		}
++		return sd.Content[:maxLen], ctx.Err()
++	}
++	pipeline := sd.FilterPipeline
++	if len(pipeline) == 0 || len(pipeline) == 1 && (pipeline[0].Name == filter.DCT && sd.CSComponents != 4 || preserveEncodedImageFilter(pipeline[0].Name)) {
++		if maxLen < 0 && filter.FullDecodeLimit(maxDecodeBytes) >= 0 && int64(len(sd.Raw)) > filter.FullDecodeLimit(maxDecodeBytes) {
++			return nil, filter.ErrDecodeLimitExceeded
++		}
++		if maxLen >= 0 && maxLen > int64(len(sd.Raw)) {
++			return nil, io.ErrUnexpectedEOF
++		}
++		if err := ctx.Err(); err != nil {
++			return nil, err
++		}
++		sd.Content = sd.Raw
+ 		if maxLen < 0 {
+ 			return sd.Content, nil
+ 		}
+-		if maxLen > int64(len(sd.Content)) {
+-			return nil, io.ErrUnexpectedEOF
+-		}
+-
+ 		return sd.Content[:maxLen], nil
+ 	}
+-
+-	fpl := sd.FilterPipeline
+-
+-	// No filter, sole DCT except CMYK, or terminal opaque image filters:
+-	// nothing to decode for consumers that can preserve the original image stream.
+-	if fpl == nil || len(fpl) == 1 && ((fpl[0].Name == filter.DCT && sd.CSComponents != 4) || preserveEncodedImageFilter(fpl[0].Name)) {
+-		sd.Content = sd.Raw
+-		//fmt.Printf("decodedStream returning %d(#%02x)bytes: \n%s\n", len(sd.Content), len(sd.Content), hex.Dump(sd.Content))
+-		if maxLen < 0 {
+-			return sd.Content, nil
+-		}
+-		if maxLen > int64(len(sd.Content)) {
+-			return nil, io.ErrUnexpectedEOF
+-		}
+-
+-		return sd.Content[:maxLen], nil
+-	}
+-
+-	//fmt.Printf("decodedStream before:\n%s\n", hex.Dump(sd.Raw))
+-
+-	return sd.decodeLength(maxLen, maxDecodeBytes)
++	return sd.decodeLengthContext(ctx, maxLen, maxDecodeBytes)
+ }
+ 
+ // IndexedObject returns the object at given index from a ObjectStreamDict.
+--- /dev/null
++++ b/pkg/pdfcpu/types/streamdict_context_test.go
+@@ -0,0 +1,104 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package types
++
++import (
++	"bytes"
++	"compress/zlib"
++	"context"
++	"errors"
++	"sync/atomic"
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/filter"
++)
++
++type streamCheckpointContext struct {
++	context.Context
++	remaining atomic.Int64
++}
++
++func (c *streamCheckpointContext) Err() error {
++	if c.remaining.Add(-1) < 0 {
++		return context.Canceled
++	}
++	return nil
++}
++
++func TestContextFullDecodeBoundsCachedRawAndOpaqueResults(t *testing.T) {
++	for _, kind := range []string{"cached", "raw", filter.JPX, filter.JBIG2, filter.DCT} {
++		for _, limit := range []int64{3, 4} {
++			sd := StreamDict{Raw: []byte("1234")}
++			if kind == "cached" {
++				sd.Content = []byte("1234")
++			}
++			if kind != "cached" && kind != "raw" {
++				sd.FilterPipeline = []PDFFilter{{Name: kind}}
++			}
++			err := sd.DecodeWithContextAndLimit(t.Context(), limit)
++			if limit == 3 {
++				if !errors.Is(err, filter.ErrDecodeLimitExceeded) || kind != "cached" && sd.Content != nil {
++					t.Fatalf("%s overflow published Content: %v %v", kind, sd.Content, err)
++				}
++			} else if err != nil || !bytes.Equal(sd.Content, []byte("1234")) {
++				t.Fatalf("%s exact cap: %v %v", kind, sd.Content, err)
++			}
++			if limit == 4 && kind != "cached" && &sd.Content[0] != &sd.Raw[0] {
++				t.Fatal("safe alias path needlessly copied raw bytes")
++			}
++		}
++	}
++}
++
++func TestContextFullDecodeBoundsFilterChainAndPreservedTerminalStage(t *testing.T) {
++	sd := StreamDict{Raw: []byte("31323334>"), FilterPipeline: []PDFFilter{{Name: filter.ASCIIHex}, {Name: filter.JPX}}}
++	if err := sd.DecodeWithContextAndLimit(t.Context(), 4); err != nil || !bytes.Equal(sd.Content, []byte("1234")) {
++		t.Fatalf("terminal opaque stage lost decoded bytes: %v %v", sd.Content, err)
++	}
++	sd = StreamDict{Raw: []byte("034141414180>"), FilterPipeline: []PDFFilter{{Name: filter.ASCIIHex}, {Name: filter.RunLength}}}
++	if err := sd.DecodeWithContextAndLimit(t.Context(), 4); !errors.Is(err, filter.ErrDecodeLimitExceeded) || sd.Content != nil {
++		t.Fatalf("oversized intermediate stage fed a later filter: %v %v", sd.Content, err)
++	}
++	sd = StreamDict{Raw: []byte("1"), FilterPipeline: []PDFFilter{{Name: filter.JPX}, {Name: filter.ASCIIHex}}}
++	if err := sd.DecodeWithContextAndLimit(t.Context(), 4); !errors.Is(err, filter.ErrUnsupportedFilter) || sd.Content != nil {
++		t.Fatalf("nonterminal opaque filter silently dropped later stage: %v", err)
++	}
++}
++
++func TestContextFullDecodeCancelsBufferedFlateWithoutPublishingContent(t *testing.T) {
++	var encoded bytes.Buffer
++	writer := zlib.NewWriter(&encoded)
++	if _, err := writer.Write(bytes.Repeat([]byte("a"), 1<<20)); err != nil {
++		t.Fatal(err)
++	}
++	if err := writer.Close(); err != nil {
++		t.Fatal(err)
++	}
++	ctx := &streamCheckpointContext{Context: t.Context()}
++	ctx.remaining.Store(15)
++	sd := StreamDict{Raw: encoded.Bytes(), FilterPipeline: []PDFFilter{{Name: filter.Flate}}}
++	if err := sd.DecodeWithContextAndLimit(ctx, 1<<20); !errors.Is(err, context.Canceled) || sd.Content != nil {
++		t.Fatalf("active decode cancellation lost identity or assigned Content: %v %v", sd.Content, err)
++	}
++	if err := sd.DecodeWithContextAndLimit(t.Context(), 1<<20); err != nil || len(sd.Content) != 1<<20 {
++		t.Fatalf("fresh uncancelled retry failed: %d %v", len(sd.Content), err)
++	}
++}
++
++func TestContextPartialPrefixSemanticsRemainDistinctFromFullCap(t *testing.T) {
++	sd := StreamDict{Raw: []byte("123456")}
++	data, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 2)
++	if err != nil || string(data) != "12345" {
++		t.Fatalf("partial prefix limit precedence changed: %q %v", data, err)
++	}
++	if err = sd.DecodeWithContextAndLimit(t.Context(), 2); !errors.Is(err, filter.ErrDecodeLimitExceeded) {
++		t.Fatalf("cached partial decode bypassed later full cap: %v", err)
++	}
++	ctx, cancel := context.WithCancel(t.Context())
++	cancel()
++	if err = sd.DecodeWithContextAndLimit(ctx, 100); !errors.Is(err, context.Canceled) {
++		t.Fatalf("cached result bypassed cancellation: %v", err)
++	}
++}
+--- a/pkg/pdfcpu/types/types.go
++++ b/pkg/pdfcpu/types/types.go
+@@ -21,6 +21,7 @@
+ 	"encoding/hex"
+ 	"fmt"
+ 	"strconv"
++	"strings"
+ )
+ 
+ // Supported line delimiters
+@@ -115,8 +116,13 @@
+ 
+ // PDFString returns a string representation as found in and written to a PDF file.
+ func (f Float) PDFString() string {
+-	// The max precision encountered so far has been 12 (fontType3 fontmatrix components).
+-	return strconv.FormatFloat(f.Value(), 'f', 12, 64)
++	// PDF has no exponent notation. Keep the shortest binary64 round trip
++	// and a decimal marker so a real object remains real, including -0.
++	number := strconv.FormatFloat(f.Value(), 'f', -1, 64)
++	if !strings.Contains(number, ".") {
++		number += ".0"
++	}
++	return number
+ }
+ 
+ // Value returns a float64 value for this PDF object.
+--- a/pkg/pdfcpu/validate/info.go
++++ b/pkg/pdfcpu/validate/info.go
+@@ -138,12 +138,8 @@
+ 
+ 	if v != "" {
+ 
+-		k, err := types.DecodeName(key)
+-		if err != nil {
+-			return fmt.Errorf("decode name: %w", err)
+-		}
+-
+-		xRefTable.Properties[k] = v
++		// Info dictionary keys are already canonical native names.
++		xRefTable.Properties[key] = v
+ 	}
+ 
+ 	return nil
+--- /dev/null
++++ b/pkg/pdfcpu/validate/info_canonical_property_test.go
+@@ -0,0 +1,25 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++Licensed under the Apache License, Version 2.0.
++*/
++package validate
++
++import (
++	"testing"
++
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++)
++
++func TestInfoPropertiesPreserveCanonicalPrivateNameBytes(t *testing.T) {
++	for _, key := range []string{"A#42", "unfinished#", "bad#gg"} {
++		version := model.V17
++		xref := &model.XRefTable{HeaderVersion: &version, Properties: map[string]string{}}
++		if err := handleProperties(xref, key, types.StringLiteral("metadata value"), 1); err != nil {
++			t.Fatalf("legal canonical private key rejected: %q %v", key, err)
++		}
++		if len(xref.Properties) != 1 || xref.Properties[key] != "metadata value" {
++			t.Fatalf("canonical Info property promoted/redecoded: %v", xref.Properties)
++		}
++	}
++}
+--- a/pkg/pdfcpu/validate/metaData.go
++++ b/pkg/pdfcpu/validate/metaData.go
+@@ -17,6 +17,7 @@
+ package validate
+ 
+ import (
++	"context"
+ 	"encoding/xml"
+ 	"fmt"
+ 	"strings"
+@@ -84,7 +85,7 @@
+ 	return err
+ }
+ 
+-func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required bool, sinceVersion model.Version) (xmpMeta *model.XMPMeta, err error) {
++func catalogMetaData(c context.Context, xRefTable *model.XRefTable, rootDict types.Dict, required bool, sinceVersion model.Version) (xmpMeta *model.XMPMeta, err error) {
+ 	rootObjNr := validationRootObjectNumber(xRefTable)
+ 	metadataObjNr := validationEntryObjectNumber(rootObjNr, rootDict, "Metadata")
+ 	defer func() {
+@@ -104,7 +105,11 @@
+ 	// }
+ 
+ 	// Decode streamDict for supported filters only.
+-	err = sd.Decode()
++	limit := filter.DefaultMaxDecodeBytes
++	if xRefTable.Conf != nil {
++		limit = xRefTable.Conf.Limits.MaxDecodeBytes
++	}
++	err = sd.DecodeWithContextAndLimit(c, limit)
+ 	if err == filter.ErrUnsupportedFilter {
+ 		return nil, nil
+ 	}
+@@ -112,9 +117,15 @@
+ 		return nil, fmt.Errorf("decode catalog metadata: %w", err)
+ 	}
+ 
++	if cancelErr := c.Err(); cancelErr != nil {
++		return nil, cancelErr
++	}
+ 	x := model.XMPMeta{}
+ 
+ 	if err = xml.Unmarshal(sd.Content, &x); err != nil {
++		if cancelErr := c.Err(); cancelErr != nil {
++			return nil, cancelErr
++		}
+ 		if xRefTable.ValidationMode == model.ValidationStrict {
+ 			return nil, fmt.Errorf("parse catalog metadata: %w", err)
+ 		}
+@@ -122,6 +133,9 @@
+ 		return nil, nil
+ 	}
+ 
++	if cancelErr := c.Err(); cancelErr != nil {
++		return nil, cancelErr
++	}
+ 	return &x, nil
+ }
+ 
+--- a/pkg/pdfcpu/validate/page.go
++++ b/pkg/pdfcpu/validate/page.go
+@@ -126,19 +126,8 @@
+ 		}
+ 	}
+ 
+-	allowedResDictKeys := []string{"ExtGState", "Font", "XObject", "Properties", "ColorSpace", "Pattern", "ProcSet", "Shading"}
+-	if t.xRefTable.ValidationMode == model.ValidationRelaxed {
+-		allowedResDictKeys = append(allowedResDictKeys, "Encoding")
+-		allowedResDictKeys = append(allowedResDictKeys, "ProcSets")
+-	}
+-
+-	// Note: Beginning with PDF V1.4 the "ProcSet" feature is considered to be obsolete!
+-
+-	for k := range d {
+-		if !types.MemberOf(k, allowedResDictKeys) {
+-			d.Delete(k)
+-		}
+-	}
++	// Resource-role validation must not delete extension entries from a shared object.
++	// The same dictionary may also carry annotation or other independently validated data.
+ 
+ 	return true, nil
+ }
+--- /dev/null
++++ b/pkg/pdfcpu/validate/resource_role_test.go
+@@ -0,0 +1,48 @@
++/*
++Copyright 2026 The pdfcpu Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++	http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package validate
++
++import (
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
++	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
++	"reflect"
++	"testing"
++)
++
++func TestResourceValidationPreservesOtherDictionaryRoles(t *testing.T) {
++	for _, mode := range []int{model.ValidationStrict, model.ValidationRelaxed} {
++		table := validationOrderXRefTable()
++		table.ValidationMode = mode
++		dictionary := types.Dict{
++			"Type": types.Name("Annot"), "Subtype": types.Name("Link"),
++			"Rect":   types.Array{types.Integer(10), types.Integer(10), types.Integer(90), types.Integer(90)},
++			"Border": types.Array{types.Integer(0), types.Integer(0), types.Integer(0)},
++			"A":      types.Dict{"S": types.Name("URI"), "URI": types.StringLiteral("https://example.invalid/")},
++		}
++		expected := dictionary.Clone()
++		if _, err := validateResourceDict(t.Context(), table, dictionary); err != nil {
++			t.Fatal(err)
++		}
++		if !reflect.DeepEqual(dictionary, expected) {
++			t.Fatalf("resource validation changed another role: %v", dictionary)
++		}
++		dictionary["Font"] = types.Integer(1)
++		if _, err := validateResourceDict(t.Context(), table, dictionary); err == nil {
++			t.Fatal("malformed recognized font resource accepted")
++		}
++	}
++}
+--- a/pkg/pdfcpu/validate/xReftable.go
++++ b/pkg/pdfcpu/validate/xReftable.go
+@@ -97,7 +97,7 @@
+ 	}
+ 	xRefTable := ctx.XRefTable
+ 
+-	rootDict, err := xRefTable.Catalog()
++	rootDict, err := xRefTable.CatalogContext(c)
+ 	if err != nil {
+ 		err = fmt.Errorf("load catalog: %w", err)
+ 		return model.WithValidationErrorObject(err, validationRootObjectNumber(xRefTable))
+@@ -163,12 +163,12 @@
+ }
+ 
+ func metaDataModifiedAfterInfoDict(c context.Context, xRefTable *model.XRefTable) (bool, error) {
+-	rootDict, err := xRefTable.Catalog()
++	rootDict, err := xRefTable.CatalogContext(c)
+ 	if err != nil {
+ 		return false, err
+ 	}
+ 
+-	xmpMeta, err := catalogMetaData(xRefTable, rootDict, OPTIONAL, model.V14)
++	xmpMeta, err := catalogMetaData(c, xRefTable, rootDict, OPTIONAL, model.V14)
+ 	if err != nil {
+ 		return false, err
+ 	}

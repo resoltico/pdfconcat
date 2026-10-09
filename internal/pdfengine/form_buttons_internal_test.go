@@ -343,7 +343,7 @@ func TestButtonCompilationCancellationAtEveryCheckpoint(t *testing.T) {
 	completed := false
 
 	for budget := range checkpoints {
-		ctx := &formCheckpointContext{}
+		ctx := newFormCheckpointContext(t.Context(), t)
 		ctx.remaining.Store(int64(budget))
 
 		pdf := signatureTestContext(t)

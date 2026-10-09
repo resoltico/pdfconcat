@@ -46,7 +46,7 @@ func readUnvalidated(t *testing.T, doc *pdffixture.Doc) *model.Context {
 }
 
 func rawDoc(objects ...string) *pdffixture.Doc {
-	doc := &pdffixture.Doc{Version: "1.7"}
+	doc := &pdffixture.Doc{Version: fitCatalogSourceVersion}
 	for _, object := range objects {
 		doc.Objs = append(doc.Objs, []byte(object))
 	}
@@ -74,7 +74,7 @@ func TestWalkPagesRejectsCorruptTrees(t *testing.T) {
 		{"cycle", rawDoc(catalog, "<< /Type /Pages /Kids [2 0 R] /Count 1 >>"), "reachable twice"},
 		{"page listed twice", rawDoc(catalog, "<< /Type /Pages /Kids [3 0 R 3 0 R] /Count 2 >>", page), "reachable twice"},
 		{"too deep", rawDoc(deep...), "nested too deeply"},
-		{"null node", rawDoc(catalog, singlePageTreeBody, nullPDFObject), "missing"},
+		{"null node", rawDoc(catalog, singlePageTreeBody, nullPDFObject), "not an indirect reference"},
 		{"kid is not a reference", rawDoc(catalog, "<< /Type /Pages /Kids [<< /Type /Page >>] /Count 1 >>"), "not an indirect reference"},
 		{"kids is not an array", rawDoc(catalog, "<< /Type /Pages /Kids 5 /Count 1 >>"), "kids"},
 		{"node is not a dictionary", rawDoc(catalog, singlePageTreeBody, "[1 2]"), "page tree node 3"},
@@ -287,11 +287,11 @@ func checkNamesNotDictionary(t *testing.T) {
 			rawDoc("<< /Type /Catalog /Pages 2 0 R /Names 5 >>", singlePageTreeBody, page),
 		),
 	}
-	if err := damaged.keepOnlyDestinationNames(); err == nil {
+	if err := damaged.keepOnlyDestinationNames(t.Context()); err == nil {
 		t.Fatal("no error")
 	}
 
-	if err := damaged.reorder(nil); err == nil {
+	if err := damaged.reorder(t.Context(), nil); err == nil {
 		t.Fatal("reorder accepted a damaged /Names")
 	}
 }
@@ -301,15 +301,15 @@ func checkNoPageTree(t *testing.T) {
 
 	treeless := pool{pdf: readUnvalidated(t, rawDoc(emptyCatalogBody))}
 
-	if _, _, err := treeless.root(); err == nil {
+	if _, _, err := treeless.root(t.Context()); err == nil {
 		t.Error("root found a page tree")
 	}
 
-	if _, err := treeless.lastTree(); err == nil {
+	if _, err := treeless.lastTree(t.Context()); err == nil {
 		t.Error("lastTree found a page tree")
 	}
 
-	if err := treeless.reorder(nil); err == nil {
+	if err := treeless.reorder(t.Context(), nil); err == nil {
 		t.Error("reorder accepted a missing page tree")
 	}
 }
@@ -319,7 +319,7 @@ func checkRootNotDictionary(t *testing.T) {
 
 	damaged := pool{pdf: readUnvalidated(t, rawDoc(catalog, "[1 2]"))}
 
-	if _, _, err := damaged.root(); err == nil {
+	if _, _, err := damaged.root(t.Context()); err == nil {
 		t.Error("root accepted an array")
 	}
 }
@@ -334,7 +334,7 @@ func checkMergeAppendedNothing(t *testing.T) {
 		"last kid not ref": "<< /Type /Pages /Kids [<< >>] /Count 0 >>",
 	} {
 		merged := pool{pdf: readUnvalidated(t, rawDoc(catalog, tree))}
-		if _, err := merged.lastTree(); err == nil {
+		if _, err := merged.lastTree(t.Context()); err == nil {
 			t.Errorf("%s: no error", name)
 		}
 	}

@@ -54,7 +54,7 @@ const (
 	toUnicodeHeader   = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
 		"/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n" +
 		"1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
-	contentHead     = "0 0 0 rg\nBT\n/F1 10 Tf\n1 0 0 1 12.346 190.25 Tm\n"
+	contentHead     = "0 0 0 rg\nBT\n/F1 10 Tf\n1 0 0 1 12.3456 190.25 Tm\n"
 	contentTail     = "ET\n"
 	toUnicodeFooter = "endcmap\nCMapName currentdict /CMap defineresource pop\n" + "end\n" + "end\n"
 )

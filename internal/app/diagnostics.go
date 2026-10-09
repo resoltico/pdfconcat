@@ -150,7 +150,7 @@ func classifyKind(stage report.Stage, err error) problem {
 // recognizes it first.
 func engineStatus(code pdfengine.Code) report.Status {
 	if code == pdfengine.CodePartialRange || code == pdfengine.CodeLegacyDestsRepeated ||
-		code == pdfengine.CodeSignatureUnsupported || code == pdfengine.CodeFormUnsupported {
+		code == pdfengine.CodeSignatureUnsupported || code == pdfengine.CodeFormUnsupported || code == pdfengine.CodeFitUnsupported {
 		return report.StatusInvalid
 	}
 

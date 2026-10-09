@@ -79,6 +79,7 @@ const (
 	memberDir   = "dir"
 	memberItems = "items"
 	memberSize  = "size"
+	memberFitTo = "fit_to"
 )
 
 // Decode reads exactly one plan object from reader in a single pass over the jsontext token stream. reader
@@ -304,9 +305,12 @@ func (p *parser) document() error {
 
 	var seen seenMembers
 
-	err = p.members([]string{"$schema", memberVersion, "output", memberDir, memberBlank, memberItems}, func(name string) error {
-		return p.rootMember(name, &seen)
-	})
+	err = p.members(
+		[]string{"$schema", memberVersion, "output", memberFitTo, memberDir, memberBlank, memberItems},
+		func(name string) error {
+			return p.rootMember(name, &seen)
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -349,6 +353,8 @@ func (p *parser) rootMember(name string, seen *seenMembers) error {
 		err = p.version()
 	case "output":
 		err = p.output()
+	case memberFitTo:
+		err = p.fitTarget()
 	case memberDir:
 		p.job.Dir, err = p.readDir()
 	case memberBlank:

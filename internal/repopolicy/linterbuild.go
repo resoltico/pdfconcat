@@ -25,7 +25,7 @@ type SourceBuildIdentity struct {
 
 // GolangciBuildIdentity derives metadata from the authoritative upstream and patch pins.
 func GolangciBuildIdentity(versions map[string]string) (SourceBuildIdentity, error) {
-	return sourceBuildIdentity(versions, "GOLANGCI_LINT", "physical-source")
+	return sourceBuildIdentity(versions, "GOLANGCI_LINT", "source-contracts")
 }
 
 // GremlinsBuildIdentity identifies the reviewed executor source variant without inventing VCS metadata.

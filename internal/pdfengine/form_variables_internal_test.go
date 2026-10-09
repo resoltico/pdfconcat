@@ -137,7 +137,7 @@ func TestVariableCompilationCancellationRetainsSourceGraph(t *testing.T) {
 
 	for budget := range checkpoints {
 		fixture := variableTestFixture()
-		ctx := &formCheckpointContext{}
+		ctx := newFormCheckpointContext(t.Context(), t)
 		ctx.remaining.Store(int64(budget))
 
 		_, err := analyzeForm(ctx, fixture.pdf)

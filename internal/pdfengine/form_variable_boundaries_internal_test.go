@@ -105,7 +105,7 @@ func TestChoiceOptionAndIndexReadersHonorCancellation(t *testing.T) {
 
 	for count := range budget {
 		fixture := choiceTestFixture()
-		ctx := &formCheckpointContext{}
+		ctx := newFormCheckpointContext(t.Context(), t)
 		ctx.remaining.Store(int64(count))
 
 		_, err := analyzeForm(ctx, fixture.pdf)
@@ -156,7 +156,7 @@ func TestMultilineAndCombCompilationCancellationRetainsClassification(t *testing
 			fixture.parent[keyMaxLen] = types.Integer(8)
 			fixture.parent["V"] = types.StringLiteral("AAA   BBB\nCCC")
 			fixture.parent["DA"] = types.StringLiteral(variableAutoDA)
-			ctx := &formCheckpointContext{}
+			ctx := newFormCheckpointContext(t.Context(), t)
 			ctx.remaining.Store(int64(count))
 
 			_, err := analyzeForm(ctx, fixture.pdf)

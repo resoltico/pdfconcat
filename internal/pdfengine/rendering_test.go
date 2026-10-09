@@ -30,7 +30,7 @@ func TestRejectsDynamicFormSourcesAndAllowsStaticFlag(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err := engine.Inspect(t.Context(), path)
+		_, err := engine.Inspect(t.Context(), path, nil)
 		if flag == "false" {
 			if err != nil {
 				t.Fatalf("static rendering flag rejected: %v", err)
@@ -55,7 +55,7 @@ func TestRejectsDynamicFormSourcesAndAllowsStaticFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := engine.Inspect(t.Context(), path)
+	_, err := engine.Inspect(t.Context(), path, nil)
 
 	failure := requireFailure(t, err, pdfengine.CodeUnsupportedRendering)
 	if failure.Path != path {
@@ -74,7 +74,7 @@ func TestMalformedCatalogCannotBecomeASilentDefault(t *testing.T) {
 		doc := pdffixture.Plain("CONTROL")
 		doc.Objs[0] = []byte(body)
 		path := writeDoc(t, t.TempDir(), "malformed-catalog", doc)
-		_, err := engine.Inspect(t.Context(), path)
+		_, err := engine.Inspect(t.Context(), path, nil)
 
 		failure := requireFailure(t, err, pdfengine.CodeInvalid)
 		if failure.Path != path {
@@ -123,7 +123,7 @@ func TestOptionalLayerSourcesRejectBeforeWritingAndHaveIndependentVisibilityCont
 	}
 
 	for _, path := range []string{off, visible} {
-		_, inspectionErr := engine.Inspect(context.Background(), path)
+		_, inspectionErr := engine.Inspect(context.Background(), path, nil)
 
 		failure := requireFailure(t, inspectionErr, pdfengine.CodeUnsupportedRendering)
 		if failure.Path != path {
@@ -140,7 +140,7 @@ func TestOptionalLayerSourcesRejectBeforeWritingAndHaveIndependentVisibilityCont
 		t.Fatal(checkErr)
 	}
 
-	_, multiErr := engine.Inspect(t.Context(), multiPath)
+	_, multiErr := engine.Inspect(t.Context(), multiPath, nil)
 
 	multiFailure := requireFailure(t, multiErr, pdfengine.CodeUnsupportedRendering)
 	if multiFailure.Path != multiPath {

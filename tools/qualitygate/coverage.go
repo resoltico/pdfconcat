@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -30,7 +31,7 @@ const (
 func runtimePackages(ctx context.Context, root, module string) ([]string, error) {
 	format := `{{if and (not .Standard) .Module}}{{if eq .Module.Path "` + module + `"}}{{.ImportPath}}{{end}}{{end}}`
 
-	output, err := goCommand(root, goListVerb, "-deps", "-f", format, "./cmd/pdfconcat").output(ctx)
+	output, err := baselineGoCommand(root, goListVerb, foreignDependencyFlag, "-f", format, productCommandPackage).output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime packages: %w", err)
 	}
@@ -52,7 +53,7 @@ func runtimePackages(ctx context.Context, root, module string) ([]string, error)
 
 // testPackages lists every package of the module except the scale acceptance package.
 func testPackages(ctx context.Context, root string) ([]string, error) {
-	output, err := goCommand(root, goListVerb, allPackages).output(ctx)
+	output, err := baselineGoCommand(root, goListVerb, allPackages).output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list packages: %w", err)
 	}
@@ -71,7 +72,7 @@ func testPackages(ctx context.Context, root string) ([]string, error) {
 // runCoverage measures statement coverage of the runtime packages from the unit tests and from the
 // executable run as a subprocess by those tests, merges the two profiles, applies the registry and
 // enforces its threshold.
-func runCoverage(ctx context.Context, args []string) error {
+func runCoverage(ctx context.Context, args []string) (resultErr error) {
 	set := newFlags(coverageCommand)
 	profileOut := set.String("profile", "", "also write the merged profile (and its per-function report, with .func.txt appended) here")
 
@@ -105,9 +106,13 @@ func runCoverage(ctx context.Context, args []string) error {
 		return fmt.Errorf("create scratch directory: %w", err)
 	}
 
-	defer removeAll(scratch)
+	var merged *repopolicy.CoverageProfile
 
-	merged, err := collectCoverage(ctx, root, scratch, runtimeList)
+	defer func() {
+		resultErr = finishCoverageEvidence(ctx, root, scratch, merged, resultErr)
+	}()
+
+	merged, err = collectCoverage(ctx, root, scratch, runtimeList)
 	if err != nil {
 		return err
 	}
@@ -130,8 +135,24 @@ func runCoverage(ctx context.Context, args []string) error {
 		result.Adjusted.Percent(), registry.CoverageThresholdPercent))
 }
 
-// collectCoverage runs the tests with instrumentation and returns the merged unit and subprocess profile.
-func collectCoverage(ctx context.Context, root, scratch string, runtimeList []string) (*repopolicy.CoverageProfile, error) {
+// finishCoverageEvidence retains failed runs, including partial native and executable data.
+func finishCoverageEvidence(ctx context.Context, root, scratch string, merged *repopolicy.CoverageProfile, result error) error {
+	if result == nil {
+		removeAll(scratch)
+		return nil
+	}
+
+	log.Printf("coverage: failed run evidence retained in %s", scratch)
+
+	if merged == nil {
+		return result
+	}
+
+	return errors.Join(result, writeProfileFiles(ctx, root, filepath.Join(scratch, "merged.out"), merged))
+}
+
+// collectBaselineCoverage measures CGO0 unit and executable coverage.
+func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeList []string) (*repopolicy.CoverageProfile, error) {
 	coverDir := filepath.Join(scratch, "covdata")
 
 	err := os.MkdirAll(coverDir, dirMode)
@@ -149,8 +170,8 @@ func collectCoverage(ctx context.Context, root, scratch string, runtimeList []st
 
 	err = (&command{
 		dir: root, name: goTool, stdout: log.Writer(), stderr: log.Writer(),
-		env: []string{envCoverDir + "=" + coverDir, envCoverPkg + "=" + coverPkg},
-		args: append([]string{testVerb, countOnce, "-covermode=atomic", "-coverpkg=" + coverPkg, "-coverprofile=" + unitProfile},
+		env: []string{baselineCGOEnv, readonlyGoFlags, envCoverDir + "=" + coverDir, envCoverPkg + "=" + coverPkg},
+		args: append([]string{testVerb, countOnce, atomicCoverageFlag, "-coverpkg=" + coverPkg, "-coverprofile=" + unitProfile},
 			packages...),
 	}).run(ctx)
 	if err != nil {
@@ -165,7 +186,7 @@ func collectCoverage(ctx context.Context, root, scratch string, runtimeList []st
 
 	subprocessProfile := filepath.Join(scratch, "subprocess.out")
 
-	err = goCommand(root, "tool", "covdata", "textfmt", "-i="+coverDir, "-o="+subprocessProfile).run(ctx)
+	err = goCommand(root, goToolVerb, covdataVerb, "textfmt", "-i="+coverDir, "-o="+subprocessProfile).run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("convert executable coverage: %w", err)
 	}

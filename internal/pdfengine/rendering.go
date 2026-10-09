@@ -4,6 +4,7 @@
 package pdfengine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -21,8 +22,8 @@ var errRenderingState = errors.New("unsupported document rendering state")
 
 // checkRenderingState rejects document rendering state that the pool cannot safely reconcile.
 // Inspect and import share this boundary; supplied inspection facts cannot bypass it.
-func checkRenderingState(pdf *model.Context) error {
-	if err := checkDynamicForms(pdf); err != nil {
+func checkRenderingState(ctx context.Context, pdf *model.Context) error {
+	if err := checkDynamicForms(ctx, pdf); err != nil {
 		return err
 	}
 
@@ -49,12 +50,15 @@ func checkRenderingState(pdf *model.Context) error {
 	return nil
 }
 
-func checkDynamicForms(pdf *model.Context) error {
+func checkDynamicForms(ctx context.Context, pdf *model.Context) error {
 	if object, found := pdf.RootDict.Find(keyNeedsRendering); found {
-		value, err := pdf.Dereference(object)
+		value, err := pdf.DereferenceContext(ctx, object)
+		if err != nil {
+			return fmt.Errorf("%w: catalog /NeedsRendering: %w", errRenderingState, err)
+		}
 
 		needsRendering, boolean := value.(types.Boolean)
-		if err != nil || !boolean {
+		if !boolean {
 			return fmt.Errorf("%w: catalog /NeedsRendering must be a boolean", errRenderingState)
 		}
 
@@ -64,7 +68,7 @@ func checkDynamicForms(pdf *model.Context) error {
 	}
 
 	if object, found := pdf.RootDict.Find(keyAcroForm); found {
-		form, err := pdf.DereferenceDict(object)
+		form, err := pdf.DereferenceDictContext(ctx, object)
 		if err != nil {
 			return fmt.Errorf("%w: catalog /AcroForm: %w", errRenderingState, err)
 		}

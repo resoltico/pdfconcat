@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -101,12 +102,29 @@ func runControls(ctx context.Context, args []string) error {
 
 	defer removeAll(snapshot)
 
+	// Go reports physical module paths (notably /private/var for macOS temporary roots).
+	// Resolve the owned snapshot once before deriving exact staged replacement identities.
+	snapshot, err = filepath.EvalSymlinks(snapshot)
+	if err != nil {
+		return fmt.Errorf("resolve control snapshot: %w", err)
+	}
+
+	stage, err := prepareForeignTests(ctx, snapshot)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cleanupErr := stage.cleanup(); cleanupErr != nil {
+			log.Printf("controls: remove foreign test stage: %v", cleanupErr)
+		}
+	}()
+
 	var problems []string
 
 	baseline := map[string]bool{}
 
 	for _, item := range set.Controls {
-		problem := runControl(ctx, snapshot, &item, baseline)
+		problem := runControl(ctx, snapshot, &item, baseline, stage)
 		if problem != "" {
 			problems = append(problems, item.ID+": "+problem)
 
@@ -120,21 +138,19 @@ func runControls(ctx context.Context, args []string) error {
 }
 
 // runControl returns a description of what went wrong, or "" when the defect was detected.
-func runControl(ctx context.Context, snapshot string, item *control, baseline map[string]bool) string {
-	if !baseline[item.Package] {
-		out, err := (&command{dir: snapshot, name: goTool, args: []string{testVerb, countOnce, item.Package}}).output(ctx)
-		if err != nil {
-			return fmt.Sprintf(
-				"the package's tests fail before the defect is applied, so detection cannot be attributed: %v\n%s",
-				err,
-				indent(out),
-			)
-		}
-
-		baseline[item.Package] = true
+func runControl(ctx context.Context, snapshot string, item *control, baseline map[string]bool, stage *foreignTestStage) string {
+	if err := stage.verify(ctx, snapshot); err != nil {
+		return "pristine source/fixture authority failed before control: " + err.Error()
 	}
 
-	target := filepath.Join(snapshot, filepath.FromSlash(item.File))
+	target, err := controlTarget(snapshot, item, stage)
+	if err != nil {
+		return err.Error()
+	}
+
+	if err := controlBaseline(ctx, snapshot, item, baseline, stage); err != "" {
+		return err
+	}
 
 	original, err := readInRoot(snapshot, item.File)
 	if err != nil {
@@ -151,14 +167,51 @@ func runControl(ctx context.Context, snapshot string, item *control, baseline ma
 		return fmt.Sprintf("write %s: %v", item.File, err)
 	}
 
-	defer restore(target, original)
+	problem := controlFailure(ctx, snapshot, item, stage)
+	if restoreErr := os.WriteFile(target, original, fileMode); restoreErr != nil {
+		return problem + "\nrestore control source: " + restoreErr.Error()
+	}
 
-	_, err = goCommand(snapshot, "build", allPackages).output(ctx)
+	if verifyErr := stage.verify(ctx, snapshot); verifyErr != nil {
+		return problem + "\nrestored source/fixture authority failed: " + verifyErr.Error()
+	}
+
+	return problem
+}
+
+// controlBaseline proves pristine source, fixture and compiler authority before attribution.
+func controlBaseline(ctx context.Context, snapshot string, item *control, baseline map[string]bool, stage *foreignTestStage) string {
+	if !baseline[item.Package] {
+		if graphErr := stage.compilerEquivalent(ctx, snapshot, []string{allPackages, item.Package}, testOptions{}); graphErr != nil {
+			return "staged compiler graph differs from canonical authority: " + graphErr.Error()
+		}
+
+		out, err := controlGoCommand(snapshot, stage, testVerb, countOnce, item.Package).output(ctx)
+		if err != nil {
+			return fmt.Sprintf(
+				"the package's tests fail before the defect is applied, so detection cannot be attributed: %v\n%s",
+				err,
+				indent(out),
+			)
+		}
+
+		if verifyErr := stage.verify(ctx, snapshot); verifyErr != nil {
+			return "baseline changed source/fixture authority: " + verifyErr.Error()
+		}
+
+		baseline[item.Package] = true
+	}
+
+	return ""
+}
+
+func controlFailure(ctx context.Context, snapshot string, item *control, stage *foreignTestStage) string {
+	_, err := controlGoCommand(snapshot, stage, "build", allPackages, item.Package).output(ctx)
 	if err != nil {
 		return "the deliberate defect does not compile, so it proves nothing:\n" + indent(err.Error())
 	}
 
-	out, err := (&command{dir: snapshot, name: goTool, args: []string{testVerb, countOnce, item.Package}}).output(ctx)
+	out, err := controlGoCommand(snapshot, stage, testVerb, countOnce, item.Package).output(ctx)
 	if err == nil {
 		return fmt.Sprintf("NOT DETECTED: the tests of %s still pass with the defect applied in %s", item.Package, item.File)
 	}
@@ -170,10 +223,50 @@ func runControl(ctx context.Context, snapshot string, item *control, baseline ma
 	return ""
 }
 
-// restore puts a file's original content back after a control.
+// controlTarget maps foreign controls to the exact validated staged module used by the Go graph.
+// Mutating the checkout while testing reconstructed replacements would silently test pristine code.
+func controlTarget(snapshot string, item *control, stage *foreignTestStage) (string, error) {
+	if !fs.ValidPath(item.File) || strings.Contains(item.File, `\`) {
+		return "", fmt.Errorf("%w: control %s source path must be a root-relative slash path", errGate, item.ID)
+	}
+
+	for index := range stage.sources {
+		source := &stage.sources[index]
+		prefix := source.Root + "/"
+		foreignPackage := item.Package == source.Module || strings.HasPrefix(item.Package, source.Module+"/")
+
+		foreignFile := strings.HasPrefix(item.File, prefix)
+		if !foreignPackage && !foreignFile {
+			continue
+		}
+
+		if !foreignPackage || !foreignFile {
+			return "", fmt.Errorf("%w: control %s foreign package and source root disagree", errGate, item.ID)
+		}
+
+		module := stage.roots[filepath.Join(snapshot, filepath.FromSlash(source.Root))]
+		if module == "" {
+			return "", fmt.Errorf("%w: control %s has no validated foreign stage", errGate, item.ID)
+		}
+
+		return filepath.Join(module, filepath.FromSlash(strings.TrimPrefix(item.File, prefix))), nil
+	}
+
+	return filepath.Join(snapshot, filepath.FromSlash(item.File)), nil
+}
+
+func controlGoCommand(snapshot string, stage *foreignTestStage, verb string, args ...string) *command {
+	flags := append([]string{verb}, stage.flags(testOptions{})...)
+	flags = append(flags, args...)
+	child := goCommand(snapshot, flags...)
+	child.env = stage.environment()
+
+	return child
+}
+
+// restore puts a lint fixture's original content back after a control.
 func restore(target string, original []byte) {
-	err := os.WriteFile(target, original, fileMode)
-	if err != nil {
+	if err := os.WriteFile(target, original, fileMode); err != nil {
 		log.Printf("controls: cannot restore %s: %v", target, err)
 	}
 }

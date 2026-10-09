@@ -27,7 +27,7 @@ func TestInspectRejectsFIFOWithoutWaitingForAWriter(t *testing.T) {
 
 	result := make(chan error, 1)
 
-	go func() { _, err := engine.Inspect(t.Context(), path); result <- err }()
+	go func() { _, err := engine.Inspect(t.Context(), path, nil); result <- err }()
 
 	select {
 	case err := <-result:
@@ -46,7 +46,7 @@ func TestCanceledInspectionDoesNotOpenAMissingNamedInput(t *testing.T) {
 	cancel()
 
 	path := filepath.Join(t.TempDir(), "absent.pdf")
-	_, err := newEngine(t).Inspect(ctx, path)
+	_, err := newEngine(t).Inspect(ctx, path, nil)
 
 	failure := requireFailure(t, err, pdfengine.CodeCanceled)
 	if failure.Path != path {

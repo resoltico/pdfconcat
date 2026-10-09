@@ -40,7 +40,7 @@ func TestFeatureNameTreeChildValuesAndActionSequences(t *testing.T) {
 	t.Parallel()
 	observer := featureTestObserver(t)
 	child := types.Dict{keyNames: types.Array{types.StringLiteral("name"), types.HexLiteral("61")}}
-	root := types.Dict{featureKids: types.Array{child}}
+	root := types.Dict{keyKids: types.Array{child}}
 
 	material, err := observer.materialTree(t.Context(), root, keyNames, FeatureOtherCatalogNames, map[types.IndirectRef]bool{}, 0)
 	if err != nil || !material {
@@ -48,7 +48,7 @@ func TestFeatureNameTreeChildValuesAndActionSequences(t *testing.T) {
 	}
 
 	actions := types.Array{
-		types.Dict{"S": types.Name("URI"), "URI": types.StringLiteral("https://example.org")},
+		types.Dict{"S": types.Name(keyURI), keyURI: types.StringLiteral("https://example.org")},
 		types.Dict{"S": types.Name(featureJavaScript), "JS": types.HexLiteral("74727565")},
 	}
 
@@ -57,7 +57,7 @@ func TestFeatureNameTreeChildValuesAndActionSequences(t *testing.T) {
 		t.Fatalf("action sequence: %v %v", material, err)
 	}
 
-	observer.pdf.RootDict["OpenAction"] = types.Array{types.Integer(1), types.Name("Fit")}
+	observer.pdf.RootDict["OpenAction"] = types.Array{types.Integer(1), types.Name(fitDestinationMode)}
 	if catalogErr := observer.catalog(t.Context()); catalogErr != nil || !observer.found[FeatureCatalogActions] {
 		t.Fatalf("catalog destination effect: %v", catalogErr)
 	}
@@ -89,9 +89,9 @@ func TestMalformedLazyFeatureObjectsRemainErrors(t *testing.T) {
 			case "name value":
 				_, err = observer.nameValue(t.Context(), bad, FeatureOtherCatalogNames)
 			case "script":
-				_, err = observer.materialAction(types.Dict{"S": types.Name(featureJavaScript), "JS": bad}, FeaturePageActions)
+				_, err = observer.materialAction(t.Context(), types.Dict{"S": types.Name(featureJavaScript), "JS": bad}, FeaturePageActions)
 			case featurePayloadLabel:
-				_, err = observer.attachmentPayload(types.Dict{"EF": types.Dict{"F": bad}})
+				_, err = observer.attachmentPayload(t.Context(), types.Dict{"EF": types.Dict{"F": bad}})
 			case "catalog open":
 				observer.pdf.RootDict["OpenAction"] = bad
 				err = observer.catalog(t.Context())
@@ -114,8 +114,8 @@ func TestMalformedFeatureContainersRejectWithoutInventingObservations(t *testing
 		{keyAcroForm: types.Integer(7)},
 		{keyAcroForm: types.Dict{keyFields: types.Integer(7)}},
 		{keyAcroForm: types.Dict{keyFields: types.Array{types.Integer(7)}}},
-		{"PageLabels": types.Dict{featureKids: types.Integer(7)}},
-		{"PageLabels": types.Dict{featureKids: types.Array{types.Integer(7)}}},
+		{"PageLabels": types.Dict{keyKids: types.Integer(7)}},
+		{"PageLabels": types.Dict{keyKids: types.Array{types.Integer(7)}}},
 		{"Pages": types.Integer(7)},
 	} {
 		observer := featureTestObserver(t)
@@ -151,7 +151,7 @@ func TestMalformedAnnotationAndAssociatedFileStateRejects(t *testing.T) {
 		t.Fatal("malformed associated file accepted")
 	}
 
-	if material, err := observer.attachmentPayload(types.Dict{}); err != nil || material {
+	if material, err := observer.attachmentPayload(t.Context(), types.Dict{}); err != nil || material {
 		t.Fatalf("external filespec invented embedded bytes: %v %v", material, err)
 	}
 }
@@ -191,7 +191,7 @@ func TestFeatureTraversalCancellationAndChildGuards(t *testing.T) {
 		t.Fatalf("field depth guard: %v", err)
 	}
 
-	for _, field := range []types.Dict{{"AA": types.Integer(7)}, {featureKids: types.Integer(7)}} {
+	for _, field := range []types.Dict{{"AA": types.Integer(7)}, {keyKids: types.Integer(7)}} {
 		if err := observer.fieldActions(t.Context(), types.Array{field}, map[types.IndirectRef]bool{}, 0); err == nil {
 			t.Fatalf("field action container ignored: %v", field)
 		}
@@ -205,12 +205,12 @@ func TestScriptDataSemanticsAndDecodeFailures(t *testing.T) {
 		types.HexLiteral("zz"),
 		types.StreamDict{Dict: types.Dict{}, Raw: []byte("bad"), FilterPipeline: []types.PDFFilter{{Name: "FlateDecode"}}},
 	} {
-		if material, err := materialScript(object); err == nil {
+		if material, err := materialScript(t.Context(), object); err == nil {
 			t.Fatalf("undecodable script treated as material=%v", material)
 		}
 	}
 
-	if material, err := materialScript(types.Integer(7)); err != nil || material {
+	if material, err := materialScript(t.Context(), types.Integer(7)); err != nil || material {
 		t.Fatalf("non-script object became active content: %v %v", material, err)
 	}
 
@@ -253,7 +253,7 @@ func TestNameTreeDecodeFailureAndFieldCycleCannotBeSkipped(t *testing.T) {
 	field := types.Dict{}
 	reference := signatureTestObject(observer.pdf, field)
 
-	field[featureKids] = types.Array{reference}
+	field[keyKids] = types.Array{reference}
 
 	fieldErr := observer.fieldActions(
 		t.Context(),

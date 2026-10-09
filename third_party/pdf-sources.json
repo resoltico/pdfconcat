@@ -1,0 +1,51 @@
+[
+  {
+    "root": "third_party/benoitkugler/pdf",
+    "module": "github.com/benoitkugler/pdf",
+    "version": "v0.0.15",
+    "repository": "https://github.com/benoitkugler/pdf",
+    "revision": "85f51161fb69eb2439ded4532d7bf8191f055072",
+    "source_artifact": "third_party/benoitkugler/base/pdf-v0.0.15.zip",
+    "source_sha256": "db336a415bc1cce38b4c42e0b24e9dc5964ec928806a97984ac611c5167cf84d",
+    "module_sum": "h1:FDatswON2irQJv2+02Q2ojKqoUPbwPxIbLguX4kBExM=",
+    "go_mod_sum": "h1:r6/Weo/I6C80KgkJhnfbvlIygvj2sl/rWcTPWJdbfMs=",
+    "patch": "third_party/benoitkugler/patches/pdf-content-limits.patch",
+    "patch_sha256": "f90210902dc93ccc3e32485846604ab1bc15860fb06a378b1eb6aac21a2df6f7",
+    "license": "third_party/benoitkugler/pdf/LICENSE",
+    "completeness": "Go module ZIP plus exact local patch; not a full Git tree claim"
+  },
+  {
+    "root": "third_party/benoitkugler/pstokenizer",
+    "module": "github.com/benoitkugler/pstokenizer",
+    "version": "v1.0.1",
+    "repository": "https://github.com/benoitkugler/pstokenizer",
+    "revision": "a0e2cd648b8acf5f2631280f733302e90a38ef57",
+    "source_artifact": "third_party/benoitkugler/base/pstokenizer-v1.0.1.zip",
+    "source_sha256": "6cfdcf021773b53b5e03860c157413aeb6e090958e5b3d721b648d73596d5c0f",
+    "module_sum": "h1:3+18uif4Dg4+w84AmkWPKOujhPKbLnkgxP1eb/KtiGg=",
+    "go_mod_sum": "h1:l1G2Voirz0q/jj0TQfabNxVsa8HZXh/VMxFSRALWTiE=",
+    "patch": "third_party/benoitkugler/patches/pstokenizer-content-limits.patch",
+    "patch_sha256": "0bc607a405eee7bd72826dff5fdbf6f6d6fccc4dffe8f1fa1ff2b992436ced76",
+    "license": "third_party/benoitkugler/pstokenizer/LICENSE",
+    "completeness": "Go module ZIP plus exact local patch; not a full Git tree claim"
+  },
+  {
+    "root": "third_party/pdfcpu/pdfcpu",
+    "module": "github.com/pdfcpu/pdfcpu",
+    "version": "v0.16.1",
+    "repository": "https://github.com/pdfcpu/pdfcpu",
+    "revision": "2f7a89a0a69c117a5252601907ff9f31ac4c70f2",
+    "source_artifact": "third_party/pdfcpu/base/pdfcpu-v0.16.1.zip",
+    "source_sha256": "600785665197234b475e74f96fd387b9814fa64365c766e7d474e82fc748991f",
+    "module_sum": "h1:Sh6XZwaaCQaEN17eQItF0uQY8E4xFU+5BTHuDnhVTYI=",
+    "go_mod_sum": "h1:tnZgbllgsd8cGfbwRgOVUdlSS/mpsWjQMWSAI1vfltA=",
+    "patch": "third_party/pdfcpu/patches/document-objects.patch",
+    "patch_sha256": "487637178b7022e2baac0e730ffc09db23e452f289c6c4d77e04b76b55ccfe4b",
+    "license": "third_party/pdfcpu/pdfcpu/LICENSE.txt",
+    "completeness": "Go module ZIP plus exact local patch; not a full Git tree claim",
+    "test_inputs": {
+      "url": "https://codeload.github.com/pdfcpu/pdfcpu/tar.gz/2f7a89a0a69c117a5252601907ff9f31ac4c70f2",
+      "sha256": "b5abb1e0d16393c75e899ce5bb43460797cae82b52aa3128bfb3f774055b68ab"
+    }
+  }
+]

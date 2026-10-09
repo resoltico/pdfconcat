@@ -65,6 +65,8 @@ func expectedOptions() map[cli.Name][]string {
 		argBaseDir,
 		"--output",
 		"--overwrite",
+		argFitTo,
+		argProgress,
 		"--report",
 		argJobs,
 		"--details",
@@ -207,7 +209,7 @@ func TestRootHelpFitsOneScreenAndNamesTheNextStep(t *testing.T) {
 		t.Errorf("root help does not end with its example:\n%s", text.String())
 	}
 
-	for _, command := range []string{argBuild, argCheck, argReport, "schema", "version", argHelpCommand} {
+	for _, command := range []string{argBuild, argCheck, argReport, argSchemaCommand, argVersionCommand, argHelpCommand} {
 		if !slices.ContainsFunc(doc.Commands, func(c cli.HelpCommand) bool { return string(c.Name) == command && c.Summary != "" }) {
 			t.Errorf("root help does not describe %s", command)
 		}

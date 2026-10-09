@@ -16,7 +16,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/capture"
@@ -30,8 +29,8 @@ import (
 )
 
 type (
-	// failingWriter is a terminal that fails every write and counts the attempts.
-	failingWriter struct{ calls int }
+	// failingWriter is a sink that fails every write.
+	failingWriter struct{}
 
 	// closeFails is a file that writes and then cannot be closed.
 	closeFails struct{ io.Writer }
@@ -216,84 +215,8 @@ func TestPlanAndAssemblyProblemsOutsideTheirContracts(t *testing.T) {
 	}
 }
 
-func TestProgressDrawsStagesAndBoundsRedraws(t *testing.T) {
-	t.Parallel()
-
-	var (
-		out   bytes.Buffer
-		clock = time.Unix(0, 0)
-	)
-
-	progress := newProgress(&out, func() time.Time { return clock })
-
-	progress.enter(stageInspect)
-
-	// Steps closer together than the redraw interval draw nothing.
-	progress.step(1, 10)
-
-	clock = clock.Add(minRedrawInterval / 2)
-
-	progress.step(2, 10)
-
-	if strings.Contains(out.String(), "1/10") || strings.Contains(out.String(), "2/10") {
-		t.Errorf("a redraw inside the interval: %q", out.String())
-	}
-
-	clock = clock.Add(minRedrawInterval)
-
-	progress.step(3, 10)
-
-	if !strings.Contains(out.String(), "pdfconcat: inspect 3/10") {
-		t.Errorf("the counter was not drawn: %q", out.String())
-	}
-
-	// A flood of steps over a long time stops at the redraw bound.
-	for done := range 5 * maxRedraws {
-		clock = clock.Add(2 * minRedrawInterval)
-
-		progress.step(done, 5*maxRedraws)
-	}
-
-	if progress.redraws != maxRedraws {
-		t.Errorf("%d redraws, want exactly %d", progress.redraws, maxRedraws)
-	}
-
-	progress.erase()
-	progress.erase()
-
-	if !strings.HasSuffix(out.String(), "\r") {
-		t.Errorf("the line was not cleared: %q", out.String()[max(0, out.Len()-30):])
-	}
-
-	if strings.Contains(out.String(), "\x1b") {
-		t.Error("progress uses terminal escape sequences")
-	}
-}
-
-func (w *failingWriter) Write([]byte) (int, error) {
-	w.calls++
-
+func (*failingWriter) Write([]byte) (int, error) {
 	return 0, errInjected
-}
-
-func TestProgressNeverFailsTheCommand(t *testing.T) {
-	t.Parallel()
-
-	silent := newProgress(nil, time.Now)
-	silent.enter(stagePrepare)
-	silent.step(1, 2)
-	silent.erase()
-
-	broken := &failingWriter{}
-	progress := newProgress(broken, time.Now)
-	progress.enter(stagePrepare)
-	progress.enter(stageInspect)
-	progress.step(1, 2)
-	progress.erase()
-
-	if broken.calls != 1 {
-		t.Errorf("%d writes to a broken terminal; the first failure should disable progress", broken.calls)
-	}
 }
 
 func TestResolveBuildFillsWhatTheLinkerDidNot(t *testing.T) {
@@ -435,7 +358,7 @@ func TestResourceProducerCannotWriteOutsideItsWorkspace(t *testing.T) {
 
 	current := &pipeline{
 		workspace: workspace,
-		progress:  newProgress(nil, time.Now),
+		progress:  nil,
 		builder:   report.NewBuilder(buildName),
 		layout:    &assembly.Layout{Specs: []assembly.ResolvedSpec{{}}},
 	}
@@ -451,7 +374,7 @@ func TestCanceledResourceProductionKeepsLayoutIncomplete(t *testing.T) {
 
 	current := &pipeline{
 		workspace: openScratch(t),
-		progress:  newProgress(nil, time.Now),
+		progress:  nil,
 		builder:   report.NewBuilder(buildName),
 		layout: &assembly.Layout{
 			Specs: []assembly.ResolvedSpec{{Spec: assembly.BlankSpec{Dim: assembly.PageDim{Width: 100, Height: 100}}}},

@@ -16,14 +16,16 @@ type (
 	// Builder accumulates one Report. It is safe for concurrent use, so bounded workers can add the
 	// diagnostics of their own inputs; Build orders them by input position, never by completion time.
 	Builder struct {
-		styleIndex  map[styleKey][]int
-		sourceIndex map[sourceKey]int
-		fontIndex   map[Font]int
-		ordered     []orderedDiagnostic
-		styles      []Style
-		sources     []sourceKey
-		report      Report
-		mutex       sync.Mutex
+		styleIndex     map[styleKey][]int
+		sourceIndex    map[sourceKey][]int
+		geometryIndex  map[Geometry]int
+		sourceGeometry [][]GeometryRange
+		fontIndex      map[Font]int
+		ordered        []orderedDiagnostic
+		styles         []Style
+		sources        []sourceKey
+		report         Report
+		mutex          sync.Mutex
 	}
 
 	orderedDiagnostic struct {
@@ -54,9 +56,10 @@ type (
 // NewBuilder starts a report for command. All phases start as not run.
 func NewBuilder(command string) *Builder {
 	return &Builder{
-		styleIndex:  map[styleKey][]int{},
-		sourceIndex: map[sourceKey]int{},
-		fontIndex:   map[Font]int{},
+		styleIndex:    map[styleKey][]int{},
+		sourceIndex:   map[sourceKey][]int{},
+		geometryIndex: map[Geometry]int{},
+		fontIndex:     map[Font]int{},
 		report: Report{
 			FormatVersion: Version,
 			AttemptID:     rand.Text(),
@@ -68,6 +71,14 @@ func NewBuilder(command string) *Builder {
 			},
 		},
 	}
+}
+
+// AttemptID identifies the report being captured without constructing a snapshot.
+func (b *Builder) AttemptID() string {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	return b.report.AttemptID
 }
 
 func keyOfSource(s Source) sourceKey {
@@ -91,6 +102,7 @@ func (k sourceKey) source() Source {
 
 func keyOfStyle(s *Style) styleKey {
 	key := styleKey{size: s.Size, background: s.Background}
+
 	if s.Text != nil {
 		key.hasText, key.text, key.font = true, s.Text.TextSettings, s.Text.Font
 
@@ -109,6 +121,9 @@ func keyOfStyle(s *Style) styleKey {
 
 // cloneStyle owns every optional geometry value and finding of its snapshot.
 func cloneStyle(style Style) Style {
+	style.Geometry = clonePointer(style.Geometry)
+
+	style.FinalText = clonePlacement(style.FinalText)
 	if style.Text == nil {
 		return style
 	}
@@ -188,7 +203,19 @@ func (b *Builder) Source(s Source) int {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	return intern(b.sourceIndex, &b.sources, keyOfSource(s))
+	key := keyOfSource(s)
+	for _, index := range b.sourceIndex[key] {
+		if slices.Equal(b.sourceGeometry[index], s.Geometries) {
+			return index
+		}
+	}
+
+	index := len(b.sources)
+	b.sources = append(b.sources, key)
+	b.sourceGeometry = append(b.sourceGeometry, slices.Clone(s.Geometries))
+	b.sourceIndex[key] = append(b.sourceIndex[key], index)
+
+	return index
 }
 
 // Font interns a font and returns its index in the fonts table.
@@ -207,7 +234,9 @@ func (b *Builder) Style(s *Style) int {
 
 	key := keyOfStyle(s)
 	for _, index := range b.styleIndex[key] {
-		if s.Text == nil || slices.Equal(b.styles[index].Text.Findings, s.Text.Findings) {
+		if sameGeometryReference(b.styles[index].Geometry, s.Geometry) &&
+			samePlacement(b.styles[index].FinalText, s.FinalText) &&
+			(s.Text == nil || slices.Equal(b.styles[index].Text.Findings, s.Text.Findings)) {
 			return index
 		}
 	}
@@ -258,7 +287,14 @@ func (b *Builder) Build(status Status) *Report {
 
 	out := b.report
 	out.Status = status
-	out.Sources = tableOf(b.sources, sourceKey.source)
+	out.Sources = b.capturedSources()
+	out.Geometries = slices.Clone(b.report.Geometries)
+
+	out.Fit = clonePointer(b.report.Fit)
+	if out.Fit != nil {
+		out.Fit.Location = cloneLocation(out.Fit.Location)
+	}
+
 	out.Styles = tableOf(b.styles, cloneStyle)
 	out.Diagnostics = make([]Diagnostic, len(sorted))
 

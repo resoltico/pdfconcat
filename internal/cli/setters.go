@@ -7,8 +7,20 @@ import (
 	"errors"
 	"math"
 
+	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/report"
 )
+
+func (p *parser) setFitTo(index int, value string) error {
+	target, err := assembly.ParseFitTarget(value)
+	if err != nil {
+		return p.fail(CodeInvalidValue, index, "--fit-to needs A4 or Legal, not %q", value)
+	}
+
+	p.cmd.FitTo = target
+
+	return nil
+}
 
 func (p *parser) setPlan(index int, value string) error {
 	source := PlanFile

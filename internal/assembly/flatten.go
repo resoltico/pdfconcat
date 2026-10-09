@@ -62,6 +62,8 @@ type (
 		Files         []SourceFile
 		Fonts         []FontFileUse
 		Styles        []LayeredStyle
+		// FitTo retains the effective global target declaration.
+		FitTo Field[FitTarget]
 		// GeneratedPages is the sum of the blank counts.
 		GeneratedPages int64
 	}
@@ -117,7 +119,7 @@ func flattenAs(job *Job, style PathStyle) (*Flattened, error) {
 	walker := &flattener{
 		job:        job,
 		style:      style,
-		result:     &Flattened{Source: job.Source, TextDefaults: &job.Defaults.Text},
+		result:     &Flattened{Source: job.Source, TextDefaults: &job.Defaults.Text, FitTo: job.FitTo},
 		fileIndex:  map[string]int{},
 		fontIndex:  map[string]int{},
 		fonts:      map[Font]fontResolution{},

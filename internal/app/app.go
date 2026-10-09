@@ -55,7 +55,7 @@ type (
 	// a fake to inject failures at each stage.
 	Engine interface {
 		// Inspect reads one captured source and reports its facts.
-		Inspect(ctx context.Context, path string) (pdfengine.SourceInfo, error)
+		Inspect(ctx context.Context, path string, target *pdfengine.PageSize) (pdfengine.SourceInfo, error)
 		// Assemble writes and verifies the final document described by request.
 		Assemble(ctx context.Context, request *pdfengine.AssembleRequest) error
 	}
@@ -78,8 +78,13 @@ type (
 		Stdout io.Writer
 		// Stderr receives scratch-cleanup warnings and the committed state when Stdout is broken.
 		Stderr io.Writer
-		// Progress receives stage lines; nil unless standard error is an interactive terminal.
-		Progress io.Writer
+		// NewProgress constructs a session only at the parsed build/check boundary.
+		// The process owns native sink classification, transport lifetime and closure.
+		NewProgress func(context.Context, cli.ProgressMode, string) *Progress
+		// ProgressRecord retains idle exception capability after telemetry has joined.
+		ProgressRecord      RecordWriter
+		ProgressInterrupted func() bool
+		ProgressSequence    func() uint64
 		// WorkingDir is the absolute directory relative command-line paths resolve against.
 		Executable string
 		WorkingDir string

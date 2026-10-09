@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
+	"github.com/resoltico/pdfconcat/internal/observation"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
@@ -36,6 +37,7 @@ type (
 const (
 	fontPointer      = "/blank/text/font"
 	textValuePointer = "/blank/text/value"
+	textWidthPointer = "/blank/text/width"
 	// StageLayout is text shaping, wrapping, and overflow on a resolved page.
 	StageLayout assembly.Stage = "layout"
 
@@ -85,19 +87,25 @@ func Params(spec *assembly.BlankSpec) typeset.Params {
 // identify all affected contributions. Geometry-independent rejection has no placement. ctx is checked
 // between specs.
 func Place(ctx context.Context, layout *assembly.Layout, fonts FontSet) ([]*typeset.Placed, error) {
-	return placeEach(ctx, layout, fonts, nil)
+	return placeEach(ctx, layout, fonts, nil, nil)
 }
 
 // PlaceBounds is Place for a check that renders nothing: only the bounds and findings of each placement
 // are kept, so a check does not hold every shaped glyph of thousands of distinct texts.
-func PlaceBounds(ctx context.Context, layout *assembly.Layout, fonts FontSet) ([]*typeset.Placed, error) {
-	return placeEach(ctx, layout, fonts, dropLines)
+func PlaceBounds(ctx context.Context, layout *assembly.Layout, fonts FontSet, observer observation.Observer) ([]*typeset.Placed, error) {
+	return placeEach(ctx, layout, fonts, dropLines, observer)
 }
 
 // dropLines releases the shaped lines of a placement, which only rendering needs.
 func dropLines(placed *typeset.Placed) { placed.Lines = nil }
 
-func placeEach(ctx context.Context, layout *assembly.Layout, fonts FontSet, finish func(*typeset.Placed)) ([]*typeset.Placed, error) {
+func placeEach(
+	ctx context.Context,
+	layout *assembly.Layout,
+	fonts FontSet,
+	finish func(*typeset.Placed),
+	observer observation.Observer,
+) ([]*typeset.Placed, error) {
 	var (
 		shaper   typeset.Shaper
 		problems assembly.Errors
@@ -118,6 +126,8 @@ func placeEach(ctx context.Context, layout *assembly.Layout, fonts FontSet, fini
 			problems = append(problems, diagnoseEach(layout, index, assembly.CodeFontUnavailable, nil,
 				fmt.Sprintf("font %q was not loaded; layout needs the font file", spec.Spec.Text.Font))...)
 
+			observePlacement(observer, index+1, len(layout.Specs))
+
 			continue
 		}
 
@@ -129,6 +139,8 @@ func placeEach(ctx context.Context, layout *assembly.Layout, fonts FontSet, fini
 
 			placed[index] = result
 		}
+
+		observePlacement(observer, index+1, len(layout.Specs))
 
 		if err != nil {
 			problems = append(problems, diagnoseEach(layout, index, codeOf(err), err, err.Error())...)
@@ -179,6 +191,12 @@ func diagnose(layout *assembly.Layout, specIndex int, code assembly.Code, cause 
 
 		diagnostic.Related = append(diagnostic.Related, diagnostic.Location)
 		diagnostic.Location = assembly.Locate(layout.Source, origin, member)
+	}
+
+	if overflow, found := errors.AsType[*typeset.OverflowError](cause); found &&
+		overflow.FixedWidthExceedsPage() && spec.Declared.Width.IsSet() {
+		diagnostic.Related = append(diagnostic.Related, diagnostic.Location)
+		diagnostic.Location = assembly.Locate(layout.Source, spec.Declared.Width.Origin, textWidthPointer)
 	}
 
 	return diagnostic
@@ -399,7 +417,7 @@ func lateDeclarations(text *assembly.TextStyle, fallback assembly.Origin, code a
 	overflow, found := errors.AsType[*typeset.OverflowError](cause)
 	if found {
 		for _, finding := range overflow.Findings {
-			declaration, known := findingDeclaration(text, finding.Kind)
+			declaration, known := findingDeclaration(text, finding.Kind, overflow)
 			if known {
 				declarations = append(declarations, declaration)
 			}
@@ -425,16 +443,14 @@ func lateDeclarations(text *assembly.TextStyle, fallback assembly.Origin, code a
 	return []placementDeclaration{{origin: fallback, member: "/blank"}}
 }
 
-func findingDeclaration(text *assembly.TextStyle, kind typeset.FindingKind) (placementDeclaration, bool) {
+func findingDeclaration(text *assembly.TextStyle, kind typeset.FindingKind, overflow *typeset.OverflowError) (placementDeclaration, bool) {
 	switch kind {
 	case typeset.FindingWordTooWide:
 		if text.Width.IsSet() {
-			return placementDeclaration{origin: text.Width.Origin, member: "/blank/text/width"}, true
+			return placementDeclaration{origin: text.Width.Origin, member: textWidthPointer}, true
 		}
 	case typeset.FindingOutsidePageHorizontal:
-		if text.X.IsSet() {
-			return placementDeclaration{origin: text.X.Origin, member: "/blank/text/x"}, true
-		}
+		return horizontalDeclaration(text, overflow)
 	case typeset.FindingOutsidePageVertical:
 		if text.Y.IsSet() {
 			return placementDeclaration{origin: text.Y.Origin, member: "/blank/text/y"}, true
@@ -443,4 +459,30 @@ func findingDeclaration(text *assembly.TextStyle, kind typeset.FindingKind) (pla
 	}
 
 	return placementDeclaration{}, false
+}
+
+func horizontalDeclaration(text *assembly.TextStyle, overflow *typeset.OverflowError) (placementDeclaration, bool) {
+	if overflow.FixedWidthExceedsPage() && text.Width.IsSet() {
+		return placementDeclaration{origin: text.Width.Origin, member: textWidthPointer}, true
+	}
+
+	if text.X.IsSet() {
+		return placementDeclaration{origin: text.X.Origin, member: "/blank/text/x"}, true
+	}
+
+	return placementDeclaration{}, false
+}
+
+func observePlacement(observer observation.Observer, completed, total int) {
+	if observer != nil {
+		observer.Observe(
+			observation.Milestone{
+				Phase:      observation.Layout,
+				Unit:       observation.ProcessedGeneratedSpecs,
+				Completed:  int64(completed),
+				Total:      int64(total),
+				TotalKnown: true,
+			},
+		)
+	}
 }

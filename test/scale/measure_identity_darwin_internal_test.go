@@ -30,9 +30,7 @@ const blockedCollectorScript = `#!/bin/sh
 dir=${0%/*}
 printf 'started' > "$dir/started"
 while [ ! -e "$dir/released" ]; do /bin/sleep 0.005; done
-printf 'p%s\n' "$2"
-i=0
-while [ "$i" -lt 96 ]; do printf 'f%s\n' "$i"; i=$((i+1)); done
+printf 'p%s\nc96\ne0\ng3\n' "$2"
 `
 
 func TestSuccessfulCollectorReplyAfterOwnedWaitCannotBecomeDescriptorReading(t *testing.T) {
@@ -84,7 +82,7 @@ func assertOwnedExitRemainsLatched(t *testing.T, sampler *processSampler) {
 
 	for range 2 {
 		proof, exited, err := sampler.exit.confirm(t.Context(), sampler.pid)
-		if err != nil || !exited || proof != "owned_NOTE_EXIT" {
+		if err != nil || !exited || proof != ownedExitProof {
 			t.Fatalf("owned exit lost after consuming one-shot event: %q %v %v", proof, exited, err)
 		}
 	}
@@ -98,32 +96,45 @@ func startCollectorProcessFixture(t *testing.T) *collectorProcessFixture {
 func ownCollectorProcess(t *testing.T, command *exec.Cmd) *collectorProcessFixture {
 	t.Helper()
 
-	sampler, err := prepareProcessSampler()
+	fixture, err := startOwnedCollectorProcess(t, command)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if startErr := command.Start(); startErr != nil {
-		t.Fatal(startErr)
+	return fixture
+}
+
+func startOwnedCollectorProcess(t *testing.T, command *exec.Cmd) (*collectorProcessFixture, error) {
+	t.Helper()
+
+	sampler, err := prepareProcessSampler(t.Context())
+	if err != nil {
+		return nil, err
 	}
 
 	fixture := &collectorProcessFixture{command: command, sampler: sampler}
-
+	// Register sampler ownership before any child launch can fail.
 	t.Cleanup(func() {
-		if cleanupErr := fixture.killAndWait(); cleanupErr != nil {
-			t.Error(cleanupErr)
-		}
-
 		if closeErr := sampler.release(); closeErr != nil && (!fixture.closedQueue || !errors.Is(closeErr, unix.EBADF)) {
 			t.Error(closeErr)
 		}
 	})
 
+	if startErr := command.Start(); startErr != nil {
+		return fixture, fmt.Errorf("start owned collector child: %w", startErr)
+	}
+	// LIFO cleanup joins the actual child before deleting its owned collector.
+	t.Cleanup(func() {
+		if cleanupErr := fixture.killAndWait(); cleanupErr != nil {
+			t.Error(cleanupErr)
+		}
+	})
+
 	if attachErr := sampler.attach(t.Context(), command.Process.Pid); attachErr != nil {
-		t.Fatal(attachErr)
+		return fixture, attachErr
 	}
 
-	return fixture
+	return fixture, nil
 }
 
 func (f *collectorProcessFixture) killAndWait() error {

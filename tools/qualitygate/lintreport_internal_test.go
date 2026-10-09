@@ -107,7 +107,7 @@ func seedRealLintReport(t *testing.T, root, binary string) {
 	output, err := (&command{
 		dir: root, name: binary,
 		args: []string{
-			runVerb, serialLintRunners, lintNoFixFlag, configFlag, filepath.Join(root, lintConfigFileName),
+			runVerb, parallelLintRunners, lintNoFixFlag, configFlag, filepath.Join(root, lintConfigFileName),
 			enableOnlyFlag, "unused", "--output.json.path=" + filepath.Join(root, lintReportFileName), allPackages,
 		},
 		env: []string{"GOLANGCI_LINT_CACHE=" + filepath.Join(root, "valid-cache")},

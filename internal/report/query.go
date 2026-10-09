@@ -66,14 +66,20 @@ type (
 
 	// StyleDetail is a style with its font materialized.
 	StyleDetail struct {
-		Text       *TextDetail `json:"text,omitempty"`
-		Background string      `json:"background"`
-		Size       PageSize    `json:"size"`
+		CanvasSize *PageSize      `json:"canvas_size,omitempty"`
+		Geometry   *Geometry      `json:"geometry,omitempty"`
+		FinalText  *TextPlacement `json:"final_text,omitempty"`
+		Text       *TextDetail    `json:"text,omitempty"`
+		Background string         `json:"background"`
+		Size       PageSize       `json:"size"`
 	}
 
 	// PartView is a part as a query shows it. Brief records carry Path (a PDF) or Generated (a blank);
 	// detailed records carry the materialized Source or Style instead, so one call is enough.
 	PartView struct {
+		Fit          *FitDeclaration `json:"fit,omitempty"`
+		Geometries   []GeometryEntry `json:"geometries,omitempty"`
+		FinalSize    *PageSize       `json:"final_size,omitempty"`
 		Range        *PageRange      `json:"range"`
 		Pages        *int64          `json:"pages"`
 		Generated    *GeneratedBrief `json:"generated,omitempty"`
@@ -95,11 +101,12 @@ type (
 
 	// PageResponse answers a page query: the part covering the page, and the page's 1-based position in it.
 	PageResponse struct {
-		Kind          string   `json:"kind"`
-		Part          PartView `json:"part"`
-		Page          int64    `json:"page"`
-		PageInPart    int64    `json:"page_in_part"`
-		FormatVersion int      `json:"format_version"`
+		Geometry      *Geometry `json:"geometry,omitempty"`
+		Kind          string    `json:"kind"`
+		Part          PartView  `json:"part"`
+		Page          int64     `json:"page"`
+		PageInPart    int64     `json:"page_in_part"`
+		FormatVersion int       `json:"format_version"`
 	}
 
 	// ViewResponse is one page of a paged view. NextOffset is null after the last record.
@@ -314,14 +321,18 @@ func (r *Report) page(page int64, details bool) (*PageResponse, error) {
 		return nil, usage(CodePageOutOfRange, "page %d is outside the output's pages 1 to %d", page, *r.Counts.TotalPages)
 	}
 
-	return &PageResponse{
+	response := &PageResponse{
 		FormatVersion: Version, Kind: kindPage, Page: page, PageInPart: page - r.Parts[index].Range.Start + 1,
 		Part: r.partView(index, details),
-	}, nil
+	}
+	response.Geometry = r.pageGeometry(&r.Parts[index], int(response.PageInPart))
+
+	return response, nil
 }
 
 func (r *Report) partView(index int, details bool) PartView {
 	part := &r.Parts[index]
+
 	view := PartView{
 		WarningCount: r.relevantCounts([]string{part.ID}).WarningCount,
 		ID:           part.ID,
@@ -330,17 +341,22 @@ func (r *Report) partView(index int, details bool) PartView {
 		Range:        part.Range,
 		Pages:        part.Pages,
 	}
+	if r.Fit != nil {
+		view.Fit = clonePointer(r.Fit)
+		view.FinalSize = clonePointer(&r.Fit.Size)
+	}
 
 	switch {
 	case part.Source != nil && details:
 		source := r.Sources[*part.Source]
 		view.Source = &source
+		view.Geometries = r.sourceGeometryEntries(&source)
 	case part.Source != nil:
 		view.Path = r.Sources[*part.Source].Path
 	case part.Style != nil && details:
 		view.Style = r.styleDetail(&r.Styles[*part.Style])
 	case part.Style != nil:
-		view.Generated = generatedBrief(&r.Styles[*part.Style])
+		view.Generated = r.generatedBrief(&r.Styles[*part.Style])
 	default:
 	}
 
@@ -349,6 +365,12 @@ func (r *Report) partView(index int, details bool) PartView {
 
 func (r *Report) styleDetail(s *Style) *StyleDetail {
 	detail := &StyleDetail{Background: s.Background, Size: s.Size}
+	if s.Geometry != nil {
+		detail.CanvasSize = clonePointer(&s.Size)
+		detail.Size = r.Fit.Size
+		detail.Geometry = clonePointer(&r.Geometries[*s.Geometry])
+		detail.FinalText = clonePlacement(s.FinalText)
+	}
 
 	if s.Text != nil {
 		detail.Text = &TextDetail{TextSettings: s.Text.TextSettings, Font: r.Fonts[s.Text.Font], Findings: slices.Clone(s.Text.Findings)}
@@ -357,8 +379,11 @@ func (r *Report) styleDetail(s *Style) *StyleDetail {
 	return detail
 }
 
-func generatedBrief(s *Style) *GeneratedBrief {
+func (r *Report) generatedBrief(s *Style) *GeneratedBrief {
 	brief := &GeneratedBrief{Background: s.Background, Width: s.Size.Width, Height: s.Size.Height}
+	if s.Geometry != nil {
+		brief.Width, brief.Height = r.Fit.Size.Width, r.Fit.Size.Height
+	}
 
 	if s.Text != nil {
 		cut, truncated := preview(s.Text.Value)

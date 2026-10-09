@@ -72,6 +72,9 @@ func sourceFeatureMessage(feature pdfengine.SourceFeature) string {
 		return "Source page labels are present. Assembly omits document page-label numbering; review output page references."
 	case pdfengine.FeatureOtherCatalogNames:
 		return "Other catalog name-tree entries are present. Assembly keeps only destination names; review the omitted catalog features."
+	case pdfengine.FeatureURIBase:
+		return "Assembly omits catalog URI/Base used by retained relative URI actions; use absolute targets. " +
+			"Keeping action bytes does not guarantee external URI resolution."
 	default:
 		return fmt.Sprintf(
 			"Source feature %s has assembly policy %s; review the source and requested packet.",

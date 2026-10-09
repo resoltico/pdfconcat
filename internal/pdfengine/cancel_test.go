@@ -7,40 +7,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
 )
 
-// countdownContext reports cancellation after its budget of Err calls is spent, which lets a test cancel
-// at every point where the engine consults the context, deterministically.
-type countdownContext struct {
-	remaining atomic.Int64
-}
-
-// cancellationSweepLimit stops a sweep whose budget grows without the assembly ever completing.
+// cancellationSweepLimit stops a sweep whose budget grows without completion.
 const cancellationSweepLimit = 1 << 27
-
-func newCountdown(budget int64) *countdownContext {
-	c := &countdownContext{}
-	c.remaining.Store(budget)
-
-	return c
-}
-
-func (*countdownContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (*countdownContext) Done() <-chan struct{}       { return nil }
-func (*countdownContext) Value(any) any               { return nil }
-
-func (c *countdownContext) Err() error {
-	if c.remaining.Add(-1) < 0 {
-		return context.Canceled
-	}
-
-	return nil
-}
 
 // TestAssembleCancellationAtEveryCheckpoint cancels after 0, 1, 2, ... context checks. Every outcome
 // must be success or a CodeCanceled error that wraps [context.Canceled], never another failure.
@@ -85,7 +58,7 @@ func sweepAssembly(t *testing.T, env *world, parts []part, step func(budget int6
 	for budget := int64(0); ; budget = step(budget) {
 		c := env.compile(filepath.Join(t.TempDir(), outputFilename), parts)
 
-		err := env.engine.Assemble(newCountdown(budget), &c.request)
+		err := env.engine.Assemble(pdfengine.CheckpointContext(t.Context(), t, budget), &c.request)
 		if err == nil {
 			return canceledRuns
 		}
@@ -124,7 +97,7 @@ func TestInspectCancellationAtEveryCheckpoint(t *testing.T) {
 	canceledRuns := 0
 
 	for budget := int64(0); ; budget++ {
-		_, err := env.engine.Inspect(newCountdown(budget), env.files[fixtureMulti].Path)
+		_, err := env.engine.Inspect(pdfengine.CheckpointContext(t.Context(), t, budget), env.files[fixtureMulti].Path, nil)
 		if err == nil {
 			break
 		}

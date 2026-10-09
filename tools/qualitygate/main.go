@@ -31,16 +31,18 @@ const (
 	lintCommand         = "lint"
 	formatCommand       = "format"
 
-	runSelectionFlag  = "-run"
-	jsonFlag          = "-json"
-	readonlyGoFlags   = "GOFLAGS=-mod=readonly"
-	configFlag        = "--config"
-	enableOnlyFlag    = "--enable-only"
-	dependencyLinter  = "depguard"
-	securityLinter    = "gosec"
-	lintTool          = "golangci-lint"
-	serialLintRunners = "--allow-serial-runners"
-	lintNoFixFlag     = "--fix=false"
+	runSelectionFlag    = "-run"
+	jsonFlag            = "-json"
+	readonlyGoFlags     = "GOFLAGS=-mod=readonly"
+	configFlag          = "--config"
+	enableOnlyFlag      = "--enable-only"
+	dependencyLinter    = "depguard"
+	securityLinter      = "gosec"
+	lintTool            = "golangci-lint"
+	serialLintRunners   = "--allow-serial-runners"
+	parallelLintRunners = "--allow-parallel-runners"
+	lintFixtureCache    = "cache"
+	lintNoFixFlag       = "--fix=false"
 
 	usage = `usage: go run ./tools/qualitygate <command> [flags]
 

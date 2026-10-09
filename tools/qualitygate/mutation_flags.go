@@ -58,3 +58,13 @@ func (options mutationOptions) toolWorkers() int {
 
 	return options.workers
 }
+
+// baselinePackage selects a debugging baseline after mutationScope validates the requested host package.
+func (options mutationOptions) baselinePackage() string {
+	selected := splitList(options.only)
+	if !options.integration && len(selected) == 1 {
+		return "./" + selected[0]
+	}
+
+	return ""
+}

@@ -6,6 +6,7 @@ package typeset_test
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"slices"
 	"strings"
@@ -23,11 +24,6 @@ type byteStream struct {
 }
 
 const (
-	// panicSeed starts the corruption sequence; the sequence reaches a recovered parser panic when loading
-	// and when shaping within maxPanicSearch corrupted fonts.
-	panicSeed      = 7
-	maxPanicSearch = 20000
-
 	panicProbeText = "Rīgas ļoti q̄ Ελληνικά ffi"
 )
 
@@ -81,45 +77,51 @@ func corruptedFont(tb testing.TB, stream *byteStream, data []byte) []byte {
 	return corrupted
 }
 
-// The parser dependency panics on some corrupted fonts. Loading and shaping must turn that into an
-// error. The stream reaches both within a few thousand iterations.
+// panicFont applies captured corruptions to the pinned default font. The offsets come from actual
+// parser failures; replaying them tests recovery without searching for a failing input on every run.
+func panicFont(t *testing.T, changes map[int]byte) []byte {
+	t.Helper()
+
+	data := defaultFontFile(t)
+
+	digest := sha256.Sum256(data)
+	if hex.EncodeToString(digest[:]) != defaultFontDigest {
+		t.Fatal("panic fixture requires the pinned default font")
+	}
+
+	for position, value := range changes {
+		data[position] = value
+	}
+
+	return data
+}
+
 func TestParserPanicsBecomeErrors(t *testing.T) {
 	t.Parallel()
 
-	data := defaultFontFile(t)
-	stream := newByteStream(panicSeed)
+	data := panicFont(t, map[int]byte{
+		17203: 0x16, 128933: 0xc6, 152757: 0xa0,
+		165203: 0xc3, 236299: 0x4a, 238790: 0xc7,
+	})
+	_, err := typeset.LoadFont(data)
+	requireErrorMentioning(t, err, "parser panic")
 
-	var (
-		loadPanic   bool
-		panicShaper *typeset.Shaper
-	)
+	data = panicFont(t, map[int]byte{
+		22: 0xe1, 1201: 0x7f, 19792: 0x0d, 132106: 0x84, 245452: 0x6b,
+	})
 
-	for range maxPanicSearch {
-		if loadPanic && panicShaper != nil {
-			break
-		}
-
-		font, err := typeset.LoadFont(corruptedFont(t, stream, data))
-		if err != nil {
-			loadPanic = loadPanic || strings.Contains(err.Error(), "parser panic")
-
-			continue
-		}
-
-		candidate := new(typeset.Shaper)
-
-		_, err = candidate.Place(font, baseParams(panicProbeText))
-		if err != nil && strings.Contains(err.Error(), "parser panic") {
-			panicShaper = candidate
-		}
+	font, err := typeset.LoadFont(data)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if !loadPanic || panicShaper == nil {
-		t.Fatalf("expected both kinds of recovered panic, got load=%v shape=%v", loadPanic, panicShaper != nil)
-	}
+	var shaper typeset.Shaper
 
-	// The shaper keeps working after a recovered panic.
-	_, err := panicShaper.Place(defaultFont(t), baseParams(panicProbeText))
+	_, err = shaper.Place(font, baseParams(panicProbeText))
+	requireErrorMentioning(t, err, "parser panic")
+
+	// The same shaper keeps working after a recovered panic.
+	_, err = shaper.Place(defaultFont(t), baseParams(panicProbeText))
 	if err != nil {
 		t.Fatalf("shaper unusable after panic: %v", err)
 	}

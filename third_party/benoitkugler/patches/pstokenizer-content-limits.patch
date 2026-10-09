@@ -1,0 +1,256 @@
+--- /dev/null
++++ b/bounded.go
+@@ -0,0 +1,76 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 Ervins Strauhmanis
++
++package tokenizer
++
++import (
++	"context"
++	"errors"
++)
++
++// Limits bounds byte-slice tokenization before scans and allocations.
++// All limits must be positive. Reader-driven input is deliberately unavailable.
++type Limits struct{ ProgramBytes, TokenBytes, Tokens int }
++type boundedTokenizer struct {
++	ctx           context.Context
++	limits        Limits
++	start, tokens int
++	err           error
++}
++
++// NewBoundedTokenizer constructs an incremental PDF tokenizer on checked immutable bytes.
++func NewBoundedTokenizer(ctx context.Context, data []byte, limits Limits) (*Tokenizer, error) {
++	if ctx == nil || limits.ProgramBytes <= 0 || limits.TokenBytes <= 0 || limits.Tokens <= 0 {
++		return nil, errors.New("invalid tokenizer limits or context")
++	}
++	if len(data) > limits.ProgramBytes {
++		return nil, errors.New("program byte limit exceeded")
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
++	tk := &Tokenizer{data: data, bounded: &boundedTokenizer{ctx: ctx, limits: limits}}
++	tk.SetPosition(0)
++	if tk.bounded.err != nil {
++		return nil, tk.bounded.err
++	}
++	return tk, nil
++}
++func (b *boundedTokenizer) allowRead(pos int) bool {
++	if b.err != nil {
++		return false
++	}
++	if pos-b.start >= b.limits.TokenBytes {
++		b.err = errors.New("token byte limit exceeded")
++		return false
++	}
++	if pos&1023 == 0 {
++		b.err = b.ctx.Err()
++	}
++	return b.err == nil
++}
++
++// SkipRawBytes advances over binary bytes without tokenizing image payload.
++// Call SetPosition after the maintained filter has established the actual EOD boundary.
++func (tk *Tokenizer) SkipRawBytes(n int) ([]byte, error) {
++	if n < 0 || n > len(tk.data)-tk.currentPos {
++		return nil, errors.New("binary data length exceeds input")
++	}
++	out := tk.data[tk.currentPos : tk.currentPos+n]
++	tk.currentPos += n
++	tk.pos = tk.currentPos
++	tk.nextPos = tk.currentPos
++	tk.aToken = Token{Kind: EOF}
++	tk.aaToken = tk.aToken
++	tk.aError = nil
++	tk.aaError = nil
++	return out, nil
++}
++
++// TokenCount reports actual bounded token discoveries, including maintained lookahead.
++func (tk *Tokenizer) TokenCount() int {
++	if tk.bounded == nil {
++		return 0
++	}
++	return tk.bounded.tokens
++}
+--- /dev/null
++++ b/bounded_test.go
+@@ -0,0 +1,70 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 Ervins Strauhmanis
++
++package tokenizer
++
++import (
++	"context"
++	"errors"
++	"strings"
++	"testing"
++)
++
++type cancelAfterChecks struct {
++	context.Context
++	checks int
++}
++
++func (c *cancelAfterChecks) Err() error {
++	c.checks++
++	if c.checks >= 3 {
++		return context.Canceled
++	}
++	return nil
++}
++func TestBoundedTokenizerConstructorLookaheadAndCancellation(t *testing.T) {
++	limits := Limits{ProgramBytes: 1 << 20, TokenBytes: 1 << 18, Tokens: 100}
++	ctx := &cancelAfterChecks{Context: context.Background()}
++	if _, err := NewBoundedTokenizer(ctx, []byte("("+strings.Repeat("x", 10000)+")"), limits); !errors.Is(err, context.Canceled) {
++		t.Fatalf("constructor failed to cancel during bounded scan: %v", err)
++	}
++	for _, data := range []string{"q", "/Escaped#20Name", "(escaped\\(string)", "<4142>", "%comment\nq"} {
++		tk, err := NewBoundedTokenizer(context.Background(), []byte(data), limits)
++		if err != nil {
++			t.Fatalf("ordinary bounded input %q: %v", data, err)
++		}
++		token, err := tk.NextToken()
++		if err != nil {
++			t.Fatal(err)
++		}
++		if string(token.Raw) != data[token.Start:token.End] || token.End <= token.Start {
++			t.Fatalf("source token span %q: %+v", data, token)
++		}
++	}
++}
++func TestBoundedTokenizerTokenProgramAndCountBoundaries(t *testing.T) {
++	limits := Limits{ProgramBytes: 16, TokenBytes: 8, Tokens: 2}
++	if _, err := NewBoundedTokenizer(context.Background(), []byte("(123456)"), limits); err != nil {
++		t.Fatalf("exact token byte boundary: %v", err)
++	}
++	if _, err := NewBoundedTokenizer(context.Background(), []byte("(1234567)"), limits); err == nil {
++		t.Fatal("token byte limit+1 accepted")
++	}
++	if _, err := NewBoundedTokenizer(context.Background(), []byte(strings.Repeat(" ", 17)), limits); err == nil {
++		t.Fatal("program byte limit+1 accepted")
++	}
++	tk, err := NewBoundedTokenizer(context.Background(), []byte("q Q q"), limits)
++	if err != nil {
++		t.Fatal(err)
++	}
++	_, err = tk.NextToken()
++	if err == nil {
++		_, err = tk.NextToken()
++	}
++	if err == nil {
++		_, err = tk.NextToken()
++	}
++	if err == nil {
++		t.Fatal("token count limit+1 accepted")
++	}
++}
+--- a/token.go
++++ b/token.go
+@@ -109,6 +109,9 @@
+ 	// Note that it is a copy of the source bytes.
+ 	Value []byte
+ 	Kind  Kind
++	// Raw and Start/End identify original input spelling in bounded mode.
++	Raw        []byte
++	Start, End int
+ }
+ 
+ // Int returns the integer value of the token,
+@@ -175,6 +178,8 @@
+ // we support it in the tokenizer (no confusion with other types, so
+ // no compromise).
+ type Tokenizer struct {
++	bounded *boundedTokenizer
++
+ 	numberSb []byte // buffer to avoid allocations
+ 
+ 	data []byte
+@@ -363,6 +368,9 @@
+ 
+ // return false if EOF, true if the moved forward
+ func (pr *Tokenizer) read() (byte, bool) {
++	if pr.bounded != nil && pr.pos < len(pr.data) && !pr.bounded.allowRead(pr.pos) {
++		return 0, false
++	}
+ 	if pr.pos >= len(pr.data) && pr.src != nil { // try and grow
+ 		pr.grow(bufferSize)
+ 	}
+@@ -392,7 +400,35 @@
+ func (pr Tokenizer) CurrentPosition() int { return pr.currentPos }
+ 
+ // reads and advances, mutating `pos`
+-func (pr *Tokenizer) nextToken(previous Token) (Token, error) {
++func (pr *Tokenizer) nextToken(previous Token) (token Token, err error) {
++	start := pr.pos
++	if pr.bounded != nil {
++		pr.bounded.start = start
++		defer func() {
++			if pr.bounded.err != nil {
++				token = Token{}
++				err = pr.bounded.err
++				return
++			}
++			if token.Kind != EOF {
++				pr.bounded.tokens++
++				if pr.bounded.tokens > pr.bounded.limits.Tokens {
++					token = Token{}
++					err = errors.New("token count limit exceeded")
++					pr.bounded.err = err
++					return
++				}
++				token.Start, token.End = start, pr.pos
++				token.Raw = pr.data[start:pr.pos]
++			}
++		}()
++	}
++
++again:
++	start = pr.pos
++	if pr.bounded != nil {
++		pr.bounded.start = start
++	}
+ 	ch, ok := pr.read()
+ 	for ok && IsAsciiWhitespace(ch) {
+ 		ch, ok = pr.read()
+@@ -401,6 +437,7 @@
+ 		return Token{Kind: EOF}, nil
+ 	}
+ 
++	start = pr.pos - 1
+ 	var outBuf []byte
+ 	switch ch {
+ 	case '[':
+@@ -483,7 +520,7 @@
+ 			ch, ok = pr.read()
+ 		}
+ 		// ignore comments: go to next token
+-		return pr.nextToken(previous)
++		goto again
+ 	case '(':
+ 		nesting := 0
+ 		for {
+@@ -574,7 +611,7 @@
+ 		ch, ok = pr.read() // we went back before parsing a number
+ 		outBuf = append(outBuf, ch)
+ 		ch, ok = pr.read()
+-		for !isDelimiter(ch) {
++		for ok && !isDelimiter(ch) {
+ 			outBuf = append(outBuf, ch)
+ 			ch, ok = pr.read()
+ 		}
+@@ -583,6 +620,9 @@
+ 		}
+ 
+ 		if cmd := string(outBuf); cmd == "RD" || cmd == "-|" {
++			if pr.bounded != nil {
++				return Token{}, errors.New("PostScript CharString is not PDF content")
++			}
+ 			// return the next CharString instead
+ 			if previous.Kind == Integer {
+ 				f, err := previous.Int()

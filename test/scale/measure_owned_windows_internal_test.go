@@ -17,7 +17,7 @@ import (
 func TestOwnedProcessSamplerReadsLiveMetricsAndClosesHandle(t *testing.T) {
 	t.Parallel()
 
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(t.Context())
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
 	}
@@ -60,7 +60,7 @@ func TestOwnedProcessTerminationEligibilityRejectsInfrastructureErrors(t *testin
 func TestOwnedProcessHandleConfirmsNativeChildTermination(t *testing.T) {
 	t.Parallel()
 
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(t.Context())
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
 	}

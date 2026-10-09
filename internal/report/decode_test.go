@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -58,6 +59,42 @@ func TestSamplesDecodeAndRoundTrip(t *testing.T) {
 		if again := mustDecode(t, written); encodeReport(t, again) != written {
 			t.Errorf("%s: second round trip differs", name)
 		}
+	}
+}
+
+func TestMissingFormatNamesTheCurrentContract(t *testing.T) {
+	t.Parallel()
+
+	_, err := report.Decode(t.Context(), "historical.json", strings.NewReader(`{"report_version":1,"kind":"report"}`))
+
+	failure, ok := report.AsError(err)
+	if !ok || failure.Diagnostic.Code != report.CodeUnsupportedVersion {
+		t.Fatalf("historical report error: %v", err)
+	}
+
+	want := "format_version " + strconv.Itoa(report.Version)
+	if !strings.Contains(failure.Diagnostic.Message, want) {
+		t.Fatalf("message %q does not name %q", failure.Diagnostic.Message, want)
+	}
+}
+
+func TestDraftReportShapeCannotBecomeTheCurrentContract(t *testing.T) {
+	t.Parallel()
+
+	for name, draft := range map[string]string{
+		"missing diagnostic counts": strings.Replace(failedCheck, `"diagnostic_count":2,"error_count":2,"warning_count":0,`, "", 1),
+		"missing severity":          strings.ReplaceAll(failedCheck, `"severity":"error",`, ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := report.Decode(t.Context(), "draft.json", strings.NewReader(draft))
+
+			failure, ok := report.AsError(err)
+			if !ok || failure.Diagnostic.Code != report.CodeMissingMember {
+				t.Fatalf("draft without required %s was not rejected: %v", name, err)
+			}
+		})
 	}
 }
 
@@ -226,7 +263,7 @@ func TestLimits(t *testing.T) {
 	}
 
 	nest := func(depth int) string {
-		return `{"format_version":3,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","x":` + strings.Repeat(
+		return `{"format_version":2,"attempt_id":"AAAAAAAAAAAAAAAAAAAAAAAAAA","kind":"report","x":` + strings.Repeat(
 			"[",
 			depth-1,
 		) + strings.Repeat(

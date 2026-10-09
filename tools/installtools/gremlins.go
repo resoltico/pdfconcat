@@ -160,7 +160,7 @@ func verifyBuiltGremlins(ctx context.Context, file, version string) error {
 func gremlinsSourceTestArgs(goos, goarch string) []string {
 	args := []string{sourceTestVerb}
 	if goos != windowsOS || goarch != arm64Arch {
-		args = append(args, "-race")
+		args = append(args, sourceRaceFlag)
 	}
 
 	return append(args, "./internal/execution", "./internal/coverage", "./internal/engine",

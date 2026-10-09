@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/report/report.schema.json",
-  "title": "PDFConcat complete report, format 3",
+  "title": "PDFConcat complete report, format 2",
   "type": "object",
   "properties": {
     "format_version": {
-      "const": 3
+      "const": 2
     },
     "kind": {
       "const": "report"
@@ -81,6 +81,19 @@
     "warning_count": {
       "type": "integer",
       "minimum": 0
+    },
+    "fit": {
+      "$ref": "#/$defs/fit"
+    },
+    "geometries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/geometry"
+      }
+    },
+    "progress_interrupted": {
+      "type": "boolean",
+      "description": "Records observed interruption of requested progress. Absence or false is not proof of complete delivery; a prestaged report may predate the observation."
     }
   },
   "required": [
@@ -585,6 +598,12 @@
             "null"
           ],
           "minimum": 0
+        },
+        "geometries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/geometry_range"
+          }
         }
       },
       "required": [
@@ -621,7 +640,8 @@
           "enum": [
             "explicit",
             "following_source",
-            "preceding_source"
+            "preceding_source",
+            "fit_target"
           ]
         },
         "width": {
@@ -790,6 +810,13 @@
         },
         "text": {
           "$ref": "#/$defs/text"
+        },
+        "geometry": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_text": {
+          "$ref": "#/$defs/text_placement"
         }
       },
       "required": [
@@ -1046,6 +1073,171 @@
             }
           }
         }
+      ]
+    },
+    "fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paper": {
+          "enum": [
+            "A4",
+            "Legal"
+          ]
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "paper",
+        "size",
+        "location"
+      ]
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "media_box": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "crop_box": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "visible_box": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "matrix": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "number"
+          }
+        },
+        "original_width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "original_height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "physical_scale": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "user_unit": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rotation": {
+          "enum": [
+            0,
+            90,
+            180,
+            270
+          ]
+        },
+        "has_crop_box": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "media_box",
+        "crop_box",
+        "visible_box",
+        "matrix",
+        "original_width",
+        "original_height",
+        "physical_scale",
+        "user_unit",
+        "rotation",
+        "has_crop_box"
+      ]
+    },
+    "geometry_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "last": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "geometry": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "first",
+        "last",
+        "geometry"
+      ]
+    },
+    "text_placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ink_bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_size": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "bounds",
+        "ink_bounds",
+        "font_size"
       ]
     }
   },

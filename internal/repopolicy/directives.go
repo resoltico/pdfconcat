@@ -4,6 +4,7 @@
 package repopolicy
 
 import (
+	"context"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -63,17 +64,23 @@ func skippedDirectories() map[string]bool {
 // literals and prose out of the findings, and leaves //go:build, //go:embed, //go:generate, //line
 // and SPDX notices alone. A file that does not parse is an error: it cannot be shown clean. Files
 // are read through an [os.Root], so a symbolic link cannot lead the scan outside root.
-func ScanDirectives(root string) ([]DirectiveViolation, error) {
-	files, err := OwnedGoSources(root)
+func ScanDirectives(ctx context.Context, root string) ([]DirectiveViolation, error) {
+	files, err := OwnedGoSources(ctx, root)
 	if err != nil {
 		return nil, err
 	}
 
 	var violations []DirectiveViolation
 
+	patterns := prohibitedDirectives()
+
 	err = withRoot(root, func(tree *os.Root) error {
 		for _, name := range files {
-			found, scanErr := scanFile(tree, name)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("owned source scan canceled: %w", ctxErr)
+			}
+
+			found, scanErr := scanFile(tree, name, patterns)
 			if scanErr != nil {
 				return scanErr
 			}
@@ -91,17 +98,21 @@ func ScanDirectives(root string) ([]DirectiveViolation, error) {
 }
 
 // scanFile reads one file through the root and reports its directives.
-func scanFile(tree *os.Root, name string) ([]DirectiveViolation, error) {
+func scanFile(tree *os.Root, name string, patterns []directivePattern) ([]DirectiveViolation, error) {
 	content, err := tree.ReadFile(name)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 
-	return DirectivesIn(name, content)
+	return parseDirectiveComments(name, content, patterns)
 }
 
 // DirectivesIn reports the prohibited directives in one Go source file.
 func DirectivesIn(name string, content []byte) ([]DirectiveViolation, error) {
+	return parseDirectiveComments(name, content, prohibitedDirectives())
+}
+
+func parseDirectiveComments(name string, content []byte, patterns []directivePattern) ([]DirectiveViolation, error) {
 	fset := token.NewFileSet()
 
 	parsed, err := parser.ParseFile(fset, name, content, parser.ParseComments|parser.SkipObjectResolution)
@@ -113,7 +124,7 @@ func DirectivesIn(name string, content []byte) ([]DirectiveViolation, error) {
 
 	for _, group := range parsed.Comments {
 		for _, comment := range group.List {
-			kind := directiveKind(commentText(comment.Text))
+			kind := directiveKind(commentText(comment.Text), patterns)
 			if kind != "" {
 				violations = append(violations, DirectiveViolation{
 					File: name, Line: fset.PositionFor(comment.Pos(), false).Line, Kind: kind, Comment: comment.Text,
@@ -126,8 +137,8 @@ func DirectivesIn(name string, content []byte) ([]DirectiveViolation, error) {
 }
 
 // directiveKind names the prohibited family a comment's text belongs to, or "" when it is not one.
-func directiveKind(text string) string {
-	for _, candidate := range prohibitedDirectives() {
+func directiveKind(text string, patterns []directivePattern) string {
+	for _, candidate := range patterns {
 		if candidate.pattern.MatchString(text) {
 			return candidate.kind
 		}

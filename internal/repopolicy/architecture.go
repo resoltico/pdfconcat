@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// ProductionOwners derives exact production-directory classifications from native depguard rules.
+// SourceOwners derives exact production and test-support directory classifications from native depguard rules.
 // Import matching remains depguard's responsibility; this only validates the declaration shape.
-func ProductionOwners(config []byte, module string) (map[string]string, error) {
+func SourceOwners(config []byte, module string) (map[string]string, error) {
 	document, err := decodeLintConfig(config)
 	if err != nil {
 		return nil, err
@@ -26,23 +26,23 @@ func ProductionOwners(config []byte, module string) (map[string]string, error) {
 	owners := map[string]string{}
 
 	for name, value := range rules {
-		if !strings.HasPrefix(name, "production-") {
+		if !sourceOwnerRule(name) {
 			continue
 		}
 
 		rule, isRule := value.(map[string]any)
 		if !isRule {
-			return nil, fmt.Errorf("%w: invalid production rule %s", ErrLintConfig, name)
+			return nil, fmt.Errorf("%w: invalid source owner rule %s", ErrLintConfig, name)
 		}
 
-		dirs, scopeErr := productionDirectories(name, rule, module)
+		dirs, scopeErr := sourceOwnerDirectories(name, rule, module)
 		if scopeErr != nil {
 			return nil, scopeErr
 		}
 
 		for _, dir := range dirs {
 			if previous, exists := owners[dir]; exists {
-				return nil, fmt.Errorf("%w: ambiguous production owner %s: %s and %s", ErrLintConfig, dir, previous, name)
+				return nil, fmt.Errorf("%w: ambiguous source owner %s: %s and %s", ErrLintConfig, dir, previous, name)
 			}
 
 			owners[dir] = name
@@ -50,13 +50,13 @@ func ProductionOwners(config []byte, module string) (map[string]string, error) {
 	}
 
 	if len(owners) == 0 {
-		return nil, fmt.Errorf("%w: no production internal-boundary rules", ErrLintConfig)
+		return nil, fmt.Errorf("%w: no production or test-support internal-boundary rules", ErrLintConfig)
 	}
 
 	return owners, nil
 }
 
-func productionDirectories(name string, rule map[string]any, module string) ([]string, error) {
+func sourceOwnerDirectories(name string, rule map[string]any, module string) ([]string, error) {
 	files := activeItems(rule["files"])
 	if rule["list-mode"] != "lax" || !slices.Contains(files, "!$test") || !deniesProject(rule, module) {
 		return nil, fmt.Errorf("%w: %s must be lax, exclude tests and deny the project prefix", ErrLintConfig, name)
@@ -75,7 +75,7 @@ func productionDirectories(name string, rule map[string]any, module string) ([]s
 			continue
 		}
 
-		dir, err := productionDirectory(name, selector)
+		dir, err := sourceOwnerDirectory(name, selector)
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +84,7 @@ func productionDirectories(name string, rule map[string]any, module string) ([]s
 	}
 
 	if len(dirs) == 0 {
-		return nil, fmt.Errorf("%w: %s selects no production directories", ErrLintConfig, name)
+		return nil, fmt.Errorf("%w: %s selects no owned directories", ErrLintConfig, name)
 	}
 
 	return dirs, nil
@@ -106,9 +106,9 @@ func deniesProject(rule map[string]any, module string) bool {
 	return false
 }
 
-// ProductionClassificationIssues requires every owned file to compile for at least one supported target
-// and each production file to have one configured owner. Tests retain native depguard's separate import policy.
-func ProductionClassificationIssues(owners map[string]string, files []string, compiled map[string]bool) []string {
+// SourceClassificationIssues requires every owned file to compile for a supported variant and every
+// non-test Go source to have one production or test-support owner. Tests retain their import policy.
+func SourceClassificationIssues(owners map[string]string, files []string, compiled map[string]bool) []string {
 	var problems []string
 
 	production := 0
@@ -122,10 +122,13 @@ func ProductionClassificationIssues(owners map[string]string, files []string, co
 			continue
 		}
 
-		production++
+		owner := owners[path.Dir(file)]
+		if !strings.HasPrefix(owner, "test-support-") {
+			production++
+		}
 
-		if owners[path.Dir(file)] == "" {
-			problems = append(problems, "unclassified production file: "+file)
+		if owner == "" {
+			problems = append(problems, "unclassified non-test file: "+file)
 		}
 	}
 
@@ -138,7 +141,7 @@ func ProductionClassificationIssues(owners map[string]string, files []string, co
 	return problems
 }
 
-func productionDirectory(name, selector string) (string, error) {
+func sourceOwnerDirectory(name, selector string) (string, error) {
 	dir, hasPrefix := strings.CutPrefix(selector, "**/")
 	if !hasPrefix {
 		return "", fmt.Errorf("%w: %s has unsupported production selector %q", ErrLintConfig, name, selector)
@@ -151,4 +154,8 @@ func productionDirectory(name, selector string) (string, error) {
 	}
 
 	return dir, nil
+}
+
+func sourceOwnerRule(name string) bool {
+	return strings.HasPrefix(name, "production-") || strings.HasPrefix(name, "test-support-")
 }

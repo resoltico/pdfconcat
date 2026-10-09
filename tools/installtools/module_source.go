@@ -36,6 +36,8 @@ const (
 	sourceModVerb      = "mod"
 	sourceDownloadVerb = "download"
 	sourceTestVerb     = "test"
+	sourceVendorMode   = "-mod=vendor"
+	sourceRaceFlag     = "-race"
 	sourceModuleFile   = "go.mod"
 	linterPinPrefix    = "GOLANGCI_LINT"
 	linterModule       = "github.com/golangci/golangci-lint/v2"

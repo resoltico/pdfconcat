@@ -32,6 +32,7 @@ type (
 	// Summary is the compact default result. It is labeled as a summary, never lists every diagnostic of a
 	// large failure, and points at the saved report for the rest.
 	Summary struct {
+		FitTarget             string                 `json:"fit_target,omitempty"`
 		Counts                Counts                 `json:"counts"`
 		Next                  *[]string              `json:"next"`
 		NextReference         *ContinuationReference `json:"next_reference,omitempty"`
@@ -53,6 +54,7 @@ type (
 		ErrorCount            int  `json:"error_count"`
 		WarningCount          int  `json:"warning_count"`
 		DiagnosticsOmitted    int  `json:"diagnostics_omitted,omitzero"`
+		ProgressInterrupted   bool `json:"progress_interrupted,omitzero"`
 		NextOmitted           bool `json:"next_omitted,omitzero"`
 	}
 )
@@ -126,20 +128,25 @@ func previewDiagnosticView(d *Diagnostic) DiagnosticView {
 // diagnostics, retaining the primary fault and prioritizing report-write recovery before other previews.
 func (r *Report) Summary() *Summary {
 	shown := min(len(r.Diagnostics), PreviewDiagnostics)
+
 	summary := &Summary{
-		FormatVersion:   Version,
-		AttemptID:       r.AttemptID,
-		Kind:            KindSummary,
-		Status:          r.Status,
-		Command:         r.Command,
-		Phases:          r.Phases,
-		Counts:          r.Counts,
-		Publication:     r.Publication,
-		PartCount:       len(r.Parts),
-		DiagnosticCount: len(r.Diagnostics),
-		ErrorCount:      r.ErrorCount, WarningCount: r.WarningCount,
+		ProgressInterrupted: r.ProgressInterrupted,
+		FormatVersion:       Version,
+		AttemptID:           r.AttemptID,
+		Kind:                KindSummary,
+		Status:              r.Status,
+		Command:             r.Command,
+		Phases:              r.Phases,
+		Counts:              r.Counts,
+		Publication:         r.Publication,
+		PartCount:           len(r.Parts),
+		DiagnosticCount:     len(r.Diagnostics),
+		ErrorCount:          r.ErrorCount, WarningCount: r.WarningCount,
 		Diagnostics:        make([]DiagnosticView, shown),
 		DiagnosticsOmitted: len(r.Diagnostics) - shown,
+	}
+	if r.Fit != nil {
+		summary.FitTarget = r.Fit.Paper
 	}
 
 	indices := summaryIndices(r.Diagnostics, shown)

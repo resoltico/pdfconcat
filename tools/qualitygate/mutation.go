@@ -126,7 +126,7 @@ func mutateSnapshot(ctx context.Context, options *mutationOptions, registry *rep
 
 	log.Printf("mutation: gremlins in a snapshot of %d runtime packages (%d source files)", scope.packages, len(scope.hostFiles))
 
-	evidence, err := executeMutation(ctx, binary, reportFile, options, scope.excludes, registry)
+	evidence, err := executeMutation(ctx, binary, reportFile, options, scope.excludes, scope.hostFiles, registry)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +163,7 @@ func gremlinsArguments(reportFile string, options *mutationOptions, excludes []s
 			"unleash", "--output", reportFile, "--timeout-coefficient", strconv.Itoa(options.coefficient),
 			"--diff=", "--tags=", "--coverpkg=", "--dry-run=false", "--test-cpu=0",
 			"--run-uncovered=true", "--execution-log-dir", mutationExecutionDirectory(reportFile),
+			"--baseline-package=" + options.baselinePackage(),
 			"--threshold-efficacy=0", "--threshold-mcover=0",
 		},
 		operatorFlags()...)
@@ -232,6 +233,15 @@ func mutationScope(ctx context.Context, dir, module string, only []string) (scop
 	}
 
 	scope.excludes = append(scope.excludes, ignored...)
+
+	foreign, err := repopolicy.ForeignSourcesContext(ctx, dir)
+	if err != nil {
+		return scopeOfMutation{}, fmt.Errorf("mutation foreign source exclusions: %w", err)
+	}
+
+	for index := range foreign {
+		scope.addOther(foreign[index].Root)
+	}
 
 	if len(scope.hostFiles) == 0 {
 		return scopeOfMutation{}, fmt.Errorf("%w: the runtime packages have no source files to mutate", errGate)
@@ -307,6 +317,7 @@ func executeMutation(
 	tool, reportFile string,
 	options *mutationOptions,
 	excludes []string,
+	hostFiles map[string]bool,
 	registry *repopolicy.Registry,
 ) (mutationEvidence, error) {
 	discoveryFile := reportFile + ".discovery.json"
@@ -337,13 +348,9 @@ func executeMutation(
 		return mutationEvidence{}, fmt.Errorf("mutation discovery failed: %w", err)
 	}
 
-	discovery, err := readMutationReport(discoveryFile)
+	discovery, err := readMutationDiscovery(ctx, discoveryFile, hostFiles)
 	if err != nil {
 		return mutationEvidence{}, err
-	}
-
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return mutationEvidence{}, fmt.Errorf("mutation discovery canceled: %w", ctxErr)
 	}
 
 	err = (&command{
@@ -399,3 +406,21 @@ func (s *scopeOfMutation) collectRuntimeListing(resolved, listing string, runtim
 
 // mutationExecutionDirectory retains baseline and per-mutant process evidence beside its report.
 func mutationExecutionDirectory(reportFile string) string { return reportFile + ".executions" }
+
+// readMutationDiscovery validates the dry run before any mutant process starts.
+func readMutationDiscovery(ctx context.Context, file string, hostFiles map[string]bool) (*repopolicy.MutationReport, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("mutation discovery canceled: %w", ctxErr)
+	}
+
+	discovery, err := readMutationReport(file)
+	if err != nil {
+		return nil, err
+	}
+
+	if problems := repopolicy.MutationDiscoveryPreflightIssues(discovery, hostFiles); len(problems) > 0 {
+		return nil, fmt.Errorf("%w: mutation discovery preflight: %v", errGate, problems)
+	}
+
+	return discovery, nil
+}

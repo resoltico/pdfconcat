@@ -38,11 +38,11 @@ func checkSignatureState(ctx context.Context, pdf *model.Context) error {
 		return fmt.Errorf("inspect signatures: %w", err)
 	}
 
-	if err := checkCatalogSignatures(pdf); err != nil {
+	if err := checkCatalogSignatures(ctx, pdf); err != nil {
 		return err
 	}
 
-	form, err := pdf.DereferenceDict(pdf.RootDict[keyAcroForm])
+	form, err := pdf.DereferenceDictContext(ctx, pdf.RootDict[keyAcroForm])
 	if err != nil {
 		return fmt.Errorf("signature form lookup: %w", err)
 	}
@@ -54,7 +54,7 @@ func checkSignatureState(ctx context.Context, pdf *model.Context) error {
 		}
 	}
 
-	root, err := pdf.Pages()
+	root, err := pdf.PagesContext(ctx)
 	if err != nil {
 		return fmt.Errorf("signature page lookup: %w", err)
 	}
@@ -64,8 +64,8 @@ func checkSignatureState(ctx context.Context, pdf *model.Context) error {
 	})
 }
 
-func checkCatalogSignatures(pdf *model.Context) error {
-	permissions, err := pdf.DereferenceDict(pdf.RootDict["Perms"])
+func checkCatalogSignatures(ctx context.Context, pdf *model.Context) error {
+	permissions, err := pdf.DereferenceDictContext(ctx, pdf.RootDict["Perms"])
 	if err != nil {
 		return signatureFailure("malformed catalog /Perms")
 	}
@@ -84,7 +84,7 @@ func (w *signatureWalker) fields(ctx context.Context, object types.Object, inher
 		return fmt.Errorf("inspect signature fields: %w", err)
 	}
 
-	fields, err := w.pdf.DereferenceArray(object)
+	fields, err := w.pdf.DereferenceArrayContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("signature field array: %w", err)
 	}
@@ -112,7 +112,7 @@ func (w *signatureWalker) field(ctx context.Context, object types.Object, inheri
 		w.seen[number] = true
 	}
 
-	field, err := w.pdf.DereferenceDict(object)
+	field, err := w.pdf.DereferenceDictContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("signature field lookup: %w", err)
 	}
@@ -121,8 +121,8 @@ func (w *signatureWalker) field(ctx context.Context, object types.Object, inheri
 		return fmt.Errorf("%w: missing field dictionary", errFormState)
 	}
 
-	kind, kindErr := fieldKind(w.pdf, field, inherited)
-	if valueErr := checkSignatureValue(w.pdf, field, kind); valueErr != nil {
+	kind, kindErr := fieldKind(ctx, w.pdf, field, inherited)
+	if valueErr := checkSignatureValue(ctx, w.pdf, field, kind); valueErr != nil {
 		return valueErr
 	}
 
@@ -133,13 +133,13 @@ func (w *signatureWalker) field(ctx context.Context, object types.Object, inheri
 	return w.fields(ctx, field["Kids"], kind, depth+1)
 }
 
-func fieldKind(pdf *model.Context, field types.Dict, inherited string) (string, error) {
+func fieldKind(ctx context.Context, pdf *model.Context, field types.Dict, inherited string) (string, error) {
 	_, present := field.Find("FT")
 	if !present {
 		return inherited, nil
 	}
 
-	value, _, err := pdf.DereferenceNameEntry(field, "FT")
+	value, _, err := pdf.DereferenceNameEntryContext(ctx, field, "FT")
 	if err != nil {
 		return "", fmt.Errorf("%w: malformed field /FT: %w", errFormState, err)
 	}
@@ -151,29 +151,29 @@ func fieldKind(pdf *model.Context, field types.Dict, inherited string) (string, 
 	return string(*value), nil
 }
 
-func checkSignatureValue(pdf *model.Context, field types.Dict, kind string) error {
+func checkSignatureValue(ctx context.Context, pdf *model.Context, field types.Dict, kind string) error {
 	object, present := field.Find("V")
 	if !present {
 		return nil
 	}
 
 	if kind == signatureType {
-		return checkPopulatedSignature(pdf, object)
+		return checkPopulatedSignature(ctx, pdf, object)
 	}
 
-	value, err := pdf.Dereference(object)
+	value, err := pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("signature field value: %w", err)
 	}
 
 	if dictionary, ok := value.(types.Dict); ok {
-		return checkSignatureDictionary(pdf, dictionary)
+		return checkSignatureDictionary(ctx, pdf, dictionary)
 	}
 
 	return nil
 }
 
-func checkPopulatedSignature(pdf *model.Context, object types.Object) error {
+func checkPopulatedSignature(ctx context.Context, pdf *model.Context, object types.Object) error {
 	if reference, ok := object.(types.IndirectRef); ok {
 		entry, found := pdf.FindTableEntryForIndRef(&reference)
 		if !found || entry == nil || entry.Free {
@@ -181,7 +181,7 @@ func checkPopulatedSignature(pdf *model.Context, object types.Object) error {
 		}
 	}
 
-	value, err := pdf.Dereference(object)
+	value, err := pdf.DereferenceContext(ctx, object)
 	if err != nil || value != nil {
 		return signatureFailure("signature field has a signature value or malformed /V")
 	}
@@ -189,14 +189,14 @@ func checkPopulatedSignature(pdf *model.Context, object types.Object) error {
 	return nil
 }
 
-func checkSignatureDictionary(pdf *model.Context, value types.Dict) error {
+func checkSignatureDictionary(ctx context.Context, pdf *model.Context, value types.Dict) error {
 	for _, key := range []string{"ByteRange", "Contents"} {
 		if _, found := value.Find(key); found {
 			return signatureFailure("field value contains signature /" + key + " state")
 		}
 	}
 
-	typeName, _, err := pdf.DereferenceNameEntry(value, keyType)
+	typeName, _, err := pdf.DereferenceNameEntryContext(ctx, value, keyType)
 	if err != nil {
 		return fmt.Errorf("signature value type: %w", err)
 	}
@@ -209,18 +209,18 @@ func checkSignatureDictionary(pdf *model.Context, value types.Dict) error {
 }
 
 func checkWidgetSignatures(ctx context.Context, pdf *model.Context, page types.Dict) error {
-	annotations, err := pdf.DereferenceArray(page["Annots"])
+	annotations, err := pdf.DereferenceArrayContext(ctx, page["Annots"])
 	if err != nil {
 		return fmt.Errorf("signature annotations: %w", err)
 	}
 
 	for _, object := range annotations {
-		widget, widgetErr := pdf.DereferenceDict(object)
+		widget, widgetErr := pdf.DereferenceDictContext(ctx, object)
 		if widgetErr != nil {
 			return fmt.Errorf("signature widget: %w", widgetErr)
 		}
 
-		subtype, _, readErr := pdf.DereferenceNameEntry(widget, keySubtype)
+		subtype, _, readErr := pdf.DereferenceNameEntryContext(ctx, widget, keySubtype)
 		if readErr != nil {
 			return fmt.Errorf("signature widget subtype: %w", readErr)
 		}
@@ -238,7 +238,7 @@ func checkWidgetSignatures(ctx context.Context, pdf *model.Context, page types.D
 }
 
 func checkWidgetParents(ctx context.Context, pdf *model.Context, field types.Dict) error {
-	if err := checkSignatureValue(pdf, field, ""); err != nil {
+	if err := checkSignatureValue(ctx, pdf, field, ""); err != nil {
 		return err
 	}
 
@@ -256,16 +256,16 @@ func checkWidgetParents(ctx context.Context, pdf *model.Context, field types.Dic
 			return fmt.Errorf("%w: widget parent chain is cyclic or too deep", errFormState)
 		}
 
-		kind, err = fieldKind(pdf, field, kind)
+		kind, err = fieldKind(ctx, pdf, field, kind)
 		if err != nil {
 			return err
 		}
 
-		if valueErr := checkSignatureValue(pdf, field, kind); valueErr != nil {
+		if valueErr := checkSignatureValue(ctx, pdf, field, kind); valueErr != nil {
 			return valueErr
 		}
 
-		parent, parentErr := pdf.DereferenceDict(field[keyParent])
+		parent, parentErr := pdf.DereferenceDictContext(ctx, field[keyParent])
 		if parentErr != nil {
 			return fmt.Errorf("signature widget parent: %w", parentErr)
 		}
@@ -287,10 +287,10 @@ func effectiveWidgetKind(ctx context.Context, pdf *model.Context, field types.Di
 		}
 
 		if _, found := field.Find("FT"); found {
-			return fieldKind(pdf, field, "")
+			return fieldKind(ctx, pdf, field, "")
 		}
 
-		parent, err := pdf.DereferenceDict(field[keyParent])
+		parent, err := pdf.DereferenceDictContext(ctx, field[keyParent])
 		if err != nil {
 			return "", fmt.Errorf("inherited signature parent: %w", err)
 		}

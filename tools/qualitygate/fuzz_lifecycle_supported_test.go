@@ -18,11 +18,14 @@ import (
 	"time"
 )
 
-const fuzzLifecycleSource = `package fixture
+const (
+	fuzzFixturePackage  = "fuzz.fixture"
+	fuzzLifecycleSource = `package fixture
 import "testing"
 func FuzzPresent(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T, n int) {}) }
 func FuzzSkipped(f *testing.F) { f.Skip("fixture unavailable") }
 `
+)
 
 func TestFuzzTargetRequiresActualPassingLifecycle(t *testing.T) {
 	t.Parallel()
@@ -33,7 +36,7 @@ func TestFuzzTargetRequiresActualPassingLifecycle(t *testing.T) {
 
 			dir := fuzzLifecycleFixture(t)
 
-			err := runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: "fuzz.fixture", name: name}, "1x")
+			err := runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: name}, "1x")
 			if (err == nil) != (name == "FuzzPresent") {
 				t.Fatalf("target %s: %v", name, err)
 			}
@@ -47,7 +50,7 @@ func fuzzLifecycleFixture(t *testing.T) string {
 	dir := t.TempDir()
 
 	for name, data := range map[string]string{
-		moduleFileName: "module fuzz.fixture\n\ngo 1.27.1\n",
+		moduleFileName: "module " + fuzzFixturePackage + "\n\ngo 1.27.1\n",
 		"fuzz_test.go": fuzzLifecycleSource,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), fileMode); err != nil {
@@ -80,11 +83,19 @@ func FuzzHang(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T,n int) {
 		t.Fatal(err)
 	}
 
+	// Compilation is setup, not part of the actual worker-start/cancellation window.
+	prepared, prepareErr := prepareFuzzCancellationFixture(t.Context(), dir)
+	if prepareErr != nil {
+		t.Fatal(prepareErr)
+	}
+
+	t.Logf("fuzz-instrumented cancellation fixture prepared: %s", prepared)
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- runFuzzTarget(ctx, dir, fuzzTarget{pkg: "fuzz.fixture", name: "FuzzHang"}, "1x") }()
+	go func() { done <- runFuzzTarget(ctx, dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzHang"}, "1x") }()
 
 	pid := awaitFuzzWorker(t, dir, "worker.pid", done)
 	descendant := awaitFuzzWorker(t, dir, "descendant.pid", done)

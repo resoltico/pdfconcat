@@ -5,6 +5,7 @@ package pdfengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -119,7 +120,7 @@ func readVariableOptions(ctx context.Context, pdf *model.Context, dict types.Dic
 		return nil, err
 	}
 
-	array, err := pdf.DereferenceArray(property.value)
+	array, err := pdf.DereferenceArrayContext(ctx, property.value)
 	if err != nil {
 		return nil, fmt.Errorf("%w: choice options: %w", errFormState, err)
 	}
@@ -130,7 +131,7 @@ func readVariableOptions(ctx context.Context, pdf *model.Context, dict types.Dic
 			return nil, fmt.Errorf("read choice options: %w", err)
 		}
 
-		option, readErr := readVariableOption(pdf, object)
+		option, readErr := readVariableOption(ctx, pdf, object)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -141,10 +142,10 @@ func readVariableOptions(ctx context.Context, pdf *model.Context, dict types.Dic
 	return options, nil
 }
 
-func readVariableOption(pdf *model.Context, object types.Object) (variableChoiceOption, error) {
+func readVariableOption(ctx context.Context, pdf *model.Context, object types.Object) (variableChoiceOption, error) {
 	option := variableChoiceOption{}
 
-	value, err := pdf.Dereference(object)
+	value, err := pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return option, fmt.Errorf("%w: choice option: %w", errFormState, err)
 	}
@@ -158,12 +159,12 @@ func readVariableOption(pdf *model.Context, object types.Object) (variableChoice
 		return option, fmt.Errorf("%w: choice option must be a string or export/display pair", errFormState)
 	}
 
-	export, err := pdf.Dereference(pair[0])
+	export, err := pdf.DereferenceContext(ctx, pair[0])
 	if err != nil {
 		return option, fmt.Errorf("%w: choice export: %w", errFormState, err)
 	}
 
-	display, err := pdf.Dereference(pair[1])
+	display, err := pdf.DereferenceContext(ctx, pair[1])
 	if err != nil {
 		return option, fmt.Errorf("%w: choice display: %w", errFormState, err)
 	}
@@ -191,7 +192,7 @@ func readVariableIndices(ctx context.Context, pdf *model.Context, dict types.Dic
 		return nil, nil
 	}
 
-	array, err := pdf.DereferenceArray(property.value)
+	array, err := pdf.DereferenceArrayContext(ctx, property.value)
 	if err != nil {
 		return nil, fmt.Errorf("%w: choice indices: %w", errFormState, err)
 	}
@@ -199,9 +200,9 @@ func readVariableIndices(ctx context.Context, pdf *model.Context, dict types.Dic
 	indices := make([]bool, count)
 
 	for _, object := range array {
-		value, readErr := pdf.DereferenceInteger(object)
+		value, readErr := pdf.DereferenceIntegerContext(ctx, object)
 		if readErr != nil || value == nil || value.Value() < 0 || value.Value() >= count {
-			return nil, fmt.Errorf("%w: choice index is outside options", errFormState)
+			return nil, errors.Join(readErr, fmt.Errorf("%w: choice index is outside options", errFormState))
 		}
 
 		indices[value.Value()] = true

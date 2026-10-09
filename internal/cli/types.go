@@ -18,6 +18,9 @@ type (
 	// Format is the rendering of a command's standard output.
 	Format uint8
 
+	// ProgressMode selects optional stderr observations for build and check.
+	ProgressMode string
+
 	// PlanSource says where the instructions of a build or check come from.
 	PlanSource uint8
 
@@ -33,6 +36,9 @@ type (
 		BaseDir string
 		// Output is -o/--output, relative to the working directory; empty when the plan names the output.
 		Output string
+		// FitTo is the optional portrait target, overriding the plan declaration.
+		FitTo    assembly.FitTarget
+		Progress ProgressMode
 		// ReportPath is --report for build and check, relative to the working directory.
 		ReportPath string
 		// ReportFile is the saved report that the report command reads.
@@ -90,6 +96,13 @@ const (
 	FormatJSON Format = 0
 	// FormatText is human-readable text.
 	FormatText Format = 1
+
+	// ProgressAuto retains interactive text with quiet redirected stderr.
+	ProgressAuto ProgressMode = "auto"
+	// ProgressJSON requests machine observations on stderr.
+	ProgressJSON ProgressMode = "json"
+	// ProgressNone disables optional observations.
+	ProgressNone ProgressMode = "none"
 
 	// PlanNone is the absence of instructions: report, schema, version, and help commands.
 	PlanNone PlanSource = 0

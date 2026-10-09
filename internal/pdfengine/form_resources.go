@@ -23,16 +23,16 @@ const (
 	fontHelvetica        = "Helvetica"
 )
 
-func (s *formState) readResources(pdf *model.Context) error {
+func (s *formState) readResources(ctx context.Context, pdf *model.Context) error {
 	s.resources = map[string]types.Dict{}
 
-	resources, err := pdf.DereferenceDict(s.root["DR"])
+	resources, err := pdf.DereferenceDictContext(ctx, s.root["DR"])
 	if err != nil {
 		return fmt.Errorf("form DR must be a dictionary: %w", err)
 	}
 
 	for category, object := range resources {
-		if categoryErr := s.readResourceCategory(pdf, category, object); categoryErr != nil {
+		if categoryErr := s.readResourceCategory(ctx, pdf, category, object); categoryErr != nil {
 			return categoryErr
 		}
 	}
@@ -40,12 +40,12 @@ func (s *formState) readResources(pdf *model.Context) error {
 	return nil
 }
 
-func (s *formState) readResourceCategory(pdf *model.Context, category string, object types.Object) error {
+func (s *formState) readResourceCategory(ctx context.Context, pdf *model.Context, category string, object types.Object) error {
 	if category == keyProcSet {
-		return s.readProcSet(pdf, object)
+		return s.readProcSet(ctx, pdf, object)
 	}
 
-	bindings, err := pdf.DereferenceDict(object)
+	bindings, err := pdf.DereferenceDictContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("form DR /%s: %w", category, err)
 	}
@@ -55,7 +55,7 @@ func (s *formState) readResourceCategory(pdf *model.Context, category string, ob
 	}
 
 	for name, binding := range bindings {
-		if bindingErr := checkFormResource(pdf, category, binding); bindingErr != nil {
+		if bindingErr := checkFormResource(ctx, pdf, category, binding); bindingErr != nil {
 			return fmt.Errorf("form DR /%s /%s: %w", category, name, bindingErr)
 		}
 	}
@@ -65,8 +65,8 @@ func (s *formState) readResourceCategory(pdf *model.Context, category string, ob
 	return nil
 }
 
-func (s *formState) readProcSet(pdf *model.Context, object types.Object) error {
-	values, err := pdf.DereferenceArray(object)
+func (s *formState) readProcSet(ctx context.Context, pdf *model.Context, object types.Object) error {
+	values, err := pdf.DereferenceArrayContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf("form DR ProcSet: %w", err)
 	}
@@ -82,15 +82,15 @@ func (s *formState) readProcSet(pdf *model.Context, object types.Object) error {
 	return nil
 }
 
-func checkFormResource(pdf *model.Context, category string, object types.Object) error {
-	value, err := pdf.Dereference(object)
+func checkFormResource(ctx context.Context, pdf *model.Context, category string, object types.Object) error {
+	value, err := pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
 
 	switch category {
 	case keyFont:
-		return checkFormFont(pdf, value)
+		return checkFormFont(ctx, pdf, value)
 	case keyExtGState, keyProperties, keyEncoding:
 		return checkResourceDictionary(value)
 	case keyXObject, "Pattern":
@@ -102,13 +102,13 @@ func checkFormResource(pdf *model.Context, category string, object types.Object)
 	}
 }
 
-func checkFormFont(pdf *model.Context, object types.Object) error {
+func checkFormFont(ctx context.Context, pdf *model.Context, object types.Object) error {
 	dict, ok := object.(types.Dict)
 	if !ok {
 		return fmt.Errorf("%w: font resource must be a dictionary: %T", errFormState, object)
 	}
 
-	subtype, _, err := pdf.DereferenceNameEntry(dict, keySubtype)
+	subtype, _, err := pdf.DereferenceNameEntryContext(ctx, dict, keySubtype)
 	if err != nil {
 		return fmt.Errorf("font subtype: %w", err)
 	}
@@ -196,17 +196,17 @@ func prepareFormResources(ctx context.Context, pdf *model.Context, occurrence in
 
 // mergeFormResources runs after pdfcpu renumbers imported references. Its merge deliberately keeps
 // the first DR dictionary, so append the already namespaced later bindings to that dictionary here.
-func mergeFormResources(pdf *model.Context, source *formState) error {
+func mergeFormResources(ctx context.Context, pdf *model.Context, source *formState) error {
 	if source == nil || source.root == nil {
 		return nil
 	}
 
-	form, err := pdf.DereferenceDict(pdf.RootDict[keyAcroForm])
+	form, err := pdf.DereferenceDictContext(ctx, pdf.RootDict[keyAcroForm])
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
 
-	resources, err := pdf.DereferenceDict(form["DR"])
+	resources, err := pdf.DereferenceDictContext(ctx, form["DR"])
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
@@ -216,13 +216,13 @@ func mergeFormResources(pdf *model.Context, source *formState) error {
 		form["DR"] = resources
 	}
 
-	imported, err := pdf.DereferenceDict(source.root["DR"])
+	imported, err := pdf.DereferenceDictContext(ctx, source.root["DR"])
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
 
 	for category, object := range imported {
-		if categoryErr := mergeFormResourceCategory(pdf, resources, category, object); categoryErr != nil {
+		if categoryErr := mergeFormResourceCategory(ctx, pdf, resources, category, object); categoryErr != nil {
 			return categoryErr
 		}
 	}
@@ -230,17 +230,17 @@ func mergeFormResources(pdf *model.Context, source *formState) error {
 	return nil
 }
 
-func mergeFormResourceCategory(pdf *model.Context, resources types.Dict, category string, object types.Object) error {
+func mergeFormResourceCategory(ctx context.Context, pdf *model.Context, resources types.Dict, category string, object types.Object) error {
 	if category == keyProcSet {
-		return mergeFormProcSet(pdf, resources, object)
+		return mergeFormProcSet(ctx, pdf, resources, object)
 	}
 
-	bindings, err := pdf.DereferenceDict(object)
+	bindings, err := pdf.DereferenceDictContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
 
-	destination, err := pdf.DereferenceDict(resources[category])
+	destination, err := pdf.DereferenceDictContext(ctx, resources[category])
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
@@ -255,13 +255,13 @@ func mergeFormResourceCategory(pdf *model.Context, resources types.Dict, categor
 	return nil
 }
 
-func mergeFormProcSet(pdf *model.Context, resources types.Dict, object types.Object) error {
-	imported, err := pdf.DereferenceArray(object)
+func mergeFormProcSet(ctx context.Context, pdf *model.Context, resources types.Dict, object types.Object) error {
+	imported, err := pdf.DereferenceArrayContext(ctx, object)
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}
 
-	destination, err := pdf.DereferenceArray(resources[keyProcSet])
+	destination, err := pdf.DereferenceArrayContext(ctx, resources[keyProcSet])
 	if err != nil {
 		return fmt.Errorf(formResourcesFailure, err)
 	}

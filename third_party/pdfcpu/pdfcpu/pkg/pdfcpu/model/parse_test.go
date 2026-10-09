@@ -1,0 +1,481 @@
+/*
+Copyright 2024 The pdfcpu Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package model
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+)
+
+// TestDecodeNameHexInvalid verifies invalid name hex escapes are rejected.
+func TestDecodeNameHexInvalid(t *testing.T) {
+	testcases := []string{
+		"#",
+		"#A",
+		"#a",
+		"#G0",
+		"#00",
+		"Fo\x00",
+	}
+	for _, tc := range testcases {
+		if decoded, err := decodeNameHexSequence(tc); err == nil {
+			t.Errorf("expected error decoding %s, got %s", tc, decoded)
+		}
+	}
+}
+
+// TestParseObjectRejectsRecursionDepth verifies object parsing respects recursion limits.
+func TestParseObjectRejectsRecursionDepth(t *testing.T) {
+	s := "[[[1]]]"
+
+	_, err := ParseObject(t.Context(), &s, 0, 1)
+	if !errors.Is(err, ErrMaxRecursionDepthExceeded) {
+		t.Fatalf("got %v, want ErrMaxRecursionDepthExceeded", err)
+	}
+}
+
+// TestParseObjectBoundsIncompleteArray verifies incomplete nested arrays remain bounded.
+func TestParseObjectBoundsIncompleteArray(t *testing.T) {
+	s := strings.Repeat("<</Differences[24/breve/quotesingle0\r", 34)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	_, err := ParseObject(ctx, &s, 0)
+	if !errors.Is(err, errArrayNotTerminated) {
+		t.Fatalf("got %v, want errArrayNotTerminated", err)
+	}
+}
+
+// TestParseRejectsMissingContext verifies context-aware parsers reject a nil context.
+func TestParseRejectsMissingContext(t *testing.T) {
+	s := "1"
+	if _, err := ParseObject(nil, &s, 0); !errors.Is(err, ErrMissingContext) {
+		t.Fatalf("parse object: got %v, want ErrMissingContext", err)
+	}
+	if _, _, err := DetectKeywords(nil, s); !errors.Is(err, ErrMissingContext) {
+		t.Fatalf("detect keywords: got %v, want ErrMissingContext", err)
+	}
+}
+
+// TestProcessRefCountsRejectsRecursionDepth verifies ref count processing respects recursion limits.
+func TestProcessRefCountsRejectsRecursionDepth(t *testing.T) {
+	conf := NewDefaultConfiguration()
+	conf.Limits.MaxRecursionDepth = 1
+	xRefTable := newXRefTable(conf)
+
+	o := types.Array{types.Array{types.Array{types.Integer(1)}}}
+
+	err := ProcessRefCountsWithError(xRefTable, o)
+	if !errors.Is(err, ErrMaxRecursionDepthExceeded) {
+		t.Fatalf("got %v, want ErrMaxRecursionDepthExceeded", err)
+	}
+}
+
+// TestDereferenceNumberPreservesDereferenceError verifies numeric dereferencing
+// preserves an underlying lazy object decode error.
+func TestDereferenceNumberPreservesDereferenceError(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	osd := types.NewObjectStreamDict()
+	lazy := types.NewLazyObjectStreamObject(osd, 1, -1, nil)
+	xRefTable.Table[1] = NewXRefTableEntryGen0(lazy)
+
+	_, err := xRefTable.DereferenceNumber(*types.NewIndirectRef(1, 0))
+	if err == nil {
+		t.Fatal("expected dereference error")
+	}
+	if strings.Contains(err.Error(), "wrong type") {
+		t.Fatalf("got %v, want underlying decode error", err)
+	}
+}
+
+// TestPageTreeLookupRejectsRecursionDepth verifies page tree lookup respects recursion limits.
+func TestPageTreeLookupRejectsRecursionDepth(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	maxDepth := xRefTable.MaxRecursionDepth()
+	ir := types.NewIndirectRef(1, 0)
+	attrs := InheritedPageAttrs{}
+	pageCount := 0
+
+	_, _, err := xRefTable.processPageTreeForPageDictDepth(t.Context(), ir, &attrs, &pageCount, 1, false, maxDepth+1, NewPageTreeVisit())
+	if !errors.Is(err, ErrMaxRecursionDepthExceeded) {
+		t.Fatalf("got %v, want ErrMaxRecursionDepthExceeded", err)
+	}
+
+	_, err = xRefTable.processPageTreeForPageNumberDepth(t.Context(), ir, &pageCount, 1, maxDepth+1, NewPageTreeVisit())
+	if !errors.Is(err, ErrMaxRecursionDepthExceeded) {
+		t.Fatalf("got %v, want ErrMaxRecursionDepthExceeded", err)
+	}
+}
+
+// TestPageDictRejectsUnresolvedPage verifies PageDict returns an error instead of nil page data.
+func TestPageDictRejectsUnresolvedPage(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	pages, err := xRefTable.IndRefForObject(1, types.Dict{
+		"Type":  types.Name("Pages"),
+		"Count": types.Integer(1),
+		"Kids":  types.Array{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	xRefTable.RootDict = types.Dict{"Pages": *pages}
+	xRefTable.PageCount = 1
+
+	d, indRef, attrs, err := xRefTable.PageDict(t.Context(), 1, false)
+	if err == nil {
+		t.Fatal("expected unresolved page error")
+	}
+	if d != nil || indRef != nil || attrs != nil {
+		t.Fatalf("got %v, %v, %v; want nil page data", d, indRef, attrs)
+	}
+}
+
+// TestPageTreeMutationRejectsRecursionDepth verifies page tree mutation respects recursion limits.
+func TestPageTreeMutationRejectsRecursionDepth(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	maxDepth := xRefTable.MaxRecursionDepth()
+	ir := types.NewIndirectRef(1, 0)
+	attrs := InheritedPageAttrs{}
+	pageCount := 0
+
+	_, err := xRefTable.insertBlankPagesDepth(t.Context(), ir, &attrs, &pageCount, nil, nil, false, maxDepth+1, NewPageTreeVisit())
+	if !errors.Is(err, ErrMaxRecursionDepthExceeded) {
+		t.Fatalf("got %v, want ErrMaxRecursionDepthExceeded", err)
+	}
+
+	_, err = xRefTable.insertPagesDepth(t.Context(), ir, &pageCount, nil, maxDepth+1, NewPageTreeVisit())
+	if !errors.Is(err, ErrMaxRecursionDepthExceeded) {
+		t.Fatalf("got %v, want ErrMaxRecursionDepthExceeded", err)
+	}
+}
+
+// TestPageTreeRejectsCycle verifies page tree traversal rejects cycles.
+func TestPageTreeRejectsCycle(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	ir := types.NewIndirectRef(1, 0)
+	pageCount := 0
+
+	_, err := xRefTable.IndRefForObject(1, types.Dict{
+		"Type": types.Name("Pages"),
+		"Kids": types.Array{*ir},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = xRefTable.processPageTreeForPageNumber(t.Context(), ir, &pageCount, 1)
+	if !errors.Is(err, ErrPageTreeCycle) {
+		t.Fatalf("got %v, want ErrPageTreeCycle", err)
+	}
+}
+
+// TestPageTreeRejectsDuplicateNode verifies page tree traversal rejects duplicate nodes.
+func TestPageTreeRejectsDuplicateNode(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	root := types.NewIndirectRef(1, 0)
+	child := types.NewIndirectRef(2, 0)
+	pageCount := 0
+
+	if _, err := xRefTable.IndRefForObject(1, types.Dict{
+		"Type": types.Name("Pages"),
+		"Kids": types.Array{*child, *child},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := xRefTable.IndRefForObject(2, types.Dict{
+		"Type": types.Name("Pages"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := xRefTable.processPageTreeForPageNumber(t.Context(), root, &pageCount, 1)
+	if !errors.Is(err, ErrPageTreeDuplicate) {
+		t.Fatalf("got %v, want ErrPageTreeDuplicate", err)
+	}
+}
+
+func TestPageTreeOperationsRejectChildMissingType(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+	root := types.NewIndirectRef(1, 0)
+	child := types.NewIndirectRef(2, 0)
+	pageCount := 0
+
+	if _, err := xRefTable.IndRefForObject(1, types.Dict{
+		"Type": types.Name("Pages"),
+		"Kids": types.Array{*child},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := xRefTable.IndRefForObject(2, types.Dict{}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := xRefTable.processPageTreeForPageNumber(t.Context(), root, &pageCount, 1)
+	if err == nil || !strings.Contains(err.Error(), "page tree kid obj#2: missing dict type") {
+		t.Fatalf("got %v, want missing page node Type error", err)
+	}
+
+	_, err = xRefTable.insertPagesDepth(t.Context(), root, &pageCount, nil, 0, NewPageTreeVisit())
+	if err == nil || !strings.Contains(err.Error(), "page tree kid obj#2: missing dict type") {
+		t.Fatalf("got %v, want missing page node Type error", err)
+	}
+}
+
+func TestDereferencePageNodeDictRejectsMissingDict(t *testing.T) {
+	xRefTable := newXRefTable(NewDefaultConfiguration())
+
+	_, err := xRefTable.DereferencePageNodeDict(*types.NewIndirectRef(7, 0))
+	if err == nil || !strings.Contains(err.Error(), "missing page node dict") {
+		t.Fatalf("got %v, want missing page node dict error", err)
+	}
+}
+
+// TestParseXRefStreamDictRejectsSizeLimit verifies xref stream parsing enforces size limits.
+func TestParseXRefStreamDictRejectsSizeLimit(t *testing.T) {
+	sd := types.StreamDict{
+		Dict: types.Dict{
+			"Size": types.Integer(3),
+			"W":    types.Array{types.Integer(1), types.Integer(1), types.Integer(1)},
+		},
+	}
+
+	_, err := ParseXRefStreamDictWithLimits(&sd, ResourceLimits{
+		MaxObjectCount:       2,
+		MaxXRefEntries:       10,
+		MaxObjectStreamCount: 1,
+		MaxObjectStreamFirst: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Size") {
+		t.Fatalf("got %v, want Size limit error", err)
+	}
+}
+
+func TestParseXRefStreamDictRequiresDirectSize(t *testing.T) {
+	sd := types.StreamDict{Dict: types.Dict{
+		"Size": *types.NewIndirectRef(7, 0),
+		"W":    types.Array{types.Integer(1), types.Integer(1), types.Integer(1)},
+	}}
+
+	_, err := ParseXRefStreamDictWithLimits(&sd, DefaultResourceLimits())
+	if err == nil || !strings.Contains(err.Error(), `"Size" not available`) {
+		t.Fatalf("got %v, want direct Size error", err)
+	}
+}
+
+// TestParseXRefStreamDictAllocatesForIndexedEntries verifies a sparse xref stream reserves capacity for its checked
+// Index entry count instead of its declared object-number range.
+func TestParseXRefStreamDictAllocatesForIndexedEntries(t *testing.T) {
+	sd := types.StreamDict{Dict: types.Dict{
+		"Size":  types.Integer(1_000_000),
+		"Index": types.Array{types.Integer(0), types.Integer(4)},
+		"W":     types.Array{types.Integer(1), types.Integer(1), types.Integer(1)},
+	}}
+	limits := DefaultResourceLimits()
+	limits.MaxObjectCount = 1_000_000
+	limits.MaxXRefEntries = 4
+
+	for _, tt := range []struct {
+		name  string
+		parse func(*types.StreamDict, ResourceLimits) (*types.XRefStreamDict, error)
+	}{
+		{"strict", ParseXRefStreamDictWithLimits},
+		{"relaxed", ParseXRefStreamDictRelaxedWithLimits},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			xsd, err := tt.parse(&sd, limits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(xsd.Objects) != 4 || cap(xsd.Objects) != 4 {
+				t.Fatalf("got xref object length %d and capacity %d, want 4 and 4", len(xsd.Objects), cap(xsd.Objects))
+			}
+		})
+	}
+}
+
+// TestParseXRefStreamDictRepairsIndexSizeMismatch verifies relaxed parsing repairs
+// an undersized Size entry without weakening strict parsing or resource limits.
+func TestParseXRefStreamDictRepairsIndexSizeMismatch(t *testing.T) {
+	sd := types.StreamDict{
+		Dict: types.Dict{
+			"Size":  types.Integer(6),
+			"Index": types.Array{types.Integer(0), types.Integer(7)},
+			"W":     types.Array{types.Integer(1), types.Integer(1), types.Integer(1)},
+		},
+	}
+
+	limits := DefaultResourceLimits()
+	if _, err := ParseXRefStreamDictWithLimits(&sd, limits); !errors.Is(err, ErrXRefStreamIndexSizeMismatch) {
+		t.Fatalf("got %v, want ErrXRefStreamIndexSizeMismatch", err)
+	}
+
+	xsd, err := ParseXRefStreamDictRelaxedWithLimits(&sd, limits)
+	if err != nil {
+		t.Fatalf("parse relaxed xref stream dictionary: %v", err)
+	}
+	if xsd.Size != 7 || len(xsd.Objects) != 7 {
+		t.Fatalf("got size %d and %d objects, want 7 and 7", xsd.Size, len(xsd.Objects))
+	}
+
+	limits.MaxObjectCount = 6
+	if _, err := ParseXRefStreamDictRelaxedWithLimits(&sd, limits); err == nil {
+		t.Fatal("expected repaired Size to respect MaxObjectCount")
+	}
+}
+
+// TestObjectStreamDictRejectsLimits verifies object stream parsing enforces resource limits.
+func TestObjectStreamDictRejectsLimits(t *testing.T) {
+	sd := types.StreamDict{
+		Dict: types.Dict{
+			"Type":  types.Name("ObjStm"),
+			"N":     types.Integer(3),
+			"First": types.Integer(10),
+		},
+	}
+
+	_, err := ObjectStreamDictWithLimits(&sd, ResourceLimits{
+		MaxObjectStreamCount: 2,
+		MaxObjectStreamFirst: 20,
+	})
+	if err == nil || !strings.Contains(err.Error(), "N") {
+		t.Fatalf("got %v, want N limit error", err)
+	}
+
+	sd.Dict["N"] = types.Integer(2)
+	_, err = ObjectStreamDictWithLimits(&sd, ResourceLimits{
+		MaxObjectStreamCount: 2,
+		MaxObjectStreamFirst: 9,
+	})
+	if err == nil || !strings.Contains(err.Error(), "First") {
+		t.Fatalf("got %v, want First limit error", err)
+	}
+}
+
+func TestObjectStreamDictWithResolvedIntegersPreservesIndirectEntries(t *testing.T) {
+	nRef := *types.NewIndirectRef(7, 0)
+	firstRef := *types.NewIndirectRef(8, 0)
+	sd := types.StreamDict{Dict: types.Dict{
+		"Type":  types.Name("ObjStm"),
+		"N":     nRef,
+		"First": firstRef,
+	}}
+	n := types.Integer(3)
+	first := types.Integer(12)
+
+	osd, err := ObjectStreamDictWithResolvedIntegers(&sd, DefaultResourceLimits(), &n, &first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if osd.ObjCount != 3 || osd.FirstObjOffset != 12 {
+		t.Fatalf("got N=%d First=%d, want N=3 First=12", osd.ObjCount, osd.FirstObjOffset)
+	}
+	if sd.Dict["N"] != nRef || sd.Dict["First"] != firstRef {
+		t.Fatalf("object stream dictionary was normalized in place: %v", sd.Dict)
+	}
+}
+
+// TestDecodeNameHexValid verifies valid name hex escapes are decoded.
+func TestDecodeNameHexValid(t *testing.T) {
+	testcases := []struct {
+		Input    string
+		Expected string
+	}{
+		{"", ""},
+		{"Foo", "Foo"},
+		{"A#23", "A#"},
+		// Examples from "7.3.5 Name Objects"
+		{"Name1", "Name1"},
+		{"ASomewhatLongerName", "ASomewhatLongerName"},
+		{"A;Name_With-Various***Characters?", "A;Name_With-Various***Characters?"},
+		{"1.2", "1.2"},
+		{"$$", "$$"},
+		{"@pattern", "@pattern"},
+		{".notdef", ".notdef"},
+		{"Lime#20Green", "Lime Green"},
+		{"paired#28#29parentheses", "paired()parentheses"},
+		{"The_Key_of_F#23_Minor", "The_Key_of_F#_Minor"},
+		{"A#42", "AB"},
+	}
+	for _, tc := range testcases {
+		decoded, err := decodeNameHexSequence(tc.Input)
+		if err != nil {
+			t.Errorf("decoding %s failed: %s", tc.Input, err)
+		} else if decoded != tc.Expected {
+			t.Errorf("expected %s when decoding %s, got %s", tc.Expected, tc.Input, decoded)
+		}
+	}
+}
+
+// TestDetectNonEscaped verifies detection of non-escaped delimiters.
+func TestDetectNonEscaped(t *testing.T) {
+	testcases := []struct {
+		input string
+		want  int
+	}{
+		{"", -1},
+		{" ( ", 1},
+		{" \\( )", -1},
+		{"\\(", -1},
+		{"   \\(   ", -1},
+		{"\\()(", 3},
+		{" \\(\\((abc)", 5},
+	}
+	for _, tc := range testcases {
+		got := detectNonEscaped(tc.input, "(")
+		if tc.want != got {
+			t.Errorf("%s, want: %d, got: %d", tc.input, tc.want, got)
+		}
+	}
+}
+
+// TestDetectKeywords verifies keyword detection.
+func TestDetectKeywords(t *testing.T) {
+	msg := "detectKeywords"
+
+	// process: # gen obj ... obj dict ... {stream ... data ... endstream} endobj
+	//                                    streamInd                        endInd
+	//                                  -1 if absent                    -1 if absent
+
+	//s := "5 0 obj\n<</Title (xxxxendobjxxxxx)\n/Parent 4 0 R\n/Dest [3 0 R /XYZ 0 738 0]>>\nendobj\n" //78
+
+	s := "1 0 obj\n<<\n /Lang (en-endobject-stream-UK%)  % comment \n>>\nendobj\n\n2 0 obj\n"
+	//    0....... ..1 .........2.........3.........4.........5..... ... .6
+	endInd, _, err := DetectKeywords(t.Context(), s)
+	if err != nil {
+		t.Errorf("%s failed: %v", msg, err)
+	}
+	if endInd != 59 {
+		t.Errorf("%s failed: want %d, got %d", msg, 59, endInd)
+	}
+
+	// negative test
+	s = "1 0 obj\n<<\n /Lang (en-endobject-stream-UK%)  % endobject"
+	endInd, _, err = DetectKeywords(t.Context(), s)
+	if err != nil {
+		t.Errorf("%s failed: %v", msg, err)
+	}
+	if endInd > 0 {
+		t.Errorf("%s failed: want %d, got %d", msg, 0, endInd)
+	}
+
+}

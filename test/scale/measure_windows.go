@@ -42,7 +42,7 @@ var errProcessWait = errors.New("unexpected process wait result")
 
 // startProcess starts the command. Windows has no descriptor limit to impose, so the limit is ignored
 // and handle counts are only sampled.
-func startProcess(command *exec.Cmd, _ uint64) error {
+func startProcess(command *exec.Cmd) error {
 	err := command.Start()
 	if err != nil {
 		return fmt.Errorf("launch process: %w", err)
@@ -51,7 +51,7 @@ func startProcess(command *exec.Cmd, _ uint64) error {
 	return nil
 }
 
-func prepareProcessSampler() (*processSampler, error) { return &processSampler{}, nil }
+func prepareProcessSampler(_ context.Context) (*processSampler, error) { return &processSampler{}, nil }
 
 // The exec.Process still owns the process object while this extra synchronized query handle is acquired.
 func (s *processSampler) attach(_ context.Context, pid int) error {
@@ -193,3 +193,5 @@ func peakResidentBytes(_ *os.ProcessState, sampled int64) int64 {
 }
 
 func (*processSampler) retryEvidence() ObserverRetryEvidence { return ObserverRetryEvidence{} }
+
+func (*processSampler) collectorIdentity() *DescriptorCollectorIdentity { return nil }

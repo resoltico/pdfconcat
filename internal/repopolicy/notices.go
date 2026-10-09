@@ -61,7 +61,7 @@ func LinkedModules(ctx context.Context, root, ownModule string) ([]LinkedModule,
 		format := "{{with .Module}}{{.Path}} {{.Version}} {{.Dir}}{{end}}"
 		command := exec.CommandContext(ctx, "go", "list", "-deps", "-f", format, "./cmd/pdfconcat")
 		command.Dir = root
-		command.Env = append(command.Environ(), "GOOS="+goos, "GOFLAGS=-mod=readonly")
+		command.Env = append(command.Environ(), "GOOS="+goos, "GOFLAGS=-mod=readonly", "GOWORK=off")
 
 		output, err := command.Output()
 		if err != nil {
@@ -137,7 +137,7 @@ func noticeProblems(tree *os.Root, goroot string, modules []LinkedModule) ([]str
 		return nil, fmt.Errorf("read notices: %w", err)
 	}
 
-	goMod, err := tree.ReadFile("go.mod")
+	goMod, err := tree.ReadFile(goModuleFile)
 	if err != nil {
 		return nil, fmt.Errorf("read go.mod: %w", err)
 	}

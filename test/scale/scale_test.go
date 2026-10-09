@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,36 +28,39 @@ import (
 type (
 	// result is one row of the acceptance output.
 	result struct {
-		ExitObserverRetries       scale.ObserverRetryEvidence `json:"exit_observer_retries,omitzero"`
-		DescriptorState           string                      `json:"descriptor_state"`
-		Outcome                   string                      `json:"outcome"`
-		Case                      string                      `json:"case"`
-		RSSState                  string                      `json:"rss_state"`
-		Input                     string                      `json:"input"`
-		Environment               string                      `json:"environment"`
-		ReadingFailures           []scale.ReadingFailure      `json:"reading_failures,omitempty"`
-		DescriptorTerminalSamples int64                       `json:"descriptor_terminal_samples"`
-		TerminalSamples           int64                       `json:"terminal_samples"`
-		PeakRSSMiB                float64                     `json:"peak_rss_mib"`
-		StdoutBytes               int                         `json:"stdout_bytes"`
-		MaxDescriptors            int64                       `json:"max_descriptors"`
-		FixtureSeconds            float64                     `json:"fixture_s"`
-		OutputObjects             int                         `json:"output_objects"`
-		WallSeconds               float64                     `json:"wall_s"`
-		ExitCode                  int                         `json:"exit_code"`
-		InputMiB                  float64                     `json:"input_mib"`
-		ScratchPeakMiB            float64                     `json:"scratch_peak_mib"`
-		PlanMiB                   float64                     `json:"plan_mib"`
-		StderrBytes               int                         `json:"stderr_bytes"`
-		OutputMiB                 float64                     `json:"output_mib"`
-		VerifySeconds             float64                     `json:"verify_s"`
-		DescriptorLimit           uint64                      `json:"descriptor_limit,omitempty"`
-		SourceFiles               int                         `json:"source_files"`
-		Pages                     int                         `json:"pages"`
-		DescriptorSamples         int64                       `json:"descriptor_samples"`
-		SampleAttempts            int64                       `json:"sample_attempts"`
-		DescriptorCoverage        float64                     `json:"descriptor_coverage"`
-		Gated                     bool                        `json:"gated"`
+		DescriptorCollector       *scale.DescriptorCollectorIdentity `json:"descriptor_collector,omitempty"`
+		DescriptorCeiling         *scale.DescriptorCeiling           `json:"descriptor_ceiling,omitempty"`
+		DescriptorResourceState   string                             `json:"descriptor_resource_state"`
+		ExitObserverRetries       scale.ObserverRetryEvidence        `json:"exit_observer_retries,omitzero"`
+		DescriptorState           string                             `json:"descriptor_state"`
+		Outcome                   string                             `json:"outcome"`
+		Case                      string                             `json:"case"`
+		RSSState                  string                             `json:"rss_state"`
+		Input                     string                             `json:"input"`
+		Environment               string                             `json:"environment"`
+		ReadingFailures           []scale.ReadingFailure             `json:"reading_failures,omitempty"`
+		DescriptorTerminalSamples int64                              `json:"descriptor_terminal_samples"`
+		TerminalSamples           int64                              `json:"terminal_samples"`
+		PeakRSSMiB                float64                            `json:"peak_rss_mib"`
+		StdoutBytes               int                                `json:"stdout_bytes"`
+		MaxDescriptors            int64                              `json:"max_descriptors"`
+		FixtureSeconds            float64                            `json:"fixture_s"`
+		OutputObjects             int                                `json:"output_objects"`
+		WallSeconds               float64                            `json:"wall_s"`
+		ExitCode                  int                                `json:"exit_code"`
+		InputMiB                  float64                            `json:"input_mib"`
+		ScratchPeakMiB            float64                            `json:"scratch_peak_mib"`
+		PlanMiB                   float64                            `json:"plan_mib"`
+		StderrBytes               int                                `json:"stderr_bytes"`
+		OutputMiB                 float64                            `json:"output_mib"`
+		VerifySeconds             float64                            `json:"verify_s"`
+		DescriptorLimit           uint64                             `json:"descriptor_limit,omitempty"`
+		SourceFiles               int                                `json:"source_files"`
+		Pages                     int                                `json:"pages"`
+		DescriptorSamples         int64                              `json:"descriptor_samples"`
+		SampleAttempts            int64                              `json:"sample_attempts"`
+		DescriptorCoverage        float64                            `json:"descriptor_coverage"`
+		Gated                     bool                               `json:"gated"`
 	}
 
 	// acceptanceCase is one executable run on one workload.
@@ -78,6 +80,9 @@ type (
 )
 
 const (
+	nativeWindowsPlatform = "windows"
+	validMeasurementState = "valid"
+
 	// Environment variables of the acceptance test.
 	envScale   = "PDFCONCAT_SCALE"
 	envResults = "PDFCONCAT_SCALE_RESULTS"
@@ -273,6 +278,14 @@ func verifyCase(t *testing.T, tools pdforacle.Tools, dir string, workload *scale
 	}
 
 	row.Outcome = "verified"
+	if row.DescriptorResourceState == "verified_ceiling_unavailable_observations" {
+		row.Outcome = "verification_passed_descriptor_observations_unavailable"
+	}
+
+	if row.DescriptorResourceState == "verified_ceiling_partial_observations" {
+		row.Outcome = "verified_with_partial_descriptor_observations"
+	}
+
 	if !reportPresent || verification.Pages != workload.Pages || len(verification.Findings) != 0 {
 		row.Outcome = "verification_failed"
 	}
@@ -339,6 +352,9 @@ func newRow(tc *acceptanceCase, workload *scale.Workload, measured *scale.Measur
 	}
 
 	return result{
+		DescriptorCollector:       measured.DescriptorCollector,
+		DescriptorCeiling:         measured.DescriptorCeiling,
+		DescriptorResourceState:   descriptorResourceState(measured),
 		ExitObserverRetries:       measured.ObserverRetries,
 		ReadingFailures:           measured.ReadingFailures,
 		TerminalSamples:           measured.TerminalSamples,
@@ -381,6 +397,10 @@ func checkGates(t *testing.T, name string, measured *scale.Measurement) {
 
 	if measured.PeakRSSBytes > gateRSSBytes {
 		t.Errorf("%s: peak RSS %.0f MiB exceeds the %d MiB budget", name, mib(measured.PeakRSSBytes), gateRSSBytes>>20)
+	}
+
+	if runtime.GOOS != nativeWindowsPlatform && !measured.DescriptorBoundVerified() {
+		t.Errorf("%s: required native descriptor ceiling was not proved", name)
 	}
 
 	if measured.MaxDescriptors > gateDescriptors {
@@ -449,6 +469,8 @@ func runHelper(mode string) int {
 		return allocateHelper()
 	case "open-many":
 		return openManyHelper()
+	case "descriptor-facts":
+		return descriptorFactsHelper()
 	default:
 		return helperExitUnknownMode
 	}
@@ -505,15 +527,18 @@ func allocateHelper() int {
 	return helperExitAllocated
 }
 
-// openManyHelper opens the executable repeatedly and exits 7 when an open fails, as it does under a
-// descriptor limit.
+// openManyHelper holds real files and reports the specific descriptor-limit failure separately.
 func openManyHelper() int {
 	files := make([]*os.File, 0, helperOpenAttempts)
 
 	for range helperOpenAttempts {
 		file, openErr := os.Open(os.DevNull)
 		if openErr != nil {
-			return helperExitLimitHit
+			if descriptorLimitError(openErr) {
+				return helperExitLimitHit
+			}
+
+			return helperExitOpenFailed
 		}
 
 		files = append(files, file)
@@ -625,17 +650,15 @@ func TestMeasureReportsProcessCosts(t *testing.T) {
 		t.Errorf("scratch peak %d bytes, want at least 3 MiB", measured.PeakScratchBytes)
 	}
 
-	if _, lsofErr := exec.LookPath("lsof"); runtime.GOOS == "linux" || runtime.GOOS == "windows" || lsofErr == nil {
-		if measured.MaxDescriptors < 10 {
-			t.Errorf("sampled %d descriptors, the child held at least 10", measured.MaxDescriptors)
-		}
+	if measured.MaxDescriptors < 10 {
+		t.Errorf("sampled %d descriptors, the child held at least 10", measured.MaxDescriptors)
 	}
 }
 
 func TestMeasureEnforcesDescriptorLimit(t *testing.T) {
 	t.Parallel()
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == nativeWindowsPlatform {
 		t.Skip("Windows has no descriptor limit to impose; handles are only sampled")
 	}
 
@@ -845,7 +868,7 @@ func assembleWorkload(t *testing.T, dir string, count int) string {
 	for index := range count {
 		path := filepath.Join(dir, "src", fmt.Sprintf("s%05d.pdf", index))
 
-		info, inspectErr := engine.Inspect(t.Context(), path)
+		info, inspectErr := engine.Inspect(t.Context(), path, nil)
 		if inspectErr != nil {
 			t.Fatal(inspectErr)
 		}
@@ -865,7 +888,7 @@ func assembleWorkload(t *testing.T, dir string, count int) string {
 func checkMeasurements(t *testing.T, name string, measured *scale.Measurement) {
 	t.Helper()
 
-	if measured.RSSState != "valid" || measured.DescriptorState != "valid" {
+	if measured.RSSState != validMeasurementState || !descriptorObservationAcceptable(measured) {
 		t.Errorf(
 			"%s: required measurements invalid: RSS=%s descriptors=%s (%d/%d samples)",
 			name,
@@ -875,6 +898,34 @@ func checkMeasurements(t *testing.T, name string, measured *scale.Measurement) {
 			measured.SampleAttempts,
 		)
 	}
+}
+
+func descriptorObservationAcceptable(measured *scale.Measurement) bool {
+	if measured.DescriptorCeiling == nil {
+		return measured.DescriptorState == validMeasurementState
+	}
+
+	return measured.DescriptorBoundVerified() && measured.DescriptorSamples > 0
+}
+
+func descriptorResourceState(measured *scale.Measurement) string {
+	if measured.DescriptorCeiling == nil {
+		return "sampled_only"
+	}
+
+	if !measured.DescriptorBoundVerified() {
+		return "ceiling_unverified"
+	}
+
+	if measured.DescriptorSamples == 0 {
+		return "verified_ceiling_unavailable_observations"
+	}
+
+	if measured.DescriptorState != validMeasurementState {
+		return "verified_ceiling_partial_observations"
+	}
+
+	return "verified_ceiling_valid_observations"
 }
 
 func TestMeasuredRowPlanBytesMatchActualStagedInstructions(t *testing.T) {

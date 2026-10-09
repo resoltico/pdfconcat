@@ -71,6 +71,10 @@ linters:
             - github.com/pdfcpu/pdfcpu
             - github.com/benoitkugler/pdf/fonts/glyphsnames$
             - github.com/benoitkugler/pdf/fonts/simpleencodings$
+            - github.com/benoitkugler/pdf/fonts/standardfonts$
+            - github.com/benoitkugler/pdf/contentstream$
+            - github.com/benoitkugler/pdf/reader/parser$
+            - github.com/benoitkugler/pstokenizer$
             - github.com/go-text/typesetting
             - github.com/santhosh-tekuri/jsonschema/v6
             - go.yaml.in/yaml/v3
@@ -92,6 +96,32 @@ linters:
         # Independent _test.go internal imports are deliberately unrestricted; the $all external
         # allowlist and library ownership checks still apply. Non-test support files are classified
         # explicitly below, and runtime owners cannot import them.
+        production-observation:
+          list-mode: lax
+          files:
+            - "**/internal/observation/*.go"
+            - "!$test"
+          deny:
+            - pkg: encoding/json
+              desc: observation milestones have no JSON presentation
+            - pkg: io
+              desc: observation milestones have no stream ownership
+            - pkg: time
+              desc: observation consumers own clocks and scheduling
+            - pkg: github.com/resoltico/pdfconcat
+              desc: observation milestones have no internal dependencies
+            - pkg: os
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: syscall
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: net
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: log
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: io/ioutil
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
+            - pkg: plugin
+              desc: computational packages receive values and abstract I/O, not process or filesystem state
         production-assembly:
           list-mode: lax
           files:
@@ -168,6 +198,7 @@ linters:
             - "**/internal/layout/*.go"
             - "!$test"
           allow:
+            - github.com/resoltico/pdfconcat/internal/observation$
             - github.com/resoltico/pdfconcat/internal/assembly$
             - github.com/resoltico/pdfconcat/internal/typeset$
           deny:
@@ -213,6 +244,7 @@ linters:
             - "**/internal/pdfengine/*.go"
             - "!$test"
           allow:
+            - github.com/resoltico/pdfconcat/internal/observation$
             - github.com/resoltico/pdfconcat/internal/capture$
           deny:
             - pkg: github.com/resoltico/pdfconcat
@@ -278,6 +310,7 @@ linters:
             - "**/internal/app/*.go"
             - "!$test"
           allow:
+            - github.com/resoltico/pdfconcat/internal/observation$
             - github.com/resoltico/pdfconcat/internal/assembly$
             - github.com/resoltico/pdfconcat/internal/capture$
             - github.com/resoltico/pdfconcat/internal/cli$
@@ -297,11 +330,20 @@ linters:
             - "**/cmd/pdfconcat/*.go"
             - "!$test"
           allow:
+            - github.com/resoltico/pdfconcat/internal/cli$
             - github.com/resoltico/pdfconcat/internal/app$
             - github.com/resoltico/pdfconcat/internal/pdfengine$
           deny:
             - pkg: github.com/resoltico/pdfconcat
               desc: internal imports must follow this production owner
+        test-support-progress-native:
+          list-mode: lax
+          files:
+            - "**/internal/progressnativefixture/*.go"
+            - "!$test"
+          deny:
+            - pkg: github.com/resoltico/pdfconcat
+              desc: native progress fault fixtures have no project runtime dependencies
         production-support:
           list-mode: lax
           files:
@@ -394,8 +436,10 @@ linters:
           deny:
             - pkg: github.com/pdfcpu/pdfcpu
               desc: pdfcpu may only be imported by internal/pdfengine
-            - pkg: github.com/benoitkugler/pdf/fonts
-              desc: PDF glyph encoding tables belong to internal/pdfengine
+            - pkg: github.com/benoitkugler/pdf
+              desc: maintained PDF content parsing and encoding tables belong to internal/pdfengine
+            - pkg: github.com/benoitkugler/pstokenizer
+              desc: maintained PDF tokenization belongs to internal/pdfengine
         typesetting-boundary:
           # Text shaping is internal/typeset's concern; other packages use its API.
           list-mode: lax
@@ -646,6 +690,251 @@ linters:
     rules:
       - linters:
           - gosec
+        path: ^test/scale/measure_setup_darwin_internal_test\.go$
+        source: fixture, err := startOwnedCollectorProcess\(t, exec\.CommandContext\(ctx, executable\)\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^test/scale/measure_zero_darwin_internal_test\.go$
+        source: fixture := ownCollectorProcess\(t, exec\.CommandContext\(ctx, binary\)\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_join_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressJoinSelector, progressNativeVerbose\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_protection_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressProtectionSelector, progressVerboseHelperArgument\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - paralleltest
+        path: ^cmd/pdfconcat/progress_transport_protection_darwin_test\.go$
+        source: func TestProgressNativeProtectionHelper\(t \*testing\.T\) \{
+        text: Function TestProgressNativeProtectionHelper missing the call to method parallel
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_linux_failure_test\.go$
+        source: command := exec\.CommandContext\(
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_phase_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressPhaseSelector, progressNativeVerbose\)\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_relocation_boundary_unix_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressRelocationSelector, progressVerboseHelperArgument\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - paralleltest
+        path: ^cmd/pdfconcat/progress_relocation_boundary_unix_test\.go$
+        source: func TestProgressRelocationBoundaryHelper\(t \*testing\.T\) \{
+        text: Function TestProgressRelocationBoundaryHelper missing the call to method parallel
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_zero_policy_linux_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressZeroSelector, progressVerboseHelperArgument\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_zero_policy_linux_test\.go$
+        source: '\{Code: unix\.BPF_JMP \| unix\.BPF_JEQ \| unix\.BPF_K, K: uint32\(owned\), Jf: 1\},'
+        text: 'G115: integer overflow conversion int -> uint32'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_producer_windows_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressProducerSelector, "-test\.v"\)\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - forbidigo
+        path: ^cmd/pdfconcat/progress_producer_windows_test\.go$
+        source: source := os\.Stderr
+        text: use of `os\.Stderr` forbidden
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_pipe_windows\.go$
+        source: queryErr := windows\.NtQueryInformationFile\(handle, &status, \(\*byte\)\(unsafe\.Pointer\(&mode\)\), fileModeBytes, fileModeInformation\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_pipe_windows\.go$
+        source: returned, _, _ := query\.Call\(uintptr\(handle\), uintptr\(unsafe\.Pointer\(&status\)\), uintptr\(unsafe\.Pointer\(&device\)\),
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - errcheck
+        path: ^cmd/pdfconcat/progress_pipe_windows\.go$
+        source: returned, _, _ := query\.Call\(uintptr\(handle\), uintptr\(unsafe\.Pointer\(&status\)\), uintptr\(unsafe\.Pointer\(&device\)\),
+        text: Error return value of `query\.Call` is not checked
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_pipe_windows\.go$
+        source: code := windows\.NTStatus\(returned\)
+        text: 'G115: integer overflow conversion uintptr -> uint32'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_seccomp_linux_test\.go$
+        source: _, _, errno := unix\.Syscall6\(unix\.SYS_PRCTL, unix\.PR_SET_SECCOMP, unix\.SECCOMP_MODE_FILTER, uintptr\(unsafe\.Pointer\(&program\)\), 0, 0, 0\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_close_policy_linux_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressClosePolicySelector, progressVerboseHelperArgument\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_sandbox_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressSandboxSelector, progressNativeVerbose\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_signal_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressSignalSelector, progressNativeVerbose, "-test\.gocoverdir="\+directory\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_signal_coverage_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, tool, "version"\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_signal_coverage_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, tool, "tool", "covdata", "textfmt", "-i="\+directory, "-o="\+profile\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - usetesting
+        path: ^cmd/pdfconcat/progress_transport_signal_coverage_darwin_test\.go$
+        source: directory, err := os\.MkdirTemp\(root, "native-signal-"\+scenario\+"-"\)
+        text: os\.MkdirTemp\(\) could be replaced by t\.TempDir\(\) in progressSignalCoverDirectory
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_poll_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressPollLimitSelector, progressNativeVerbose\)\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^test/scale/descriptor_identity_darwin\.go$
+        source: return uint64\(stat\.Dev\)
+        text: 'G115: integer overflow conversion int32 -> uint64'
+      - linters:
+          - forbidigo
+        path: ^test/scale/descriptor_launch_unix_internal_test\.go$
+        source: input := bufio\.NewReader\(os\.Stdin\)
+        text: use of `os\.Stdin` forbidden
+      - linters:
+          - forbidigo
+        path: ^test/scale/descriptor_launch_unix_internal_test\.go$
+        source: if _, err = fmt\.Fprintln\(os\.Stderr, "stderr after exec"\); err != nil \{
+        text: use of `os\.Stderr` forbidden
+      - linters:
+          - forbidigo
+        path: ^test/scale/descriptor_launch_unix_internal_test\.go$
+        source: if _, err = fmt\.Fprintln\(os\.Stdout, "alive after exec"\); err != nil \{
+        text: use of `os\.Stdout` forbidden
+      - linters:
+          - containedctx
+        path: ^internal/pdfengine/context_checkpoint_internal_test\.go$
+        source: context\.Context
+        text: found a struct that contains a context\.Context field
+      - linters:
+          - wrapcheck
+        path: ^internal/pdfengine/context_checkpoint_internal_test\.go$
+        source: return c\.Context\.Err\(\)
+        text: 'error returned from interface method should be wrapped: sig: func \(context\.Context\)\.Err\(\) error'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_pty_darwin_test\.go$
+        source: err := unix\.IoctlSetInt\(master, unix\.TIOCPTYGNAME, int\(uintptr\(unsafe\.Pointer\(&name\[0\]\)\)\)\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_limits_darwin_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressDescriptorLimitSelector, "-test\.v"\)\.\.\.\)
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_owner_boundary_unix_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\("-test\.run=\^TestProgressIdleDescriptorCloseFaultHelper\$"\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_owner_boundary_unix_test\.go$
+        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\("-test\.run=\^TestProgressClosedCallerStderrHelper\$"\)\.\.\.\)
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_standard_unix_test\.go$
+        source: command := exec\.CommandContext\(
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_pause_windows_test\.go$
+        source: command := exec\.CommandContext\(
+        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      - linters:
+          - errchkjson
+        path: ^internal/app/progress_render\.go$
+        source: encoded, _ := json\.Marshal\(record\)
+        text: Error return value of `encoding/json\.Marshal` is not checked
+      - linters:
+          - paralleltest
+        path: ^tools/qualitygate/foreign_constructor_cleanup_internal_test\.go$
+        source: func TestForeignConstructorLateFailureNeverHandsOffOwnedStage\(t \*testing\.T\) \{
+        text: Function TestForeignConstructorLateFailureNeverHandsOffOwnedStage missing the call to method parallel
+      - linters:
+          - errcheck
+        path: ^internal/app/progress_render\.go$
+        source: encoded, _ := json\.Marshal\(record\)
+        text: Error return value of `json\.Marshal` is not checked
+      - linters:
+          - gochecknoglobals
+        path: ^internal/repopolicy/foreign_tree\.go$
+        source: ^var foreignReconstructions =
+        text: foreignReconstructions is a global variable
+      - linters:
+          - gomoddirectives
+        path: ^go\.mod$
+        source: ^replace github\.com/pdfcpu/pdfcpu => \./third_party/pdfcpu/pdfcpu$
+        text: 'local replacement are not allowed: github\.com/pdfcpu/pdfcpu'
+      - linters:
+          - gomoddirectives
+        path: ^go\.mod$
+        source: ^replace github\.com/benoitkugler/pdf => \./third_party/benoitkugler/pdf$
+        text: 'local replacement are not allowed: github\.com/benoitkugler/pdf'
+      - linters:
+          - gomoddirectives
+        path: ^go\.mod$
+        source: ^replace github\.com/benoitkugler/pstokenizer => \./third_party/benoitkugler/pstokenizer$
+        text: 'local replacement are not allowed: github\.com/benoitkugler/pstokenizer'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_windows\.go$
+        source: requested := uint32\(len\(units\)\)
+        text: 'G115: integer overflow conversion int -> uint32'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_darwin\.go$
+        source: unix\.FcntlInt\(descriptor, unix\.F_GETPATH, int\(uintptr\(unsafe\.Pointer\(&path\[0\]\)\)\)\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_console_windows_test\.go$
+        source: uintptr\(handle\), uintptr\(unsafe\.Pointer\(&units\[0\]\)\), uintptr\(len\(units\)\), 0, uintptr\(unsafe\.Pointer\(&count\)\),
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_pause_fixture_windows_test\.go$
+        source: input\.Fd\(\), uintptr\(unsafe\.Pointer\(&record\)\), 1, uintptr\(unsafe\.Pointer\(&count\)\),
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_pause_native_windows_test\.go$
+        source: queried, _, queryErr := procedure\.Call\(uintptr\(thread\), uintptr\(unsafe\.Pointer\(&pending\)\)\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
         path: ^tools/qualitygate/process\.go$
         source: exec\.CommandContext\(ctx, c\.name, c\.args\.\.\.\)
         text: 'G204: Subprocess launched with a potential tainted input'
@@ -743,46 +1032,6 @@ linters:
         path: ^internal/report/query\.go$
         source: TextDetail struct \{
         text: 'fieldalignment: TextDetail has 200 leading bytes of pointer data but optimal value is 160'
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: background\s+string
-        text: field background is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: size\s+PageSize
-        text: field size is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: bounds, inkBounds Rect
-        text: field bounds is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: bounds, inkBounds Rect
-        text: field inkBounds is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: hasBounds, hasInk bool
-        text: field hasBounds is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: hasBounds, hasInk bool
-        text: field hasInk is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: hasText\s+bool
-        text: field hasText is unused
-      - linters:
-          - unused
-        path: ^internal/report/builder\.go$
-        source: font\s+int
-        text: field font is unused
       - linters:
           - depguard
         path: ^internal/genpage/ink_test\.go$
@@ -918,11 +1167,6 @@ linters:
         path: ^cmd/pdfconcat/progress_windows_internal_test\.go$
         source: func TestProgressUsesWindowsConsoleAndRejectsPipe\(t \*testing\.T\) \{
         text: Function TestProgressUsesWindowsConsoleAndRejectsPipe missing the call to method parallel
-      - linters:
-          - forbidigo
-        path: ^cmd/pdfconcat/progress_windows_internal_test\.go$
-        source: os\.Stderr
-        text: use of `os\.Stderr` forbidden because "process streams are wired in cmd/pdfconcat and injected"
       - linters:
           - gosec
         path: ^tools/qualitygate/process_fuzz\.go$

@@ -5,6 +5,7 @@ package app_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
@@ -87,5 +88,45 @@ func TestSourceWarningsRemainCapturedWhenAnotherInputFails(t *testing.T) {
 	saved := decodedInventoryReport(t, dir)
 	if saved.WarningCount != 1 || saved.ErrorCount != 1 {
 		t.Fatalf("mixed captured facts %+v", saved.Diagnostics)
+	}
+}
+
+func TestURIBaseWarningAggregatesRepeatedLinksAndSurvivesSavedQueries(t *testing.T) {
+	t.Parallel()
+
+	dir := workDir(t)
+
+	doc := pdffixture.URILink("relative URI", "annex.pdf", "https://example.invalid/report/", true)
+	if err := doc.WriteFile(filepath.Join(dir, sourceA)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, command := range []string{commandCheck, commandBuild} {
+		result := execute(t.Context(), t, nativeInventoryApp(), dir, command, outputFlag, "uri.pdf",
+			sourceA, sourceA, reportFlag, reportFile, overwriteFlag)
+		result.requireCode(t, 0, "")
+
+		saved := decodedInventoryReport(t, dir)
+		if saved.WarningCount != 1 || len(saved.Diagnostics) != 1 {
+			t.Fatalf("duplicated URI effect: %+v", saved.Diagnostics)
+		}
+
+		warning := saved.Diagnostics[0]
+
+		context := "predicted"
+		if command == commandBuild {
+			context = "committed"
+		}
+
+		if warning.Code != "source_uri_base_removed" || warning.ConsequenceContext != context || len(warning.Consumers) != 2 {
+			t.Fatalf("URI effect/provenance: %+v", warning)
+		}
+
+		query := execute(t.Context(), t, nativeInventoryApp(), dir, "report", reportFile, "--view=diagnostics", "--details")
+		query.requireCode(t, 0, "")
+
+		if !strings.Contains(query.stdout, "source_uri_base_removed") {
+			t.Fatalf("saved query lost URI effect: %s", query.stdout)
+		}
 	}
 }

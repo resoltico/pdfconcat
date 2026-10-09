@@ -19,15 +19,20 @@ type processExitObserver struct {
 	attached  bool
 }
 
-const exitObservationErrorFormat = "observe owned process exit: %w"
+const (
+	exitObservationErrorFormat = "observe owned process exit: %w"
+	ownedExitProofBudget       = time.Second
+	exitEventWaitQuantum       = 10 * time.Millisecond
+)
 
 var (
-	errOwnedPID     = errors.New("owned process PID must be positive")
-	errExitObserver = errors.New("owned process exit observer unavailable")
+	errOwnedPID               = errors.New("owned process PID must be positive")
+	errExitObserver           = errors.New("owned process exit observer unavailable")
+	errOwnedExitProofDeadline = errors.New("owned process exit proof deadline exceeded")
 )
 
 // observeProcessExit runs before the command wait may reap this owned child. At this boundary its PID
-// cannot be reused; ESRCH from registration therefore means the child has already terminated.
+// cannot be reused; registration ESRCH means it is unobservable or exiting. Command.Wait independently proves completion.
 func observeProcessExit(ctx context.Context, pid int) (processExitObserver, error) {
 	if pid <= 0 {
 		return processExitObserver{}, fmt.Errorf("%w: %d", errOwnedPID, pid)
@@ -61,7 +66,7 @@ func observeProcessExit(ctx context.Context, pid int) (processExitObserver, erro
 
 	closeErr := observer.release()
 	if errors.Is(registerErr, unix.ESRCH) && ctx.Err() == nil && closeErr == nil {
-		observer.exitCause = "owned_exit_before_registration: ESRCH"
+		observer.exitCause = "owned_exit_unobservable_at_registration: ESRCH"
 		return observer, nil
 	}
 
@@ -82,6 +87,21 @@ func (o *processExitObserver) release() error {
 }
 
 func (o *processExitObserver) confirm(ctx context.Context, pid int) (string, bool, error) {
+	return o.readExitEvent(ctx, pid, time.Time{})
+}
+
+// awaitExitProof is used only after an actual native ESRCH, with one monotonic budget.
+func (o *processExitObserver) awaitExitProof(ctx context.Context, pid int) (string, bool, error) {
+	deadline := time.Now().Add(ownedExitProofBudget)
+	for {
+		proof, terminal, err := o.readExitEvent(ctx, pid, deadline)
+		if err != nil || terminal {
+			return proof, terminal, err
+		}
+	}
+}
+
+func (o *processExitObserver) readExitEvent(ctx context.Context, pid int, deadline time.Time) (string, bool, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return "owned_exit_observation_canceled", false, fmt.Errorf(exitObservationErrorFormat, ctxErr)
 	}
@@ -96,13 +116,28 @@ func (o *processExitObserver) confirm(ctx context.Context, pid int) (string, boo
 
 	events := make([]unix.Kevent_t, 1)
 
-	count, err := retryExitSyscall(ctx, &o.retries, func() (int, error) { return unix.Kevent(o.queue, nil, events, &unix.Timespec{}) })
-	if count > 0 && ownedExitEvent(events[0], pid) {
-		o.exitCause = "owned_NOTE_EXIT"
+	count, err := retryExitSyscall(ctx, &o.retries, func() (int, error) {
+		timeout, timeoutErr := exitEventTimeout(ctx, deadline)
+		if timeoutErr != nil {
+			return 0, timeoutErr
+		}
+
+		return unix.Kevent(o.queue, nil, events, &timeout)
+	})
+	if err != nil {
+		if errors.Is(err, errOwnedExitProofDeadline) {
+			return "owned_exit_proof_deadline", false, err
+		}
+
+		return "owned_exit_event_error", false, fmt.Errorf("read owned process exit queue: %w", err)
 	}
 
-	if err != nil {
-		return "owned_exit_event_error", false, fmt.Errorf("read owned process exit queue: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "owned_exit_observation_canceled", false, fmt.Errorf(exitObservationErrorFormat, ctxErr)
+	}
+
+	if _, deadlineErr := exitEventTimeout(ctx, deadline); deadlineErr != nil {
+		return "owned_exit_proof_deadline", false, deadlineErr
 	}
 
 	if count == 0 {
@@ -116,6 +151,24 @@ func (o *processExitObserver) confirm(ctx context.Context, pid int) (string, boo
 	o.exitCause = "owned_NOTE_EXIT"
 
 	return o.exitCause, true, nil
+}
+
+// Compute the remaining absolute budget for every syscall, including EINTR retries.
+func exitEventTimeout(ctx context.Context, deadline time.Time) (unix.Timespec, error) {
+	if deadline.IsZero() {
+		return unix.Timespec{}, nil
+	}
+
+	remaining := time.Until(deadline)
+	if parentDeadline, found := ctx.Deadline(); found {
+		remaining = min(remaining, time.Until(parentDeadline))
+	}
+
+	if remaining <= 0 {
+		return unix.Timespec{}, errOwnedExitProofDeadline
+	}
+
+	return unix.NsecToTimespec(min(remaining, exitEventWaitQuantum).Nanoseconds()), nil
 }
 
 func ownedExitEvent(event unix.Kevent_t, pid int) bool {

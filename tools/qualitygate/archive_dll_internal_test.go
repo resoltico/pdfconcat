@@ -8,6 +8,7 @@ import (
 	"debug/buildinfo"
 	"debug/pe"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -21,19 +22,7 @@ func TestArchiveRejectsRealWindowsBinaryWithDLLCharacteristic(t *testing.T) {
 		t.Fatal(rootErr)
 	}
 
-	dir := t.TempDir()
-	file := filepath.Join(dir, "pdfconcat.exe")
-	build := goCommand(root, goBuildVerb, "-trimpath", "-o", file, "./cmd/pdfconcat")
-
-	build.env = []string{"GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0"}
-	if _, err := build.output(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	data, readErr := readInRoot(dir, filepath.Base(file))
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
+	data := windowsHeaderExecutable(t, root)
 
 	before, beforeErr := buildinfo.Read(bytes.NewReader(data))
 	if beforeErr != nil {
@@ -66,4 +55,31 @@ func TestArchiveRejectsRealWindowsBinaryWithDLLCharacteristic(t *testing.T) {
 	if binaryHeaderMatches(windowsOS, amd64Arch, data) {
 		t.Fatal("DLL accepted as standalone Windows executable")
 	}
+}
+
+func windowsHeaderExecutable(t *testing.T, root string) []byte {
+	t.Helper()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "header-control.exe")
+	source := filepath.Join(dir, "header_control.go")
+
+	if err := os.WriteFile(source, []byte("package main\nfunc main() {}\n"), fileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	// This predicate checks PE kind and machine, independently of application behavior.
+	// Compile a real Go executable; release gates separately build the complete application.
+	build := goCommand(root, goBuildVerb, "-trimpath", "-o", file, source)
+
+	build.env = []string{"GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0"}
+	if _, err := build.output(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	data, readErr := readInRoot(dir, filepath.Base(file))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	return data
 }

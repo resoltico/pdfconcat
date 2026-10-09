@@ -452,7 +452,7 @@ func (e *Entry) lintProblems() []string {
 		problems = e.requireKind(KindFalsePositive, KindIntendedPattern)
 		problems = append(problems, e.fieldProblems(
 			[]string{fieldLinter, fieldPath, fieldMessage}, []string{fieldSource, fieldGOOS})...)
-		problems = append(problems, pathProblems(fieldPath, e.Path)...)
+		problems = append(problems, e.lintPathProblems()...)
 		problems = append(problems, regexProblems(fieldMessage, e.Message)...)
 		problems = append(problems, optionalRegexProblems(fieldSource, e.Source)...)
 		problems = append(problems, e.goosProblems()...)
@@ -462,6 +462,16 @@ func (e *Entry) lintProblems() []string {
 	}
 
 	return append(problems, e.premiseProblems()...)
+}
+
+func (e *Entry) lintPathProblems() []string {
+	// This linter reports the module file itself. Keep its foreign-source
+	// exceptions as exact as the Go-source diagnostic exclusions.
+	if e.Linter == "gomoddirectives" && e.Path == goModuleFile {
+		return nil
+	}
+
+	return pathProblems(fieldPath, e.Path)
 }
 
 func (e *Entry) settingItemProblems() []string {

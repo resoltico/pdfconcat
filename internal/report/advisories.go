@@ -82,8 +82,8 @@ func layoutWarnings(snapshot *Report) []Diagnostic {
 		warnings = append(warnings, Diagnostic{
 			Severity: SeverityWarning, Stage: Stage(phaseLayout), Code: "generated_text_overflow",
 			Location: location, Consumers: consumers[i],
-			Message: "Allowed text placement has measured overflow: " + text.Findings[0].Detail +
-				". Adjust anchor, offset, width, text or size, or retain this placement intentionally; inspect the style findings.",
+			Message: "Allowed text has measured overflow. Adjust placement or retain it intentionally. " + text.Findings[0].Detail +
+				". Inspect the style findings; adjust anchor, offset, width, text or size when revising placement.",
 			Recovery: &Recovery{Action: "edit_input", Location: location},
 		})
 	}

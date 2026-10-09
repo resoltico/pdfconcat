@@ -299,6 +299,14 @@ func MutationDiscoveryIssues(discovery, campaign *MutationReport, hostFiles map[
 	return problems
 }
 
+// MutationDiscoveryPreflightIssues rejects incomplete or out-of-scope discovery before any mutant executes.
+func MutationDiscoveryPreflightIssues(discovery *MutationReport, hostFiles map[string]bool) []string {
+	_, problems := discoveredMutations(discovery, hostFiles)
+	slices.Sort(problems)
+
+	return problems
+}
+
 func discoveredMutations(discovery *MutationReport, hostFiles map[string]bool) (map[Mutant]int, []string) {
 	expected := map[Mutant]int{}
 

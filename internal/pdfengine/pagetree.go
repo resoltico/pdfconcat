@@ -38,18 +38,25 @@ const (
 	maxPageTreeDepth = 64
 
 	// Dictionary keys the engine reads or keeps; Dests is both a catalog key and a /Names tree key.
-	keyResources = "Resources"
-	keyMediaBox  = "MediaBox"
-	keyCropBox   = "CropBox"
-	keyRotate    = "Rotate"
-	keyDests     = "Dests"
+	keyResources      = "Resources"
+	keyMediaBox       = "MediaBox"
+	keyCropBox        = "CropBox"
+	keyRotate         = "Rotate"
+	keyDests          = "Dests"
+	keyKids           = "Kids"
+	pageNodeLeaf      = "Page"
+	pageNodeBranch    = "Pages"
+	pageObjectFailure = "%w: object %d"
 )
 
 var (
-	errTreeTooDeep     = errors.New("page tree is nested too deeply")
-	errNodeRepeated    = errors.New("page tree node is reachable twice")
-	errNodeMissing     = errors.New("page tree node is missing")
-	errKidNotReference = errors.New("page tree node has a kid that is not an indirect reference")
+	errTreeTooDeep      = errors.New("page tree is nested too deeply")
+	errNodeRepeated     = errors.New("page tree node is reachable twice")
+	errNodeMissing      = errors.New("page tree node is missing")
+	errKidNotReference  = errors.New("page tree node has a kid that is not an indirect reference")
+	errPageNodeType     = errors.New("page tree node /Type must be /Page or /Pages")
+	errPageRootType     = errors.New("page tree root /Type must be /Pages")
+	errPageKidsRequired = errors.New("page tree /Pages node requires a nonnull /Kids array")
 )
 
 // override returns the attributes in effect below node.
@@ -106,7 +113,7 @@ func (w *pageWalker) walk(ctx context.Context, ref types.IndirectRef, inherited 
 
 	w.seen[number] = struct{}{}
 
-	node, err := w.pdf.DereferenceDict(ref)
+	node, err := w.pdf.DereferenceDictContext(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("page tree node %d: %w", number, err)
 	}
@@ -115,14 +122,50 @@ func (w *pageWalker) walk(ctx context.Context, ref types.IndirectRef, inherited 
 		return fmt.Errorf(causeNumberFormat, errNodeMissing, number)
 	}
 
-	kidsObject, isNode := node.Find("Kids")
-	if !isNode {
+	kind, err := w.nodeKind(ctx, node, number, depth)
+	if err != nil {
+		return err
+	}
+
+	if kind == pageNodeLeaf {
+		// Page is a leaf by its required type. An extra Kids key cannot hide its
+		// content or turn passive data into descendants that native readers ignore.
 		return w.visit(ref, node, inherited)
 	}
 
-	kids, err := w.pdf.DereferenceArray(kidsObject)
+	return w.walkKids(ctx, number, node, inherited, depth)
+}
+
+func (w *pageWalker) nodeKind(ctx context.Context, node types.Dict, number, depth int) (string, error) {
+	kind, _, err := w.pdf.DereferenceNameEntryContext(ctx, node, keyType)
+	if err != nil {
+		return "", fmt.Errorf("page tree node %d /Type: %w", number, err)
+	}
+
+	if kind == nil || *kind != pageNodeLeaf && *kind != pageNodeBranch {
+		return "", fmt.Errorf(pageObjectFailure, errPageNodeType, number)
+	}
+
+	if depth == 0 && *kind != pageNodeBranch {
+		return "", fmt.Errorf(pageObjectFailure, errPageRootType, number)
+	}
+
+	return kind.Value(), nil
+}
+
+func (w *pageWalker) walkKids(ctx context.Context, number int, node types.Dict, inherited inheritedAttrs, depth int) error {
+	kidsObject, found := node.Find(keyKids)
+	if !found || kidsObject == nil {
+		return fmt.Errorf(pageObjectFailure, errPageKidsRequired, number)
+	}
+
+	kids, err := w.pdf.DereferenceArrayContext(ctx, kidsObject)
 	if err != nil {
 		return fmt.Errorf("page tree node %d kids: %w", number, err)
+	}
+
+	if kids == nil {
+		return fmt.Errorf(pageObjectFailure, errPageKidsRequired, number)
 	}
 
 	below := inherited.override(node)

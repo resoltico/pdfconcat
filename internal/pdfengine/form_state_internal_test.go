@@ -240,14 +240,21 @@ func TestFormResourceShapesAndProcSetMerge(t *testing.T) {
 		keyExtGState: types.Dict{}, keyProperties: types.Dict{}, "XObject": types.StreamDict{},
 		"Pattern": types.Dict{}, "ColorSpace": types.Name("DeviceRGB"), keyEncoding: types.Dict{keyType: types.Name(keyEncoding)},
 	} {
-		if err := checkFormResource(fixture.pdf, category, object); err != nil {
+		if err := checkFormResource(t.Context(), fixture.pdf, category, object); err != nil {
 			t.Fatalf("supported %s resource refused: %v", category, err)
 		}
 	}
 
 	resources := types.Dict{keyProcSet: types.Array{types.Name(procedurePDF), types.Name(procedureText)}}
-	if err := mergeFormProcSet(fixture.pdf, resources, types.Array{types.Name(procedureText), types.Name("ImageB")}); err != nil {
-		t.Fatal(err)
+
+	mergeErr := mergeFormProcSet(
+		t.Context(),
+		fixture.pdf,
+		resources,
+		types.Array{types.Name(procedureText), types.Name("ImageB")},
+	)
+	if mergeErr != nil {
+		t.Fatal(mergeErr)
 	}
 
 	merged, err := fixture.pdf.DereferenceArray(resources[keyProcSet])
@@ -255,21 +262,27 @@ func TestFormResourceShapesAndProcSetMerge(t *testing.T) {
 		t.Fatalf("procedure names not merged: %v %v", merged, err)
 	}
 
-	if importErr := mergeFormProcSet(fixture.pdf, resources, types.Integer(1)); importErr == nil {
+	if importErr := mergeFormProcSet(t.Context(), fixture.pdf, resources, types.Integer(1)); importErr == nil {
 		t.Fatal("invalid imported ProcSet accepted")
 	}
 
-	if destinationErr := mergeFormProcSet(fixture.pdf, types.Dict{keyProcSet: types.Integer(1)}, types.Array{}); destinationErr == nil {
+	destinationErr := mergeFormProcSet(
+		t.Context(),
+		fixture.pdf,
+		types.Dict{keyProcSet: types.Integer(1)},
+		types.Array{},
+	)
+	if destinationErr == nil {
 		t.Fatal("invalid destination ProcSet accepted")
 	}
 
 	font := types.Dict{keyType: types.Name(keyFont)}
-	if fontErr := checkFormFont(fixture.pdf, font); fontErr == nil {
+	if fontErr := checkFormFont(t.Context(), fixture.pdf, font); fontErr == nil {
 		t.Fatal("font without subtype accepted")
 	}
 
 	font[keySubtype] = types.Integer(1)
-	if fontErr := checkFormFont(fixture.pdf, font); fontErr == nil {
+	if fontErr := checkFormFont(t.Context(), fixture.pdf, font); fontErr == nil {
 		t.Fatal("invalid font subtype accepted")
 	}
 }

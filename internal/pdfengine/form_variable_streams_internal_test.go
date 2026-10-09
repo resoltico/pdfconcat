@@ -56,7 +56,7 @@ func TestVariableStreamDiscardsWorkCanceledBeforeAllocation(t *testing.T) {
 			t.Parallel()
 			pdf := signatureTestContext(t)
 			size := *pdf.Size
-			ctx := &formCheckpointContext{}
+			ctx := newFormCheckpointContext(t.Context(), t)
 			ctx.remaining.Store(test.budget)
 
 			plan := &variableAppearancePlan{width: 100, height: 50, fontSize: 12}

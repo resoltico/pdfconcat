@@ -119,6 +119,8 @@ func (r *Report) nodes() int64 {
 	count := &nodeCounter{}
 
 	count.add(reportNodes)
+	count.when(r.ProgressInterrupted)
+	count.fit(r.Fit, r.Geometries)
 
 	if r.Producer != nil {
 		count.add(producerNodes)
@@ -162,19 +164,27 @@ func (r *Report) nodes() int64 {
 		count.optionalPosition(&part.Origin)
 	}
 
-	for i := range r.Sources {
-		count.add(sourceNodes)
-		count.when(r.Sources[i].Digest != "")
-	}
-
-	for i := range r.Fonts {
-		count.add(fontNodes)
-		count.when(r.Fonts[i].File != "")
-	}
+	count.identities(r.Sources, r.Fonts)
 
 	count.styles(r.Styles)
 
 	return count.nodes
+}
+
+func (c *nodeCounter) identities(sources []Source, fonts []Font) {
+	for i := range sources {
+		c.add(sourceNodes)
+		c.when(sources[i].Digest != "")
+
+		if len(sources[i].Geometries) > 0 {
+			c.add(1 + 4*int64(len(sources[i].Geometries)))
+		}
+	}
+
+	for i := range fonts {
+		c.add(fontNodes)
+		c.when(fonts[i].File != "")
+	}
 }
 
 func (c *nodeCounter) add(n int64) { c.nodes += n }
@@ -213,24 +223,44 @@ func (c *nodeCounter) publication(p *Publication) {
 }
 
 func (c *nodeCounter) styles(styles []Style) {
-	for i := range styles {
+	for index := range styles {
+		style := &styles[index]
+
 		c.add(styleNodes)
+		c.when(style.Geometry != nil)
+		c.finalPlacement(style.FinalText)
+		c.authoredText(style.Text)
+	}
+}
 
-		if styles[i].Text != nil {
-			c.add(textNodes)
+func (c *nodeCounter) finalPlacement(placement *TextPlacement) {
+	if placement == nil {
+		return
+	}
 
-			if len(styles[i].Text.Findings) > 0 {
-				c.add(1 + 4*int64(len(styles[i].Text.Findings)))
-			}
+	c.add(finalPlacementNodes)
+	c.bounds(placement.Bounds)
+	c.bounds(placement.InkBounds)
+}
 
-			if styles[i].Text.Bounds != nil {
-				c.add(boundsMembers)
-			}
+func (c *nodeCounter) authoredText(text *Text) {
+	if text == nil {
+		return
+	}
 
-			if styles[i].Text.InkBounds != nil {
-				c.add(boundsMembers)
-			}
-		}
+	c.add(textNodes)
+
+	if len(text.Findings) > 0 {
+		c.add(1 + 4*int64(len(text.Findings)))
+	}
+
+	c.bounds(text.Bounds)
+	c.bounds(text.InkBounds)
+}
+
+func (c *nodeCounter) bounds(bounds *Rect) {
+	if bounds != nil {
+		c.add(boundsMembers)
 	}
 }
 

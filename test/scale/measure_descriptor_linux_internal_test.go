@@ -112,7 +112,7 @@ func waitDescriptorChild(t *testing.T, child *exec.Cmd) {
 func TestOwnedProcDirectoryClosedHandleIsNotTerminal(t *testing.T) {
 	t.Parallel()
 
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(t.Context())
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
 	}
@@ -169,7 +169,7 @@ func startDescriptorFixture(t *testing.T) *descriptorFixture {
 		}
 	})
 
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(t.Context())
 	if prepareErr != nil {
 		t.Fatal(prepareErr)
 	}

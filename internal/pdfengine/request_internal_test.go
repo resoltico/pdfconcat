@@ -15,7 +15,7 @@ func checkedRequest(order []Run, expected int) *AssembleRequest {
 	return &AssembleRequest{
 		Resource:      &ResourceDocument{Path: "resource.pdf", Pages: 2},
 		Destination:   "out.pdf",
-		Sources:       []SourceFile{{Path: "source.pdf", Info: SourceInfo{Pages: 3, PageLocal: true}}},
+		Sources:       []SourceFile{{Path: fitRenderSource, Info: SourceInfo{Pages: 3, PageLocal: true}}},
 		Order:         order,
 		ExpectedPages: expected,
 	}

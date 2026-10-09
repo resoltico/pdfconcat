@@ -5,6 +5,7 @@ package pdfengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -129,7 +130,7 @@ func parseAppearanceNumber(input string) (appearanceOperand, error) {
 	if strings.Contains(input, ".") {
 		number, err := strconv.ParseFloat(input, 64)
 		if err != nil || !finiteAppearanceNumber(number) {
-			return appearanceOperand{}, fmt.Errorf("%w: default appearance real must be finite", errFormState)
+			return appearanceOperand{}, errors.Join(err, fmt.Errorf("%w: default appearance real must be finite", errFormState))
 		}
 
 		return appearanceOperand{object: types.Float(number)}, nil

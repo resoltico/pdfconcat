@@ -6,6 +6,8 @@ package pdfengine
 import (
 	"errors"
 	"fmt"
+
+	"github.com/resoltico/pdfconcat/internal/observation"
 )
 
 type (
@@ -40,6 +42,7 @@ type (
 
 	// AssemblyPlan is the source-known instruction policy, independent of destination and resource files.
 	AssemblyPlan struct {
+		FitTarget      *PageSize
 		Sources        []SourceFile
 		Order          []Run
 		GeneratedSpecs int
@@ -48,6 +51,8 @@ type (
 
 	// AssembleRequest describes one output document.
 	AssembleRequest struct {
+		Observer      observation.Observer
+		FitTarget     *PageSize
 		Resource      *ResourceDocument
 		Destination   string
 		OutputDigest  string
@@ -99,13 +104,20 @@ func (r *AssembleRequest) check() error {
 		generated = r.Resource.Pages
 	}
 
-	return (AssemblyPlan{Sources: r.Sources, Order: r.Order, GeneratedSpecs: generated, ExpectedPages: r.ExpectedPages}).Validate()
+	return (AssemblyPlan{
+		Sources: r.Sources, Order: r.Order, GeneratedSpecs: generated, ExpectedPages: r.ExpectedPages,
+		FitTarget: r.FitTarget,
+	}).Validate()
 }
 
 // Validate checks inspected source facts and compact order without I/O or page-sized allocations.
 // At most one legacy catalog /Dests source occurrence is supported, even across distinct sources:
 // the backend cannot safely reconcile their catalog dictionaries.
 func (r AssemblyPlan) Validate() error {
+	if r.FitTarget != nil && (!positiveFinite(r.FitTarget.Width) || !positiveFinite(r.FitTarget.Height)) {
+		return policyError(CodeRequestInvalid, NoRun, NoSource, "", ReasonFit, errFitGeometry)
+	}
+
 	if len(r.Order) == 0 {
 		return policyError(CodeRequestInvalid, NoRun, NoSource, "", ReasonOrder, errEmptyOrder)
 	}
@@ -157,6 +169,7 @@ func (r AssemblyPlan) checkRun(position int, run Run, legacyRuns *int) error {
 	}
 
 	source := &r.Sources[run.Index]
+
 	pages := source.Info.Pages
 
 	if run.Start < 1 || run.Start > pages || run.Count > pages-run.Start+1 {
@@ -168,6 +181,15 @@ func (r AssemblyPlan) checkRun(position int, run Run, legacyRuns *int) error {
 		)
 	}
 
+	return r.checkSourceOccurrence(position, run, source, legacyRuns)
+}
+
+func (r AssemblyPlan) checkSourceOccurrence(position int, run Run, source *SourceFile, legacyRuns *int) error {
+	if err := r.checkSourceFit(position, run, source); err != nil {
+		return err
+	}
+
+	pages := source.Info.Pages
 	if source.Info.ImportPerOccurrence() && (run.Start != 1 || run.Count != pages) {
 		return policyError(CodePartialRange, position, run.Index, source.Path, ReasonWholeSource,
 			fmt.Errorf("%w: pages %d-%d only", errMustBeWhole, run.Start, run.Start+run.Count-1))
@@ -178,6 +200,18 @@ func (r AssemblyPlan) checkRun(position int, run Run, legacyRuns *int) error {
 		if *legacyRuns > 1 {
 			return policyError(CodeLegacyDestsRepeated, position, run.Index, source.Path, ReasonLegacyDests, errLegacyDestsClash)
 		}
+	}
+
+	return nil
+}
+
+func (r AssemblyPlan) checkSourceFit(position int, run Run, source *SourceFile) error {
+	if r.FitTarget == nil {
+		return nil
+	}
+
+	if err := source.Info.checkFits(*r.FitTarget); err != nil {
+		return policyError(CodeFitUnsupported, position, run.Index, source.Path, ReasonFit, err)
 	}
 
 	return nil

@@ -91,9 +91,10 @@ type (
 
 	// Source is the identity of a captured source PDF. Digest is the SHA-256 of the captured bytes.
 	Source struct {
-		Bytes  *int64 `json:"bytes"`
-		Path   string `json:"path"`
-		Digest string `json:"digest,omitempty"`
+		Bytes      *int64          `json:"bytes"`
+		Path       string          `json:"path"`
+		Digest     string          `json:"digest,omitempty"`
+		Geometries []GeometryRange `json:"geometries,omitempty"`
 	}
 
 	// Font is the identity of a font used by a resolved style. File is the absolute path of a supplied
@@ -104,7 +105,7 @@ type (
 		File   string `json:"file,omitempty"`
 	}
 
-	// PageSize is the resolved displayed size of a generated page in points.
+	// PageSize is a resolved canvas or final sheet size in physical points.
 	PageSize struct {
 		Origin SizeOrigin `json:"origin"`
 		Width  float64    `json:"width"`
@@ -151,12 +152,15 @@ type (
 		Line   int    `json:"line"`
 	}
 
-	// Style is a fully resolved generated-page appearance, stored once and referenced by parts.
+	// Style is the resolved authored canvas and appearance, stored once and referenced by parts.
+	// Geometry and FinalText distinguish a fitted sheet from the authored Size/Text settings.
 	// Background is "none" or "#rrggbb"; Text is absent for a page without text.
 	Style struct {
-		Text       *Text    `json:"text,omitempty"`
-		Background string   `json:"background"`
-		Size       PageSize `json:"size"`
+		FinalText  *TextPlacement `json:"final_text,omitempty"`
+		Geometry   *int           `json:"geometry,omitempty"`
+		Text       *Text          `json:"text,omitempty"`
+		Background string         `json:"background"`
+		Size       PageSize       `json:"size"`
 	}
 
 	// Producer identifies the executable that captured this run; it is provenance, not quality certification.
@@ -170,29 +174,34 @@ type (
 
 	// Report is the complete captured result of a build or check. Command errors use CommandError.
 	Report struct {
-		AttemptID       string       `json:"attempt_id"`
-		Producer        *Producer    `json:"producer,omitempty"`
-		Counts          Counts       `json:"counts"`
-		Kind            string       `json:"kind"`
-		Status          Status       `json:"status"`
-		Command         string       `json:"command"`
-		Phases          Phases       `json:"phases"`
-		Publication     Publication  `json:"publication"`
-		Diagnostics     []Diagnostic `json:"diagnostics"`
-		Parts           []Part       `json:"parts"`
-		Sources         []Source     `json:"sources"`
-		Fonts           []Font       `json:"fonts"`
-		Styles          []Style      `json:"styles"`
-		FormatVersion   int          `json:"format_version"`
-		DiagnosticCount int          `json:"diagnostic_count"`
-		ErrorCount      int          `json:"error_count"`
-		WarningCount    int          `json:"warning_count"`
+		Fit             *FitDeclaration `json:"fit,omitempty"`
+		Geometries      []Geometry      `json:"geometries,omitempty"`
+		AttemptID       string          `json:"attempt_id"`
+		Producer        *Producer       `json:"producer,omitempty"`
+		Counts          Counts          `json:"counts"`
+		Kind            string          `json:"kind"`
+		Status          Status          `json:"status"`
+		Command         string          `json:"command"`
+		Phases          Phases          `json:"phases"`
+		Publication     Publication     `json:"publication"`
+		Diagnostics     []Diagnostic    `json:"diagnostics"`
+		Parts           []Part          `json:"parts"`
+		Sources         []Source        `json:"sources"`
+		Fonts           []Font          `json:"fonts"`
+		Styles          []Style         `json:"styles"`
+		FormatVersion   int             `json:"format_version"`
+		DiagnosticCount int             `json:"diagnostic_count"`
+		ErrorCount      int             `json:"error_count"`
+		WarningCount    int             `json:"warning_count"`
+		// ProgressInterrupted records observed loss of requested live telemetry.
+		// Absence is not proof of complete delivery; staged reports can predate it.
+		ProgressInterrupted bool `json:"progress_interrupted,omitzero"`
 	}
 )
 
 const (
 	// Version is the shared public JSON format version for responses and complete reports.
-	Version = 3
+	Version = 2
 
 	// KindReport marks a complete report.
 	KindReport = "report"

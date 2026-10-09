@@ -423,11 +423,11 @@ func TestPageFindingsDescribeTheSpan(t *testing.T) {
 	want := []typeset.Finding{
 		{
 			Kind: typeset.FindingOutsidePageHorizontal, Line: -1,
-			Detail: "text spans x 150.00 to 250.00 pt, the page is 200.00 pt wide",
+			Detail: "text block spans x 150.00 to 250.00 pt, the page is 200.00 pt wide",
 		},
 		{
 			Kind: typeset.FindingOutsidePageVertical, Line: -1,
-			Detail: "text spans y 193.66 to 210.00 pt, the page is 200.00 pt high",
+			Detail: "text block spans y 193.66 to 210.00 pt, the page is 200.00 pt high",
 		},
 	}
 

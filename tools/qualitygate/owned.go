@@ -18,18 +18,26 @@ import (
 
 type (
 	discoveredPackage struct {
-		DepsErrors      []discoveryError `json:"depserrors"`
-		Error           *discoveryError  `json:"error"`
-		ImportPath      string           `json:"importpath"`
-		Dir             string           `json:"dir"`
-		GoFiles         []string         `json:"gofiles"`
-		CgoFiles        []string         `json:"cgofiles"`
-		TestGoFiles     []string         `json:"testgofiles"`
-		XTestGoFiles    []string         `json:"xtestgofiles"`
-		IgnoredGoFiles  []string         `json:"ignoredgofiles"`
-		EmbedFiles      []string         `json:"embedfiles"`
-		TestEmbedFiles  []string         `json:"testembedfiles"`
-		XTestEmbedFiles []string         `json:"xtestembedfiles"`
+		Module          *discoveredModule `json:"module"`
+		Name            string            `json:"name"`
+		ForTest         string            `json:"fortest"`
+		DepsErrors      []discoveryError  `json:"depserrors"`
+		Error           *discoveryError   `json:"error"`
+		ImportPath      string            `json:"importpath"`
+		Dir             string            `json:"dir"`
+		CompiledGoFiles []string          `json:"compiledgofiles"`
+		CFiles          []string          `json:"cfiles"`
+		HFiles          []string          `json:"hfiles"`
+		SFiles          []string          `json:"sfiles"`
+		SysoFiles       []string          `json:"sysofiles"`
+		GoFiles         []string          `json:"gofiles"`
+		CgoFiles        []string          `json:"cgofiles"`
+		TestGoFiles     []string          `json:"testgofiles"`
+		XTestGoFiles    []string          `json:"xtestgofiles"`
+		IgnoredGoFiles  []string          `json:"ignoredgofiles"`
+		EmbedFiles      []string          `json:"embedfiles"`
+		TestEmbedFiles  []string          `json:"testembedfiles"`
+		XTestEmbedFiles []string          `json:"xtestembedfiles"`
 	}
 
 	discoveryError struct {
@@ -39,12 +47,16 @@ type (
 
 // ownedPackages adds explicitly compiled fixture and hidden packages to Go's normal package scope.
 func ownedPackages(ctx context.Context, root string) ([]string, error) {
+	return ownedPackagesWithEnv(ctx, root, nil)
+}
+
+func ownedPackagesWithEnv(ctx context.Context, root string, env []string) ([]string, error) {
 	module, err := modulePath(root)
 	if err != nil {
 		return nil, err
 	}
 
-	dirs, err := repopolicy.OwnedGoDirectories(root)
+	dirs, err := repopolicy.OwnedGoDirectories(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +70,10 @@ func ownedPackages(ctx context.Context, root string) ([]string, error) {
 		return nil, fmt.Errorf("%w: no owned Go package directories", errGate)
 	}
 
-	output, err := goCommand(root, append([]string{goListVerb, "-e", jsonFlag}, patterns...)...).output(ctx)
+	discovery := goCommand(root, append([]string{goListVerb, "-e", jsonFlag}, patterns...)...)
+	discovery.env = env
+
+	output, err := discovery.output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("discover owned packages: %w", err)
 	}
@@ -114,7 +129,7 @@ func lintOwned(ctx context.Context, args []string) error {
 		return versionErr
 	}
 
-	if limitErr := sourceLimits(root); limitErr != nil {
+	if limitErr := sourceLimits(ctx, root); limitErr != nil {
 		return limitErr
 	}
 
@@ -141,7 +156,7 @@ func lintOwned(ctx context.Context, args []string) error {
 		return fmt.Errorf("configured owned lint: %w", err)
 	}
 
-	return nil
+	return lintNativeProgressSources(ctx, root, binary)
 }
 
 func formatOwned(ctx context.Context, args []string) error {
@@ -154,7 +169,7 @@ func formatOwned(ctx context.Context, args []string) error {
 		return err
 	}
 
-	dirs, err := repopolicy.OwnedGoDirectories(root)
+	dirs, err := repopolicy.OwnedGoDirectories(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -204,8 +219,8 @@ func hostOwnedPattern(pkg *discoveredPackage, module string) (string, error) {
 	return "", fmt.Errorf("%w: owned directory resolved outside module: %s", errGate, pkg.ImportPath)
 }
 
-func sourceLimits(root string) error {
-	problems, err := repopolicy.ScanSourceLimits(root)
+func sourceLimits(ctx context.Context, root string) error {
+	problems, err := repopolicy.ScanSourceLimits(ctx, root)
 	if err != nil {
 		return err
 	}

@@ -113,7 +113,7 @@ func (failingReader) Read([]byte) (int, error) { return 0, errPipeBroke }
 
 func (brokenWriter) Write([]byte) (int, error) { return 0, errStreamClosed }
 
-func (f *fakeEngine) Inspect(ctx context.Context, path string) (pdfengine.SourceInfo, error) {
+func (f *fakeEngine) Inspect(ctx context.Context, path string, _ *pdfengine.PageSize) (pdfengine.SourceInfo, error) {
 	if f.inspect != nil {
 		return f.inspect(ctx, path)
 	}
@@ -131,7 +131,7 @@ func (f *fakeEngine) Assemble(ctx context.Context, request *pdfengine.AssembleRe
 
 // realInspect is the real engine's Inspect, for a replacement that only adds a side effect.
 func (f *fakeEngine) realInspect(ctx context.Context, path string) (pdfengine.SourceInfo, error) {
-	info, err := f.engine.Inspect(ctx, path)
+	info, err := f.engine.Inspect(ctx, path, nil)
 	if err != nil {
 		return info, fmt.Errorf("real engine: %w", err)
 	}

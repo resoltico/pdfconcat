@@ -13,6 +13,7 @@ import (
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/capture"
+	"github.com/resoltico/pdfconcat/internal/observation"
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
 	"github.com/resoltico/pdfconcat/internal/report"
 	"github.com/resoltico/pdfconcat/internal/typeset"
@@ -213,7 +214,7 @@ func (p *pipeline) inspectSources(ctx context.Context) error {
 		return err
 	}
 
-	p.progress.enter(stageInspect)
+	p.observePhase(observation.InputInspection)
 
 	files := p.flat.Files
 	failures := make([]*problem, len(files))
@@ -228,7 +229,7 @@ func (p *pipeline) inspectSources(ctx context.Context) error {
 		group.Go(func() {
 			for index := range queue {
 				failures[index] = p.inspectOne(ctx, index)
-				p.progress.step(int(done.Add(1)), len(files))
+				p.observeCount(observation.InputInspection, observation.ProcessedSources, done.Add(1), int64(len(files)))
 			}
 		})
 	}
@@ -276,9 +277,11 @@ func (p *pipeline) inspectOne(ctx context.Context, index int) *problem {
 
 	captured, err := p.captures.Capture(ctx, file.Path)
 	if err == nil {
+		p.observeCount(observation.InputInspection, observation.CapturedSources, p.capturedSources.Add(1), int64(len(p.flat.Files)))
+
 		var info pdfengine.SourceInfo
 
-		info, err = p.pdf.Inspect(ctx, captured.Path)
+		info, err = p.pdf.Inspect(ctx, captured.Path, p.target)
 		if err == nil {
 			p.files[index] = inspectedSource{captured: captured, info: info}
 

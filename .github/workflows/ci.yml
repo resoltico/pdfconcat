@@ -143,6 +143,11 @@ jobs:
           tools: golangci-lint
       - uses: ./.github/actions/qa-tools
       - run: go run ./tools/qualitygate test -events "${{ runner.temp }}/test-events.json" -race
+      - name: Native progress signal and sandbox fault controls
+        if: runner.os == 'macOS'
+        env:
+          CGO_ENABLED: "1"
+        run: go run ./tools/qualitygate test -native-progress -events "${{ runner.temp }}/native-progress-events.json"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -151,10 +156,11 @@ jobs:
           path: |
             ${{ runner.temp }}/test-events.json
             ${{ runner.temp }}/test-events.json.stderr
+            ${{ runner.temp }}/native-progress-events.json*
           if-no-files-found: error
 
   # Lint natively on every operating system so that build-tagged files (internal/publish) are
-  # analyzed. The installer builds the pinned upstream linter with the reviewed physical-source
+  # analyzed. The installer builds the pinned upstream linter with the reviewed source-contract
   # attribution patch; qualitygate lint-config rejects a different build identity. The formatting gate is separate from lint and never rewrites files.
   lint:
     name: Lint (${{ matrix.os }})

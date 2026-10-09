@@ -152,7 +152,11 @@ func TestProgressAppearsOnlyOnARealTerminal(t *testing.T) {
 	}
 
 	text := string(output)
-	stages := []string{"pdfconcat: prepare", "pdfconcat: inspect", "pdfconcat: render", "pdfconcat: merge", "pdfconcat: publish"}
+	stages := []string{
+		"pdfconcat: preparation", "pdfconcat: input inspection", "pdfconcat: layout",
+		"pdfconcat: assembly", "pdfconcat: optimization", "pdfconcat: output writing",
+		"pdfconcat: output verification", "pdfconcat: publication", "pdfconcat: finalization",
+	}
 
 	for _, stage := range stages {
 		if !strings.Contains(text, stage) {

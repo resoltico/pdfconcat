@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ type (
 	// written after a command already did its work: it says what was published, so the caller is
 	// never left to guess.
 	committedState struct {
+		Sequence                *uint64              `json:"sequence,omitempty"`
 		ReportStatus            report.WriteState    `json:"report_status"`
 		ReportPath              string               `json:"report_path,omitempty"`
 		ReportTargetObservation string               `json:"report_target_observation,omitempty"`
@@ -97,7 +99,7 @@ func writeResponse(w io.Writer, format cli.Format, response report.Response) err
 // finishCommand prints the report of a build or check and returns the exit code. Standard output carries
 // the bounded summary, or the complete report with --details. If standard output cannot be written, the
 // committed state goes to standard error, and a run that had succeeded is a failure.
-func finishCommand(env Env, command *cli.Command, rep *report.Report) int {
+func finishCommand(ctx context.Context, env Env, command *cli.Command, rep *report.Report) int {
 	summary := rep.Summary()
 	if rep.Publication.ReportStatus == report.ReportWritten {
 		summary.BindContinuation(env.Executable, rep.Publication.ReportPath, originalReportArgumentReference)
@@ -108,6 +110,10 @@ func finishCommand(env Env, command *cli.Command, rep *report.Report) int {
 		response = report.NewResponse(rep)
 	}
 
+	if command.Progress == cli.ProgressJSON && env.ProgressInterrupted != nil && env.ProgressInterrupted() {
+		response = response.WithProgressInterrupted()
+	}
+
 	code := rep.Status.ExitCode()
 
 	err := writeResponse(env.Stdout, command.Format, response)
@@ -115,13 +121,13 @@ func finishCommand(env Env, command *cli.Command, rep *report.Report) int {
 		return code
 	}
 
-	stateOnStderr(env, command.Name, rep, err)
+	stateOnStderr(ctx, env, command.Name, command.Progress, rep, err)
 
 	return max(code, 1)
 }
 
 // stateOnStderr reports what the command did when standard output failed.
-func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
+func stateOnStderr(ctx context.Context, env Env, command cli.Name, mode cli.ProgressMode, rep *report.Report, cause error) {
 	fullCause := cause.Error()
 	boundedCause := boundedMessage(fullCause)
 	state := committedState{
@@ -147,6 +153,26 @@ func stateOnStderr(env Env, command cli.Name, rep *report.Report, cause error) {
 		}},
 	}
 
+	if mode == cli.ProgressJSON {
+		if env.ProgressSequence != nil {
+			state.Sequence = new(env.ProgressSequence())
+		}
+
+		state.Truncated = false
+		state.Diagnostics[0].Cause = fullCause
+		exceptionErr := writeProgressException(ctx, env, state)
+		// Stdout has failed and the owned sink retains its failure state;
+		// an unavailable stderr cannot carry a receipt for its own failure.
+		_ = exceptionErr
+
+		return
+	}
+
+	writeCommittedPreview(env, rep, &state)
+}
+
+// writeCommittedPreview keeps the conventional stderr receipt within its preview budget.
+func writeCommittedPreview(env Env, rep *report.Report, state *committedState) {
 	if len(encodeLine(state)) <= report.SummaryBytes {
 		writeStderr(env, encodeLine(state))
 		return
@@ -181,8 +207,18 @@ func stdoutFailed(env Env, err error) int {
 }
 
 // warn writes one warning line to standard error.
-func warn(env Env, message string) {
+func warn(ctx context.Context, env Env, command *cli.Command, rep *report.Report, message string) error {
+	if command.Progress == cli.ProgressJSON {
+		return cleanupOnStderr(ctx, env, rep, message)
+	}
+
+	if env.ProgressSequence != nil && env.ProgressRecord != nil {
+		return env.ProgressRecord.WriteRecord(context.WithoutCancel(ctx), []byte(binaryName+": warning: "+message+"\n"))
+	}
+
 	writeStderr(env, []byte(binaryName+": warning: "+message+"\n"))
+
+	return nil
 }
 
 // writeStderr writes to standard error; a broken stream has nowhere further to report, so the error is dropped.

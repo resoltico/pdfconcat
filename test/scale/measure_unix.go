@@ -10,31 +10,17 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"syscall"
 	"time"
 )
 
-// sampleInterval is the minimum pause between readings. macOS additionally pays for each lsof call.
+// sampleInterval is the minimum pause between readings. Darwin additionally launches a native descriptor query per sample.
 const (
 	sampleInterval = 2 * time.Millisecond
 	kibibyte       = 1024
 )
 
-func startProcess(command *exec.Cmd, descriptorLimit uint64) error {
-	if descriptorLimit != 0 {
-		command.Args = append([]string{
-			"sh", "-c", `limit=$1; shift; ulimit -n "$limit" && exec "$@"`, "sh", strconv.FormatUint(descriptorLimit, 10), command.Path,
-		}, command.Args[1:]...)
-
-		shell, err := exec.LookPath("sh")
-		if err != nil {
-			return fmt.Errorf("find a shell to set the descriptor limit: %w", err)
-		}
-
-		command.Path = shell
-	}
-
+func startProcess(command *exec.Cmd) error {
 	err := command.Start()
 	if err != nil {
 		return fmt.Errorf("launch process: %w", err)
@@ -51,7 +37,7 @@ func peakResidentBytes(state *os.ProcessState, _ int64) int64 {
 		return 0
 	}
 
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == darwinPlatform {
 		return usage.Maxrss
 	}
 

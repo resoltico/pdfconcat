@@ -67,7 +67,7 @@ func inspectDoc(tb testing.TB, engine *pdfengine.Engine, name string, doc *pdffi
 
 	path := writeDoc(tb, tb.TempDir(), name, doc)
 
-	info, err := engine.Inspect(context.Background(), path)
+	info, err := engine.Inspect(context.Background(), path, nil)
 	if err != nil {
 		tb.Fatalf("inspect %s: %v", name, err)
 	}

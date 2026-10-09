@@ -22,8 +22,9 @@ type (
 		Disposition FeatureDisposition
 	}
 	featureObserver struct {
-		pdf   *model.Context
-		found map[FeatureKind]bool
+		pdf     *model.Context
+		found   map[FeatureKind]bool
+		uriBase bool
 	}
 )
 
@@ -40,6 +41,7 @@ const (
 	FeaturePageAttachments    FeatureKind        = "page_attachments"
 	FeaturePageLabels         FeatureKind        = "page_labels"
 	FeatureOtherCatalogNames  FeatureKind        = "other_catalog_names"
+	FeatureURIBase            FeatureKind        = "uri_base"
 	FeatureRemoved            FeatureDisposition = "removed"
 	FeatureRetained           FeatureDisposition = "retained"
 )
@@ -51,7 +53,7 @@ func observeFeatures(ctx context.Context, pdf *model.Context) ([]SourceFeature, 
 		return nil, fmt.Errorf("catalog features: %w", err)
 	}
 
-	root, err := pdf.Pages()
+	root, err := pdf.PagesContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("feature page tree: %w", err)
 	}
@@ -66,12 +68,12 @@ func observeFeatures(ctx context.Context, pdf *model.Context) ([]SourceFeature, 
 		return nil, fmt.Errorf("page features: %w", err)
 	}
 
-	form, err := pdf.DereferenceDict(pdf.RootDict[keyAcroForm])
+	form, err := pdf.DereferenceDictContext(ctx, pdf.RootDict[keyAcroForm])
 	if err != nil {
 		return nil, fmt.Errorf("feature form: %w", err)
 	}
 
-	fields, err := pdf.DereferenceArray(form["Fields"])
+	fields, err := pdf.DereferenceArrayContext(ctx, form["Fields"])
 	if err != nil {
 		return nil, fmt.Errorf("feature fields: %w", err)
 	}
@@ -88,7 +90,7 @@ func (o *featureObserver) result() []SourceFeature {
 	for _, kind := range []FeatureKind{
 		FeatureBookmarks, FeatureTaggedStructure, FeatureCatalogAttachments, FeatureCatalogActions,
 		FeaturePageActions, FeaturePageAttachments,
-		FeaturePageLabels, FeatureOtherCatalogNames,
+		FeaturePageLabels, FeatureOtherCatalogNames, FeatureURIBase,
 	} {
 		if !o.found[kind] {
 			continue
@@ -110,11 +112,15 @@ func (o *featureObserver) result() []SourceFeature {
 }
 
 func (o *featureObserver) catalog(ctx context.Context) error {
+	if err := o.catalogURIBase(ctx); err != nil {
+		return err
+	}
+
 	for _, entry := range []struct {
 		key, child string
 		kind       FeatureKind
 	}{{"Outlines", "First", FeatureBookmarks}, {"StructTreeRoot", "K", FeatureTaggedStructure}, {"PageLabels", "Nums", FeaturePageLabels}} {
-		dictionary, err := o.pdf.DereferenceDict(o.pdf.RootDict[entry.key])
+		dictionary, err := o.pdf.DereferenceDictContext(ctx, o.pdf.RootDict[entry.key])
 		if err != nil {
 			return fmt.Errorf("/%s: %w", entry.key, err)
 		}
@@ -127,7 +133,7 @@ func (o *featureObserver) catalog(ctx context.Context) error {
 		o.found[entry.kind] = material
 	}
 
-	openAction, err := o.pdf.Dereference(o.pdf.RootDict["OpenAction"])
+	openAction, err := o.pdf.DereferenceContext(ctx, o.pdf.RootDict["OpenAction"])
 	if err != nil {
 		return fmt.Errorf("catalog open action: %w", err)
 	}
@@ -140,7 +146,7 @@ func (o *featureObserver) catalog(ctx context.Context) error {
 		return actionErr
 	}
 
-	names, err := o.pdf.DereferenceDict(o.pdf.RootDict[keyNames])
+	names, err := o.pdf.DereferenceDictContext(ctx, o.pdf.RootDict[keyNames])
 	if err != nil {
 		return fmt.Errorf("catalog names: %w", err)
 	}
@@ -158,7 +164,7 @@ func (o *featureObserver) nameTrees(ctx context.Context, names types.Dict) error
 			continue
 		}
 
-		dictionary, err := o.pdf.DereferenceDict(object)
+		dictionary, err := o.pdf.DereferenceDictContext(ctx, object)
 		if err != nil {
 			return fmt.Errorf("name tree /%s: %w", name, err)
 		}

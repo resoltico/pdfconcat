@@ -61,15 +61,15 @@ func TestSignatureValueObjectDecoderErrorsRemainVisible(t *testing.T) {
 	pdf := signatureTestContext(t)
 
 	bad := malformedLazyObject(pdf)
-	if err := checkSignatureValue(pdf, types.Dict{"V": bad}, "Tx"); err == nil {
+	if err := checkSignatureValue(t.Context(), pdf, types.Dict{"V": bad}, "Tx"); err == nil {
 		t.Fatal("failed signature-value decode accepted")
 	}
 
-	if err := checkSignatureDictionary(pdf, types.Dict{keyType: types.Integer(7)}); err == nil {
+	if err := checkSignatureDictionary(t.Context(), pdf, types.Dict{keyType: types.Integer(7)}); err == nil {
 		t.Fatal("malformed value type accepted")
 	}
 
-	if kind, err := fieldKind(pdf, types.Dict{"FT": nil}, "Tx"); err != nil || kind != "Tx" {
+	if kind, err := fieldKind(t.Context(), pdf, types.Dict{"FT": nil}, "Tx"); err != nil || kind != "Tx" {
 		t.Fatalf("null field type changed inheritance: %q %v", kind, err)
 	}
 }

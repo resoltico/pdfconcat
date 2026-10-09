@@ -23,14 +23,14 @@ func TestRenderingStateCannotHideLayersOutsideCatalogDeclaration(t *testing.T) {
 		pdf := &model.Context{
 			XRefTable: &model.XRefTable{RootDict: types.Dict{}, Table: map[int]*model.XRefTableEntry{1: {Object: object}}},
 		}
-		if err := checkRenderingState(pdf); err == nil {
+		if err := checkRenderingState(t.Context(), pdf); err == nil {
 			t.Fatalf("undeclared layered rendering accepted: %v", object)
 		}
 	}
 
 	for _, key := range []string{"OCProperties", "OutputIntents"} {
 		pdf := &model.Context{XRefTable: &model.XRefTable{RootDict: types.Dict{key: types.Dict{}}}}
-		if err := checkRenderingState(pdf); err == nil {
+		if err := checkRenderingState(t.Context(), pdf); err == nil {
 			t.Fatalf("unsafe catalog /%s accepted", key)
 		}
 	}
@@ -45,7 +45,7 @@ func TestRenderingStateCannotHideLayersOutsideCatalogDeclaration(t *testing.T) {
 			},
 		},
 	}
-	if err := checkRenderingState(pdf); err != nil {
+	if err := checkRenderingState(t.Context(), pdf); err != nil {
 		t.Fatalf("unlayered source rejected: %v", err)
 	}
 }
@@ -61,7 +61,7 @@ func TestDynamicFormsAreRejectedButStaticCatalogRemainsSupported(t *testing.T) {
 		{keyAcroForm: types.StringLiteral("not a dictionary")},
 	} {
 		pdf := &model.Context{XRefTable: &model.XRefTable{RootDict: catalog}}
-		if err := checkRenderingState(pdf); err == nil {
+		if err := checkRenderingState(t.Context(), pdf); err == nil {
 			t.Fatalf("unsupported dynamic/malformed form state accepted: %v", catalog)
 		}
 	}
@@ -73,7 +73,7 @@ func TestDynamicFormsAreRejectedButStaticCatalogRemainsSupported(t *testing.T) {
 			2: {Object: types.StreamDict{Dict: types.Dict{}, Content: []byte("XFA NeedsRendering OCProperties")}},
 		},
 	}}
-	if err := checkRenderingState(pdf); err != nil {
+	if err := checkRenderingState(t.Context(), pdf); err != nil {
 		t.Fatalf("static form or source stream text rejected: %v", err)
 	}
 }

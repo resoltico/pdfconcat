@@ -114,6 +114,39 @@ func TestNoticeIssuesAcceptsMatchingFixture(t *testing.T) {
 	}
 }
 
+func TestLinkedModuleNoticesFollowActualLocalReplacement(t *testing.T) {
+	t.Parallel()
+	root, gorootDir, _ := noticesFixture(t, func(files map[string]string) {
+		files["root/go.mod"] += "\nrequire example.test/dep v1.2.3\nreplace example.test/dep => ../mod\n"
+		files["root/cmd/pdfconcat/main.go"] = "package main\nimport \"example.test/dep\"\nfunc main(){dep.Value()}\n"
+		files["mod/go.mod"] = "module example.test/dep\n\ngo 1.27.1\n"
+		files["mod/value.go"] = "package dep\nfunc Value(){}\n"
+	})
+
+	modules, err := repopolicy.LinkedModules(t.Context(), root, "example.test/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(modules) != 1 || modules[0].Dir != filepath.Join(filepath.Dir(root), "mod") {
+		t.Fatalf("license lookup did not follow effective source: %+v", modules)
+	}
+
+	problems, err := repopolicy.NoticeIssues(root, gorootDir, modules)
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("actual replacement license refused: %v %v", problems, err)
+	}
+
+	if writeErr := os.WriteFile(filepath.Join(modules[0].Dir, "LICENSE"), []byte("changed local license"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	problems, err = repopolicy.NoticeIssues(root, gorootDir, modules)
+	if err != nil || len(problems) == 0 {
+		t.Fatal("changed actual local-source license was not detected")
+	}
+}
+
 // TestNoticeIssuesRejectsModuleDrift is a negative control: a new dependency, a stale row and a
 // version change are each reported.
 func TestNoticeIssuesRejectsModuleDrift(t *testing.T) {

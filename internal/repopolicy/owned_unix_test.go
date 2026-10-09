@@ -29,11 +29,11 @@ func TestOwnedSourceDiscoveryRejectsDirectoryAndBrokenLinks(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, err := repopolicy.OwnedGoSources(root); err == nil {
+			if _, err := repopolicy.OwnedGoSources(t.Context(), root); err == nil {
 				t.Fatal("uninspectable source link accepted")
 			}
 
-			if _, err := repopolicy.ScanDirectives(root); err == nil {
+			if _, err := repopolicy.ScanDirectives(t.Context(), root); err == nil {
 				t.Fatal("directive scan missed source link")
 			}
 		})
@@ -58,12 +58,12 @@ func TestOwnedSourceDiscoveryAllowsRootedRegularFileLinks(t *testing.T) {
 		}
 	}
 
-	sources, err := repopolicy.OwnedGoSources(root)
+	sources, err := repopolicy.OwnedGoSources(t.Context(), root)
 	if err != nil || len(sources) != 2 {
 		t.Fatalf("regular link rejected: %v, %v", sources, err)
 	}
 
-	if issues, scanErr := repopolicy.ScanSourceLimits(root); scanErr != nil || len(issues) != 0 {
+	if issues, scanErr := repopolicy.ScanSourceLimits(t.Context(), root); scanErr != nil || len(issues) != 0 {
 		t.Fatalf("source link not scanned: %v, %v", issues, scanErr)
 	}
 }

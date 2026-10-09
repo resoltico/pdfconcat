@@ -39,7 +39,7 @@ func lintConfig(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if limitErr := sourceLimits(root); limitErr != nil {
+	if limitErr := sourceLimits(ctx, root); limitErr != nil {
 		return limitErr
 	}
 
@@ -119,7 +119,7 @@ func checkBinary(ctx context.Context, root, binary string, registry *repopolicy.
 
 	problems = append(problems, repopolicy.PremiseIssues(registry.Exceptions, known)...)
 
-	sdk, err := goCommand(root, "env", "GOROOT").output(ctx)
+	sdk, err := goCommand(root, goEnvVerb, "GOROOT").output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("find selected Go SDK: %w", err)
 	}
@@ -150,7 +150,7 @@ func checkLinterIdentity(ctx context.Context, root, binary string, versions map[
 		return identityErr
 	}
 
-	patch, patchErr := readInRoot(root, "tools/lint-patches/golangci-lint-physical-source.patch")
+	patch, patchErr := readInRoot(root, "tools/lint-patches/golangci-lint-source-contracts.patch")
 	if patchErr != nil {
 		return patchErr
 	}
@@ -195,7 +195,7 @@ func lintStale(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if limitErr := sourceLimits(root); limitErr != nil {
+	if limitErr := sourceLimits(ctx, root); limitErr != nil {
 		return limitErr
 	}
 
@@ -237,7 +237,7 @@ func lintStale(ctx context.Context, args []string) error {
 	return report(
 		lintStaleCommand,
 		problems,
-		fmt.Sprintf("every applicable native-compiled diagnostic exclusion matches (%d diagnostics seen on %s)", len(issues), runtime.GOOS),
+		fmt.Sprintf("every applicable native diagnostic exclusion matches (%d diagnostics seen on %s)", len(issues), runtime.GOOS),
 	)
 }
 
@@ -283,7 +283,12 @@ func runUnexcludedLint(ctx context.Context, root, binary, configFile, reportFile
 
 	var stdout bytes.Buffer
 
-	packages, err := ownedPackages(ctx, root)
+	var env []string
+	if runtime.GOOS == nativeProgressOS {
+		env = nativeProgressEnv()
+	}
+
+	packages, err := ownedPackagesWithEnv(ctx, root, env)
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +298,7 @@ func runUnexcludedLint(ctx context.Context, root, binary, configFile, reportFile
 		name:   binary,
 		stdout: &stdout,
 		stderr: &stdout,
+		env:    env,
 		args: append([]string{
 			runVerb,
 			serialLintRunners,

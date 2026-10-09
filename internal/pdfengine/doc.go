@@ -11,6 +11,7 @@
 // Inspect reads one captured source once and reports SourceInfo: page count, effective version, whether
 // pages carry page-local objects, whether a form or destinations exist, and the visible size of the
 // first and last pages, plus material scope-specific feature observations captured before validator repairs.
+// With a requested target it also checks every original page and captures compact fit geometry ranges.
 // Assemble takes the inspected sources, the generated resource document and the
 // final order, and writes and verifies one PDF.
 //
@@ -20,7 +21,8 @@
 // there is no CropBox), swapped in width and height for a rotation of 90 or 270 degrees, and multiplied
 // by the page's UserUnit. MediaBox, CropBox and Rotate are inherited through the page tree, each
 // independently; UserUnit is not inherited. Boxes may be written with any two opposite corners. Only the
-// first and last pages are measured; a malformed box, an empty or non-overlapping CropBox, a rotation
+// first and last pages are measured without fitting; fitting checks every page. A malformed box, an empty
+// or non-overlapping CropBox, a rotation
 // that is not a multiple of 90, or a non-positive UserUnit on those pages is an error. Sizes above any
 // generated-page limit are returned unchanged: preserving a legal large page is the caller's rule to
 // apply. The rule was checked against Poppler renderings (pdftoppm -cropbox) in the tests; Poppler

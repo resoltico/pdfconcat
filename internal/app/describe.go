@@ -65,6 +65,12 @@ func (p *pipeline) sourceEntry(index int) report.Source {
 		entry.Bytes = &size
 	}
 
+	for fitIndex := range p.files[index].info.Fits {
+		interval := &p.files[index].info.Fits[fitIndex]
+		geometry := p.builder.Geometry(capturedReportGeometry(interval.Fit))
+		entry.Geometries = append(entry.Geometries, report.GeometryRange{First: interval.First, Last: interval.Last, Geometry: geometry})
+	}
+
 	return entry
 }
 
@@ -101,6 +107,7 @@ func (p *pipeline) styleOf(placement *assembly.Placement, fonts map[string]int) 
 	}
 
 	if spec.Text.Value == "" {
+		p.fitStyle(&style, placement.Spec)
 		return style
 	}
 
@@ -128,6 +135,8 @@ func (p *pipeline) styleOf(placement *assembly.Placement, fonts map[string]int) 
 			})
 		}
 	}
+
+	p.fitStyle(&style, placement.Spec)
 
 	return style
 }
@@ -168,6 +177,10 @@ func fontName(font *typeset.Font, path string) string {
 
 // sizeOrigin converts how a page got its size.
 func sizeOrigin(size assembly.SizeSource) report.SizeOrigin {
+	if size == assembly.SizeFitTarget {
+		return report.SizeFitTarget
+	}
+
 	if size == assembly.SizeFromPrecedingLast {
 		return report.SizePrecedingSource
 	}

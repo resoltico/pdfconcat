@@ -26,6 +26,11 @@ func (s *Summary) RenderText(w io.Writer) error {
 	out := &textWriter{writer: w}
 	out.linef("attempt: %s", s.AttemptID)
 	out.overview(s.Status, s.Command, s.Phases, s.Counts, s.Publication)
+
+	if s.ProgressInterrupted {
+		out.linef("requested progress was interrupted; work outcome remains as reported")
+	}
+
 	out.linef("diagnostic records: %d errors, %d warnings", s.ErrorCount, s.WarningCount)
 	out.linef("summary only: %d parts, %d diagnostics (%d shown)", s.PartCount, s.DiagnosticCount, len(s.Diagnostics))
 
@@ -198,6 +203,14 @@ func (t *textWriter) part(view *PartView) {
 			}
 		}
 	default:
+	}
+
+	if view.FinalSize != nil && view.Generated == nil {
+		what += fmt.Sprintf("; final sheet %gx%g pt", view.FinalSize.Width, view.FinalSize.Height)
+	}
+
+	if view.Fit != nil {
+		what += "; fit to " + view.Fit.Paper
 	}
 
 	t.linef("%s %s %s: %s (%d warning records)", view.ID, view.Kind, span, what, view.WarningCount)

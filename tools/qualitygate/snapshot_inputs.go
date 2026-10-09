@@ -23,12 +23,16 @@ func validateSnapshotInputs(ctx context.Context, source, snapshot string) error 
 		return fmt.Errorf("snapshot input validation canceled: %w", ctxErr)
 	}
 
-	files, err := repopolicy.OwnedGoSources(source)
+	if err := validateForeignSnapshotInputs(ctx, source, snapshot); err != nil {
+		return err
+	}
+
+	files, err := repopolicy.OwnedGoSources(ctx, source)
 	if err != nil {
 		return err
 	}
 
-	copied, err := repopolicy.OwnedGoSources(snapshot)
+	copied, err := repopolicy.OwnedGoSources(ctx, snapshot)
 	if err != nil {
 		return err
 	}

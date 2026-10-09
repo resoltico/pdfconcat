@@ -107,6 +107,32 @@ func (d *Document) PixelColor(number, x, y int) ([3]uint8, error) {
 	return [3]uint8{pixel.R, pixel.G, pixel.B}, nil
 }
 
+// ColorCounts counts exact RGB landmarks across one independent whole-page rendering. It detects
+// formerly hidden marks anywhere on a sheet without repeatedly rendering for each sampled pixel.
+func (d *Document) ColorCounts(number int, colors [][3]uint8) ([]int, error) {
+	img, err := d.render(number)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := make([]int, len(colors))
+	bounds := img.Bounds()
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			red, green, blue, _ := img.At(x, y).RGBA()
+			for index, landmark := range colors {
+				if red == uint32(landmark[0])*channel8To16 && green == uint32(landmark[1])*channel8To16 &&
+					blue == uint32(landmark[2])*channel8To16 {
+					counts[index]++
+				}
+			}
+		}
+	}
+
+	return counts, nil
+}
+
 // AppearanceDifference compares independent full-page rasterizations. The result is the fraction
 // of pixels with a channel differing by more than tolerance; positions and image marks matter.
 func (d *Document) AppearanceDifference(page int, source *Document, sourcePage int, tolerance uint8) (float64, error) {

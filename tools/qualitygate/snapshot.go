@@ -30,7 +30,7 @@ func snapshotTree(ctx context.Context, root string) (string, error) {
 		return "", fmt.Errorf("create snapshot directory: %w", err)
 	}
 
-	copied, err := copyListed(root, target, listing)
+	copied, err := copyListed(ctx, root, target, listing)
 	if err != nil {
 		removeAll(target)
 
@@ -54,7 +54,7 @@ func snapshotTree(ctx context.Context, root string) (string, error) {
 
 // copyListed copies each NUL-separated file name of listing from source to target and counts the copies.
 // Both directories are opened as [os.Root], so no listed name can reach outside them.
-func copyListed(source, target, listing string) (int, error) {
+func copyListed(ctx context.Context, source, target, listing string) (int, error) {
 	from, err := os.OpenRoot(source)
 	if err != nil {
 		return 0, fmt.Errorf(openFileError, source, err)
@@ -70,11 +70,16 @@ func copyListed(source, target, listing string) (int, error) {
 	var copyErr error
 
 	for name := range strings.SplitSeq(listing, "\x00") {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			copyErr = ctxErr
+			break
+		}
+
 		if name == "" {
 			continue
 		}
 
-		err = copyFile(from, dest, filepath.FromSlash(name))
+		err = copyFile(ctx, from, dest, filepath.FromSlash(name))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue // Listed by git but deleted from disk: absent from the snapshot, as in the tree.
 		}
@@ -91,7 +96,11 @@ func copyListed(source, target, listing string) (int, error) {
 	return copied, errors.Join(copyErr, from.Close(), dest.Close())
 }
 
-func copyFile(from, dest *os.Root, name string) error {
+func copyFile(ctx context.Context, from, dest *os.Root, name string) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("snapshot copy canceled: %w", ctxErr)
+	}
+
 	info, err := from.Lstat(name)
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", name, err)
@@ -104,6 +113,10 @@ func copyFile(from, dest *os.Root, name string) error {
 	content, err := from.ReadFile(name)
 	if err != nil {
 		return fmt.Errorf(readFileError, name, err)
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("snapshot copy canceled: %w", ctxErr)
 	}
 
 	err = dest.MkdirAll(filepath.Dir(name), dirMode)

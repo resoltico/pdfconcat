@@ -64,6 +64,8 @@ const (
 	SizeFollowingSource SizeOrigin = "following_source"
 	// SizePrecedingSource is a size inherited from the previous source page.
 	SizePrecedingSource SizeOrigin = "preceding_source"
+	// SizeFitTarget is a canvas resolved directly from the effective fit declaration.
+	SizeFitTarget SizeOrigin = "fit_target"
 
 	// ReportNotRequested means no report was requested.
 	ReportNotRequested WriteState = "not_requested"

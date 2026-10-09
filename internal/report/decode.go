@@ -10,6 +10,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"io"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,6 +60,7 @@ type (
 )
 
 const (
+	memberFit       = "fit"
 	memberCommand   = "command"
 	memberRecovery  = "recovery"
 	memberProducer  = "producer"
@@ -345,8 +347,9 @@ func (s *scan) finish(data []byte) error {
 			StageShape,
 			CodeUnsupportedVersion,
 			&Location{File: s.name},
-			"A complete format_version 2 report is required. Preserve historical JSON; use a fresh check with "+
+			"A complete format_version %d report is required. Preserve historical JSON; use a fresh check with "+
 				"the current job and a NEW report target.",
+			Version,
 		)
 	case s.version != "" && s.version != strconv.Itoa(Version):
 		return s.locate(data, "/"+versionMember, invalid(
@@ -533,7 +536,7 @@ func (s *scan) scalar(token jsontext.Token) {
 
 // shapes returns the table of the format's object kinds.
 func shapes() map[string]shape {
-	return map[string]shape{
+	definitions := map[string]shape{
 		KindReport: {
 			required: []string{
 				versionMember, "attempt_id", kindMember, "status", memberCommand, memberPhases, memberCounts, memberPublication,
@@ -549,6 +552,8 @@ func shapes() map[string]shape {
 				"sources":         "[source]",
 				"fonts":           "[font]",
 				"styles":          "[style]",
+				memberFit:         memberFit,
+				"geometries":      "[geometry]",
 			},
 		},
 		memberProducer: {required: []string{"tool", "version", "commit", "go", "platform"}},
@@ -571,16 +576,54 @@ func shapes() map[string]shape {
 		},
 		"position":  {required: []string{"file"}},
 		memberRange: {required: []string{"start", "end"}},
-		"source":    {required: []string{"path", "bytes"}, nullable: []string{"bytes"}},
-		"font":      {required: []string{"digest", "name"}},
+		"source": {
+			required: []string{"path", "bytes"},
+			nullable: []string{"bytes"},
+			children: map[string]string{"geometries": "[geometry_range]"},
+		},
+		"font": {required: []string{"digest", "name"}},
 		"style": {
 			required: []string{"background", memberSize},
-			children: map[string]string{memberSize: memberSize, memberText: memberText},
+			children: map[string]string{memberSize: memberSize, memberText: memberText, "final_text": "text_placement"},
 		},
+
 		memberSize:     {required: []string{memberOrigin, memberWidth, "height"}},
 		memberText:     textShape(),
 		"text_finding": {required: []string{"kind", "detail", "line"}},
 		shapeRect:      {required: []string{"x", "y", memberWidth, "height"}},
+	}
+	maps.Copy(definitions, fitShapes())
+
+	return definitions
+}
+
+func fitShapes() map[string]shape {
+	return map[string]shape{
+		memberFit: {
+			required: []string{"paper", memberSize, memberLocation},
+			nullable: []string{memberLocation},
+			children: map[string]string{memberSize: memberSize, memberLocation: memberLocation},
+		},
+		"geometry": {
+			required: []string{
+				"media_box",
+				"crop_box",
+				"visible_box",
+				"matrix",
+				"original_width",
+				"original_height",
+				"physical_scale",
+				"user_unit",
+				"rotation",
+				"has_crop_box",
+			},
+		},
+		"geometry_range": {required: []string{"first", "last", "geometry"}},
+		"text_placement": {
+			required: []string{memberBounds, memberInkBounds, "font_size"},
+			nullable: []string{memberBounds, memberInkBounds},
+			children: map[string]string{memberBounds: shapeRect, memberInkBounds: shapeRect},
+		},
 	}
 }
 

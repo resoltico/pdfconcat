@@ -6,11 +6,15 @@ This inventory lists the modules linked into application executables for macOS, 
 
 | Component | Version | License | Purpose / relationship | License copy |
 | --- | --- | --- | --- | --- |
-| Go standard library | Go 1.27.1 toolchain | BSD 3-Clause | Runtime and standard-library code linked by the Go toolchain | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
+| Go standard library | Go 1.27.2 toolchain | BSD 3-Clause | Runtime and standard-library code linked by the Go toolchain | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
 | `github.com/pdfcpu/pdfcpu` | v0.16.1 | Apache-2.0 | PDF parsing, validation, merging, and writing of the assembled output (the text of generated pages is shaped with go-text/typesetting and written by PDFConcat's own page writer) | `third_party/licenses/Apache-2.0.txt` |
-| `github.com/benoitkugler/pdf` | v0.0.15 | MIT | Predefined PDF single-byte encodings and glyph-name Unicode mappings for source form appearances | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
+| `github.com/benoitkugler/pdf` | v0.0.15 | MIT | Predefined PDF encodings/glyph mappings and bounded incremental fitting-content parsing; maintained limits/cancellation patch under `third_party/benoitkugler` | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
+| `github.com/benoitkugler/pstokenizer` | v1.0.1 | MIT | Bounded PDF content tokenization for the maintained parser; exact local patch under `third_party/benoitkugler` | `third_party/licenses/benoitkugler-pstokenizer-MIT.txt` |
+| `github.com/benoitkugler/pstokenizer` | v1.0.1 | MIT | Maintained PDF tokenization with the byte/token/cancellation patch recorded in `third_party/pdf-sources.json` | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
 | `github.com/clipperhouse/uax29/v2` | v2.7.0 | MIT | pdfcpu dependency graph | `third_party/licenses/clipperhouse-uax29-MIT.txt` |
 | `github.com/go-text/typesetting` | v0.3.5 | Unlicense OR BSD 3-Clause | text shaping (HarfBuzz port) and TrueType parsing for generated-page text; used under the BSD 3-Clause terms | `third_party/licenses/go-text-typesetting-LICENSE.txt` |
+| `github.com/hhrutter/lzw` | v1.0.0 | BSD 3-Clause | Maintained PDF inline-image LZW decoder | `third_party/licenses/hhrutter-lzw-BSD-3-Clause.txt` |
+| `github.com/hhrutter/lzw` | v1.0.0 | BSD 3-Clause | Maintained LZW decoder used only to recognize bounded inline-image filter boundaries | `third_party/licenses/hhrutter-lzw-BSD-3-Clause.txt` |
 | `github.com/hhrutter/tiff` | v1.0.7 | BSD 3-Clause | pdfcpu dependency graph | `third_party/licenses/hhrutter-tiff-BSD-3-Clause.txt` |
 | `github.com/mattn/go-runewidth` | v0.0.30 | MIT | pdfcpu dependency graph | `third_party/licenses/mattn-go-runewidth-MIT.txt` |
 | `go.yaml.in/yaml/v3` | v3.0.5 | MIT AND Apache-2.0 | pdfcpu dependency graph | `third_party/licenses/go-yaml-LICENSE.txt`; `third_party/licenses/Apache-2.0.txt`; `third_party/licenses/go-yaml-NOTICE.txt` |
@@ -18,11 +22,11 @@ This inventory lists the modules linked into application executables for macOS, 
 | `golang.org/x/image` | v0.46.0 | BSD 3-Clause | fixed-point arithmetic for text shaping and pdfcpu dependency graph | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
 | `golang.org/x/sys` | v0.48.0 | BSD 3-Clause | native no-clobber / replacement publication on supported operating systems and pdfcpu dependency graph | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
 | `golang.org/x/text` | v0.42.0 | BSD 3-Clause | Unicode artifact-name matching and text direction; pdfcpu encodings | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
-| `golang.org/x/term` | v0.46.0 | BSD 3-Clause | detecting an interactive terminal on standard error, so progress is shown only there | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
+| `golang.org/x/term` | v0.46.0 | BSD 3-Clause | detecting an interactive terminal on standard error, for automatic interactive progress; requested JSON progress also supports redirected pipes | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
 
 The Apache-2.0 text is shared by the Apache-licensed components above. go-yaml contains both MIT-covered and Apache-covered source files, so its upstream combined LICENSE and NOTICE are reproduced separately in addition to the shared Apache-2.0 text. The Go standard library and listed `golang.org/x/*` modules use the same Go Authors BSD 3-Clause license text represented by the shared copy above. Components with project-specific MIT or BSD notices retain those notices in separate files.
 
-Dependency versions and this notice inventory must be reconciled before each release whenever `go.mod` or `go.sum` changes.
+Dependency versions and this notice inventory must be reconciled before each release whenever `go.mod` or `go.sum` changes. The two local benoitkugler replacements retain their complete Go module ZIP sources, immutable base archives, exact patches, module graphs and MIT notices under `third_party/benoitkugler`; the source record binds their identities. PDFConcat uses that content parser, not the library’s document reader or writer. Module ZIP completeness is not a full Git-tree claim. The tokenizer and pdf modules have identical upstream MIT texts, reproduced by the shared copy above.
 
 ## Embedded font
 
@@ -31,8 +35,12 @@ The executable embeds the Noto Sans Regular font (version 2.015, unhinted TrueTy
 
 ## Development linter source
 
-The development-only golangci-lint is built from checksum-verified upstream source with the reviewed physical-source attribution patch under `tools/lint-patches`. Its upstream GPLv3 license and the corresponding patch/source instructions are kept there, separately from the runtime license inventory and release archives. Upstream dependencies retain their own licenses; the installer verifies the unchanged upstream module graph. The linter is not linked into PDFConcat, and the runtime remains licensed as stated above. The build/cache identity derives from the upstream version and patch digest; the source-tag epoch in its metadata is not a claim about build time.
+The development-only golangci-lint is built from checksum-verified upstream source with the reviewed physical-source attribution and concrete-comparison field-use patches under `tools/lint-patches`. Its upstream GPLv3 license and the corresponding patch/source instructions are kept there, separately from the runtime license inventory and release archives. Upstream dependencies retain their own licenses; the installer verifies the unchanged upstream module graph. The linter is not linked into PDFConcat, and the runtime remains licensed as stated above. The build/cache identity derives from the upstream version and patch digest; the source-tag epoch in its metadata is not a claim about build time.
 
 ## Development mutation tool source
 
 The development-only Gremlins is built from checksum-verified upstream source with the reviewed executor patch under `tools/mutation-patches`. Its upstream Apache License 2.0 and corresponding source/patch instructions are kept there, separately from the runtime license inventory and release archives. Upstream dependencies retain their own licenses, and the installer verifies that their original module graph remains unchanged. Gremlins is not linked into PDFConcat. Its distinct version binds the upstream version and full patch digest; source provenance does not claim an actual build time.
+
+## Maintained content parser sources
+
+The exact upstream module ZIPs and local patches for pdf, pstokenizer and pdfcpu are recorded in `third_party/pdf-sources.json`. The imported trees preserve upstream licenses, tests and non-Go assets. Source checks reconstruct each ZIP plus its exact patch and verify the complete local tree and effective replacements. This establishes module-ZIP completeness, rather than a full upstream Git-tree claim. The patches reject repeated decoded raw dictionary keys, add bounded incremental content parsing, inline-image decoding and cancellation, and keep upstream fixture-writing tests isolated. The executable remains standalone and offline; these reconstruction inputs are development/build provenance, not runtime files.

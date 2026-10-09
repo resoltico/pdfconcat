@@ -4,6 +4,7 @@
 package repopolicy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,8 +20,8 @@ var errSourceDirectoryLink = errors.New("owned source directory symlink")
 // OwnedGoDirectories finds the source directories that lint/format must consider, including hidden
 // and testdata fixture packages omitted by Go's ./... pattern. It shares the directive scan's owned
 // filesystem boundary; compiler build-tag filtering remains Go's responsibility.
-func OwnedGoDirectories(root string) ([]string, error) {
-	files, err := OwnedGoSources(root)
+func OwnedGoDirectories(ctx context.Context, root string) ([]string, error) {
+	files, err := OwnedGoSources(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -34,35 +35,64 @@ func OwnedGoDirectories(root string) ([]string, error) {
 }
 
 // OwnedGoSources returns all owned Go files, including platform variants and standalone fixtures.
-func OwnedGoSources(root string) ([]string, error) {
+func OwnedGoSources(ctx context.Context, root string) ([]string, error) {
+	foreign, err := ForeignSourcesContext(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+
+	foreignRoots := map[string]bool{}
+	for index := range foreign {
+		foreignRoots[foreign[index].Root] = true
+	}
+
 	var files []string
 
-	err := withRoot(root, func(tree *os.Root) error {
-		return fs.WalkDir(tree.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
+	err = withRoot(root, func(tree *os.Root) error {
+		var walkErr error
 
-			if entry.IsDir() && skippedDirectories()[name] {
-				return fs.SkipDir
-			}
+		files, walkErr = ownedTreeSources(ctx, tree, foreignRoots)
 
-			if linkErr := ownedSourceLink(tree, name, entry); linkErr != nil {
-				return linkErr
-			}
-
-			if !entry.IsDir() && strings.HasSuffix(name, goSourceSuffix) {
-				files = append(files, name)
-			}
-
-			return nil
-		})
+		return walkErr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("discover owned Go sources: %w", err)
 	}
 
 	slices.Sort(files)
+
+	return files, nil
+}
+
+func ownedTreeSources(ctx context.Context, tree *os.Root, foreignRoots map[string]bool) ([]string, error) {
+	var files []string
+
+	err := fs.WalkDir(tree.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("owned source walk canceled: %w", ctxErr)
+		}
+
+		if walkErr != nil {
+			return walkErr
+		}
+
+		if entry.IsDir() && (skippedDirectories()[name] || foreignRoots[name]) {
+			return fs.SkipDir
+		}
+
+		if linkErr := ownedSourceLink(tree, name, entry); linkErr != nil {
+			return linkErr
+		}
+
+		if !entry.IsDir() && strings.HasSuffix(name, goSourceSuffix) {
+			files = append(files, name)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk owned source tree: %w", err)
+	}
 
 	return files, nil
 }

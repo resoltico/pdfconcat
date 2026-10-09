@@ -17,6 +17,8 @@ type (
 	SourceInfo struct {
 		// Features captures material scope-specific source effects before validator repairs.
 		Features []SourceFeature
+		// Fits captures compact all-page fitting geometry when a target was requested.
+		Fits []FitRange
 		// Pages is the number of pages, at least 1.
 		Pages int
 		// Version is the effective PDF version: the catalog /Version entry when present, else the header.
@@ -61,12 +63,34 @@ func (s SourceInfo) ImportPerOccurrence() bool {
 // Encrypted PDFs are rejected with CodeEncrypted even when they open with an empty password. A first
 // or last page whose boxes, rotation or UserUnit are malformed is rejected with CodePageGeometry.
 // Optional content, document output intents and dynamic XFA rendering are rejected with CodeUnsupportedRendering.
-func (e *Engine) Inspect(ctx context.Context, path string) (SourceInfo, error) {
-	var info SourceInfo
+// A nonnil target adds shared raw all-page fitting policy and geometry capture before validation repairs.
+func (e *Engine) Inspect(ctx context.Context, path string, target *PageSize) (SourceInfo, error) {
+	var (
+		info SourceInfo
+		fits []FitRange
+	)
+
+	observe := observeFeatures
+	if target != nil {
+		observe = func(ctx context.Context, pdf *model.Context) ([]SourceFeature, error) {
+			features, err := observeFeatures(ctx, pdf)
+			if err != nil {
+				return nil, err
+			}
+
+			fits, err = inspectPageFits(ctx, pdf, *target)
+
+			return features, err
+		}
+	}
 
 	err := guard(CodeInvalid, path, func() error {
-		document, readErr := e.readDocument(ctx, NoSource, path, observeFeatures)
+		document, readErr := e.readDocument(ctx, NoSource, path, observe)
 		if readErr != nil {
+			if target != nil {
+				return fittingSourceReadError(ctx, NoSource, path, readErr)
+			}
+
 			return readErr
 		}
 
@@ -75,6 +99,7 @@ func (e *Engine) Inspect(ctx context.Context, path string) (SourceInfo, error) {
 		info, inspectErr = inspectContext(ctx, document.pdf, path)
 
 		info.Features = document.features
+		info.Fits = fits
 
 		return inspectErr
 	})
@@ -93,17 +118,17 @@ func inspectContext(ctx context.Context, pdf *model.Context, path string) (Sourc
 	_, info.LegacyDests = pdf.RootDict.Find(keyDests)
 
 	if names, found := pdf.RootDict.Find(keyNames); found {
-		dict, err := pdf.DereferenceDict(names)
+		dict, err := pdf.DereferenceDictContext(ctx, names)
 		if err != nil {
-			return SourceInfo{}, newError(CodeInvalid, NoSource, path, fmt.Errorf("catalog /Names: %w", err))
+			return SourceInfo{}, classifyWalk(ctx, path, fmt.Errorf("catalog /Names: %w", err))
 		}
 
 		_, info.NamedDests = dict.Find(keyDests)
 	}
 
-	root, err := pdf.Pages()
+	root, err := pdf.PagesContext(ctx)
 	if err != nil {
-		return SourceInfo{}, newError(CodeInvalid, NoSource, path, fmt.Errorf(pageTreeRootFailureFormat, err))
+		return SourceInfo{}, classifyWalk(ctx, path, fmt.Errorf(pageTreeRootFailureFormat, err))
 	}
 
 	var (
@@ -138,15 +163,23 @@ func inspectContext(ctx context.Context, pdf *model.Context, path string) (Sourc
 
 	info.Pages = pageCount
 
-	if info.First, err = visibleSize(pdf, first.page, first.inherited); err != nil {
-		return SourceInfo{}, newError(CodePageGeometry, NoSource, path, fmt.Errorf("first page: %w", err))
+	if info.First, err = visibleSize(ctx, pdf, first.page, first.inherited); err != nil {
+		return SourceInfo{}, pageGeometryFailure(ctx, path, "first page", err)
 	}
 
-	if info.Last, err = visibleSize(pdf, last.page, last.inherited); err != nil {
-		return SourceInfo{}, newError(CodePageGeometry, NoSource, path, fmt.Errorf("last page: %w", err))
+	if info.Last, err = visibleSize(ctx, pdf, last.page, last.inherited); err != nil {
+		return SourceInfo{}, pageGeometryFailure(ctx, path, "last page", err)
 	}
 
 	return info, nil
+}
+
+func pageGeometryFailure(ctx context.Context, path, page string, err error) error {
+	if failure := canceled(ctx, NoSource, path); failure != nil {
+		return failure
+	}
+
+	return newError(CodePageGeometry, NoSource, path, fmt.Errorf(labelCauseFormat, page, err))
 }
 
 // classifyWalk maps a page-tree failure to an Error: cancellation, else an invalid document.

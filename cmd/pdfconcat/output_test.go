@@ -176,7 +176,7 @@ func TestGeneratedOnlyJobsAndInheritedSizes(t *testing.T) {
 		Sources: map[string]pdforacle.SourceFact{},
 		Pages: []pdforacle.ExpectedPage{
 			{Text: "first", Geometry: &pdforacle.Geometry{MediaBox: []float64{0, 0, 200, 100}}},
-			{Text: "", Geometry: &pdforacle.Geometry{MediaBox: []float64{0, 0, 595.276, 841.89}}},
+			{Text: "", Geometry: &pdforacle.Geometry{MediaBox: []float64{0, 0, 210 * 72 / 25.4, 297 * 72 / 25.4}}},
 		},
 	})
 
@@ -250,7 +250,7 @@ func TestSavedReportsAreUntrustedAndQueriesFailCleanly(t *testing.T) {
 	requireExit(t, run(t, dir, "", commandCheck, flagReport, failedReportPath, fileA, flagBlank, fileMissing), 1)
 
 	saved := string(readFile(t, filepath.Join(dir, successfulReportPath)))
-	writeFile(t, dir, "oldversion.json", strings.Replace(saved, `"format_version":3`, `"format_version":2`, 1))
+	writeFile(t, dir, "unsupported-version.json", strings.Replace(saved, `"format_version":2`, `"format_version":3`, 1))
 	writeFile(t, dir, "trailing.json", saved+"x")
 	writeFile(t, dir, "empty.json", "")
 	writeFile(t, dir, "unknown.json", strings.Replace(saved, `"kind":"report"`, `"kind":"report","extra":1`, 1))
@@ -264,7 +264,7 @@ func TestSavedReportsAreUntrustedAndQueriesFailCleanly(t *testing.T) {
 	}{
 		{"missing file", "report_read_failed", []string{commandReport, "absent.json"}, 1},
 		{"a directory", "", []string{commandReport, "."}, 1},
-		{"unsupported version", "report_unsupported_version", []string{commandReport, "oldversion.json"}, 2},
+		{"unsupported version", "report_unsupported_version", []string{commandReport, "unsupported-version.json"}, 2},
 		{"trailing data", "report_json_trailing_data", []string{commandReport, "trailing.json"}, 2},
 		{"empty", "report_json_empty", []string{commandReport, "empty.json"}, 2},
 		{"unknown member", "report_unknown_member", []string{commandReport, "unknown.json"}, 2},

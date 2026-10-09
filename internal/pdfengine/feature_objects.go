@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/pdfcpu/pdfcpu/pkg/filter"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
@@ -29,7 +30,7 @@ func (o *featureObserver) materialTree(
 		return false, errTreeTooDeep
 	}
 
-	value, err := o.pdf.Dereference(dict[key])
+	value, err := o.pdf.DereferenceContext(ctx, dict[key])
 	if err != nil {
 		return false, fmt.Errorf("feature /%s: %w", key, err)
 	}
@@ -39,7 +40,7 @@ func (o *featureObserver) materialTree(
 		return false, err
 	}
 
-	children, err := o.pdf.DereferenceArray(dict["Kids"])
+	children, err := o.pdf.DereferenceArrayContext(ctx, dict["Kids"])
 	if err != nil {
 		return false, fmt.Errorf("feature tree children: %w", err)
 	}
@@ -83,7 +84,7 @@ func (o *featureObserver) actions(ctx context.Context, dict types.Dict, kind Fea
 		o.found[kind] = o.found[kind] || found
 	}
 
-	additional, err := o.pdf.DereferenceDict(dict["AA"])
+	additional, err := o.pdf.DereferenceDictContext(ctx, dict["AA"])
 	if err != nil {
 		return fmt.Errorf("additional actions: %w", err)
 	}
@@ -124,7 +125,7 @@ func (o *featureObserver) action(
 		defer delete(active, ref)
 	}
 
-	value, err := o.pdf.Dereference(object)
+	value, err := o.pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return false, fmt.Errorf("action reference: %w", err)
 	}
@@ -138,12 +139,12 @@ func (o *featureObserver) action(
 		return false, nil
 	}
 
-	material, err := o.materialAction(dictionary, kind)
+	material, err := o.materialAction(ctx, dictionary, kind)
 	if err != nil {
 		return false, err
 	}
 
-	next, err := o.action(ctx, dictionary["Next"], kind, active, depth+1)
+	next, err := o.action(ctx, dictionary[keyNext], kind, active, depth+1)
 
 	return material || next, err
 }
@@ -203,14 +204,14 @@ func (o *featureObserver) nameValue(ctx context.Context, object types.Object, ki
 	}
 
 	if kind == FeatureCatalogAttachments {
-		return o.attachmentPayload(object)
+		return o.attachmentPayload(ctx, object)
 	}
 
 	if kind == FeatureCatalogActions {
 		return o.action(ctx, object, FeatureCatalogActions, map[types.IndirectRef]bool{}, 0)
 	}
 
-	value, err := o.pdf.Dereference(object)
+	value, err := o.pdf.DereferenceContext(ctx, object)
 	if err != nil {
 		return false, fmt.Errorf("name entry: %w", err)
 	}
@@ -235,7 +236,7 @@ func (o *featureObserver) materialChild(
 		defer delete(active, ref)
 	}
 
-	child, err := o.pdf.DereferenceDict(object)
+	child, err := o.pdf.DereferenceDictContext(ctx, object)
 	if err != nil {
 		return false, fmt.Errorf("feature tree child: %w", err)
 	}
@@ -243,8 +244,8 @@ func (o *featureObserver) materialChild(
 	return o.materialTree(ctx, child, key, kind, active, depth+1)
 }
 
-func (o *featureObserver) materialAction(dictionary types.Dict, kind FeatureKind) (bool, error) {
-	name, _, err := o.pdf.DereferenceNameEntry(dictionary, "S")
+func (o *featureObserver) materialAction(ctx context.Context, dictionary types.Dict, kind FeatureKind) (bool, error) {
+	name, _, err := o.pdf.DereferenceNameEntryContext(ctx, dictionary, "S")
 	if err != nil {
 		return false, fmt.Errorf("action kind: %w", err)
 	}
@@ -253,22 +254,28 @@ func (o *featureObserver) materialAction(dictionary types.Dict, kind FeatureKind
 		return false, nil
 	}
 
-	if *name != "JavaScript" {
-		return kind == FeatureCatalogActions || *name != "GoTo" && *name != "URI", nil
+	if *name == keyURI && kind == FeaturePageActions && o.uriBase {
+		if bindingErr := o.baseDependentURI(ctx, dictionary); bindingErr != nil {
+			return false, bindingErr
+		}
 	}
 
-	script, err := o.pdf.Dereference(dictionary["JS"])
+	if *name != "JavaScript" {
+		return kind == FeatureCatalogActions || *name != "GoTo" && *name != keyURI, nil
+	}
+
+	script, err := o.pdf.DereferenceContext(ctx, dictionary["JS"])
 	if err != nil {
 		return false, fmt.Errorf("JavaScript action: %w", err)
 	}
 
-	return materialScript(script)
+	return materialScript(ctx, script)
 }
 
-func materialScript(object types.Object) (bool, error) {
+func materialScript(ctx context.Context, object types.Object) (bool, error) {
 	switch value := object.(type) {
 	case types.StreamDict:
-		if err := value.Decode(); err != nil {
+		if err := value.DecodeWithContextAndLimit(ctx, filter.DefaultMaxDecodeBytes); err != nil {
 			return false, fmt.Errorf("JavaScript stream: %w", err)
 		}
 

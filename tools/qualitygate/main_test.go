@@ -326,7 +326,7 @@ func TestArchiveProblemsRejectsChecksumMismatch(t *testing.T) {
 func TestVersionOutputRequiresRealCommitAndDate(t *testing.T) {
 	t.Parallel()
 
-	good := `{"kind":"version","version":"1.2.3","commit":"899db07216b1","date":"2026-10-06T05:09:28Z","format_version":2}`
+	good := `{"kind":"version","version":"1.2.3","commit":"899db07216b1","date":"2026-10-06T05:09:28Z"}`
 	if problems := main.VersionOutputCheck("1.2.3", good); len(problems) != 0 {
 		t.Fatalf("unexpected problems: %q", problems)
 	}
@@ -337,9 +337,9 @@ func TestVersionOutputRequiresRealCommitAndDate(t *testing.T) {
 		"no commit":       `{"version":"1.2.3","commit":"none","date":"2026-10-06T05:09:28Z"}`,
 		"no date":         `{"version":"1.2.3","commit":"899db07216b1","date":"unknown"}`,
 		"fields gone":     `{"version":"1.2.3"}`,
-		"numeric version": `{"version":123,"commit":"899db07216b1","date":"2026-10-06T05:09:28Z","format_version":2}`,
-		"numeric commit":  `{"version":"1.2.3","commit":899,"date":"2026-10-06T05:09:28Z","format_version":2}`,
-		"numeric date":    `{"version":"1.2.3","commit":"899db07216b1","date":2026,"format_version":2}`,
+		"numeric version": `{"version":123,"commit":"899db07216b1","date":"2026-10-06T05:09:28Z"}`,
+		"numeric commit":  `{"version":"1.2.3","commit":899,"date":"2026-10-06T05:09:28Z"}`,
+		"numeric date":    `{"version":"1.2.3","commit":"899db07216b1","date":2026}`,
 	}
 
 	for name, output := range cases {

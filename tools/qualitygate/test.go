@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -49,6 +48,7 @@ type (
 
 	// testOptions are the flags of the test command.
 	testOptions struct {
+		stage   *foreignTestStage
 		run     string
 		events  string
 		timeout string
@@ -191,9 +191,10 @@ func packagesWithTests(ctx context.Context, root string, patterns []string) ([]s
 
 // runTests runs go test with discovery checks: every package that has test files must run and pass at
 // least one test, and every test named in -require must have passed (a skip does not count).
-func runTests(ctx context.Context, args []string) error {
+func runTests(ctx context.Context, args []string) (result error) {
 	set := newFlags(testVerb)
 	race := set.Bool("race", false, "enable the race detector")
+	native := set.Bool("native-progress", false, "require Darwin native progress fault fixtures with atomic coverage")
 	run := set.String(runVerb, "", "go test -run pattern")
 	timeout := set.String("timeout", "10m", "go test -timeout")
 	events := set.String("events", "", "retain complete JSON events here and process stderr at FILE.stderr; paths must be new")
@@ -209,27 +210,45 @@ func runTests(ctx context.Context, args []string) error {
 		return err
 	}
 
-	patterns := set.Args()
-	if len(patterns) == 0 {
-		patterns, err = testPackages(ctx, root)
-		if err != nil {
-			return err
+	options := testOptions{race: *race, run: *run, timeout: *timeout, require: splitList(*require), events: *events}
+	if *native {
+		if options.run != "" || len(options.require) != 0 || len(set.Args()) != 0 {
+			return fmt.Errorf("%w: -native-progress has a fixed mandatory test selection", errGate)
 		}
+
+		return runNativeProgress(ctx, root, options)
 	}
 
-	withTests, err := packagesWithTests(ctx, root, patterns)
+	stage, err := prepareForeignTests(ctx, root)
 	if err != nil {
 		return err
 	}
 
-	options := testOptions{race: *race, run: *run, timeout: *timeout, require: splitList(*require), events: *events}
+	defer func() { result = errors.Join(result, stage.cleanup()) }()
+
+	options.stage = stage
+
+	patterns, err := stage.testSelection(ctx, root, set.Args(), options)
+	if err != nil {
+		return err
+	}
+
+	withTests, err := stagedPackagesWithTests(ctx, root, patterns, options)
+	if err != nil {
+		return err
+	}
 
 	outcome, evidence, runErr := executeWithEvidence(ctx, root, patterns, options)
 	if outcome == nil {
 		return runErr
 	}
 
-	judged := judgeTests(outcome, withTests, options, runErr)
+	judged := errors.Join(
+		judgeTests(outcome, withTests, options, runErr),
+		stage.verify(ctx, root),
+		stage.compilerEquivalent(ctx, root, patterns, options),
+	)
+	judged = errors.Join(judged, rejectForeignSkips(outcome, stage.sources))
 	evidence.finish(judged)
 
 	return judged
@@ -243,15 +262,21 @@ func executeWithEvidence(ctx context.Context, root string, patterns []string, op
 	}
 
 	testArgs := []string{testVerb, jsonFlag, countOnce, "-timeout", options.timeout}
-	if options.race {
-		testArgs = append(testArgs, "-race")
+	if options.stage != nil {
+		testArgs = append(testArgs, options.stage.flags(options)...)
+	} else if options.race {
+		testArgs = append(testArgs, foreignRaceFlag)
 	}
 
 	if options.run != "" {
 		testArgs = append(testArgs, runSelectionFlag, options.run)
 	}
 
-	run := &command{dir: root, name: goTool, args: append(testArgs, patterns...)}
+	run := &command{dir: root, name: goTool, args: append(testArgs, patterns...), env: []string{readonlyGoFlags, foreignWorkspaceOff}}
+	if options.stage != nil {
+		run.env = options.stage.environment()
+	}
+
 	outcome, runErr := collectTestEvents(ctx, run, evidence)
 
 	return outcome, evidence, errors.Join(runErr, evidence.closeFiles())
@@ -304,7 +329,7 @@ func judgeTests(outcome *testOutcome, withTests []string, options testOptions, r
 	log.Printf("test: %d packages with tests, %d top-level tests passed, %d subtests passed, %d skipped",
 		len(withTests), total, outcome.subtests, len(outcome.skipped))
 
-	for _, name := range slices.Sorted(maps.Keys(outcome.reasons)) {
+	for _, name := range slices.Sorted(slices.Values(outcome.skipped)) {
 		log.Printf("test: skipped %s: %s", name, outcome.reasons[name])
 	}
 

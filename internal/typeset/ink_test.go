@@ -31,6 +31,10 @@ func TestSuppliedItalicBearingAndEmptyInk(t *testing.T) {
 		t.Fatalf("italic right overhang escaped: %+v %v", placed, err)
 	}
 
+	if overflow.FixedWidthExceedsPage() || !strings.HasPrefix(placed.Findings[0].Detail, "glyph ink spans") {
+		t.Fatalf("glyph-only overhang misclassified as configured block width: %+v %v", placed.Findings, err)
+	}
+
 	checkWhitespaceBlockOverflow(t, font)
 }
 

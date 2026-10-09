@@ -18,7 +18,7 @@ func buildLinterSource(ctx context.Context, sourceDir, output string, identity r
 		return err
 	}
 
-	for _, args := range [][]string{{sourceModVerb, sourceDownloadVerb}, {sourceModVerb, "verify"}, linterParserTestArgs()} {
+	for _, args := range [][]string{linterParserTestArgs(), linterSemanticTestArgs()} {
 		if stepErr := runSourceGo(ctx, sourceDir, args...); stepErr != nil {
 			return stepErr
 		}
@@ -34,6 +34,7 @@ func buildLinterSource(ctx context.Context, sourceDir, output string, identity r
 		ctx,
 		sourceDir,
 		"build",
+		sourceVendorMode,
 		"-trimpath",
 		"-buildvcs=false",
 		"-ldflags",
@@ -53,8 +54,17 @@ func buildLinterSource(ctx context.Context, sourceDir, output string, identity r
 func linterParserTestArgs() []string {
 	if runtime.GOOS == windowsOS && runtime.GOARCH == arm64Arch {
 		log.Print("physical parser unit tests run without race instrumentation: Go does not support the Windows/arm64 race detector")
-		return []string{sourceTestVerb, "./internal/physicalparse"}
+		return []string{sourceTestVerb, sourceVendorMode, "./internal/physicalparse"}
 	}
 
-	return []string{sourceTestVerb, "-race", "./internal/physicalparse"}
+	return []string{sourceTestVerb, sourceVendorMode, sourceRaceFlag, "./internal/physicalparse"}
+}
+
+func linterSemanticTestArgs() []string {
+	args := []string{sourceTestVerb, sourceVendorMode}
+	if runtime.GOOS != windowsOS || runtime.GOARCH != arm64Arch {
+		args = append(args, sourceRaceFlag)
+	}
+
+	return append(args, "./vendor/honnef.co/go/tools/unused")
 }

@@ -216,7 +216,7 @@ func checkSourceEncryptedLater(t *testing.T, env *world) {
 
 	path := writeDoc(t, t.TempDir(), "later-encrypted", pdffixture.Plain("LATER"))
 
-	info, err := env.engine.Inspect(context.Background(), path)
+	info, err := env.engine.Inspect(context.Background(), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,7 @@ func architecture(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if limitErr := sourceLimits(root); limitErr != nil {
+	if limitErr := sourceLimits(ctx, root); limitErr != nil {
 		return limitErr
 	}
 
@@ -65,6 +65,10 @@ func architecture(ctx context.Context, args []string) error {
 }
 
 func architectureScope(ctx context.Context, root string) ([]string, error) {
+	if err := foreignReleaseTargets(ctx, root); err != nil {
+		return nil, err
+	}
+
 	module, err := modulePath(root)
 	if err != nil {
 		return nil, err
@@ -75,17 +79,17 @@ func architectureScope(ctx context.Context, root string) ([]string, error) {
 		return nil, err
 	}
 
-	owners, err := repopolicy.ProductionOwners(config, module)
+	owners, err := repopolicy.SourceOwners(config, module)
 	if err != nil {
 		return nil, err
 	}
 
-	files, err := repopolicy.OwnedGoSources(root)
+	files, err := repopolicy.OwnedGoSources(ctx, root)
 	if err != nil {
 		return nil, err
 	}
 
-	dirs, err := repopolicy.OwnedGoDirectories(root)
+	dirs, err := repopolicy.OwnedGoDirectories(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -101,9 +105,11 @@ func architectureScope(ctx context.Context, root string) ([]string, error) {
 
 	compiled := map[string]bool{}
 
-	for _, target := range archiveTargets() {
+	for _, variant := range supportedSourceVariants() {
+		target := variant.name
+
 		output, loadErr := (&command{
-			dir: root, name: goTool, args: append([]string{goListVerb, "-e", jsonFlag}, patterns...), env: architectureTargetEnv(target),
+			dir: root, name: goTool, args: append([]string{goListVerb, "-e", jsonFlag}, patterns...), env: variant.env,
 		}).output(ctx)
 		if loadErr != nil {
 			return nil, fmt.Errorf("architecture discovery for %s: %w", target, loadErr)
@@ -114,7 +120,7 @@ func architectureScope(ctx context.Context, root string) ([]string, error) {
 		}
 	}
 
-	return repopolicy.ProductionClassificationIssues(owners, files, compiled), nil
+	return architectureSourceIssues(root, owners, files, compiled)
 }
 
 func collectArchitectureFiles(output, module string, compiled map[string]bool) error {
@@ -164,7 +170,7 @@ func collectArchitectureFiles(output, module string, compiled map[string]bool) e
 // architectureImports uses the installed native analyzers to analyze every supported target's selected
 // owned packages. This is static cross-target import analysis, not native runtime execution.
 func architectureImports(ctx context.Context, root, binary string) error {
-	dirs, err := repopolicy.OwnedGoDirectories(root)
+	dirs, err := repopolicy.OwnedGoDirectories(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -183,14 +189,14 @@ func architectureImports(ctx context.Context, root, binary string) error {
 		return fmt.Errorf("%w: no architecture import selections", errGate)
 	}
 
-	for _, target := range archiveTargets() {
+	for _, variant := range architectureAnalysisVariants() {
+		target := variant.name
+
 		output, loadErr := (&command{
 			dir: root, name: goTool,
 			args: append([]string{goListVerb, "-e", jsonFlag}, patterns...),
-			env:  architectureTargetEnv(target),
-		}).output(
-			ctx,
-		)
+			env:  variant.env,
+		}).output(ctx)
 		if loadErr != nil {
 			return fmt.Errorf("discover architecture imports for %s: %w", target, loadErr)
 		}
@@ -212,7 +218,7 @@ func architectureImports(ctx context.Context, root, binary string) error {
 			architectureLinters,
 		}, packages...)
 		checker := &command{
-			dir: root, name: binary, args: lintArgs, env: architectureTargetEnv(target),
+			dir: root, name: binary, args: lintArgs, env: variant.env,
 			stdout: log.Writer(), stderr: log.Writer(),
 		}
 

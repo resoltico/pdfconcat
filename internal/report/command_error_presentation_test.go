@@ -17,7 +17,7 @@ const (
 	commandHelpOption       = "--help"
 	commandField            = "command"
 	recoveryReportReference = "publication.recovery_report"
-	commandWireFormat       = `{"format_version":3,"kind":"error","status":"invalid","command":"report",` +
+	commandWireFormat       = `{"format_version":2,"kind":"error","status":"invalid","command":"report",` +
 		`"next":["%s","report","--help"],"diagnostic_count":0,"error_count":0,"warning_count":0,"diagnostics":[]}`
 )
 

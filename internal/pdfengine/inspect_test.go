@@ -271,7 +271,7 @@ func TestInspectRejectsMalformedGeometry(t *testing.T) {
 
 			path := writeDoc(t, t.TempDir(), "bad", tc.doc)
 
-			_, err := engine.Inspect(context.Background(), path)
+			_, err := engine.Inspect(context.Background(), path, nil)
 			failure := requireFailure(t, err, tc.code)
 
 			if failure.Path != path || failure.Source != pdfengine.NoSource {
@@ -289,7 +289,7 @@ func TestInspectRejectsGeometryOnLastPageOnly(t *testing.T) {
 
 	path := writeDoc(t, t.TempDir(), "bad-last", doc)
 
-	_, err := newEngine(t).Inspect(context.Background(), path)
+	_, err := newEngine(t).Inspect(context.Background(), path, nil)
 	failure := requireFailure(t, err, pdfengine.CodePageGeometry)
 
 	if got := failure.Error(); !strings.Contains(got, "last page") {
@@ -310,7 +310,7 @@ func TestInspectRejectsEncrypted(t *testing.T) {
 			path := writeDoc(t, t.TempDir(), "encrypted", pdffixture.Plain("SECRET"))
 			encrypt(t, tools, path, password)
 
-			_, err := engine.Inspect(context.Background(), path)
+			_, err := engine.Inspect(context.Background(), path, nil)
 			failure := requireFailure(t, err, pdfengine.CodeEncrypted)
 
 			if failure.Path != path {
@@ -329,14 +329,14 @@ func TestInspectFileErrors(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := engine.Inspect(context.Background(), filepath.Join(dir, absentFilename))
+		_, err := engine.Inspect(context.Background(), filepath.Join(dir, absentFilename), nil)
 		requireCode(t, err, pdfengine.CodeUnreadable)
 	})
 
 	t.Run("directory", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := engine.Inspect(context.Background(), dir)
+		_, err := engine.Inspect(context.Background(), dir, nil)
 		requireCode(t, err, pdfengine.CodeUnreadable)
 	})
 
@@ -348,7 +348,7 @@ func TestInspectFileErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err := engine.Inspect(context.Background(), path)
+		_, err := engine.Inspect(context.Background(), path, nil)
 		requireCode(t, err, pdfengine.CodeInvalid)
 	})
 
@@ -360,7 +360,7 @@ func TestInspectFileErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err := engine.Inspect(context.Background(), path)
+		_, err := engine.Inspect(context.Background(), path, nil)
 		requireCode(t, err, pdfengine.CodeInvalid)
 	})
 
@@ -371,7 +371,7 @@ func TestInspectFileErrors(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := engine.Inspect(ctx, path)
+		_, err := engine.Inspect(ctx, path, nil)
 		requireCode(t, err, pdfengine.CodeCanceled)
 
 		if !isCanceled(err) {
@@ -401,7 +401,7 @@ func TestInspectRejectsMalformedFieldTree(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join("testdata", "hostile", "malformed-form-fields-panic.pdf")
-	_, err := newEngine(t).Inspect(context.Background(), path)
+	_, err := newEngine(t).Inspect(context.Background(), path, nil)
 
 	failure := requireFailure(t, err, pdfengine.CodeFormUnsupported)
 	if failure.Path != path || !strings.Contains(failure.Error(), "missing field dictionary") {

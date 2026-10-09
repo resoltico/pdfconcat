@@ -25,10 +25,23 @@
 // Measurement covers the executable from launch to exit. Fixture generation and the independent
 // verification (qpdf, pdftotext, pdftoppm) are timed separately and excluded. Peak memory comes from
 // the kernel's accounting of the child (rusage on Unix, the peak working set on Windows); descriptors
-// are sampled while the process runs. Windows peak RSS is a sampled lower bound, while Unix RSS
+// are sampled while the process runs. Capped Unix cases additionally verify a 64/64 kernel limit
+// on the same owned PID through a private native launcher. It records unprivileged identity, an
+// actual refused hard-limit raise, executable identity and configured inheritance hygiene; the
+// launched Go-runtime controls independently verify the limit and inherited-object closure.
+// A native C compiler is required for capped Unix cases; source, compiler/SDK and executable
+// identities are recorded, and helper compilation is excluded from measured wall time.
+// The frozen executable/input directories must have no concurrent writer or privileged external
+// limit mutation. The ceiling applies to the product process after successful exec, not aggregate
+// descriptors in arbitrary descendants or an unconstrained production peak.
+// Windows peak RSS is a sampled lower bound, while Unix RSS
 // uses launch-through-exit kernel accounting. Each result records valid/unavailable/error states,
 // successful/attempted descriptor samples and the sampled temporal span as a fraction of wall time;
 // that fraction does not prove every transient maximum was observed. Enabled acceptance rejects
-// missing or failed required readings. On Unix the child also runs under a descriptor limit equal
-// to the gate, so exceeding it fails the run instead of going unseen.
+// missing or failed required readings in uncapped cases. Verified Unix capped cases keep a
+// separate resource-bound result and observation quality: partial/error readings remain visible,
+// and 64 is never inserted into the sampled maximum. At least one actual descriptor reading is
+// still required to record descriptor cost; no successful readings means unavailable observation.
+// Missing/contradictory cap evidence, failed product execution, sampler cleanup, RSS, scratch and
+// independent-oracle failures still fail acceptance. Windows retains sampled native handle checks.
 package scale

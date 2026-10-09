@@ -7,32 +7,15 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"math"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
-
-type formCheckpointContext struct {
-	remaining atomic.Int64
-}
-
-func (*formCheckpointContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (*formCheckpointContext) Done() <-chan struct{}       { return nil }
-func (*formCheckpointContext) Value(any) any               { return nil }
-
-func (c *formCheckpointContext) Err() error {
-	if c.remaining.Add(-1) < 0 {
-		return context.Canceled
-	}
-
-	return nil
-}
 
 func TestFormPreparationCancellationPreservesUnnormalizedDefaults(t *testing.T) {
 	t.Parallel()
@@ -43,7 +26,7 @@ func TestFormPreparationCancellationPreservesUnnormalizedDefaults(t *testing.T) 
 
 	for budget := range checkpoints {
 		fixture := formTestContext()
-		ctx := &formCheckpointContext{}
+		ctx := newFormCheckpointContext(t.Context(), t)
 		ctx.remaining.Store(int64(budget))
 
 		_, err := prepareFormResources(ctx, fixture.pdf, 1)
@@ -86,7 +69,7 @@ func TestFormMergeValidatesImportedAndDestinationResourceGraphs(t *testing.T) {
 			}
 			damage(fixture, source)
 
-			if err := mergeFormResources(fixture.pdf, source); err == nil {
+			if err := mergeFormResources(t.Context(), fixture.pdf, source); err == nil {
 				t.Fatalf("invalid %s graph was accepted", name)
 			}
 		})
@@ -103,7 +86,7 @@ func TestFormMergeValidatesImportedAndDestinationResourceGraphs(t *testing.T) {
 			},
 		},
 	}
-	if err := mergeFormResources(fixture.pdf, source); err != nil {
+	if err := mergeFormResources(t.Context(), fixture.pdf, source); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,7 +111,7 @@ func TestFormDereferenceFailuresPreserveTheirCause(t *testing.T) {
 	fixture.pdf.Table[3] = model.NewXRefTableEntryGen0(lazy)
 
 	ref := *types.NewIndirectRef(3, 0)
-	if err := checkFormResource(fixture.pdf, keyFont, ref); !errors.Is(err, errBoom) {
+	if err := checkFormResource(t.Context(), fixture.pdf, keyFont, ref); !errors.Is(err, errBoom) {
 		t.Fatalf("compressed resource failure lost: %v", err)
 	}
 
@@ -163,23 +146,23 @@ func TestPoolFormPreparationCancellationRetainsSourceIdentity(t *testing.T) {
 
 	const probeBudget = 1 << 20
 
-	probe := &formCheckpointContext{}
+	probe := newFormCheckpointContext(t.Context(), t)
 	probe.remaining.Store(probeBudget)
 
 	initial := &pool{engine: engine}
-	if _, err = initial.importDocument(probe, 0, path, 2); err != nil {
+	if _, err = initial.importDocument(probe, 0, path, 2, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	checks := int64(probeBudget) - probe.remaining.Load()
 	// Exercise the final read/normalization/collection checkpoints, rather than a timing race.
 	for budget := max(int64(0), checks-64); budget < checks; budget++ {
-		ctx := &formCheckpointContext{}
+		ctx := newFormCheckpointContext(t.Context(), t)
 		ctx.remaining.Store(budget)
 
 		current := &pool{engine: engine}
 
-		_, failure := current.importDocument(ctx, 0, path, 2)
+		_, failure := current.importDocument(ctx, 0, path, 2, nil)
 		if failure == nil {
 			continue
 		}
@@ -267,22 +250,21 @@ func TestSourceButtonRegenerationUsesCapturedPlanAndRetainsLogicalState(t *testi
 func TestButtonPreparationCancellationRemainsVisible(t *testing.T) {
 	t.Parallel()
 
-	const checkpoints = 64
+	probe := newFormCheckpointContext(t.Context(), t)
+	probe.remaining.Store(math.MaxInt64)
+
+	if _, err := prepareFormResources(probe, buttonPreparationContext().pdf, 1); err != nil {
+		t.Fatalf("uncancelled button preparation refused: %v", err)
+	}
+
+	checkpoints := math.MaxInt64 - probe.remaining.Load() + 1
 
 	completed := false
 
 	for budget := range checkpoints {
-		fixture := formTestContext()
-		fixture.form["NeedAppearances"] = types.Boolean(true)
-		fixture.parent["FT"] = types.Name(buttonFieldType)
-		fixture.form.Delete("DA")
-		maps.Copy(fixture.widget, buttonTestDictionary())
-
-		size, offset, generation := 3, int64(0), 65535
-		fixture.pdf.Size = &size
-		fixture.pdf.Table[0] = &model.XRefTableEntry{Free: true, Offset: &offset, Generation: &generation}
-		ctx := &formCheckpointContext{}
-		ctx.remaining.Store(int64(budget))
+		fixture := buttonPreparationContext()
+		ctx := newFormCheckpointContext(t.Context(), t)
+		ctx.remaining.Store(budget)
 
 		_, err := prepareFormResources(ctx, fixture.pdf, 1)
 		if err == nil {
@@ -298,4 +280,18 @@ func TestButtonPreparationCancellationRemainsVisible(t *testing.T) {
 	if !completed {
 		t.Fatal("bounded button cancellation controls never reached success")
 	}
+}
+
+func buttonPreparationContext() *formFixture {
+	fixture := formTestContext()
+	fixture.form["NeedAppearances"] = types.Boolean(true)
+	fixture.parent["FT"] = types.Name(buttonFieldType)
+	fixture.form.Delete("DA")
+	maps.Copy(fixture.widget, buttonTestDictionary())
+
+	size, offset, generation := 3, int64(0), 65535
+	fixture.pdf.Size = &size
+	fixture.pdf.Table[0] = &model.XRefTableEntry{Free: true, Offset: &offset, Generation: &generation}
+
+	return fixture
 }

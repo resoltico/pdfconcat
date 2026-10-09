@@ -30,6 +30,7 @@ func TestSourceFeatureAdviceNamesConcretePolicyAndScope(t *testing.T) {
 		{pdfengine.FeaturePageAttachments, []string{"retains", "payloads", "does not sanitize"}},
 		{pdfengine.FeaturePageLabels, []string{omittedPolicyWord, "page references"}},
 		{pdfengine.FeatureOtherCatalogNames, []string{"only destination", reviewPolicyWord}},
+		{pdfengine.FeatureURIBase, []string{"URI/Base", "relative URI", "absolute targets", "does not guarantee"}},
 		{pdfengine.FeatureKind("unexpected_backend_fact"), []string{"unexpected_backend_fact", "retained", reviewPolicyWord}},
 	}
 	for _, test := range cases {

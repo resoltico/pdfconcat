@@ -90,11 +90,16 @@ func lintSelectedIssues(ctx context.Context, scratch, binary, source, linters st
 		return nil, prepareErr
 	}
 
-	output, runErr := (&command{dir: scratch, name: binary, args: []string{
-		runVerb, serialLintRunners, lintNoFixFlag, configFlag, filepath.Join(scratch, scratchLintConfigName),
-		enableOnlyFlag, linters,
-		"--output.json.path=" + reportFile, allPackages,
-	}}).output(ctx)
+	// Independent fixtures own their source, report and analyzer cache; the upstream machine-wide
+	// runner lock would serialize unrelated controls even when their Go tests run in parallel.
+	output, runErr := (&command{
+		dir: scratch, name: binary,
+		env: []string{"GOLANGCI_LINT_CACHE=" + filepath.Join(scratch, lintFixtureCache)}, args: []string{
+			runVerb, parallelLintRunners, lintNoFixFlag, configFlag, filepath.Join(scratch, scratchLintConfigName),
+			enableOnlyFlag, linters,
+			"--output.json.path=" + reportFile, allPackages,
+		},
+	}).output(ctx)
 	if runErr != nil && exitCode(runErr) != exitIssuesFound {
 		return nil, fmt.Errorf("lint control infrastructure: %w\n%s", runErr, output)
 	}
@@ -287,7 +292,7 @@ func sourceLimitControls(ctx context.Context, scratch, binary string) ([]string,
 		}
 	}
 
-	limits, scanErr := repopolicy.ScanSourceLimits(scratch)
+	limits, scanErr := repopolicy.ScanSourceLimits(ctx, scratch)
 	if scanErr != nil {
 		return nil, scanErr
 	}
@@ -314,7 +319,7 @@ func sourceLimitControls(ctx context.Context, scratch, binary string) ([]string,
 		}
 	}
 
-	limits, scanErr = repopolicy.ScanSourceLimits(scratch)
+	limits, scanErr = repopolicy.ScanSourceLimits(ctx, scratch)
 	if scanErr != nil {
 		return nil, scanErr
 	}

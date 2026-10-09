@@ -5,6 +5,7 @@ package pdfengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"unicode/utf8"
@@ -26,7 +27,7 @@ func compileVariableFont(ctx context.Context, pdf *model.Context, object types.O
 		return nil, fmt.Errorf("variable font: %w", err)
 	}
 
-	dict, err := pdf.DereferenceDict(object)
+	dict, err := pdf.DereferenceDictContext(ctx, object)
 	if err != nil {
 		return nil, fmt.Errorf("%w: variable font dictionary: %w", errFormState, err)
 	}
@@ -39,12 +40,12 @@ func compileVariableFont(ctx context.Context, pdf *model.Context, object types.O
 		return nil, fmt.Errorf("%w: variable font ToUnicode remapping is not supported", errFormState)
 	}
 
-	base, err := variableFontName(pdf, dict)
+	base, err := variableFontName(ctx, pdf, dict)
 	if err != nil {
 		return nil, err
 	}
 
-	encoding, err := variableFontEncoding(pdf, dict, base)
+	encoding, err := variableFontEncoding(ctx, pdf, dict, base)
 	if err != nil {
 		return nil, err
 	}
@@ -57,15 +58,15 @@ func compileVariableFont(ctx context.Context, pdf *model.Context, object types.O
 	return font, nil
 }
 
-func variableFontName(pdf *model.Context, dict types.Dict) (string, error) {
-	kind, _, err := pdf.DereferenceNameEntry(dict, keySubtype)
+func variableFontName(ctx context.Context, pdf *model.Context, dict types.Dict) (string, error) {
+	kind, _, err := pdf.DereferenceNameEntryContext(ctx, dict, keySubtype)
 	if err != nil || kind == nil || *kind != nameType1 && *kind != "TrueType" {
-		return "", fmt.Errorf("%w: variable appearance requires a supported simple font", errFormState)
+		return "", errors.Join(err, fmt.Errorf("%w: variable appearance requires a supported simple font", errFormState))
 	}
 
-	name, _, err := pdf.DereferenceNameEntry(dict, keyBaseFont)
+	name, _, err := pdf.DereferenceNameEntryContext(ctx, dict, keyBaseFont)
 	if err != nil || name == nil {
-		return "", fmt.Errorf("%w: variable font requires a BaseFont name", errFormState)
+		return "", errors.Join(err, fmt.Errorf("%w: variable font requires a BaseFont name", errFormState))
 	}
 
 	base := string(*name)

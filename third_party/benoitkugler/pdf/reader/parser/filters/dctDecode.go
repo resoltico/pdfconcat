@@ -1,0 +1,126 @@
+package filters
+
+import (
+	"bytes"
+	"errors"
+	"io"
+)
+
+type SkipperDCT struct{}
+
+// Skip implements Skipper for DCT filter (JPEG).
+func (d SkipperDCT) Skip(encoded io.Reader) (int, error) {
+	r := newCountReader(encoded)
+	first, err := r.ReadByte()
+	if err != nil {
+		return 0, unexpectedEOF(err)
+	}
+	second, err := r.ReadByte()
+	if err != nil {
+		return 0, unexpectedEOF(err)
+	}
+	if first != 0xff || second != 0xd8 {
+		return 0, errors.New("JPEG inline data requires SOI marker")
+	}
+	re := &jpegLimitedReader{source: r, scratch: &bytes.Buffer{}}
+	err = discardSkipped(re, encoded)
+	return r.totalRead, err
+}
+
+// implement a reader which don't read passed the EOD.
+// We jump from markers to markers and save the data into a temporary buffer,
+// following the sketch described at
+// https://stackoverflow.com/questions/4585527/detect-eof-for-jpg-images
+type jpegLimitedReader struct {
+	source  *countReader
+	scratch *bytes.Buffer // nil means EOD is reached
+}
+
+// read one byte from the source and stores it back to the buffer
+func (j jpegLimitedReader) read() (byte, error) {
+	c, err := j.source.ReadByte()
+	if err != nil {
+		return 0, unexpectedEOF(err)
+	}
+	j.scratch.WriteByte(c)
+	return c, nil
+}
+
+func (j *jpegLimitedReader) Read(p []byte) (int, error) {
+	if j.scratch == nil { // we have reached EOD
+		return 0, io.EOF
+	}
+
+	// if our internal buffer is large enough, just return the data
+	// and update the buffer
+	n := len(p)
+	if j.scratch.Len() >= n {
+		return j.scratch.Read(p)
+	}
+
+	// start reading from the source
+	c, err := j.read()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		if c == 0xff { // start of a marker or fill bytes
+			next, err := j.read()
+			if err != nil {
+				return 0, err
+			}
+
+			if next == 0xD9 {
+				// end of data: return the remaining buffer
+				// and mark EOD by setting the buffer to nil
+				out, err := j.scratch.Read(p)
+				j.scratch = nil
+				return out, err
+			}
+
+			if next == 0xff {
+				// fill byte; we dont want to read another byte
+				// since `next` could be the start of a marker
+				c = next
+				continue
+			}
+
+			if next == 0 || next == 1 || (0xD0 <= next && next <= 0xD8) {
+				// standalone marker just, ignore it
+			} else {
+				lb1, err := j.read()
+				if err != nil {
+					return 0, err
+				}
+
+				lb2, err := j.read()
+				if err != nil {
+					return 0, err
+				}
+
+				segmentLength := int(uint16(lb2) | uint16(lb1)<<8)
+				// the length includes the two-byte length
+				if segmentLength < 2 {
+					return 0, errors.New("corrupted JPEG data")
+				}
+
+				// jump to the next segment and store the data
+				_, err = io.CopyN(j.scratch, j.source, int64(segmentLength-2))
+				if err != nil {
+					return 0, unexpectedEOF(err)
+				}
+			}
+		}
+
+		// if we now have enough bytes, return them ...
+		if j.scratch.Len() >= n {
+			return j.scratch.Read(p)
+		}
+
+		// ... else advance and loop
+		c, err = j.read()
+		if err != nil {
+			return 0, err
+		}
+	}
+}

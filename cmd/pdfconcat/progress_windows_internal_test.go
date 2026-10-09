@@ -6,13 +6,17 @@
 package main
 
 import (
+	"context"
 	"os"
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/resoltico/pdfconcat/internal/cli"
+	"github.com/resoltico/pdfconcat/internal/observation"
 )
 
-// This test changes the process stream and therefore runs before parallel tests.
+// AllocConsole changes process console ownership, so this runs before parallel tests.
 func TestProgressUsesWindowsConsoleAndRejectsPipe(t *testing.T) {
 	console := progressConsole(t)
 
@@ -22,19 +26,23 @@ func TestProgressUsesWindowsConsoleAndRejectsPipe(t *testing.T) {
 		t.Fatalf("real console handle: %v", modeErr)
 	}
 
-	previous := os.Stderr
+	owner := &progressOwner{file: console}
+	t.Cleanup(owner.release)
 
-	t.Cleanup(func() { os.Stderr = previous })
-
-	os.Stderr = console
-
-	stream := progressStream()
-	if stream != console {
+	session := owner.newSession(t.Context(), cli.ProgressAuto, "AAAAAAAAAAAAAAAAAAAAAAAAAA")
+	if session == nil {
 		t.Fatal("interactive console did not receive progress")
 	}
 
-	if _, writeErr := stream.Write([]byte("pdfconcat: console progress control\n")); writeErr != nil {
-		t.Fatalf("write console progress: %v", writeErr)
+	session.Observe(observation.Milestone{Phase: observation.Preparation})
+	session.Stop()
+
+	if owner.interrupted() {
+		t.Fatal("normal console progress was interrupted")
+	}
+
+	if err := owner.WriteRecord(context.Background(), []byte("pdfconcat: console progress control\n")); err != nil {
+		t.Fatal(err)
 	}
 
 	reader, writer, pipeErr := os.Pipe()
@@ -52,19 +60,22 @@ func TestProgressUsesWindowsConsoleAndRejectsPipe(t *testing.T) {
 		}
 	})
 
-	os.Stderr = writer
+	redirected := &progressOwner{file: writer}
+	if redirected.newSession(t.Context(), cli.ProgressAuto, "AAAAAAAAAAAAAAAAAAAAAAAAAA") != nil {
+		t.Fatal("redirected pipe received automatic progress")
+	}
 
-	if progressStream() != nil {
-		t.Fatal("redirected pipe received progress")
+	if redirected.transport != nil {
+		t.Fatal("quiet automatic mode created a transport")
 	}
 }
 
 func progressConsole(t *testing.T) *os.File {
 	t.Helper()
 
-	console, openErr := os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	console, openErr := os.OpenFile(progressConsoleOutput, os.O_RDWR, 0)
 	if openErr != nil {
-		kernel := windows.NewLazySystemDLL("kernel32.dll")
+		kernel := windows.NewLazySystemDLL(progressWindowsKernel)
 
 		allocated, _, allocationErr := kernel.NewProc("AllocConsole").Call()
 		if allocated == 0 {
@@ -72,13 +83,13 @@ func progressConsole(t *testing.T) *os.File {
 		}
 
 		t.Cleanup(func() {
-			freed, _, freeErr := kernel.NewProc("FreeConsole").Call()
+			freed, _, freeErr := kernel.NewProc(progressFreeConsole).Call()
 			if freed == 0 {
 				t.Errorf("free owned console: %v", freeErr)
 			}
 		})
 
-		console, openErr = os.OpenFile("CONOUT$", os.O_RDWR, 0)
+		console, openErr = os.OpenFile(progressConsoleOutput, os.O_RDWR, 0)
 	}
 
 	if openErr != nil {

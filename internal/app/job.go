@@ -217,6 +217,10 @@ func (p *pipeline) flatten() error {
 	}
 
 	p.flat = flat
+	if p.command.FitTo != "" {
+		flat.FitTo = assembly.Set(p.command.FitTo, assembly.Origin{})
+	}
+
 	p.files = make([]inspectedSource, len(flat.Files))
 
 	return nil

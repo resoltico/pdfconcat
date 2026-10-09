@@ -40,3 +40,24 @@ controls:
     file: internal/report/query.go
     anchor: 'WarningCount: r.relevantCounts([]string{part.ID}).WarningCount,'
     replacement: 'WarningCount: 0,'
+
+  # Buffered codec output must observe cancellation and the decoded-read work interval.
+  - id: decode-ignores-buffered-output-cancellation
+    package: github.com/pdfcpu/pdfcpu/pkg/filter
+    file: third_party/pdfcpu/pdfcpu/pkg/filter/filter.go
+    anchor: 'r = ContextReader(f.ctx, r)'
+    replacement: 'r = ContextReader(nil, r)'
+
+  # A predictor row must fit the remaining output budget before being appended.
+  - id: decode-appends-predictor-output-beyond-limit
+    package: github.com/pdfcpu/pdfcpu/pkg/filter
+    file: third_party/pdfcpu/pdfcpu/pkg/filter/flateDecode.go
+    anchor: 'if limit := f.decodeLimit(maxLen); limit >= 0 && int64(len(row)) > limit-int64(b.Len()) {'
+    replacement: 'if limit := f.decodeLimit(maxLen); false && limit >= 0 && int64(len(row)) > limit-int64(b.Len()) {'
+
+  # Complete isolated source objects must not discard material after the parsed object.
+  - id: source-accepts-material-after-object-body
+    package: github.com/pdfcpu/pdfcpu/pkg/pdfcpu
+    file: third_party/pdfcpu/pdfcpu/pkg/pdfcpu/read.go
+    anchor: 'if err = objectBodyRemainder(c, *line); err != nil {'
+    replacement: 'if err = nil; err != nil {'

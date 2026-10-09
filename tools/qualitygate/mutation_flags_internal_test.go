@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -102,4 +103,26 @@ func mutationArgumentValue(args []string, flag string) string {
 	}
 
 	return ""
+}
+
+func TestMutationBaselinePackageOnlyScopesSinglePackageDebugging(t *testing.T) {
+	t.Parallel()
+
+	for _, entry := range []struct {
+		only        string
+		want        string
+		integration bool
+	}{
+		{only: mutationObservationPackage, want: "./internal/observation"},
+		{only: mutationObservationPackage, integration: true},
+		{only: "internal/observation,internal/plan"},
+		{},
+	} {
+		options := mutationOptions{only: entry.only, integration: entry.integration}
+
+		args := gremlinsArguments("report.json", &options, nil)
+		if !slices.Contains(args, "--baseline-package="+entry.want) {
+			t.Fatalf("baseline arguments %v, want %q", args, entry.want)
+		}
+	}
 }

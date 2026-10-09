@@ -77,7 +77,7 @@ func TestRotationIsNormalizedToOneTurn(t *testing.T) {
 
 	tests := map[int]int{0: 0, 90: 90, 180: 180, 270: 270, 360: 0, 450: 90, 720: 0, -90: 270, -180: 180, -270: 90, -360: 0, -450: 270}
 	for given, want := range tests {
-		got, err := rotationOf(pdf, types.Dict{}, types.Integer(given))
+		got, err := rotationOf(t.Context(), pdf, types.Dict{}, types.Integer(given))
 		if err != nil || got != want {
 			t.Errorf("rotation %d = %d, %v; want %d", given, got, err, want)
 		}
@@ -103,7 +103,7 @@ func TestVisibleSizeCropMustOverlapMediaInBothDimensions(t *testing.T) {
 	for name, crop := range rejected {
 		page := types.Dict{keyMediaBox: box(0, 0, 10, 10), keyCropBox: crop}
 
-		_, err := visibleSize(pdf, page, inheritedAttrs{})
+		_, err := visibleSize(t.Context(), pdf, page, inheritedAttrs{})
 		if err == nil || !strings.Contains(err.Error(), "does not overlap") {
 			t.Errorf("%s: visibleSize() = %v", name, err)
 		}
@@ -111,7 +111,7 @@ func TestVisibleSizeCropMustOverlapMediaInBothDimensions(t *testing.T) {
 
 	page := types.Dict{keyMediaBox: box(0, 0, 10, 10), keyCropBox: box(9, 9, 20, 20)}
 
-	got, err := visibleSize(pdf, page, inheritedAttrs{})
+	got, err := visibleSize(t.Context(), pdf, page, inheritedAttrs{})
 	if err != nil || got != (PageSize{Width: 1, Height: 1}) {
 		t.Errorf("a one-point overlap: %v, %v", got, err)
 	}
@@ -132,7 +132,7 @@ func TestVisibleSizeReportsOverflowOfEitherDimension(t *testing.T) {
 		"rotated":     {keyMediaBox: box(huge, types.Integer(5)), userUnitKey: types.Float(4), "Rotate": types.Integer(90)},
 	}
 	for name, page := range tests {
-		_, err := visibleSize(pdf, page, inheritedAttrs{})
+		_, err := visibleSize(t.Context(), pdf, page, inheritedAttrs{})
 		if err == nil || !strings.Contains(err.Error(), errorNamesOverflow) {
 			t.Errorf("%s: visibleSize() = %v", name, err)
 		}

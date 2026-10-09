@@ -17,7 +17,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
-const linterPatchPath = "tools/lint-patches/golangci-lint-physical-source.patch"
+const linterPatchPath = "tools/lint-patches/golangci-lint-source-contracts.patch"
 
 func installLinter(ctx context.Context, root string, versions map[string]string, binDir string) (failure error) {
 	identity, identityErr := repopolicy.GolangciBuildIdentity(versions)
@@ -83,6 +83,16 @@ func prepareLinterSource(ctx context.Context, root, workspace string, versions m
 	original, lockErr := snapshotSourceDependencies(tree)
 	if lockErr != nil {
 		return "", lockErr
+	}
+
+	for _, args := range [][]string{{sourceModVerb, sourceDownloadVerb}, {sourceModVerb, "verify"}, {sourceModVerb, "vendor"}} {
+		if err := runSourceGo(ctx, tree, args...); err != nil {
+			return "", err
+		}
+
+		if err := original.verify(tree); err != nil {
+			return "", err
+		}
 	}
 
 	patch, patchErr := readFile(root, linterPatchPath)

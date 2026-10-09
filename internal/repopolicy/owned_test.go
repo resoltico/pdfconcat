@@ -30,7 +30,7 @@ func TestOwnedGoDirectoriesIncludesCompiledFixturesAndHiddenSource(t *testing.T)
 		}
 	}
 
-	dirs, err := repopolicy.OwnedGoDirectories(root)
+	dirs, err := repopolicy.OwnedGoDirectories(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestOwnedGoDirectoriesIncludesCompiledFixturesAndHiddenSource(t *testing.T)
 		t.Fatalf("owned source discovery: %v", dirs)
 	}
 
-	if _, err = repopolicy.OwnedGoDirectories(filepath.Join(root, "missing")); err == nil {
+	if _, err = repopolicy.OwnedGoDirectories(t.Context(), filepath.Join(root, "missing")); err == nil {
 		t.Fatal("unavailable discovery accepted")
 	}
 }

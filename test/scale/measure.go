@@ -46,9 +46,11 @@ type (
 
 	// Measurement is what one execution cost.
 	Measurement struct {
-		ObserverRetries ObserverRetryEvidence
-		Stdout          string
-		Stderr          string
+		DescriptorCollector *DescriptorCollectorIdentity `json:"descriptor_collector,omitempty"`
+		DescriptorCeiling   *DescriptorCeiling           `json:"descriptor_ceiling,omitempty"`
+		ObserverRetries     ObserverRetryEvidence
+		Stdout              string
+		Stderr              string
 		// RSSState is valid, unavailable, or error; an error includes any failed intermediate RSS sample.
 		RSSState string
 		// DescriptorState is valid only when every attempted live-process sample succeeds.
@@ -78,16 +80,18 @@ type (
 
 	// ReadingFailure preserves the cause and phase of an unsuccessful process observation.
 	ReadingFailure struct {
-		ReadStarted  time.Time `json:"read_started"`
-		ReadFinished time.Time `json:"read_finished"`
-		Metric       string    `json:"metric"`
-		Phase        string    `json:"phase"`
-		Cause        string    `json:"cause"`
-		Stderr       string    `json:"stderr,omitempty"`
-		Stdout       string    `json:"stdout,omitempty"`
-		Probe        string    `json:"probe,omitempty"`
-		ExitCode     int       `json:"exit_code"`
-		NativeCode   uint64    `json:"native_code,omitempty"`
+		ProofWaitStarted  time.Time `json:"proof_wait_started,omitzero"`
+		ProofWaitFinished time.Time `json:"proof_wait_finished,omitzero"`
+		ReadStarted       time.Time `json:"read_started"`
+		ReadFinished      time.Time `json:"read_finished"`
+		Metric            string    `json:"metric"`
+		Phase             string    `json:"phase"`
+		Cause             string    `json:"cause"`
+		Stderr            string    `json:"stderr,omitempty"`
+		Stdout            string    `json:"stdout,omitempty"`
+		Probe             string    `json:"probe,omitempty"`
+		ExitCode          int       `json:"exit_code"`
+		NativeCode        uint64    `json:"native_code,omitempty"`
 	}
 
 	// processSample is one reading of a running process.
@@ -136,22 +140,48 @@ const (
 // Measure runs the command and measures it. A nonzero exit status is reported in the Measurement, not as
 // an error. Returned errors identify process, scratch-inspection or collector-cleanup failures.
 func Measure(ctx context.Context, spec RunSpec) (Measurement, error) {
-	sampler, prepareErr := prepareProcessSampler()
+	sampler, prepareErr := prepareProcessSampler(ctx)
 	if prepareErr != nil {
 		return unavailableMeasurement(), prepareErr
 	}
 
 	command := measuredCommand(ctx, spec)
 
+	launch, launchErr := prepareDescriptorLaunch(ctx, command, spec.DescriptorLimit)
+	if launchErr != nil {
+		return unavailableMeasurement(), errors.Join(launchErr, sampler.release())
+	}
+
+	measured, err := measurePreparedCommand(ctx, spec, command, sampler, launch)
+
+	return measured, errors.Join(err, sampler.release(), launch.unchangedBinary(), launch.release())
+}
+
+func measurePreparedCommand(
+	ctx context.Context,
+	spec RunSpec,
+	command *exec.Cmd,
+	sampler *processSampler,
+	launch *descriptorLaunch,
+) (Measurement, error) {
 	var stdout, stderr bytes.Buffer
 
 	command.Stdout, command.Stderr = &stdout, &stderr
 
 	started := time.Now()
 
-	err := startProcess(command, spec.DescriptorLimit)
+	err := startProcess(command)
 	if err != nil {
 		return unavailableMeasurement(), fmt.Errorf("start %s: %w", spec.Binary, err)
+	}
+
+	ceiling, capErr := launch.observe(ctx, command.Process.Pid)
+	if capErr != nil {
+		killErr := command.Process.Kill()
+		waitErr := command.Wait()
+		measured := measurementFacts(command, sampler, processPeaks{}, time.Since(started), stdout.String(), stderr.String())
+
+		return measured, errors.Join(capErr, killErr, waitErr, sampler.release())
 	}
 
 	if attachErr := sampler.attach(ctx, command.Process.Pid); attachErr != nil {
@@ -171,7 +201,11 @@ func Measure(ctx context.Context, spec RunSpec) (Measurement, error) {
 	exitCode, err := exitCodeOf(command, waitErr)
 
 	measurement := measurementFacts(command, sampler, peaks, wall, stdout.String(), stderr.String())
+
 	measurement.ExitCode = exitCode
+	if ceiling.PID != 0 {
+		measurement.DescriptorCeiling = &ceiling
+	}
 
 	if err != nil {
 		return measurement, fmt.Errorf("wait for %s: %w", spec.Binary, errors.Join(err, observerErr))
@@ -452,7 +486,8 @@ func measurementFacts(
 	coverage := max(0, min(1, peaks.lastDescriptor.Sub(peaks.firstDescriptor).Seconds()/wall.Seconds()))
 
 	measurement := Measurement{
-		RSSState: rssState, DescriptorState: descriptorState, ObserverRetries: sampler.retryEvidence(),
+		DescriptorCollector: sampler.collectorIdentity(),
+		RSSState:            rssState, DescriptorState: descriptorState, ObserverRetries: sampler.retryEvidence(),
 		TerminalSamples: peaks.terminalSamples, DescriptorTerminalSamples: peaks.descriptorTerminalSamples, ReadingFailures: peaks.failures,
 		DescriptorSamples: peaks.descriptorSamples, SampleAttempts: peaks.sampleAttempts, DescriptorCoverage: coverage,
 		Stdout:           stdout,

@@ -392,3 +392,36 @@ func TestMutationCompletenessCannotBeInferredFromKilledRows(t *testing.T) {
 	campaign.Mutants[0].ExecutionReference = strings.Repeat("a", 64)
 	requireContains(t, repopolicy.MutationDiscoveryIssues(discovery, &campaign, mutationHost()), "discovery lacks complete:true")
 }
+
+func TestMutationDiscoveryPreflightRetainsUncoveredHostAndRejectsForeign(t *testing.T) {
+	t.Parallel()
+
+	host := repopolicy.Mutant{
+		File:            mutationFile,
+		Type:            "CONDITIONALS_NEGATION",
+		Status:          "NOT COVERED",
+		DiscoveryStatus: "NOT COVERED",
+		Line:            97,
+		Column:          14,
+	}
+
+	report := &repopolicy.MutationReport{Complete: true, Mutants: []repopolicy.Mutant{host}}
+	if problems := repopolicy.MutationDiscoveryPreflightIssues(report, mutationHost()); len(problems) != 0 {
+		t.Fatal(problems)
+	}
+
+	foreign := host
+	foreign.File = "third_party/pdfcpu/pdfcpu/pkg/pdfcpu/zoom.go"
+
+	report.Mutants = append(report.Mutants, foreign)
+	if problems := repopolicy.MutationDiscoveryPreflightIssues(report, mutationHost()); len(problems) == 0 {
+		t.Fatal("foreign discovery reached execution")
+	}
+
+	report.Mutants = []repopolicy.Mutant{host}
+
+	report.Complete = false
+	if problems := repopolicy.MutationDiscoveryPreflightIssues(report, mutationHost()); len(problems) == 0 {
+		t.Fatal("partial discovery reached execution")
+	}
+}

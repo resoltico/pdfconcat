@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Ervins Strauhmanis
+
+//go:build windows
+
+package main
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"golang.org/x/sys/windows"
+)
+
+const (
+	progressNativeCancelScenario = "native-cancel"
+	progressDeadlineScenario     = "deadline"
+	progressConsoleScenario      = "PDFCONCAT_CONSOLE_STALL_SCENARIO"
+	progressAbandonedText        = "abandoned-record"
+	progressSentinelText         = "independent-sentinel"
+)
+
+func TestProgressTransportNativeConsolePause(t *testing.T) {
+	t.Parallel()
+
+	executable, err := os.Executable()
+	requireProgressNoError(t, err)
+
+	for _, scenario := range []string{"unicode", "release", progressNativeCancelScenario, "caller-cancel", progressDeadlineScenario} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			// The outer watchdog bounds a failed fixture, not the product's one-second acceptance limit.
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+
+			command := exec.CommandContext(
+				ctx,
+				executable,
+				progressHelperArgs("-test.run=^TestProgressTransportConsolePauseHelper$", "-test.v")...)
+
+			command.Env = append(os.Environ(), progressConsoleScenario+"="+scenario)
+			output, runErr := command.CombinedOutput()
+			t.Logf("private console %s: %s", scenario, output)
+
+			if runErr != nil {
+				t.Fatalf("private console fixture failed (watchdog=%v): %v", ctx.Err(), runErr)
+			}
+		})
+	}
+}
+
+func TestProgressTransportConsolePauseHelper(t *testing.T) {
+	t.Parallel()
+
+	scenario := os.Getenv(progressConsoleScenario)
+	if scenario == "" {
+		return
+	}
+
+	if scenario == "unicode" {
+		privateProgressConsole(t)
+		assertProgressConsoleUnicodeReadback(t)
+
+		return
+	}
+
+	fixture := pausedProgressConsole(t)
+	if scenario == "release" || scenario == progressNativeCancelScenario {
+		assertProgressRawConsoleBoundary(t, fixture, scenario)
+		return
+	}
+
+	assertProgressHeldConsoleCancellation(t, fixture, scenario)
+}
+
+func assertProgressHeldConsoleCancellation(t *testing.T, fixture *progressConsolePause, scenario string) {
+	t.Helper()
+	transport := progressNativeTransport(t, fixture.output)
+	// Release is registered after transport cleanup: assertion failures release before joining.
+	t.Cleanup(fixture.release)
+	observer := observeProgressNativeThread(t, transport.threadID)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	result := make(chan error, 1)
+	started := time.Now()
+
+	go func() { result <- transport.WriteRecord(ctx, []byte(progressAbandonedText)) }()
+
+	assertProgressNativePending(t, observer, result)
+
+	wanted := context.DeadlineExceeded
+	if scenario == "caller-cancel" {
+		wanted = context.Canceled
+
+		cancel()
+	}
+
+	err := awaitProgressIOResult(t, result)
+	if !errors.Is(err, wanted) || !errors.Is(err, windows.ERROR_OPERATION_ABORTED) || !transport.Interrupted() {
+		t.Fatalf("held native console result=%v interrupted=%v", err, transport.Interrupted())
+	}
+
+	assertProgressPoisoned(t.Context(), t, transport)
+	requireProgressNoError(t, transport.Close())
+
+	if time.Since(started) > time.Second {
+		t.Fatal("held native console write/shutdown exceeded one second")
+	}
+
+	select {
+	case <-transport.stopped:
+	default:
+		t.Fatal("held native console worker was not joined")
+	}
+
+	assertProgressConsoleNoDelayedRecord(t, fixture)
+}
+
+func assertProgressConsoleNoDelayedRecord(t *testing.T, fixture *progressConsolePause) {
+	t.Helper()
+	fixture.release()
+	_, result, stopped := startProgressConsoleNativeWrite(t, fixture.output, progressSentinelText)
+	requireProgressNoError(t, awaitProgressIOResult(t, result))
+	<-stopped
+
+	units := readProgressConsoleUnits(t, windows.Handle(fixture.output.Fd()))
+
+	text := windows.UTF16ToString(units)
+	if !strings.Contains(text, progressSentinelText) || strings.Contains(text, progressAbandonedText) {
+		t.Fatalf("released console contains delayed abandoned output or lacks sentinel: %q", text)
+	}
+}
+
+func awaitProgressIOResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(time.Second):
+		t.Fatal("native progress write did not complete within one second; endpoint release is cleanup rescue")
+		return nil
+	}
+}

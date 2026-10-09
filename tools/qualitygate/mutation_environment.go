@@ -14,11 +14,6 @@ import (
 
 // mutationEnvironment exposes the verified checker to whole-suite tests without copying ignored tools into source snapshots.
 func mutationEnvironment(ctx context.Context, options *mutationOptions, registry *repopolicy.Registry) ([]string, error) {
-	env := []string{readonlyGoFlags}
-	if !options.integration {
-		return env, nil
-	}
-
 	binary, err := findTool(options.root, lintTool)
 	if err != nil {
 		return nil, err

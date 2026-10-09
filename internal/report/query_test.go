@@ -18,6 +18,7 @@ type (
 	pageStats struct {
 		next      *int64
 		returned  int
+		total     int
 		size      int
 		oversized bool
 	}
@@ -57,9 +58,9 @@ const (
 	briefBlankSize = 700
 )
 
-// syntheticBuilder starts a large complete layout: syntheticPairs one-page PDFs, each followed by a run of
+// syntheticBuilder starts a large complete layout: pairCount one-page PDFs, each followed by a run of
 // two generated pages that all share one style whose text is 10 KB. It returns the builder and that text.
-func syntheticBuilder() (*report.Builder, string) {
+func syntheticBuilder(pairCount int) (*report.Builder, string) {
 	longText := strings.Repeat("Ā-ļ ", longTextRunes/4)
 
 	builder := report.NewBuilder(testCommandCheck)
@@ -82,7 +83,7 @@ func syntheticBuilder() (*report.Builder, string) {
 
 	page := int64(1)
 
-	for i := range syntheticPairs {
+	for i := range pairCount {
 		source := builder.Source(
 			report.Source{Path: fmt.Sprintf("/work/inputs/chapter-%05d.pdf", i), Digest: digestA, Bytes: new(int64(1000 + i))},
 		)
@@ -110,7 +111,7 @@ func syntheticBuilder() (*report.Builder, string) {
 		OutputVerification: report.PhaseNotRun,
 	})
 	builder.SetCounts(report.Counts{
-		SourcePages: new(int64(syntheticPairs)), GeneratedPages: new(total - syntheticPairs), TotalPages: &total,
+		SourcePages: new(int64(pairCount)), GeneratedPages: new(total - int64(pairCount)), TotalPages: &total,
 	})
 	builder.SetPublication(report.Publication{ReportStatus: report.ReportWritten, ReportPath: "/work/job.report.json"})
 
@@ -119,16 +120,20 @@ func syntheticBuilder() (*report.Builder, string) {
 
 // syntheticSuccess is the synthetic layout as a successful check without diagnostics.
 func syntheticSuccess() (*report.Report, string) {
-	builder, longText := syntheticBuilder()
+	builder, longText := syntheticBuilder(syntheticPairs)
 
 	return builder.Build(report.StatusOK), longText
 }
 
 // syntheticFailure is the synthetic layout with syntheticDiags diagnostics.
 func syntheticFailure() (*report.Report, string) {
-	builder, longText := syntheticBuilder()
+	return failureWithCounts(syntheticPairs, syntheticDiags)
+}
 
-	for i := range syntheticDiags {
+func failureWithCounts(pairCount, diagnosticCount int) (*report.Report, string) {
+	builder, longText := syntheticBuilder(pairCount)
+
+	for i := range diagnosticCount {
 		builder.AddDiagnostic(i, report.Diagnostic{
 			Stage: fixtureLayoutStage,
 			Code:  fixtureOverflowCode,
@@ -185,11 +190,17 @@ func viewStats(tb testing.TB, rep *report.Report, req report.Request) pageStats 
 	response := queryOK(tb, rep, req)
 
 	if view, ok := report.ContentOf[report.ViewResponse[report.PartView]](response); ok {
-		return pageStats{next: view.NextOffset, returned: view.Returned, size: jsonSize(tb, view), oversized: view.OversizedRecord}
+		return pageStats{
+			next: view.NextOffset, returned: view.Returned, total: view.Total,
+			size: jsonSize(tb, view), oversized: view.OversizedRecord,
+		}
 	}
 
 	if view, ok := report.ContentOf[report.ViewResponse[report.DiagnosticView]](response); ok {
-		return pageStats{next: view.NextOffset, returned: view.Returned, size: jsonSize(tb, view), oversized: view.OversizedRecord}
+		return pageStats{
+			next: view.NextOffset, returned: view.Returned, total: view.Total,
+			size: jsonSize(tb, view), oversized: view.OversizedRecord,
+		}
 	}
 
 	tb.Fatalf("query %+v: the response is not a view", req)
@@ -610,10 +621,13 @@ func pagedRecords(tb testing.TB, rep *report.Report, view string, limit int64, d
 func TestPagingTerminatesAndCoversEveryRecordOnce(t *testing.T) {
 	t.Parallel()
 
-	failed, _ := syntheticFailure()
+	// Exceed every record limit and retain a partial tail for limits 7, 20 and 100.
+	const records = report.MaxLimit + 8
 
-	// Some diagnostics are far larger than one response, so a detailed view must return them alone.
-	for _, index := range []int{0, 7, 8, 4999} {
+	failed, _ := failureWithCounts(records/2, records)
+
+	// First, adjacent boundary and final oversized records must each return alone.
+	for _, index := range []int{0, 7, 8, records - 1} {
 		failed.Diagnostics[index].Message = strings.Repeat("huge ", 60_000)
 	}
 
@@ -621,6 +635,36 @@ func TestPagingTerminatesAndCoversEveryRecordOnce(t *testing.T) {
 		for _, details := range []bool{false, true} {
 			for _, limit := range []int64{1, 7, 20, 100} {
 				checkCoverage(t, failed, walkSpec{view: view, limit: limit, details: details})
+			}
+		}
+	}
+}
+
+// TestLargeViewsRetainEndpointCursors preserves the high-count domain separately from exhaustive walks.
+func TestLargeViewsRetainEndpointCursors(t *testing.T) {
+	t.Parallel()
+
+	failed, _ := syntheticFailure()
+	for _, view := range []string{report.ViewParts, report.ViewDiagnostics} {
+		total := len(failed.Parts)
+		if view == report.ViewDiagnostics {
+			total = len(failed.Diagnostics)
+		}
+
+		for _, details := range []bool{false, true} {
+			first := viewStats(t, failed, report.Request{View: view, Limit: new(int64(7)), Details: details})
+			checkPage(t, view, &first, 0)
+
+			if first.total != total || first.returned != 7 || first.next == nil || *first.next != 7 {
+				t.Fatalf("large %s first page: %+v", view, first)
+			}
+
+			lastOffset := int64(total - 1)
+			last := viewStats(t, failed, report.Request{View: view, Offset: &lastOffset, Limit: new(int64(7)), Details: details})
+			checkPage(t, view, &last, lastOffset)
+
+			if last.total != total || last.returned != 1 || last.next != nil {
+				t.Fatalf("large %s last page: %+v", view, last)
 			}
 		}
 	}

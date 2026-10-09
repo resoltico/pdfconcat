@@ -46,6 +46,8 @@ const (
 	CodeSignatureUnsupported Code = "pdf_signature_unsupported"
 	// CodeFormUnsupported rejects form semantics the backend cannot preserve faithfully.
 	CodeFormUnsupported Code = "pdf_form_unsupported"
+	// CodeFitUnsupported rejects source geometry or semantics fitting cannot preserve.
+	CodeFitUnsupported Code = "pdf_fit_unsupported"
 	// CodeNoPages means the PDF has no pages.
 	CodeNoPages Code = "pdf_no_pages"
 	// CodePageGeometry means the first or last page has missing or malformed page boxes, rotation or UserUnit.
@@ -82,12 +84,14 @@ const (
 	ReasonLegacyDests   PolicyReason = "legacy_destinations"
 	ReasonPageLimit     PolicyReason = "page_limit"
 	ReasonTotalMismatch PolicyReason = "total_mismatch"
+	ReasonFit           PolicyReason = "fit_to"
 
 	keyNames                  = "Names"
 	keyType                   = "Type"
 	causeDetailFormat         = "%w: %v"
 	pageTreeRootFailureFormat = "page tree root: %w"
 	causeNumberFormat         = "%w: %d"
+	labelCauseFormat          = "%s: %w"
 	nullPDFObject             = "null"
 	readFailureFormat         = "read: %v"
 	errorContainingFormat     = "got %v, want an error containing %q"

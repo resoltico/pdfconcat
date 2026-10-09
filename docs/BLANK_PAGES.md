@@ -48,7 +48,7 @@ The offsets then shift the whole block. Absolute coordinates are the same model:
 
 `align` is a different thing: it places each *line inside* the block. A block can be anchored at the right edge of the page while its lines are left-aligned. The default `align` is `center`, so a short text in a block anchored at the left edge still appears in the middle of the block; write `"align": "left"` to put it at the anchor.
 
-Because the block is as wide as `width`, shifting it by more than the margin pushes it past the page edge, and the default overflow policy then rejects it. Give a smaller `width` whenever you move a block sideways.
+Because the block is as wide as `width`, shifting it by more than the margin pushes it past the page edge, and the default overflow policy then rejects it. Give a smaller `width` whenever you move a block sideways. If the configured width exceeds the canvas, the diagnostic points to the effective width declaration; reduce that width. Shorter text or another position cannot fit an oversized fixed block. Removing an item width can reveal an inherited width, so edit or override the declaration named by the diagnostic.
 
 Examples (A4 page, 595 x 842 pt):
 

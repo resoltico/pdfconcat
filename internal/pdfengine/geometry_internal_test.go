@@ -61,7 +61,7 @@ func TestVisibleSizeRejectsWhatValidationAdmits(t *testing.T) {
 			var got error
 
 			err = walkPages(context.Background(), pdf, *root, func(_ types.IndirectRef, page types.Dict, inherited inheritedAttrs) error {
-				_, got = visibleSize(pdf, page, inherited)
+				_, got = visibleSize(t.Context(), pdf, page, inherited)
 
 				return nil
 			})
@@ -119,7 +119,7 @@ func TestVisibleSizeRejectsValuesPDFSyntaxCannotExpress(t *testing.T) {
 
 			err = walkPages(context.Background(), pdf, *root, func(_ types.IndirectRef, page types.Dict, inherited inheritedAttrs) error {
 				tc.patch(page)
-				_, got = visibleSize(pdf, page, inherited)
+				_, got = visibleSize(t.Context(), pdf, page, inherited)
 
 				return nil
 			})
@@ -138,8 +138,8 @@ func TestVisibleSizeRejectsValuesPDFSyntaxCannotExpress(t *testing.T) {
 func TestVisibleSizeTreatsAReferenceToNullAsAbsent(t *testing.T) {
 	t.Parallel()
 
-	doc := &pdffixture.Doc{Version: "1.7", Objs: [][]byte{
-		[]byte("<< /Type /Catalog /Pages 2 0 R >>"),
+	doc := &pdffixture.Doc{Version: fitCatalogSourceVersion, Objs: [][]byte{
+		[]byte(catalog),
 		[]byte(singlePageTreeBody),
 		[]byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /CropBox 4 0 R >>"),
 		[]byte(nullPDFObject),
@@ -153,7 +153,7 @@ func TestVisibleSizeTreatsAReferenceToNullAsAbsent(t *testing.T) {
 	}
 
 	err = walkPages(context.Background(), pdf, *root, func(_ types.IndirectRef, page types.Dict, inherited inheritedAttrs) error {
-		got, sizeErr := visibleSize(pdf, page, inherited)
+		got, sizeErr := visibleSize(t.Context(), pdf, page, inherited)
 		if sizeErr != nil || got != (PageSize{Width: 10, Height: 10}) {
 			t.Errorf("got %v, %v", got, sizeErr)
 		}

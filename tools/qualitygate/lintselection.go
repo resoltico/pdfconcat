@@ -20,7 +20,7 @@ func diagnosticTargetFiles(ctx context.Context, root string) (map[string]map[str
 		return nil, err
 	}
 
-	dirs, err := repopolicy.OwnedGoDirectories(root)
+	dirs, err := repopolicy.OwnedGoDirectories(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -36,8 +36,10 @@ func diagnosticTargetFiles(ctx context.Context, root string) (map[string]map[str
 
 	targets := map[string]map[string]bool{}
 
-	for _, target := range archiveTargets() {
-		env := architectureTargetEnv(target)
+	for _, variant := range supportedSourceVariants() {
+		target := variant.name
+
+		env := variant.env
 		if target == runtime.GOOS+"/"+runtime.GOARCH {
 			env = []string{readonlyGoFlags}
 		}
@@ -74,14 +76,21 @@ func applicableDiagnosticEntries(ctx context.Context, root string, entries []*re
 		return nil, err
 	}
 
-	selected, problems := selectDiagnosticEntries(entries, targets, targets[runtime.GOOS+"/"+runtime.GOARCH])
+	nativeFiles := targets[runtime.GOOS+"/"+runtime.GOARCH]
+	if runtime.GOOS == nativeProgressOS {
+		for file := range targets[runtime.GOOS+"/"+runtime.GOARCH+"/"+nativeProgressTag] {
+			nativeFiles[file] = true
+		}
+	}
+
+	selected, problems := selectDiagnosticEntries(entries, targets, nativeFiles)
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("%w: %s", errGate, strings.Join(problems, "; "))
 	}
 
 	for _, entry := range entries {
 		if entry.Tool == repopolicy.ToolLint && entry.Effect == repopolicy.EffectExcludeDiagnostic &&
-			!targets[runtime.GOOS+"/"+runtime.GOARCH][entry.Path] {
+			!targets[runtime.GOOS+"/"+runtime.GOARCH][entry.Path] && !moduleDiagnosticEntry(entry) {
 			log.Printf("lint-stale: %s: source not compiled on native target; not adjudicated", entry.ID)
 		}
 	}
@@ -109,7 +118,7 @@ func selectDiagnosticEntries(
 			problems = append(problems, problem)
 		}
 
-		if nativeFiles[entry.Path] {
+		if nativeFiles[entry.Path] || moduleDiagnosticEntry(entry) {
 			selected = append(selected, entry)
 		}
 	}
@@ -119,6 +128,14 @@ func selectDiagnosticEntries(
 
 // diagnosticPlatformScopeIssue verifies compiler ownership can express the registry's OS predicate.
 func diagnosticPlatformScopeIssue(entry *repopolicy.Entry, targets map[string]map[string]bool) string {
+	if moduleDiagnosticEntry(entry) {
+		if entry.GOOS != "" {
+			return entry.ID + ": module declaration diagnostics apply to every supported target"
+		}
+
+		return ""
+	}
+
 	possible, broader := false, false
 
 	for target, files := range targets {
@@ -142,4 +159,11 @@ func diagnosticPlatformScopeIssue(entry *repopolicy.Entry, targets map[string]ma
 	}
 
 	return ""
+}
+
+// Module declaration diagnostics inspect the exact repository module file, not a compiler Go file.
+// RepositoryIssues still proves its physical source predicate before this selection runs.
+func moduleDiagnosticEntry(entry *repopolicy.Entry) bool {
+	return entry.Tool == repopolicy.ToolLint && entry.Effect == repopolicy.EffectExcludeDiagnostic &&
+		entry.Linter == "gomoddirectives" && entry.Path == moduleFileName
 }

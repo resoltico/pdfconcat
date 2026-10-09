@@ -73,7 +73,7 @@ func inspectAll(tb testing.TB, engine *pdfengine.Engine, paths []string) []pdfen
 	sources := make([]pdfengine.SourceFile, len(paths))
 
 	for index, path := range paths {
-		info, err := engine.Inspect(context.Background(), path)
+		info, err := engine.Inspect(context.Background(), path, nil)
 		if err != nil {
 			tb.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func BenchmarkInspect(b *testing.B) {
 
 	for range b.N {
 		for _, path := range files.plain {
-			if _, err := engine.Inspect(context.Background(), path); err != nil {
+			if _, err := engine.Inspect(context.Background(), path, nil); err != nil {
 				b.Fatal(err)
 			}
 		}

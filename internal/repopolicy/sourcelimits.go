@@ -5,6 +5,7 @@ package repopolicy
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -17,8 +18,8 @@ var errNoOwnedSources = errors.New("no owned Go sources discovered")
 
 // ScanSourceLimits checks physical file size and exported declarations in every owned Go source.
 // Compiler selection and source display directives cannot hide tests, fixtures or platform variants.
-func ScanSourceLimits(root string) ([]string, error) {
-	files, err := OwnedGoSources(root)
+func ScanSourceLimits(ctx context.Context, root string) ([]string, error) {
+	files, err := OwnedGoSources(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -31,6 +32,10 @@ func ScanSourceLimits(root string) ([]string, error) {
 
 	err = withRoot(root, func(tree *os.Root) error {
 		for _, file := range files {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("owned source scan canceled: %w", ctxErr)
+			}
+
 			source, readErr := tree.ReadFile(file)
 			if readErr != nil {
 				return fmt.Errorf("read source for size check %s: %w", file, readErr)

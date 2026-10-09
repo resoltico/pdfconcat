@@ -34,6 +34,8 @@ const (
 	optPlanJSON      = "--plan-json"
 	optBaseDir       = "--base-dir"
 	optOutput        = "--output"
+	optFitTo         = "--fit-to"
+	optProgress      = "--progress"
 	optOverwrite     = "--overwrite"
 	optReport        = "--report"
 	optDetails       = "--details"
@@ -124,6 +126,14 @@ func planningOptions() []optionSpec {
 			name: optOverwrite, kind: kindFlag, commands: planning,
 			summary: "Replace an existing output or report file.",
 			apply:   func(p *parser, _ int, _ string) error { p.cmd.Overwrite = true; return nil },
+		},
+		{
+			name: optFitTo, value: "A4|Legal", commands: planning, apply: (*parser).setFitTo,
+			summary: "Proportionally fit every page to portrait A4 or Legal; overrides plan fit_to.",
+		},
+		{
+			name: optProgress, value: "auto|json|none", commands: planning, apply: (*parser).setProgress,
+			summary: "Stderr progress: interactive text (auto, default), NDJSON (json), or disabled (none).",
 		},
 		{
 			name: optReport, value: "FILE", commands: planning,

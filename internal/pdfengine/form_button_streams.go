@@ -28,7 +28,7 @@ func (p *buttonAppearancePlan) apply(ctx context.Context, pdf *model.Context, di
 		return onErr
 	}
 
-	appearance, err := pdf.DereferenceDict(dict["AP"])
+	appearance, err := pdf.DereferenceDictContext(ctx, dict["AP"])
 	if err != nil {
 		return fmt.Errorf("button AP: %w", err)
 	}

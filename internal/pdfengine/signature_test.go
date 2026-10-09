@@ -21,7 +21,7 @@ func TestSignedSourceRejectsInspectionAndDefensiveImport(t *testing.T) {
 	dir := t.TempDir()
 	signed := writeDoc(t, dir, "populated-signature", pdffixture.SignatureValue("SIGNED_STATE"))
 	plain, info := inspectDoc(t, engine, "plain", pdffixture.Plain("PLAIN"))
-	_, err := engine.Inspect(t.Context(), signed)
+	_, err := engine.Inspect(t.Context(), signed, nil)
 
 	failure := requireFailure(t, err, pdfengine.CodeSignatureUnsupported)
 	if failure.Path != signed {

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
@@ -26,7 +27,7 @@ const (
 	productionAssemblyRule         = "production-assembly"
 	assemblyControlPackage         = "assembly"
 	planControlPackage             = "plan"
-	architectureImportControlCount = 17
+	architectureImportControlCount = 19
 )
 
 func architectureControls(ctx context.Context, root, binary string) ([]string, error) {
@@ -36,7 +37,12 @@ func architectureControls(ctx context.Context, root, binary string) ([]string, e
 	}
 	defer removeAll(scratch)
 
-	if err := prepareArchitectureControls(root, scratch); err != nil {
+	scratch, createErr = filepath.EvalSymlinks(scratch)
+	if createErr != nil {
+		return nil, fmt.Errorf("resolve owned architecture controls: %w", createErr)
+	}
+
+	if err := prepareArchitectureControls(ctx, root, scratch); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +52,7 @@ func architectureControls(ctx context.Context, root, binary string) ([]string, e
 
 	var problems []string
 
-	for _, control := range architectureImportControls() {
+	for _, control := range append(architectureImportControls(), nativeCImportControls()...) {
 		detected, err := architectureImportControl(ctx, scratch, binary, control)
 		if err != nil {
 			return nil, err
@@ -75,7 +81,11 @@ func architectureControls(ctx context.Context, root, binary string) ([]string, e
 	return append(append(append(problems, classification...), loader...), structure...), nil
 }
 
-func prepareArchitectureControls(root, scratch string) error {
+func prepareArchitectureControls(ctx context.Context, root, scratch string) error {
+	if err := copyForeignInputs(ctx, root, scratch); err != nil {
+		return err
+	}
+
 	for _, file := range []string{moduleFileName, "go.sum", lintConfigFileName} {
 		data, err := readInRoot(root, file)
 		if err != nil {
@@ -89,7 +99,7 @@ func prepareArchitectureControls(root, scratch string) error {
 
 	for _, dir := range []string{
 		assemblyControlPackage, "app", "capture", planControlPackage,
-		"pdfengine", "exectest", "pdffixture", "assemblySibling", "repopolicy",
+		"pdfengine", "exectest", "pdffixture", "assemblySibling", "repopolicy", "progressnativefixture",
 	} {
 		source := "package " + dir + "\nfunc Value() int { return 1 }\n"
 		if err := writeArchitectureSource(scratch, "internal/"+dir+"/stub.go", source); err != nil {
@@ -97,11 +107,33 @@ func prepareArchitectureControls(root, scratch string) error {
 		}
 	}
 
+	if runtimeErr := prepareArchitectureRuntime(root, scratch); runtimeErr != nil {
+		return runtimeErr
+	}
+
 	if err := prepareArchitectureToolControls(scratch); err != nil {
 		return err
 	}
 
-	// The sibling exists solely as an imported package; classify it temporarily with its own deliberate rule.
+	if err := prepareArchitectureSiblingRule(scratch); err != nil {
+		return err
+	}
+
+	valid := "package plan\nimport \"github.com/resoltico/pdfconcat/internal/assembly\"\nvar Checked = assembly.Value()\n"
+	if err := writeArchitectureSource(scratch, "internal/plan/legal.go", valid); err != nil {
+		return err
+	}
+
+	oracle := `package assembly_test
+import ("testing";"github.com/resoltico/pdfconcat/internal/pdffixture")
+func TestIndependentOracle(t *testing.T) { if pdffixture.Value()!=1 { t.Fatal("oracle") } }
+`
+
+	return writeArchitectureSource(scratch, "internal/assembly/oracle_test.go", oracle)
+}
+
+// The sibling package needs its own rule to test prefix boundaries.
+func prepareArchitectureSiblingRule(scratch string) error {
 	config, configErr := readInRoot(scratch, lintConfigFileName)
 	if configErr != nil {
 		return configErr
@@ -117,21 +149,28 @@ func prepareArchitectureControls(root, scratch string) error {
 `
 
 	config = []byte(strings.Replace(string(config), needle, sibling+needle, 1))
-	if err := writeArchitectureSource(scratch, lintConfigFileName, string(config)); err != nil {
+
+	return writeArchitectureSource(scratch, lintConfigFileName, string(config))
+}
+
+// The valid fixture exercises the same foreign runtime command graph required by architectureScope.
+func prepareArchitectureRuntime(root, scratch string) error {
+	module, err := modulePath(root)
+	if err != nil {
 		return err
 	}
 
-	valid := "package plan\nimport \"github.com/resoltico/pdfconcat/internal/assembly\"\nvar Checked = assembly.Value()\n"
-	if err := writeArchitectureSource(scratch, "internal/plan/legal.go", valid); err != nil {
-		return err
+	mainSource := "package main\nimport \"" + module + "/internal/pdfengine\"\nfunc main(){ _ = pdfengine.Value() }\n"
+	if writeErr := writeArchitectureSource(scratch, "cmd/pdfconcat/main.go", mainSource); writeErr != nil {
+		return writeErr
 	}
 
-	oracle := `package assembly_test
-import ("testing";"github.com/resoltico/pdfconcat/internal/pdffixture")
-func TestIndependentOracle(t *testing.T) { if pdffixture.Value()!=1 { t.Fatal("oracle") } }
-`
+	engineSource := "package pdfengine\nimport (\n" +
+		"_ \"github.com/pdfcpu/pdfcpu/pkg/api\"\n" +
+		"_ \"github.com/benoitkugler/pdf/contentstream\"\n" +
+		"_ \"github.com/benoitkugler/pstokenizer\"\n)\nfunc Value() int { return 1 }\n"
 
-	return writeArchitectureSource(scratch, "internal/assembly/oracle_test.go", oracle)
+	return writeArchitectureSource(scratch, "internal/pdfengine/stub.go", engineSource)
 }
 
 func prepareArchitectureToolControls(scratch string) error {
@@ -155,6 +194,7 @@ func architectureImportControls() []architectureControl {
 	controls := make([]architectureControl, 0, architectureImportControlCount)
 	for _, item := range []struct{ dir, imported, owner string }{
 		{assemblyControlPackage, module + "internal/app", productionAssemblyRule},
+		{assemblyControlPackage, module + nativeProgressFixture, productionAssemblyRule},
 		{planControlPackage, module + "internal/exectest", "production-plan"},
 		{"pdfengine", module + "internal/plan", "production-pdfengine"},
 		{planControlPackage, module + "internal/assemblySibling", "production-plan"},
@@ -225,7 +265,10 @@ func writeArchitectureSource(root, file, source string) error {
 }
 
 func architectureTargetEnv(target string) []string {
-	env := []string{"CGO_ENABLED=0", readonlyGoFlags}
+	env := []string{baselineCGOEnv, readonlyGoFlags}
+	if strings.HasSuffix(target, "/"+nativeProgressTag) {
+		env = nativeProgressEnv()
+	}
 
 	if target != "" {
 		parts := strings.Split(target, "/")
@@ -257,10 +300,10 @@ func architectureAnalyzerIssues(ctx context.Context, root, binary, target, linte
 	output, runErr := (&command{
 		dir: root, name: binary,
 		args: []string{
-			runVerb, serialLintRunners, lintNoFixFlag, configFlag, filepath.Join(root, lintConfigFileName), enableOnlyFlag, linters,
+			runVerb, parallelLintRunners, lintNoFixFlag, configFlag, filepath.Join(root, lintConfigFileName), enableOnlyFlag, linters,
 			"--output.json.path=" + reportFile, allPackages,
 		},
-		env: architectureTargetEnv(target),
+		env: append(architectureTargetEnv(target), "GOLANGCI_LINT_CACHE="+filepath.Join(root, lintFixtureCache)),
 	}).output(ctx)
 
 	if runErr != nil && exitCode(runErr) != exitIssuesFound {
@@ -292,7 +335,7 @@ func architectureClassificationControls(ctx context.Context, root string) ([]str
 	var problems []string
 
 	for _, control := range []struct{ file, source, want string }{
-		{"internal/unclassified/new.go", "package unclassified\n", "unclassified production file"},
+		{"internal/unclassified/new.go", "package unclassified\n", "unclassified non-test file"},
 		{
 			"internal/assembly/never.go", "//go:build architecture_never_supported\n\npackage assembly\n",
 			"excluded from every supported target",
@@ -362,6 +405,10 @@ func architectureImportControl(ctx context.Context, root, binary string, control
 
 	if err := compileArchitectureControl(ctx, root, control.target); err != nil {
 		return false, err
+	}
+
+	if control.imported == "C" {
+		return nativeCImportControl(root, control)
 	}
 
 	issues, runErr, err := architectureControlIssues(ctx, root, binary, control.target)
@@ -455,4 +502,16 @@ func architectureAvailabilityControls(ctx context.Context, root string) ([]strin
 	}
 
 	return problems, nil
+}
+
+func nativeCImportControls() []architectureControl {
+	if runtime.GOOS != nativeProgressOS {
+		return nil
+	}
+
+	return []architectureControl{{
+		file:   "internal/assembly/native_c.go",
+		source: "package assembly\n/* static int value(void){return 1;} */\nimport \"C\"\nvar NativeValue = C.value()\n",
+		owner:  "native-c-fixture-boundary", imported: "C", target: runtime.GOOS + "/" + runtime.GOARCH + "/" + nativeProgressTag,
+	}}
 }

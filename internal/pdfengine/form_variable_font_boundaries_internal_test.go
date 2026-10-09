@@ -125,7 +125,7 @@ func TestVariableFontRejectsUnknownDictionaryAndAdvanceOverflow(t *testing.T) {
 		t.Fatalf("unbounded advance accepted: %v", err)
 	}
 
-	ctx := &formCheckpointContext{}
+	ctx := newFormCheckpointContext(t.Context(), t)
 	ctx.remaining.Store(1)
 
 	if _, err = compileVariableFont(ctx, formTestContext().pdf, variableFontDictionary()); !errors.Is(err, context.Canceled) {

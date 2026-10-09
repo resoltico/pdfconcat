@@ -135,7 +135,7 @@ func actionInputIssues(where, action string, with *yaml.Node) []string {
 
 	switch {
 	case strings.HasPrefix(action, "actions/setup-go@"):
-		if value(with, "go-version-file") != "go.mod" {
+		if value(with, "go-version-file") != goModuleFile {
 			problems = append(problems, where+": setup-go must read the Go version from go.mod (go-version-file: go.mod)")
 		}
 

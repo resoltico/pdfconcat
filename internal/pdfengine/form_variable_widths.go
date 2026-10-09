@@ -5,6 +5,7 @@ package pdfengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -19,15 +20,15 @@ func (f *variableFont) readWidths(
 	ctx context.Context, pdf *model.Context, dict types.Dict, base string, encoding *simpleencodings.Encoding,
 ) error {
 	if _, found := dict.Find("Widths"); found {
-		return f.readDeclaredWidths(pdf, dict)
+		return f.readDeclaredWidths(ctx, pdf, dict)
 	}
 
-	kind, _, err := pdf.DereferenceNameEntry(dict, keySubtype)
+	kind, _, err := pdf.DereferenceNameEntryContext(ctx, dict, keySubtype)
 	if err != nil || kind == nil || *kind != nameType1 || !pdffont.IsCoreFont(base) {
-		return fmt.Errorf("%w: variable font %s needs declared glyph widths", errFormState, base)
+		return errors.Join(err, fmt.Errorf("%w: variable font %s needs declared glyph widths", errFormState, base))
 	}
 
-	descriptor, err := pdf.DereferenceDict(dict["FontDescriptor"])
+	descriptor, err := pdf.DereferenceDictContext(ctx, dict["FontDescriptor"])
 	if err != nil {
 		return fmt.Errorf("variable metric descriptor: %w", err)
 	}
@@ -85,13 +86,13 @@ func variableMetricCodes(base string) map[string]byte {
 	return codes
 }
 
-func (f *variableFont) readDeclaredWidths(pdf *model.Context, dict types.Dict) error {
-	values, first, err := variableWidthRange(pdf, dict)
+func (f *variableFont) readDeclaredWidths(ctx context.Context, pdf *model.Context, dict types.Dict) error {
+	values, first, err := variableWidthRange(ctx, pdf, dict)
 	if err != nil {
 		return err
 	}
 
-	missing, err := variableMissingWidth(pdf, dict)
+	missing, err := variableMissingWidth(ctx, pdf, dict)
 	if err != nil {
 		return err
 	}
@@ -102,9 +103,9 @@ func (f *variableFont) readDeclaredWidths(pdf *model.Context, dict types.Dict) e
 	}
 
 	for index, object := range values {
-		width, readErr := pdf.DereferenceNumber(object)
+		width, readErr := pdf.DereferenceNumberContext(ctx, object)
 		if readErr != nil || math.IsInf(width, 0) || math.IsNaN(width) || width < 0 {
-			return fmt.Errorf("%w: variable glyph widths must be finite nonnegative numbers", errFormState)
+			return errors.Join(readErr, fmt.Errorf("%w: variable glyph widths must be finite nonnegative numbers", errFormState))
 		}
 
 		f.widths[first+index] = width / fontMetricScale
@@ -113,22 +114,22 @@ func (f *variableFont) readDeclaredWidths(pdf *model.Context, dict types.Dict) e
 	return nil
 }
 
-func variableWidthRange(pdf *model.Context, dict types.Dict) (types.Array, int, error) {
-	values, err := pdf.DereferenceArray(dict["Widths"])
+func variableWidthRange(ctx context.Context, pdf *model.Context, dict types.Dict) (types.Array, int, error) {
+	values, err := pdf.DereferenceArrayContext(ctx, dict["Widths"])
 	if err != nil || len(values) == 0 {
-		return nil, 0, fmt.Errorf("%w: variable font Widths must be a nonempty number array", errFormState)
+		return nil, 0, errors.Join(err, fmt.Errorf("%w: variable font Widths must be a nonempty number array", errFormState))
 	}
 
-	first, err := pdf.DereferenceInteger(dict["FirstChar"])
+	first, err := pdf.DereferenceIntegerContext(ctx, dict["FirstChar"])
 	if err != nil || first == nil || first.Value() < 0 || first.Value() > 255 || len(values) > 256-first.Value() {
-		return nil, 0, fmt.Errorf("%w: variable font Widths range must fit character codes 0..255", errFormState)
+		return nil, 0, errors.Join(err, fmt.Errorf("%w: variable font Widths range must fit character codes 0..255", errFormState))
 	}
 
 	return values, first.Value(), nil
 }
 
-func variableMissingWidth(pdf *model.Context, dict types.Dict) (float64, error) {
-	descriptor, err := pdf.DereferenceDict(dict["FontDescriptor"])
+func variableMissingWidth(ctx context.Context, pdf *model.Context, dict types.Dict) (float64, error) {
+	descriptor, err := pdf.DereferenceDictContext(ctx, dict["FontDescriptor"])
 	if err != nil {
 		return 0, fmt.Errorf("variable font descriptor: %w", err)
 	}
@@ -138,9 +139,9 @@ func variableMissingWidth(pdf *model.Context, dict types.Dict) (float64, error) 
 		return 0, nil
 	}
 
-	width, err := pdf.DereferenceNumber(object)
+	width, err := pdf.DereferenceNumberContext(ctx, object)
 	if err != nil || math.IsNaN(width) || math.IsInf(width, 0) || width < 0 {
-		return 0, fmt.Errorf("%w: variable MissingWidth must be finite and nonnegative", errFormState)
+		return 0, errors.Join(err, fmt.Errorf("%w: variable MissingWidth must be finite and nonnegative", errFormState))
 	}
 
 	return width / fontMetricScale, nil

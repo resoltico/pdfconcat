@@ -120,16 +120,27 @@ func Load(tools Tools, path string) (*Document, error) {
 	return doc, nil
 }
 
-// dumpOf runs qpdf's JSON dump of path and decodes its two sections: the header facts and the object table.
-func dumpOf(tools Tools, path string) (qpdfFile, error) {
+// QPDFJSON returns the independent parser's complete object/page dump without interpreting it.
+// Tests can inspect serialized geometry and action graphs beyond the standard expectation checks.
+func QPDFJSON(tools Tools, path string) ([]byte, error) {
 	stdout, stderr, err := run(tools.QPDF, "--json=2", path)
 	if err != nil && exitCode(err) != qpdfWarningsExit {
-		return qpdfFile{}, fmt.Errorf("qpdf --json=2 %s: %w: %s", path, err, stderr)
+		return nil, fmt.Errorf("qpdf --json=2 %s: %w: %s", path, err, stderr)
+	}
+
+	return []byte(stdout), nil
+}
+
+// dumpOf runs qpdf's JSON dump of path and decodes its two sections: the header facts and the object table.
+func dumpOf(tools Tools, path string) (qpdfFile, error) {
+	stdout, err := QPDFJSON(tools, path)
+	if err != nil {
+		return qpdfFile{}, err
 	}
 
 	var file qpdfFile
 
-	if err = json.Unmarshal([]byte(stdout), &file.dump); err != nil {
+	if err = json.Unmarshal(stdout, &file.dump); err != nil {
 		return qpdfFile{}, fmt.Errorf("parse qpdf json: %w", err)
 	}
 

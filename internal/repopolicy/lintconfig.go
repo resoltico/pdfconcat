@@ -50,10 +50,17 @@ type (
 	// issueRecord is one issue of golangci-lint's JSON report. The tool writes FromLinter, which
 	// encoding/json matches case-insensitively with the lower-case tag below.
 	issueRecord struct {
+		LineRange   *issueRange   `json:"linerange"`
 		FromLinter  string        `json:"fromlinter"`
 		Text        string        `json:"text"`
 		Pos         issuePosition `json:"pos"`
 		SourceLines []string      `json:"sourcelines"`
+	}
+
+	// issueRange describes displayed source lines, which can extend beyond the diagnostic position.
+	issueRange struct {
+		From int `json:"from"`
+		To   int `json:"to"`
 	}
 
 	// issueReport is golangci-lint's JSON report.
@@ -605,6 +612,11 @@ func ParseIssues(data []byte, root string) ([]Issue, error) {
 	issues := make([]Issue, 0, len(parsed.Issues))
 
 	for _, record := range parsed.Issues {
+		source, sourceErr := diagnosticSourceLine(&record)
+		if sourceErr != nil {
+			return nil, sourceErr
+		}
+
 		file := strings.ReplaceAll(record.Pos.Filename, `\`, "/")
 		file = strings.TrimPrefix(file, strings.ReplaceAll(root, `\`, "/")+"/")
 
@@ -614,13 +626,38 @@ func ParseIssues(data []byte, root string) ([]Issue, error) {
 				Linter: record.FromLinter,
 				File:   path.Clean(file),
 				Text:   record.Text,
-				Source: strings.Join(record.SourceLines, "\n"),
+				Source: source,
 				Line:   record.Pos.Line,
 			},
 		)
 	}
 
 	return issues, nil
+}
+
+// diagnosticSourceLine matches golangci-lint's source exclusion: the physical position's line,
+// rather than every line displayed for a multi-line diagnostic.
+func diagnosticSourceLine(record *issueRecord) (string, error) {
+	if len(record.SourceLines) == 0 {
+		return "", nil
+	}
+
+	if record.Pos.Line <= 0 {
+		return "", fmt.Errorf("%w: diagnostic source has no physical position", ErrLintConfig)
+	}
+
+	index := 0
+	if record.LineRange != nil && record.LineRange.From != 0 {
+		index = record.Pos.Line - record.LineRange.From
+		if record.LineRange.From < 0 || index < 0 || record.Pos.Line > record.LineRange.To ||
+			len(record.SourceLines)-1 != record.LineRange.To-record.LineRange.From {
+			return "", fmt.Errorf("%w: diagnostic source range does not contain its physical position", ErrLintConfig)
+		}
+	} else if len(record.SourceLines) != 1 || record.LineRange != nil && record.LineRange.To != 0 {
+		return "", fmt.Errorf("%w: diagnostic source without a range must contain only its physical line", ErrLintConfig)
+	}
+
+	return record.SourceLines[index], nil
 }
 
 // StaleDiagnosticEntries returns the diagnostic exclusions that match no issue of an unexcluded

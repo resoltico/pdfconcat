@@ -246,7 +246,7 @@ func TestHistoricalReportRejectionPreservesEvidence(t *testing.T) {
 	beforePDF := readFile(t, filepath.Join(dir, fileOut))
 	saved := readFile(t, filepath.Join(dir, fileJob))
 	// Historical format rejection must not modify either evidence or output.
-	old := strings.Replace(string(saved), `"format_version":3`, `"report_version":1`, 1)
+	old := strings.Replace(string(saved), `"format_version":2`, `"report_version":1`, 1)
 	writeFile(t, dir, historicalReport, old)
 	rejected := run(t, dir, "", commandReport, historicalReport)
 	requireExit(t, rejected, 2)
@@ -361,7 +361,7 @@ func TestEmptyTextValueClearsDefaultsThroughExecutable(t *testing.T) {
 	plan := obj{
 		keyVersion: 1,
 		keyBlank:   obj{keySize: "A4", keyBackground: "#eef4ff", keyText: obj{keyValue: dividerText}},
-		keyItems:   []any{obj{keyBlank: obj{}}, obj{keyBlank: obj{keyText: obj{keyValue: ""}, keyBackground: "none"}}},
+		keyItems:   []any{obj{keyBlank: obj{}}, obj{keyBlank: obj{keyText: obj{keyValue: ""}, keyBackground: fixtureProgressNone}}},
 	}
 	checked := run(t, dir, "", commandCheck, inlinePlanFlag, planJSON(t, plan), flagReport, successfulReportPath)
 	requireExit(t, checked, 0)
@@ -372,7 +372,7 @@ func TestEmptyTextValueClearsDefaultsThroughExecutable(t *testing.T) {
 	cleared := generic(t, run(t, dir, "", commandReport, fileSavedReport, flagPage, "2", flagDetails).stdout)
 	style := objAt(t, cleared, partField, keyStyle)
 
-	if textAt(t, style, keyBackground) != "none" {
+	if textAt(t, style, keyBackground) != fixtureProgressNone {
 		t.Fatal("background default was not cleared")
 	}
 
@@ -487,13 +487,19 @@ func requireDeclarationRecovery(t *testing.T, envelope obj, test *declarationFau
 		t.Fatalf("known declaration has no edit recovery: %v", diagnostic)
 	}
 
-	if envelope["kind"] == "summary" && test.bounded {
+	if envelope["kind"] == "summary" && (test.bounded || recovery["location_from"] != nil) {
 		if recovery["location"] != nil || recovery["location_from"] != "complete_report.diagnostics/0/recovery/location" {
 			t.Fatalf("bounded recovery lost its exact full-report authority: %v", recovery)
 		}
 
 		return
 	}
+
+	requireExactRecoveryLocation(t, recovery, test, path)
+}
+
+func requireExactRecoveryLocation(t *testing.T, recovery obj, test *declarationFault, path string) {
+	t.Helper()
 
 	location := objAt(t, recovery, "location")
 	if location["file"] != path || location["pointer"] != test.pointer ||

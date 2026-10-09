@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/cli"
@@ -61,7 +60,7 @@ func assertCanceledResolvedLayout(t *testing.T, command cli.Name) {
 		command:     &cli.Command{Name: command},
 		fonts:       loadedFonts{byPath: map[string]*typeset.Font{"": font}},
 		builder:     report.NewBuilder(string(command)),
-		progress:    newProgress(nil, time.Now),
+		progress:    nil,
 		workspace:   openScratch(t),
 		publication: report.Publication{ReportStatus: report.ReportNotRequested},
 		phases: report.Phases{

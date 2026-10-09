@@ -8,14 +8,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"syscall"
 	"unicode/utf8"
-
-	"golang.org/x/term"
 
 	"github.com/resoltico/pdfconcat/internal/app"
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
@@ -52,14 +49,19 @@ func run() int {
 
 	info, _ := debug.ReadBuildInfo()
 
+	progress := &progressOwner{file: os.Stderr}
+	defer progress.release()
+
 	env := app.Env{
-		Executable: executable,
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-		Progress:   progressStream(),
-		WorkingDir: workingDir,
-		Build:      app.ResolveBuild(version, info),
+		Executable:          executable,
+		Stdin:               os.Stdin,
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		NewProgress:         progress.newSession,
+		ProgressRecord:      progress,
+		ProgressInterrupted: progress.interrupted,
+		WorkingDir:          workingDir,
+		Build:               app.ResolveBuild(version, info),
 	}
 
 	return app.New(func() (app.Engine, error) {
@@ -70,16 +72,6 @@ func run() int {
 
 		return engine, nil
 	}).Run(ctx, os.Args[1:], env)
-}
-
-// progressStream returns standard error when it is an interactive terminal on any supported operating
-// system, so progress never reaches a redirected log or standard output.
-func progressStream() io.Writer {
-	if term.IsTerminal(int(os.Stderr.Fd())) {
-		return os.Stderr
-	}
-
-	return nil
 }
 
 // usableExecutable rejects a path returned alongside an error; it may be relative or incomplete.

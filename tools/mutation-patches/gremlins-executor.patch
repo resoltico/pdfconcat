@@ -33,7 +33,7 @@ index f6b4568..6807ad6 100644
  
  func buildVersion(version string) string {
 diff --git a/cmd/unleash.go b/cmd/unleash.go
-index d7eddb2..03e5f91 100644
+index d7eddb2..580b503 100644
 --- a/cmd/unleash.go
 +++ b/cmd/unleash.go
 @@ -18,10 +18,12 @@ package cmd
@@ -191,30 +191,189 @@ index d7eddb2..03e5f91 100644
  }
  
  func setFlagsOnCmd(cmd *cobra.Command) error {
-@@ -206,6 +207,9 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
+@@ -206,6 +207,10 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
  	})
  
  	fls := []*flags.Flag{
 +		{Name: "max-duration", CfgKey: configuration.UnleashMaxDurationKey, DefaultV: "", Usage: "maximum work duration; interrupted evidence is retained as incomplete"},
 +		{Name: "run-uncovered", CfgKey: configuration.UnleashRunUncoveredKey, DefaultV: false, Usage: "test discovered mutants even when their tokens are unmapped by statement coverage"},
++		{Name: "baseline-package", CfgKey: configuration.UnleashBaselinePackageKey, DefaultV: "", Usage: "single module-relative package baseline for non-integration debugging at the module root"},
 +		{Name: "execution-log-dir", CfgKey: configuration.UnleashExecutionLogDirKey, DefaultV: "", Usage: "new external directory retaining complete per-mutant execution evidence"},
  		{Name: paramDryRun, CfgKey: configuration.UnleashDryRunKey, Shorthand: "d", DefaultV: false, Usage: "find mutations but do not executes tests"},
  		{Name: paramOutputStatuses, CfgKey: configuration.UnleashOutputStatusesKey, Shorthand: "S", DefaultV: "", Usage: "print only statuses from this flag, allowed values - 'lctkvsr'"},
  		{Name: paramBuildTags, CfgKey: configuration.UnleashTagsKey, Shorthand: "t", DefaultV: "", Usage: "a comma-separated list of build tags"},
 diff --git a/internal/configuration/configuration.go b/internal/configuration/configuration.go
-index be4a411..07d0e1c 100644
+index be4a411..f4ef025 100644
 --- a/internal/configuration/configuration.go
 +++ b/internal/configuration/configuration.go
-@@ -34,6 +34,9 @@ import (
+@@ -34,6 +34,10 @@ import (
  // This is the list of the keys available in config files and as flags.
  const (
  	GremlinsSilentKey            = "silent"
++	UnleashBaselinePackageKey    = "unleash.baseline-package"
 +	UnleashMaxDurationKey        = "unleash.max-duration"
 +	UnleashRunUncoveredKey       = "unleash.run-uncovered"
 +	UnleashExecutionLogDirKey    = "unleash.execution-log-dir"
  	UnleashDryRunKey             = "unleash.dry-run"
  	UnleashOutputStatusesKey     = "unleash.output-statuses"
  	UnleashOutputKey             = "unleash.output"
+diff --git a/internal/coverage/baseline_package_test.go b/internal/coverage/baseline_package_test.go
+new file mode 100644
+index 0000000..e363e63
+--- /dev/null
++++ b/internal/coverage/baseline_package_test.go
+@@ -0,0 +1,105 @@
++/*
++ * Copyright 2022 The Gremlins Authors
++ *
++ *    Licensed under the Apache License, Version 2.0 (the "License");
++ *    you may not use this file except in compliance with the License.
++ *    You may obtain a copy of the License at
++ *
++ *        http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *    Unless required by applicable law or agreed to in writing, software
++ *    distributed under the License is distributed on an "AS IS" BASIS,
++ *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *    See the License for the specific language governing permissions and
++ *    limitations under the License.
++ */
++
++package coverage
++
++import (
++	"github.com/go-gremlins/gremlins/internal/configuration"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestExplicitBaselinePackageRejectsIncompatibleScope(t *testing.T) {
++	defer configuration.Set(configuration.UnleashBaselinePackageKey, "")
++	for _, selected := range []string{"./", "./.", "./..", "../pkg", "/pkg", "./../pkg", "./pkg/...", "./pkg/../other", "./pkg\\other", "./pkg:other"} {
++		configuration.Set(configuration.UnleashBaselinePackageKey, selected)
++		c := &Coverage{mod: gomodule.GoModule{CallingDir: "."}}
++		if _, err := c.baselinePath(); err == nil {
++			t.Fatalf("unsafe baseline accepted: %q", selected)
++		}
++	}
++	configuration.Set(configuration.UnleashBaselinePackageKey, "./internal/observation")
++	for _, c := range []*Coverage{{integrationMode: true, mod: gomodule.GoModule{CallingDir: "."}}, {mod: gomodule.GoModule{CallingDir: "internal/observation"}}} {
++		if _, err := c.baselinePath(); err == nil {
++			t.Fatal("incompatible explicit baseline accepted")
++		}
++	}
++	root := t.TempDir()
++	if err := os.MkdirAll(filepath.Join(root, "internal", "observation"), 0700); err != nil {
++		t.Fatal(err)
++	}
++	c := &Coverage{mod: gomodule.GoModule{Root: root, CallingDir: "."}}
++	if path, err := c.baselinePath(); err != nil || path != "./internal/observation" {
++		t.Fatalf("package baseline: %q %v", path, err)
++	}
++	configuration.Set(configuration.UnleashBaselinePackageKey, "")
++	if path, err := c.baselinePath(); err != nil || path != "./..." {
++		t.Fatalf("default baseline changed: %q %v", path, err)
++	}
++}
++
++func TestSelectedBaselineRunsRealPackageAndPreservesFailure(t *testing.T) {
++	defer configuration.Set(configuration.UnleashBaselinePackageKey, "")
++	defer configuration.Set(configuration.UnleashExecutionLogDirKey, "")
++	defer configuration.Set(configuration.UnleashIntegrationMode, false)
++	root := t.TempDir()
++	t.Chdir(root)
++	files := map[string]string{
++		"go.mod":                    "module baselinefixture.local\ngo 1.27.2\n",
++		"selected/guard.go":         "package selected\nfunc Guard(n int)bool{return n>0}\n",
++		"selected/guard_test.go":    "package selected\nimport \"testing\"\nfunc TestGuard(t *testing.T){if !Guard(1){t.Fatal(\"guard\")}}\n",
++		"unrelated/failure_test.go": "package unrelated\nimport \"testing\"\nfunc TestFailure(t *testing.T){t.Fatal(\"unrelated failure\")}\n",
++	}
++	for name, body := range files {
++		path := filepath.Join(root, name)
++		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	module, err := gomodule.Init(root)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	configuration.Set(configuration.UnleashIntegrationMode, false)
++	for _, selector := range []string{"./selected/guard_test.go", "./missing"} {
++		configuration.Set(configuration.UnleashBaselinePackageKey, selector)
++		artifacts := t.TempDir()
++		configuration.Set(configuration.UnleashExecutionLogDirKey, artifacts)
++		if _, err := New(t.TempDir(), module).Run(); err == nil {
++			t.Fatalf("invalid directory selector accepted: %q", selector)
++		}
++		entries, err := os.ReadDir(artifacts)
++		if err != nil || len(entries) != 0 {
++			t.Fatalf("invalid selector launched setup: %v %v", entries, err)
++		}
++	}
++	configuration.Set(configuration.UnleashBaselinePackageKey, "./selected")
++	configuration.Set(configuration.UnleashExecutionLogDirKey, t.TempDir())
++	if _, err := New(t.TempDir(), module).Run(); err != nil {
++		t.Fatalf("unrelated failing package poisoned selected baseline: %v", err)
++	}
++	configuration.Set(configuration.UnleashBaselinePackageKey, "./unrelated")
++	configuration.Set(configuration.UnleashExecutionLogDirKey, t.TempDir())
++	if _, err := New(t.TempDir(), module).Run(); err == nil {
++		t.Fatal("selected failing package accepted")
++	}
++}
+diff --git a/internal/coverage/baseline_package_unix_test.go b/internal/coverage/baseline_package_unix_test.go
+new file mode 100644
+index 0000000..86d23c3
+--- /dev/null
++++ b/internal/coverage/baseline_package_unix_test.go
+@@ -0,0 +1,40 @@
++/*
++ * Copyright 2022 The Gremlins Authors
++ *
++ *    Licensed under the Apache License, Version 2.0 (the "License");
++ *    you may not use this file except in compliance with the License.
++ *    You may obtain a copy of the License at
++ *
++ *        http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *    Unless required by applicable law or agreed to in writing, software
++ *    distributed under the License is distributed on an "AS IS" BASIS,
++ *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *    See the License for the specific language governing permissions and
++ *    limitations under the License.
++ */
++
++//go:build !windows
++
++package coverage
++
++import (
++	"github.com/go-gremlins/gremlins/internal/configuration"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestBaselinePackageRejectsEscapingDirectorySymlink(t *testing.T) {
++	defer configuration.Set(configuration.UnleashBaselinePackageKey, "")
++	root, outside := t.TempDir(), t.TempDir()
++	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
++		t.Fatal(err)
++	}
++	configuration.Set(configuration.UnleashBaselinePackageKey, "./escape")
++	c := &Coverage{mod: gomodule.GoModule{Root: root, CallingDir: "."}}
++	if _, err := c.baselinePath(); err == nil {
++		t.Fatal("outside module directory accepted")
++	}
++}
 diff --git a/internal/coverage/cancellation_test.go b/internal/coverage/cancellation_test.go
 new file mode 100644
 index 0000000..7928232
@@ -329,7 +488,7 @@ index 0000000..7928232
 +	}
 +}
 diff --git a/internal/coverage/coverage.go b/internal/coverage/coverage.go
-index d7be532..49ba48a 100644
+index d7be532..41b8312 100644
 --- a/internal/coverage/coverage.go
 +++ b/internal/coverage/coverage.go
 @@ -18,6 +18,8 @@
@@ -377,12 +536,16 @@ index d7be532..49ba48a 100644
  		workDir:         workdir,
  		path:            "./...",
  		fileName:        "coverage",
-@@ -94,7 +103,13 @@ func NewWithCmd(cmdContext execContext, workdir string, mod gomodule.GoModule, o
+@@ -94,13 +103,23 @@ func NewWithCmd(cmdContext execContext, workdir string, mod gomodule.GoModule, o
  // Before executing the coverage, it downloads the go modules in a separate step.
  // This is done to avoid that the download phase impacts the execution time which
  // is later used as timeout for the mutant testing execution.
 -func (c *Coverage) Run() (Result, error) {
 +func (c *Coverage) Run() (result Result, resultErr error) {
++	baseline, err := c.baselinePath()
++	if err != nil {
++		return Result{}, err
++	}
 +	cache, err := execution.NewGoCache(c.workDir)
 +	if err != nil {
 +		return Result{}, err
@@ -392,7 +555,14 @@ index d7be532..49ba48a 100644
  	log.Infof("Gathering coverage... ")
  	_ = os.Chdir(c.mod.Root)
  	if err := c.downloadModules(); err != nil {
-@@ -110,7 +125,7 @@ func (c *Coverage) Run() (Result, error) {
+ 		return Result{}, fmt.Errorf("impossible to download modules: %w", err)
+ 	}
+-	elapsed, err := c.executeCoverage()
++	elapsed, err := c.executeCoverage(baseline)
+ 	if err != nil {
+ 		return Result{}, fmt.Errorf("impossible to executeCoverage coverage: %w", err)
+ 	}
+@@ -110,7 +129,7 @@ func (c *Coverage) Run() (Result, error) {
  		return Result{}, fmt.Errorf("an error occurred while generating coverage profile: %w", err)
  	}
  
@@ -401,7 +571,7 @@ index d7be532..49ba48a 100644
  }
  
  func (c *Coverage) profile() (Profile, error) {
-@@ -135,14 +150,28 @@ func (c *Coverage) filePath() string {
+@@ -135,14 +154,28 @@ func (c *Coverage) filePath() string {
  
  func (c *Coverage) downloadModules() error {
  	cmd := c.cmdContext("go", "mod", "download")
@@ -428,14 +598,19 @@ index d7be532..49ba48a 100644
 +	return errors.Join(runErr, cleanupErr, c.cache.AfterCommand(c.callerContext(), cmd, artifactRoot, "download"), out.Close(), stderr.Close())
  }
  
- func (c *Coverage) executeCoverage() (time.Duration, error) {
+-func (c *Coverage) executeCoverage() (time.Duration, error) {
 -	args := []string{"test"}
++func (c *Coverage) executeCoverage(baseline string) (time.Duration, error) {
 +	args := []string{"test", "-json"}
  	if c.buildTags != "" {
  		args = append(args, "-tags", c.buildTags)
  	}
-@@ -153,14 +182,46 @@ func (c *Coverage) executeCoverage() (time.Duration, error) {
- 	args = append(args, "-cover", "-coverprofile", c.filePath(), c.scanPath())
+@@ -150,17 +183,49 @@ func (c *Coverage) executeCoverage() (time.Duration, error) {
+ 		args = append(args, "-coverpkg", c.coverPkg)
+ 	}
+ 
+-	args = append(args, "-cover", "-coverprofile", c.filePath(), c.scanPath())
++	args = append(args, "-cover", "-coverprofile", c.filePath(), baseline)
  	cmd := c.cmdContext("go", args...)
  
 -	start := time.Now()
@@ -487,7 +662,7 @@ index d7be532..49ba48a 100644
  }
  
  func (c *Coverage) scanPath() string {
-@@ -205,3 +266,13 @@ func (c *Coverage) removeModuleFromPath(p *cover.Profile) string {
+@@ -205,3 +270,40 @@ func (c *Coverage) removeModuleFromPath(p *cover.Profile) string {
  
  	return path
  }
@@ -500,6 +675,33 @@ index d7be532..49ba48a 100644
 +}
 +func WithContext(ctx context.Context) Option {
 +	return func(c *Coverage) *Coverage { c.ctx = ctx; return c }
++}
++
++// baselinePath keeps scanner identity at the module root while limiting an explicit debugging baseline.
++func (c *Coverage) baselinePath() (string, error) {
++	selected := configuration.Get[string](configuration.UnleashBaselinePackageKey)
++	if selected == "" {
++		return c.scanPath(), nil
++	}
++	if c.integrationMode || c.mod.CallingDir != "." {
++		return "", errors.New("baseline-package requires non-integration mode at the module root")
++	}
++	if !strings.HasPrefix(selected, "./") || selected == "./" || selected == "./." || selected == "./.." || strings.ContainsAny(selected, "\\:\x00") || strings.Contains(selected, "...") || filepath.ToSlash(filepath.Clean(selected)) != strings.TrimPrefix(selected, "./") || strings.HasPrefix(strings.TrimPrefix(selected, "./"), "../") {
++		return "", fmt.Errorf("baseline-package must be one clean module-relative package directory: %q", selected)
++	}
++
++	tree, err := os.OpenRoot(c.mod.Root)
++	if err != nil {
++		return "", fmt.Errorf("open baseline module root: %w", err)
++	}
++	info, statErr := tree.Stat(selected)
++	if err := errors.Join(statErr, tree.Close()); err != nil {
++		return "", fmt.Errorf("inspect baseline package directory: %w", err)
++	}
++	if !info.IsDir() {
++		return "", fmt.Errorf("baseline-package must select a directory: %q", selected)
++	}
++	return selected, nil
 +}
 diff --git a/internal/coverage/coverage_test.go b/internal/coverage/coverage_test.go
 index 78f3002..0d0801c 100644

@@ -332,27 +332,14 @@ func (d *document) appendColor(color Color) {
 	d.content = append(d.content, "rg\n"...)
 }
 
-// number formats value with at most three decimals and no trailing zeros.
+// number emits round-trip decimal precision without scientific notation. Canvas dimensions and
+// captured physical placements must describe the numbers actually written into the resource PDF.
 func number(value float64) string {
-	text := strconv.FormatFloat(value, 'f', 3, 64)
-	for text[len(text)-1] == '0' {
-		text = text[:len(text)-1]
-	}
-
-	text = trimDot(text)
-	if text == "-0" {
+	if value == 0 {
 		return "0"
 	}
 
-	return text
-}
-
-func trimDot(text string) string {
-	if text[len(text)-1] == '.' {
-		return text[:len(text)-1]
-	}
-
-	return text
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func utf16Hex(text string) string {

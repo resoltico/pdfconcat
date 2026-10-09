@@ -23,7 +23,7 @@ const (
 func TestNoProhibitedDirectivesInRepository(t *testing.T) {
 	t.Parallel()
 
-	violations, err := repopolicy.ScanDirectives(repoRoot(t))
+	violations, err := repopolicy.ScanDirectives(t.Context(), repoRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestScanDirectivesWalksHiddenDirectoriesAndTests(t *testing.T) {
 		}
 	}
 
-	violations, err := repopolicy.ScanDirectives(root)
+	violations, err := repopolicy.ScanDirectives(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

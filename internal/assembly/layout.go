@@ -111,6 +111,7 @@ type (
 		problems  Errors
 		// resolved caches, per layered style, the spec index of each inherited size.
 		resolved []map[PageDim]int
+		fitDim   PageDim
 	}
 
 	// inheritFrom is a source page a blank can take its size from.
@@ -128,6 +129,8 @@ const (
 	SizeFromPrecedingLast SizeSource = 2
 	// SizeFromFollowingFirst means a leading blank took the first page of the first source.
 	SizeFromFollowingFirst SizeSource = 3
+	// SizeFitTarget means implicit/inherit canvas resolution used the effective fit target directly.
+	SizeFitTarget SizeSource = 4
 
 	// RunSource is the pages of one source occurrence.
 	RunSource RunKind = 1
@@ -160,6 +163,14 @@ func (f *Flattened) Resolve(sources []SourceGeometry, fonts FontDigests) (*Layou
 		specIndex: map[SpecKey]int{},
 		resolved:  make([]map[PageDim]int, len(f.Styles)),
 		following: firstSourcePage(f, sources),
+	}
+	if f.FitTo.IsSet() {
+		dim, err := f.FitTo.Value.Dim()
+		if err != nil {
+			return nil, Errors{errorAt(f.Source, f.FitTo.Origin, "/fit_to", StageGeometry, CodeSizeOutOfRange, err, "%v", err)}
+		}
+
+		state.fitDim = dim
 	}
 
 	state.emptySources()
@@ -237,20 +248,11 @@ func (r *resolution) placeBlank(contribution *Contribution) (Placement, int64, b
 	var inherited PageDim
 
 	if size := r.flat.Styles[contribution.Style].Style.Size; !size.IsSet() || size.Value.Inherit {
-		from := r.inheritSource()
-		if from != nil {
-			dim, err := NewPageDim(Length(from.geometry.Width), Length(from.geometry.Height))
-			if err != nil {
-				r.failf(contribution.Origin, "/blank/size", CodeSizeOutOfRange, err,
-					"the page this blank inherits its size from is %vx%v pt, outside the supported %d to %d points per side; "+
-						"give an explicit size",
-					from.geometry.Width, from.geometry.Height, int(MinPageSide), int(MaxPageSide))
+		var resolved bool
 
-				return placement, 0, false
-			}
-
-			inherited = dim
-			placement.SizeFrom, placement.Size = from.contribution, from.size
+		inherited, resolved = r.inheritedCanvas(contribution, &placement)
+		if !resolved {
+			return placement, 0, false
 		}
 	}
 
@@ -258,6 +260,32 @@ func (r *resolution) placeBlank(contribution *Contribution) (Placement, int64, b
 	placement.Spec = spec
 
 	return placement, contribution.Count, found
+}
+
+func (r *resolution) inheritedCanvas(contribution *Contribution, placement *Placement) (PageDim, bool) {
+	if r.flat.FitTo.IsSet() {
+		placement.Size = SizeFitTarget
+		return r.fitDim, true
+	}
+
+	from := r.inheritSource()
+	if from == nil {
+		return PageDim{}, true
+	}
+
+	dim, err := NewPageDim(Length(from.geometry.Width), Length(from.geometry.Height))
+	if err != nil {
+		r.failf(contribution.Origin, "/blank/size", CodeSizeOutOfRange, err,
+			"the page this blank inherits its size from is %vx%v pt, outside the supported %d to %d points per side; "+
+				"give an explicit size",
+			from.geometry.Width, from.geometry.Height, int(MinPageSide), int(MaxPageSide))
+
+		return PageDim{}, false
+	}
+
+	placement.SizeFrom, placement.Size = from.contribution, from.size
+
+	return dim, true
 }
 
 // inheritSource is the source page a blank takes its size from: the last page of the nearest preceding

@@ -61,7 +61,7 @@ func newWorld(t *testing.T) *world {
 	env.resource = resource
 
 	for name, path := range paths {
-		info, err := env.engine.Inspect(context.Background(), path)
+		info, err := env.engine.Inspect(context.Background(), path, nil)
 		if err != nil {
 			t.Fatalf("inspect %s: %v", name, err)
 		}

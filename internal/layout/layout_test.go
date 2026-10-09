@@ -213,7 +213,7 @@ func TestPlaceWithoutKeepingLinesKeepsBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dropped, err := layout.PlaceBounds(context.Background(), table, builtIn(loadFont(t)))
+	dropped, err := layout.PlaceBounds(context.Background(), table, builtIn(loadFont(t)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -122,7 +122,7 @@ func (v *validator) run() *fault {
 	}
 
 	for _, check := range []func() *fault{
-		v.header, v.counts, v.publication, v.diagnostics, v.sources, v.fonts, v.styles, v.parts, v.layout, v.consumerLinks,
+		v.header, v.counts, v.publication, v.diagnostics, v.sources, v.fonts, v.styles, v.parts, v.layout, v.consumerLinks, v.fitting,
 	} {
 		if found := check(); found != nil {
 			return found
@@ -462,8 +462,13 @@ func styleFault(pointer string, style *Style) *fault {
 	size := &style.Size
 
 	switch {
-	case size.Origin != SizeExplicit && size.Origin != SizeFollowingSource && size.Origin != SizePrecedingSource:
-		return newFault(pointer+"/size/origin", CodeInvalidValue, "size origin must be explicit, following_source, or preceding_source")
+	case size.Origin != SizeExplicit && size.Origin != SizeFollowingSource &&
+		size.Origin != SizePrecedingSource && size.Origin != SizeFitTarget:
+		return newFault(
+			pointer+"/size/origin",
+			CodeInvalidValue,
+			"size origin must be explicit, following_source, preceding_source, or fit_target",
+		)
 	case !within(size.Width, float64(assembly.MinPageSide), maxPageSide) ||
 		!within(size.Height, float64(assembly.MinPageSide), maxPageSide):
 		return newFault(pointer+"/size", CodeInvalidValue, "page sides must be between 1 and 14400 points")

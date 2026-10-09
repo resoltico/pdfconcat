@@ -4,6 +4,7 @@
 package pdfengine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -21,6 +22,16 @@ type (
 	// rectangle is a normalized box: x0 < x1 and y0 < y1.
 	rectangle struct {
 		x0, y0, x1, y1 float64
+	}
+
+	// pageGeometry is the single decomposition of effective visible geometry in source user space.
+	pageGeometry struct {
+		media, crop rectangle
+		visible     rectangle
+		size        PageSize
+		units       float64
+		rotation    int
+		hasCrop     bool
 	}
 )
 
@@ -51,21 +62,27 @@ var (
 // A rotation of 90 or 270 degrees swaps width and height, and the page's UserUnit (default 1) scales
 // both to physical points. Missing, non-numeric, non-finite, empty or non-intersecting boxes, a rotation
 // that is not a multiple of 90, and a non-positive UserUnit are errors.
-func visibleSize(pdf *model.Context, page types.Dict, inherited inheritedAttrs) (PageSize, error) {
-	media, found, err := boxOf(pdf, page, inherited.mediaBox, keyMediaBox)
+func visibleSize(ctx context.Context, pdf *model.Context, page types.Dict, inherited inheritedAttrs) (PageSize, error) {
+	geometry, err := decomposePage(ctx, pdf, page, inherited)
+
+	return geometry.size, err
+}
+
+func decomposePage(ctx context.Context, pdf *model.Context, page types.Dict, inherited inheritedAttrs) (pageGeometry, error) {
+	media, found, err := boxOf(ctx, pdf, page, inherited.mediaBox, keyMediaBox)
 	if err != nil {
-		return PageSize{}, err
+		return pageGeometry{}, err
 	}
 
 	if !found {
-		return PageSize{}, errMediaBoxMissing
+		return pageGeometry{}, errMediaBoxMissing
 	}
 
 	visible := media
 
-	crop, found, err := boxOf(pdf, page, inherited.cropBox, keyCropBox)
+	crop, found, err := boxOf(ctx, pdf, page, inherited.cropBox, keyCropBox)
 	if err != nil {
-		return PageSize{}, err
+		return pageGeometry{}, err
 	}
 
 	if found {
@@ -74,18 +91,20 @@ func visibleSize(pdf *model.Context, page types.Dict, inherited inheritedAttrs) 
 			x1: math.Min(media.x1, crop.x1), y1: math.Min(media.y1, crop.y1),
 		}
 		if visible.x0 >= visible.x1 || visible.y0 >= visible.y1 {
-			return PageSize{}, errCropOutsideMedia
+			return pageGeometry{}, errCropOutsideMedia
 		}
+	} else {
+		crop = media
 	}
 
-	rotation, err := rotationOf(pdf, page, inherited.rotate)
+	rotation, err := rotationOf(ctx, pdf, page, inherited.rotate)
 	if err != nil {
-		return PageSize{}, err
+		return pageGeometry{}, err
 	}
 
-	units, err := userUnitOf(pdf, page)
+	units, err := userUnitOf(ctx, pdf, page)
 	if err != nil {
-		return PageSize{}, err
+		return pageGeometry{}, err
 	}
 
 	size := PageSize{Width: (visible.x1 - visible.x0) * units, Height: (visible.y1 - visible.y0) * units}
@@ -94,15 +113,15 @@ func visibleSize(pdf *model.Context, page types.Dict, inherited inheritedAttrs) 
 	}
 
 	if math.IsInf(size.Width, 0) || math.IsInf(size.Height, 0) {
-		return PageSize{}, errSizeOverflow
+		return pageGeometry{}, errSizeOverflow
 	}
 
-	return size, nil
+	return pageGeometry{media: media, crop: crop, hasCrop: found, visible: visible, rotation: rotation, units: units, size: size}, nil
 }
 
 // boxOf reads the rectangle entry key of page, or else the inherited one; found is false for an absent or
 // null entry.
-func boxOf(pdf *model.Context, page types.Dict, inherited types.Object, key string) (rectangle, bool, error) {
+func boxOf(ctx context.Context, pdf *model.Context, page types.Dict, inherited types.Object, key string) (rectangle, bool, error) {
 	object, own := page.Find(key)
 	if !own {
 		object = inherited
@@ -112,16 +131,16 @@ func boxOf(pdf *model.Context, page types.Dict, inherited types.Object, key stri
 		return rectangle{}, false, nil
 	}
 
-	array, err := pdf.DereferenceArray(object)
+	array, err := pdf.DereferenceArrayContext(ctx, object)
 	if err != nil {
-		return rectangle{}, false, fmt.Errorf("%s: %w", key, err)
+		return rectangle{}, false, fmt.Errorf(labelCauseFormat, key, err)
 	}
 
 	if array == nil {
 		return rectangle{}, false, nil
 	}
 
-	box, err := boxFromArray(pdf, array, key)
+	box, err := boxFromArray(ctx, pdf, array, key)
 	if err != nil {
 		return rectangle{}, false, err
 	}
@@ -130,7 +149,7 @@ func boxOf(pdf *model.Context, page types.Dict, inherited types.Object, key stri
 }
 
 // boxFromArray converts the four numbers of array, named by key in errors, to a normalized non-empty rectangle.
-func boxFromArray(pdf *model.Context, array types.Array, key string) (rectangle, error) {
+func boxFromArray(ctx context.Context, pdf *model.Context, array types.Array, key string) (rectangle, error) {
 	if len(array) != boxEntries {
 		return rectangle{}, fmt.Errorf("%w: %s has %d numbers, want %d", errBoxEntryCount, key, len(array), boxEntries)
 	}
@@ -138,9 +157,9 @@ func boxFromArray(pdf *model.Context, array types.Array, key string) (rectangle,
 	var corner [boxEntries]float64
 
 	for index, entry := range array {
-		value, err := pdf.DereferenceNumber(entry)
+		value, err := pdf.DereferenceNumberContext(ctx, entry)
 		if err != nil {
-			return rectangle{}, fmt.Errorf("%s: %w", key, err)
+			return rectangle{}, fmt.Errorf(labelCauseFormat, key, err)
 		}
 
 		if math.IsNaN(value) || math.IsInf(value, 0) {
@@ -162,7 +181,7 @@ func boxFromArray(pdf *model.Context, array types.Array, key string) (rectangle,
 }
 
 // rotationOf reads /Rotate of page, or else the inherited one. It must be a multiple of 90; the result is in [0, 360).
-func rotationOf(pdf *model.Context, page types.Dict, inherited types.Object) (int, error) {
+func rotationOf(ctx context.Context, pdf *model.Context, page types.Dict, inherited types.Object) (int, error) {
 	object, own := page.Find(keyRotate)
 	if !own {
 		object = inherited
@@ -172,7 +191,7 @@ func rotationOf(pdf *model.Context, page types.Dict, inherited types.Object) (in
 		return 0, nil
 	}
 
-	value, err := pdf.DereferenceNumber(object)
+	value, err := pdf.DereferenceNumberContext(ctx, object)
 	if err != nil {
 		return 0, fmt.Errorf("/%s: %w", keyRotate, err)
 	}
@@ -185,13 +204,13 @@ func rotationOf(pdf *model.Context, page types.Dict, inherited types.Object) (in
 }
 
 // userUnitOf reads the page's /UserUnit, which is not inherited, and defaults to 1.
-func userUnitOf(pdf *model.Context, page types.Dict) (float64, error) {
+func userUnitOf(ctx context.Context, pdf *model.Context, page types.Dict) (float64, error) {
 	object, found := page.Find("UserUnit")
 	if !found {
 		return defaultUnits, nil
 	}
 
-	value, err := pdf.DereferenceNumber(object)
+	value, err := pdf.DereferenceNumberContext(ctx, object)
 	if err != nil {
 		return 0, fmt.Errorf("UserUnit: %w", err)
 	}

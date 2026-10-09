@@ -11,9 +11,13 @@ import (
 )
 
 func (*command) runFuzzProcess(_ context.Context) error {
-	return requireFuzzPlatform()
+	return fuzzPlatformError()
 }
 
-func requireFuzzPlatform() error {
+func runPlatformFuzz(context.Context, []string, string) error {
+	return fuzzPlatformError()
+}
+
+func fuzzPlatformError() error {
 	return fmt.Errorf("%w: owned fuzz process cleanup requires a macOS or Linux runner; no fuzz subprocess was started", errGate)
 }

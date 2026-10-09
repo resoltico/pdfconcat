@@ -18,10 +18,14 @@ import (
 
 type (
 	progressConsolePause struct {
-		input   *os.File
-		output  *os.File
-		testing *testing.T
-		once    sync.Once
+		input    *os.File
+		output   *os.File
+		testing  *testing.T
+		handle   windows.Handle
+		once     sync.Once
+		mode     uint32
+		codepage uint32
+		flags    uint32
 	}
 	// INPUT_RECORD's KEY_EVENT_RECORD layout is 20 bytes in both native Windows ABIs.
 	progressConsoleKeyEvent struct {
@@ -84,10 +88,41 @@ func privateProgressConsole(t *testing.T) *progressConsolePause {
 	requireProgressNoError(t, windows.SetConsoleMode(windows.Handle(input.Fd()), mode|windows.ENABLE_LINE_INPUT))
 	t.Cleanup(func() { requireProgressNoError(t, windows.SetConsoleMode(windows.Handle(input.Fd()), mode)) })
 	requireProgressNoError(t, windows.SetConsoleCursorPosition(windows.Handle(output.Fd()), windows.Coord{}))
-	fixture := &progressConsolePause{input: input, output: output, testing: t}
+	handle := windows.Handle(output.Fd())
+
+	var outputMode uint32
+	requireProgressNoError(t, windows.GetConsoleMode(handle, &outputMode))
+
+	codepage, err := windows.GetConsoleOutputCP()
+	requireProgressNoError(t, err)
+	fixture := &progressConsolePause{
+		input: input, output: output, testing: t, handle: handle,
+		mode: outputMode, codepage: codepage, flags: progressConsoleHandleFlags(t, handle),
+	}
 	t.Cleanup(fixture.release)
 
 	return fixture
+}
+
+func progressConsoleHandleFlags(t *testing.T, handle windows.Handle) uint32 {
+	t.Helper()
+
+	var flags uint32
+
+	var pin runtime.Pinner
+	pin.Pin(&flags)
+
+	defer pin.Unpin()
+
+	procedure := windows.NewLazySystemDLL(progressWindowsKernel).NewProc("GetHandleInformation")
+	queried, _, queryErr := procedure.Call(uintptr(handle), uintptr(unsafe.Pointer(&flags)))
+	runtime.KeepAlive(&flags)
+
+	if queried == 0 {
+		t.Fatalf("query caller console handle flags: %v", queryErr)
+	}
+
+	return flags
 }
 
 func (fixture *progressConsolePause) release() {

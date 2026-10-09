@@ -5,8 +5,6 @@ package scale
 
 import (
 	"crypto/sha256"
-	"errors"
-	"os"
 	"syscall"
 )
 
@@ -46,46 +44,12 @@ type (
 		ControlCloseOnExec bool   `json:"control_cloexec"`
 		HygieneConfigured  bool   `json:"hygiene_configured"`
 	}
-
-	descriptorLaunch struct {
-		reader     *os.File
-		writer     *os.File
-		directory  string
-		binaryPath string
-		expected   DescriptorCeiling
-	}
 )
 
 const (
 	descriptorHygieneDarwin = "same_pid_setexec_cloexec_default"
 	descriptorHygieneLinux  = "close_range_and_proc_survivors"
 )
-
-var errDescriptorLaunch = errors.New("descriptor launch")
-
-func (launch *descriptorLaunch) release() error {
-	if launch == nil {
-		return nil
-	}
-
-	var failures []error
-	if launch.reader != nil {
-		failures = append(failures, launch.reader.Close())
-		launch.reader = nil
-	}
-
-	if launch.writer != nil {
-		failures = append(failures, launch.writer.Close())
-		launch.writer = nil
-	}
-
-	if launch.directory != "" {
-		failures = append(failures, os.RemoveAll(launch.directory))
-		launch.directory = ""
-	}
-
-	return errors.Join(failures...)
-}
 
 // DescriptorBoundVerified distinguishes the completed process's checked ceiling from sample quality.
 // Its facts are produced by the owned native launch boundary, not by a requested RunSpec limit.

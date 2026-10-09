@@ -689,6 +689,21 @@ linters:
     presets: []
     rules:
       - linters:
+          - usetesting
+        path: ^cmd/pdfconcat/progress_producer_windows_test\.go$
+        source: directory, err := os\.MkdirTemp\(root, "progress-child-"\)
+        text: os\.MkdirTemp\(\) could be replaced by t\.TempDir\(\) in progressWindowsHelperArgs
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_pause_native_windows_test\.go$
+        source: requested := uint32\(len\(units\)\)
+        text: 'G115: integer overflow conversion int -> uint32'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_transport_pause_fixture_windows_test\.go$
+        source: queried, _, queryErr := procedure\.Call\(uintptr\(handle\), uintptr\(unsafe\.Pointer\(&flags\)\)\)
+        text: 'G103: Use of unsafe calls should be audited'
+      - linters:
           - gosec
         path: ^test/scale/measure_setup_darwin_internal_test\.go$
         source: fixture, err := startOwnedCollectorProcess\(t, exec\.CommandContext\(ctx, executable\)\)
@@ -746,7 +761,7 @@ linters:
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_producer_windows_test\.go$
-        source: command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressProducerSelector, "-test\.v"\)\.\.\.\)
+        source: command := exec\.CommandContext\(
         text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
       - linters:
           - forbidigo

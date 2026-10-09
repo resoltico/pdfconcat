@@ -12,10 +12,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+var errProgressRawConsoleIncomplete = errors.New("independent native console write was incomplete")
 
 func observeProgressNativeThread(t *testing.T, threadID uint32) windows.Handle {
 	t.Helper()
@@ -100,7 +103,31 @@ func startProgressConsoleNativeWrite(t *testing.T, file *os.File, text string) (
 			return
 		}
 
-		result <- writeProgressConsoleRecord(nil, windows.Handle(file.Fd()), []byte(text))
+		// Independent single native call: no transport encoder, retry or cancellation policy.
+		units := utf16.Encode([]rune(text))
+
+		if len(units) == 0 || len(units) > 65535 {
+			result <- errProgressRawConsoleIncomplete
+			return
+		}
+
+		requested := uint32(len(units))
+
+		var written uint32
+
+		var pin runtime.Pinner
+		pin.Pin(&units[0])
+		pin.Pin(&written)
+		err = windows.WriteConsole(windows.Handle(file.Fd()), &units[0], requested, &written, nil)
+
+		pin.Unpin()
+		runtime.KeepAlive(units)
+
+		if err == nil && written != requested {
+			err = errProgressRawConsoleIncomplete
+		}
+
+		result <- err
 	}()
 
 	thread := <-ready
@@ -125,7 +152,7 @@ func assertProgressRawConsoleBoundary(t *testing.T, fixture *progressConsolePaus
 	if scenario == progressNativeCancelScenario {
 		assertProgressNativeConsoleAbort(t, thread, result)
 		<-stopped
-		assertProgressConsoleNoDelayedRecord(t, fixture)
+		assertProgressJoinedConsoleCallerAccess(t, fixture)
 
 		return
 	}

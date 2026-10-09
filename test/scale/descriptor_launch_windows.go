@@ -10,6 +10,10 @@ import (
 	"os/exec"
 )
 
+type descriptorLaunch struct{}
+
+func (*descriptorLaunch) release() error { return nil }
+
 func prepareDescriptorLaunch(context.Context, *exec.Cmd, uint64) (*descriptorLaunch, error) {
 	return &descriptorLaunch{}, nil
 }

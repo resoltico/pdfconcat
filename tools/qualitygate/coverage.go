@@ -178,15 +178,14 @@ func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeL
 		return nil, fmt.Errorf("unit tests failed: %w", err)
 	}
 
-	entries, err := os.ReadDir(coverDir)
-	if err != nil || len(entries) == 0 {
-		return nil, fmt.Errorf("%w: the tests produced no executable coverage in %s: tests that run the executable must build it with "+
-			"internal/exectest so that %s and %s take effect", errGate, coverDir, envCoverDir, envCoverPkg)
+	inputs, err := executableCoverageInputs(coverDir)
+	if err != nil {
+		return nil, err
 	}
 
 	subprocessProfile := filepath.Join(scratch, "subprocess.out")
 
-	err = goCommand(root, goToolVerb, covdataVerb, "textfmt", "-i="+coverDir, "-o="+subprocessProfile).run(ctx)
+	err = goCommand(root, goToolVerb, covdataVerb, "textfmt", "-i="+strings.Join(inputs, ","), "-o="+subprocessProfile).run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("convert executable coverage: %w", err)
 	}

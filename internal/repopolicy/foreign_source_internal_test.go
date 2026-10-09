@@ -30,6 +30,52 @@ const (
 		" package reader\n-func Value() int { return 1 }\n+func Value() int { return 2 }\n"
 )
 
+func TestForeignPatchIgnoresCallerGitConfiguration(t *testing.T) {
+	root := t.TempDir()
+	config := filepath.Join(t.TempDir(), "caller.config")
+
+	if err := os.WriteFile(config, []byte("invalid config syntax\n"), foreignFileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_CONFIG_GLOBAL", config)
+	t.Setenv("GIT_CONFIG_SYSTEM", config)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "apply.ignoreWhitespace")
+	t.Setenv("GIT_CONFIG_VALUE_0", "change")
+
+	base := tinyForeignFiles()
+
+	files, err := reconstructForeignFiles(t.Context(), root, base, []byte(foreignFixturePatch), foreignLicenseFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(files) != len(base) {
+		t.Fatalf("reconstructed inventory has %d files, want %d", len(files), len(base))
+	}
+
+	tree, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if closeErr := tree.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+
+	actual, err := tree.ReadFile(filepath.FromSlash(foreignFixtureReader))
+	if err != nil || !bytes.Equal(actual, []byte("package reader\nfunc Value() int { return 2 }\n")) {
+		t.Fatalf("actual patched source = %q, error = %v", actual, err)
+	}
+
+	if err = applyForeignPatch(t.Context(), root, []byte(foreignFixturePatch)); err == nil {
+		t.Fatal("already-applied patch accepted")
+	}
+}
+
 func tinyForeignFiles() map[string][]byte {
 	return map[string][]byte{
 		goModuleFile:         []byte("module github.com/benoitkugler/pdf\n"),

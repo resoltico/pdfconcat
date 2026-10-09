@@ -24,6 +24,48 @@ version: 1
 coverage_threshold_percent: 100
 
 exceptions:
+  # Instrumented private helpers must retain their distinct raw Go coverage files
+  # until the parent gate converts them. t.TempDir cleanup would erase those
+  # counters before collection; the coverage gate owns and removes this root.
+  - id: lint-progress-windows-retained-child-coverage
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: usetesting
+    path: cmd/pdfconcat/progress_producer_windows_test.go
+    message: 'os\.MkdirTemp\(\) could be replaced by t\.TempDir\(\) in progressWindowsHelperArgs'
+    source: 'directory, err := os\.MkdirTemp\(root, "progress-child-"\)'
+    goos: windows
+    retained_property: actual child counters survive joined helper completion for complete native coverage merging
+
+  # The independent native console control refuses zero or more than 65535 UTF-16
+  # units before converting the single WriteConsoleW count to its uint32 ABI.
+  # This does not cover any other numeric narrowing or production write path.
+  - id: lint-progress-native-console-bounded-unit-count
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_pause_native_windows_test.go
+    message: 'G115: integer overflow conversion int -> uint32'
+    source: 'requested := uint32\(len\(units\)\)'
+    goos: windows
+    retained_property: one independent real native write uses a count proven within the Windows ABI range
+
+  # GetHandleInformation writes one pinned uint32 owned by this read-only caller
+  # identity fixture. Keep the value alive through the call, check API failure,
+  # and compare real handle flags after cancellation and writer completion.
+  - id: lint-progress-console-caller-handle-flags-query
+    tool: golangci-lint
+    kind: intended-pattern
+    effect: exclude-diagnostic
+    linter: gosec
+    path: cmd/pdfconcat/progress_transport_pause_fixture_windows_test.go
+    message: 'G103: Use of unsafe calls should be audited'
+    source: 'queried, _, queryErr := procedure\.Call\(uintptr\(handle\), uintptr\(unsafe\.Pointer\(&flags\)\)\)'
+    goos: windows
+    retained_property: independent native observations prove caller handle flags survive console cancellation unchanged
+
   # This startup-failure control uses only an owned missing path or fixed true
   # executable with an already-canceled context. A real native Start failure proves
   # prepared collector cleanup; no shell, arguments or user executable is accepted.
@@ -187,7 +229,7 @@ exceptions:
     linter: gosec
     path: cmd/pdfconcat/progress_producer_windows_test.go
     message: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
-    source: 'command := exec\.CommandContext\(ctx, executable, progressHelperArgs\(progressProducerSelector, "-test\.v"\)\.\.\.\)'
+    source: 'command := exec\.CommandContext\('
     goos: windows
     retained_property: actual private producer scenarios and joined cleanup are proved without selectable commands
 

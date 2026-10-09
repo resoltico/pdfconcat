@@ -26,6 +26,14 @@ import (
 	"github.com/resoltico/pdfconcat/internal/exectest"
 )
 
+type descriptorLaunch struct {
+	reader     *os.File
+	writer     *os.File
+	directory  string
+	binaryPath string
+	expected   DescriptorCeiling
+}
+
 const (
 	descriptorCeiling           = 64
 	descriptorTokenBytes        = 16
@@ -40,8 +48,36 @@ const (
 	descriptorPreparationError  = "read descriptor preparation: %w"
 )
 
-//go:embed testdata/descriptor_launcher.c
-var descriptorLauncherSource string
+var (
+	errDescriptorLaunch = errors.New("descriptor launch")
+
+	//go:embed testdata/descriptor_launcher.c
+	descriptorLauncherSource string
+)
+
+func (launch *descriptorLaunch) release() error {
+	if launch == nil {
+		return nil
+	}
+
+	var failures []error
+	if launch.reader != nil {
+		failures = append(failures, launch.reader.Close())
+		launch.reader = nil
+	}
+
+	if launch.writer != nil {
+		failures = append(failures, launch.writer.Close())
+		launch.writer = nil
+	}
+
+	if launch.directory != "" {
+		failures = append(failures, os.RemoveAll(launch.directory))
+		launch.directory = ""
+	}
+
+	return errors.Join(failures...)
+}
 
 func prepareDescriptorLaunch(ctx context.Context, command *exec.Cmd, ceiling uint64) (_ *descriptorLaunch, failure error) {
 	if ceiling == 0 {

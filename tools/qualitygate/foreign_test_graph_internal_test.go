@@ -18,6 +18,51 @@ const (
 	compilerFixtureEmbeds    = "fixtures"
 )
 
+func TestForeignCompilerGraphCanonicalizesOnlyDeclaredReplacementSpellings(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	canonical := filepath.Join(root, "foreign")
+	staged := filepath.Join(t.TempDir(), "foreign")
+	stage := &foreignTestStage{roots: map[string]string{canonical: staged}}
+
+	for _, spelling := range []string{staged, filepath.ToSlash(staged), "./foreign"} {
+		if actual := stage.canonicalGraphPath(root, spelling); actual != canonical {
+			t.Fatalf("replacement %q normalized to %q, want %q", spelling, actual, canonical)
+		}
+	}
+
+	invalid := []string{
+		filepath.ToSlash(staged) + "-sibling",
+		filepath.ToSlash(staged) + "/../foreign",
+		"./foreign/../foreign",
+		"./foreign-sibling",
+	}
+	for _, spelling := range invalid {
+		if actual := stage.canonicalGraphPath(root, spelling); actual != spelling {
+			t.Fatalf("undeclared replacement %q normalized to %q", spelling, actual)
+		}
+	}
+}
+
+func TestForeignCompilerGraphDifferenceIdentifiesFirstPackageAndField(t *testing.T) {
+	t.Parallel()
+
+	canonical := foreignCompilerGraph{"diagnostic.test/package": `{"Dir":"canonical","Module":{"Path":"owned"}}`}
+	staged := foreignCompilerGraph{"diagnostic.test/package": `{"Dir":"staged","Module":{"Path":"secret"}}`}
+
+	if actual := compilerGraphDifference(canonical, staged); actual != "package diagnostic.test/package field Dir" {
+		t.Fatalf("difference = %q", actual)
+	}
+
+	if actual := compilerGraphDifference(canonical, foreignCompilerGraph{}); actual != "missing package diagnostic.test/package" {
+		t.Fatalf("missing difference = %q", actual)
+	}
+
+	if actual := compilerGraphDifference(foreignCompilerGraph{}, staged); actual != "unexpected package diagnostic.test/package" {
+		t.Fatalf("extra difference = %q", actual)
+	}
+}
+
 func TestForeignCompilerGraphRejectsWildcardEmbedAdoptionAndSourceDrift(t *testing.T) {
 	t.Parallel()
 	root, stage := foreignCompilerFixture(t)

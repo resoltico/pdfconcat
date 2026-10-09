@@ -117,11 +117,11 @@ func (stage *foreignTestStage) canonicalGraphPath(root, text string) string {
 	}
 
 	for canonical, staged := range stage.roots {
-		if text == staged {
+		if text == staged || text == filepath.ToSlash(staged) {
 			return canonical
 		}
 
-		if strings.HasPrefix(text, staged+string(filepath.Separator)) {
+		if strings.HasPrefix(text, staged+string(filepath.Separator)) && filepath.Clean(text) == text {
 			return canonical + strings.TrimPrefix(text, staged)
 		}
 
@@ -275,10 +275,55 @@ func (stage *foreignTestStage) compilerEquivalent(ctx context.Context, root stri
 	}
 
 	if !maps.Equal(canonical, staged) {
-		return fmt.Errorf("%w: staged native compiler/module/source/embed graph differs", errGate)
+		difference := compilerGraphDifference(canonical, staged)
+
+		return fmt.Errorf("%w: staged native compiler/module/source/embed graph differs: %s", errGate, difference)
 	}
 
 	return nil
+}
+
+func compilerGraphDifference(canonical, staged foreignCompilerGraph) string {
+	for _, name := range slices.Sorted(maps.Keys(canonical)) {
+		actual, exists := staged[name]
+		if !exists {
+			return "missing package " + name
+		}
+
+		if actual != canonical[name] {
+			return "package " + name + compilerDescriptorDifference(canonical[name], actual)
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(staged)) {
+		if _, exists := canonical[name]; !exists {
+			return "unexpected package " + name
+		}
+	}
+
+	return "unknown difference"
+}
+
+func compilerDescriptorDifference(expected, actual string) string {
+	var expectedFields, actualFields map[string]json.RawMessage
+
+	if json.Unmarshal([]byte(expected), &expectedFields) != nil || json.Unmarshal([]byte(actual), &actualFields) != nil {
+		return ""
+	}
+
+	for _, field := range slices.Sorted(maps.Keys(expectedFields)) {
+		if !bytes.Equal(expectedFields[field], actualFields[field]) {
+			return " field " + field
+		}
+	}
+
+	for _, field := range slices.Sorted(maps.Keys(actualFields)) {
+		if _, exists := expectedFields[field]; !exists {
+			return " added field " + field
+		}
+	}
+
+	return ""
 }
 
 func selectedForeignCompilerFiles(descriptor map[string]any) []string {

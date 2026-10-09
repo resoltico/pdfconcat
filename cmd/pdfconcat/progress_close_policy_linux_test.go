@@ -29,10 +29,11 @@ type progressCloseDescriptorState struct {
 }
 
 const (
-	progressClosePolicyScenario  = "PDFCONCAT_NATIVE_CLOSE_POLICY"
-	progressClosePolicySelector  = "-test.run=^TestProgressClosePolicyHelper$"
-	progressClosePolicyReceipt   = "native close policy verified"
-	progressCloseDescriptorLimit = 64
+	progressClosePolicyScenario   = "PDFCONCAT_NATIVE_CLOSE_POLICY"
+	progressClosePolicySelector   = "-test.run=^TestProgressClosePolicyHelper$"
+	progressClosePolicyReceipt    = "native close policy verified"
+	progressCloseDescriptorLimit  = 64
+	progressCloseInheritedMinimum = 142
 )
 
 func TestProgressConstructorPreservesNativeRelocationCloseFailure(t *testing.T) {
@@ -60,13 +61,8 @@ func TestProgressConstructorPreservesNativeRelocationCloseFailure(t *testing.T) 
 func TestProgressClosePolicyHelper(t *testing.T) {
 	t.Parallel()
 
-	scenario := os.Getenv(progressClosePolicyScenario)
-	if scenario == "" {
+	if !progressClosePolicySelected(t) {
 		return
-	}
-
-	if scenario != "close-zero" {
-		t.Fatal("unexpected close-policy scenario")
 	}
 	// This dedicated child's irreversible thread policy never returns its M to the runtime pool.
 	runtime.LockOSThread()
@@ -75,6 +71,13 @@ func TestProgressClosePolicyHelper(t *testing.T) {
 	reader, source := progressPipe(t)
 	descriptor, err := nativeProgressDescriptor(source)
 	requireProgressNoError(t, err)
+
+	inheritedFile := newProgressCloseInheritedFile(t, descriptor)
+	defer cleanupProgressCloseProbe(t, &inheritedFile)
+
+	inventory := newProgressCloseInventory(t)
+	defer cleanupProgressCloseProbe(t, &inventory)
+
 	boundProgressCloseDescriptorTable(t)
 	requireProgressNoError(t, unix.Close(unix.Stdin))
 
@@ -96,7 +99,7 @@ func TestProgressClosePolicyHelper(t *testing.T) {
 	probeFile = nil
 
 	requireProgressNoError(t, closeErr)
-	before := snapshotProgressCloseDescriptors(t)
+	before := snapshotProgressCloseDescriptors(t, inventory)
 
 	transport, err := newProgressTransport(source)
 	if transport != nil {
@@ -111,14 +114,75 @@ func TestProgressClosePolicyHelper(t *testing.T) {
 		t.Fatal("constructor left its reviewed policy thread")
 	}
 
-	after := snapshotProgressCloseDescriptors(t)
-	assertProgressCloseOwnedState(t, before, after, int(descriptor))
-	verifyProgressCloseCallerBytes(t, reader, source)
-	restoreProgressCloseDescriptors(t, before)
+	verifyProgressClosePreservation(t, inventory, inheritedFile, reader, source, before, int(descriptor))
 
 	requireProgressNoError(t, source.Close())
 	requireProgressNoError(t, reader.Close())
 	t.Log(progressClosePolicyReceipt)
+}
+
+func progressClosePolicySelected(t *testing.T) bool {
+	t.Helper()
+
+	scenario := os.Getenv(progressClosePolicyScenario)
+	if scenario == "" {
+		return false
+	}
+
+	if scenario != "close-zero" {
+		t.Fatal("unexpected close-policy scenario")
+	}
+
+	return true
+}
+
+func verifyProgressClosePreservation(
+	t *testing.T,
+	inventory, inherited, reader, source *os.File,
+	before map[int]progressCloseDescriptorState,
+	caller int,
+) {
+	t.Helper()
+	requireProgressCloseInheritedSnapshot(t, inherited, before)
+
+	after := snapshotProgressCloseDescriptors(t, inventory)
+	assertProgressCloseOwnedState(t, before, after, caller)
+	verifyProgressCloseCallerBytes(t, reader, source)
+	verifyProgressCloseCallerBytes(t, reader, inherited)
+	restoreProgressCloseDescriptors(t, inventory, before)
+}
+
+func newProgressCloseInheritedFile(t *testing.T, source uintptr) *os.File {
+	t.Helper()
+
+	descriptor, err := unix.FcntlInt(source, unix.F_DUPFD_CLOEXEC, progressCloseInheritedMinimum)
+	requireProgressNoError(t, err)
+
+	if descriptor < progressCloseInheritedMinimum {
+		t.Fatal("actual high inherited descriptor was not installed")
+	}
+
+	return os.NewFile(uintptr(descriptor), "private-high-inherited-progress")
+}
+
+func newProgressCloseInventory(t *testing.T) *os.File {
+	t.Helper()
+
+	inventory, err := os.Open("/proc/self/fd")
+	requireProgressNoError(t, err)
+
+	return inventory
+}
+
+func requireProgressCloseInheritedSnapshot(t *testing.T, inherited *os.File, before map[int]progressCloseDescriptorState) {
+	t.Helper()
+
+	descriptor, err := nativeProgressDescriptor(inherited)
+	requireProgressNoError(t, err)
+
+	if _, ok := before[int(descriptor)]; !ok {
+		t.Fatal("complete descriptor snapshot omitted the actual inherited descriptor")
+	}
 }
 
 func boundProgressCloseDescriptorTable(t *testing.T) {
@@ -135,37 +199,43 @@ func boundProgressCloseDescriptorTable(t *testing.T) {
 	if actual.Cur != progressCloseDescriptorLimit || actual.Max != progressCloseDescriptorLimit {
 		t.Fatalf("descriptor ceiling was not installed: %+v", actual)
 	}
+}
 
-	entries, err := os.ReadDir("/proc/self/fd")
-	requireProgressNoError(t, err)
+func snapshotProgressCloseDescriptors(t *testing.T, inventory *os.File) map[int]progressCloseDescriptorState {
+	t.Helper()
+
+	result := map[int]progressCloseDescriptorState{}
+
+	// RLIMIT bounds new allocations, but Linux retains descriptors inherited above it.
+	// Reuse the directory opened before the zero-slot denial; opening here would claim fd zero.
+	_, seekErr := inventory.Seek(0, io.SeekStart)
+	requireProgressNoError(t, seekErr)
+
+	entries, readErr := inventory.ReadDir(-1)
+	requireProgressNoError(t, readErr)
+
+	descriptors := make(map[int]struct{}, len(entries)+progressCloseDescriptorLimit)
+	for descriptor := range progressCloseDescriptorLimit {
+		descriptors[descriptor] = struct{}{}
+	}
 
 	for _, entry := range entries {
 		descriptor, parseErr := strconv.Atoi(entry.Name())
 		requireProgressNoError(t, parseErr)
 
-		if descriptor >= progressCloseDescriptorLimit {
-			var stat unix.Stat_t
-			if statErr := unix.Fstat(descriptor, &stat); !errors.Is(statErr, unix.EBADF) {
-				t.Fatalf("inherited descriptor outside complete bounded scan: %d %v", descriptor, statErr)
-			}
-		}
+		descriptors[descriptor] = struct{}{}
 	}
-}
 
-func snapshotProgressCloseDescriptors(t *testing.T) map[int]progressCloseDescriptorState {
-	t.Helper()
-
-	result := map[int]progressCloseDescriptorState{}
-
-	for descriptor := range progressCloseDescriptorLimit {
+	for descriptor := range descriptors {
 		var stat unix.Stat_t
 
-		err := unix.Fstat(descriptor, &stat)
-		if errors.Is(err, unix.EBADF) {
+		statErr := unix.Fstat(descriptor, &stat)
+		if errors.Is(statErr, unix.EBADF) {
 			continue
 		}
 
-		requireProgressNoError(t, err)
+		requireProgressNoError(t, statErr)
+
 		flags, err := unix.FcntlInt(uintptr(descriptor), unix.F_GETFD, 0)
 		requireProgressNoError(t, err)
 		status, err := unix.FcntlInt(uintptr(descriptor), unix.F_GETFL, 0)
@@ -320,12 +390,12 @@ func cleanupProgressCloseProbe(t *testing.T, file **os.File) {
 	}
 }
 
-func restoreProgressCloseDescriptors(t *testing.T, before map[int]progressCloseDescriptorState) {
+func restoreProgressCloseDescriptors(t *testing.T, inventory *os.File, before map[int]progressCloseDescriptorState) {
 	t.Helper()
 	requireProgressNoError(t, unix.CloseRange(0, 0, 0))
 	assertProgressCloseZeroVacant(t)
 
-	if current := snapshotProgressCloseDescriptors(t); !equalProgressCloseDescriptors(before, current) {
+	if current := snapshotProgressCloseDescriptors(t, inventory); !equalProgressCloseDescriptors(before, current) {
 		t.Fatal("allowed close_range did not restore the complete preconstructor descriptor state")
 	}
 }

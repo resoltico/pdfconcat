@@ -174,9 +174,22 @@ func verifyProtectedForeignFiles(scratch string, base map[string][]byte, license
 	})
 }
 
-func applyForeignPatch(ctx context.Context, scratch string, patch []byte) error {
+func applyForeignPatch(ctx context.Context, scratch string, patch []byte) (result error) {
 	ctx, cancel := context.WithTimeout(ctx, foreignPatchTimeout)
 	defer cancel()
+
+	// Git's config reader does not consistently accept Windows' NUL device.
+	// Keep the empty regular config outside the reconstructed source inventory.
+	configDirectory, err := os.MkdirTemp("", "pdfconcat-git-config-")
+	if err != nil {
+		return fmt.Errorf("create isolated Git config: %w", err)
+	}
+	defer func() { result = errors.Join(result, os.RemoveAll(configDirectory)) }()
+
+	config := filepath.Join(configDirectory, "config")
+	if err = os.WriteFile(config, nil, foreignFileMode); err != nil {
+		return fmt.Errorf("write isolated Git config: %w", err)
+	}
 
 	commands := []*exec.Cmd{
 		exec.CommandContext(ctx, "git", "apply", "--check", "--whitespace=nowarn", "-"),
@@ -192,9 +205,9 @@ func applyForeignPatch(ctx context.Context, scratch string, patch []byte) error 
 			}
 		}
 
-		command.Env = append(command.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
-		if output, err := command.CombinedOutput(); err != nil {
-			return fmt.Errorf("%w: exact git apply (no fuzz): %w: %s", errForeignSource, err, strings.TrimSpace(string(output)))
+		command.Env = append(command.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+config)
+		if output, commandErr := command.CombinedOutput(); commandErr != nil {
+			return fmt.Errorf("%w: exact git apply (no fuzz): %w: %s", errForeignSource, commandErr, strings.TrimSpace(string(output)))
 		}
 	}
 

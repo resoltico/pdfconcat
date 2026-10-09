@@ -6,6 +6,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -27,7 +28,11 @@ func assertProgressSocketProducer(t *testing.T) {
 
 	client, err := net.DialTCP("tcp4", nil, address)
 	requireProgressNoError(t, err)
-	closeProgressResource(t, client)
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+			t.Error(closeErr)
+		}
+	})
 
 	peer, err := listener.AcceptTCP()
 	requireProgressNoError(t, err)

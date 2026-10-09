@@ -36,3 +36,12 @@ func TestCanceledFuzzTargetDoesNotStartGo(t *testing.T) {
 		t.Fatalf("canceled child: %v", err)
 	}
 }
+
+func TestFuzzGateRejectsInvalidBudgetBeforePlatformAndDiscovery(t *testing.T) {
+	t.Parallel()
+
+	if err := runFuzz(t.Context(), []string{"-time=0x", "not-an-installed-package"}); err == nil ||
+		!strings.Contains(err.Error(), "fuzz time must be a positive") {
+		t.Fatalf("invalid budget reached platform selection or discovery: %v", err)
+	}
+}

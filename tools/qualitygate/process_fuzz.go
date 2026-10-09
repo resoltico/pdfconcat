@@ -20,8 +20,6 @@ const (
 	fuzzPipeDrain = 2 * time.Second
 )
 
-func requireFuzzPlatform() error { return nil }
-
 // runFuzzProcess never reaps the group leader until all group signaling has finished.
 // The unreaped child pins its PID, so cancellation cannot signal a reused process group.
 // Go's inheriting workers share this group; deliberately detached processes are unsupported.

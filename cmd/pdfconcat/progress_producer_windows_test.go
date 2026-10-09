@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/resoltico/pdfconcat/internal/exectest"
 )
 
 type progressProducerRead struct {
@@ -57,7 +59,9 @@ func runProgressProducerChild(t *testing.T, executable, scenario string) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, executable, progressHelperArgs(progressProducerSelector, "-test.v")...)
+	command := exec.CommandContext(
+		ctx, executable, progressWindowsHelperArgs(t, progressProducerSelector, progressVerboseHelperArgument)...,
+	)
 
 	command.Env = append(os.Environ(), progressProducerScenario+"="+scenario)
 
@@ -73,6 +77,10 @@ func runProgressProducerChild(t *testing.T, executable, scenario string) {
 	var captured bytes.Buffer
 
 	command.Stdout = &captured
+
+	if inherited == nil {
+		command.Stderr = &captured
+	}
 
 	startErr := command.Start()
 	if startErr != nil {
@@ -104,6 +112,22 @@ func runProgressProducerChild(t *testing.T, executable, scenario string) {
 			t.Fatal("inherited stderr did not preserve exact transport and caller records")
 		}
 	}
+}
+
+func progressWindowsHelperArgs(t *testing.T, args ...string) []string {
+	t.Helper()
+
+	args = progressHelperArgs(args...)
+
+	if root := os.Getenv(exectest.EnvCoverDir); root != "" {
+		// Each child owns its metadata rename; the gate merges these retained directories.
+		directory, err := os.MkdirTemp(root, "progress-child-")
+		requireProgressNoError(t, err)
+
+		args[len(args)-1] = "-test.gocoverdir=" + directory
+	}
+
+	return args
 }
 
 func collectProgressProducerPipe(reader io.ReadCloser) <-chan progressProducerRead {

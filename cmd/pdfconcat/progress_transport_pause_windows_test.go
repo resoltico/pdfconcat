@@ -41,7 +41,7 @@ func TestProgressTransportNativeConsolePause(t *testing.T) {
 			command := exec.CommandContext(
 				ctx,
 				executable,
-				progressHelperArgs("-test.run=^TestProgressTransportConsolePauseHelper$", "-test.v")...)
+				progressWindowsHelperArgs(t, "-test.run=^TestProgressTransportConsolePauseHelper$", progressVerboseHelperArgument)...)
 
 			command.Env = append(os.Environ(), progressConsoleScenario+"="+scenario)
 			output, runErr := command.CombinedOutput()
@@ -120,10 +120,10 @@ func assertProgressHeldConsoleCancellation(t *testing.T, fixture *progressConsol
 		t.Fatal("held native console worker was not joined")
 	}
 
-	assertProgressConsoleNoDelayedRecord(t, fixture)
+	assertProgressJoinedConsoleCallerAccess(t, fixture)
 }
 
-func assertProgressConsoleNoDelayedRecord(t *testing.T, fixture *progressConsolePause) {
+func assertProgressJoinedConsoleCallerAccess(t *testing.T, fixture *progressConsolePause) {
 	t.Helper()
 	fixture.release()
 	_, result, stopped := startProgressConsoleNativeWrite(t, fixture.output, progressSentinelText)
@@ -133,8 +133,24 @@ func assertProgressConsoleNoDelayedRecord(t *testing.T, fixture *progressConsole
 	units := readProgressConsoleUnits(t, windows.Handle(fixture.output.Fd()))
 
 	text := windows.UTF16ToString(units)
-	if !strings.Contains(text, progressSentinelText) || strings.Contains(text, progressAbandonedText) {
-		t.Fatalf("released console contains delayed abandoned output or lacks sentinel: %q", text)
+	text = strings.TrimRight(text, " ")
+
+	prefix, present := strings.CutSuffix(text, progressSentinelText)
+	if !present || !strings.HasPrefix(progressAbandonedText, prefix) {
+		t.Fatalf("joined console writer left more than its aborted prefix or caller sentinel: %q", text)
+	}
+
+	t.Logf("native aborted suffix=%q independent caller sentinel=%q", prefix, progressSentinelText)
+
+	var mode uint32
+	requireProgressNoError(t, windows.GetConsoleMode(fixture.handle, &mode))
+
+	codepage, err := windows.GetConsoleOutputCP()
+	requireProgressNoError(t, err)
+
+	if windows.Handle(fixture.output.Fd()) != fixture.handle || mode != fixture.mode || codepage != fixture.codepage ||
+		progressConsoleHandleFlags(t, fixture.handle) != fixture.flags {
+		t.Fatal("aborted progress changed caller console handle, flags, mode or codepage")
 	}
 }
 

@@ -22,7 +22,7 @@ const (
 	sourceEmptyResources   = "/Resources <<>>"
 	sourceFiveReference    = "5 0 R"
 	sourceMissingReference = "99 0 R"
-	sourceTargetOutput     = "output-%v.pdf"
+	sourceTargetOutput     = "output.pdf"
 	sourceHexDrawing       = "712051>"
 	sourceHexFilter        = "/ASCIIHexDecode"
 )
@@ -212,7 +212,7 @@ func sourceInspect(t *testing.T, engine *Engine, path string, target *PageSize) 
 func sourceNullRoundTrip(t *testing.T, engine *Engine, path string, data []byte, target *PageSize) {
 	t.Helper()
 	info := sourceInspect(t, engine, path, target)
-	destination := filepath.Join(filepath.Dir(path), fmt.Sprintf(sourceTargetOutput, target))
+	destination := filepath.Join(filepath.Dir(path), sourceTargetOutput)
 	sourceWrite(t, destination, []byte("retain destination until valid output is ready"))
 	sourceAssemble(t, engine, SourceFile{Path: path, Info: info}, destination, 2, target)
 
@@ -235,7 +235,7 @@ func sourceGenerationRoundTrip(
 ) {
 	t.Helper()
 	info := sourceInspect(t, engine, path, target)
-	destination := filepath.Join(filepath.Dir(path), fmt.Sprintf(sourceTargetOutput, target))
+	destination := filepath.Join(filepath.Dir(path), sourceTargetOutput)
 	sourceAssemble(t, engine, SourceFile{Path: path, Info: info}, destination, 1, target)
 	pdf := sourceContext(t, engine, destination)
 
@@ -261,7 +261,7 @@ func sourceDecodedContent(t *testing.T, object types.Object) []byte {
 func sourcePredictorRoundTrip(t *testing.T, engine *Engine, path string, data []byte, target *PageSize) {
 	t.Helper()
 	info := sourceInspect(t, engine, path, target)
-	destination := filepath.Join(filepath.Dir(path), fmt.Sprintf(sourceTargetOutput, target))
+	destination := filepath.Join(filepath.Dir(path), sourceTargetOutput)
 	sourceAssemble(t, engine, SourceFile{Path: path, Info: info}, destination, 1, target)
 
 	output := sourceContext(t, engine, destination)
@@ -297,7 +297,7 @@ func (test sourceCatalogVersionCase) verifyMode(t *testing.T, engine *Engine, pa
 		t.Fatalf("effective version: %+v, want %+v", info.Version, expected)
 	}
 
-	destination := filepath.Join(filepath.Dir(path), fmt.Sprintf(sourceTargetOutput, target))
+	destination := filepath.Join(filepath.Dir(path), sourceTargetOutput)
 	sourceAssemble(t, engine, SourceFile{Path: path, Info: info}, destination, 1, target)
 
 	if _, inspectErr := engine.Inspect(t.Context(), destination, target); inspectErr != nil {

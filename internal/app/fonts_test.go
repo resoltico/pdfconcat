@@ -6,7 +6,10 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 // maxFontFileBytes is the largest font file the program reads: 64 MiB.
@@ -81,15 +84,20 @@ func TestEveryFontProblemIsReportedInOrderBeforeAnySourceIsRead(t *testing.T) {
 		t,
 		map[string]any{keyItems: []any{blankWithFont("missing.ttf"), blankWithFont(invalidFontPath), blankWithFont(oversizedFontPath)}},
 	)
-	res := execute(t.Context(), t, runner, dir, commandCheck, inlinePlanFlag, plan)
+	res := execute(t.Context(), t, runner, dir, commandCheck, inlinePlanFlag, plan, reportFlag, reportFile)
 	parsed := res.requireCode(t, 1, fontUnreadableCode)
 
-	codes := make([]string, 0, len(parsed.Diagnostics))
-	for _, found := range parsed.Diagnostics {
-		codes = append(codes, found.Code)
+	saved := decodedInventoryReport(t, dir)
+	if parsed.DiagnosticCount != 3 || saved.Status != report.StatusFailed {
+		t.Fatalf("font failure inventory: summary=%+v saved=%+v", parsed, saved)
 	}
 
-	if len(codes) != 3 || codes[0] != fontUnreadableCode || codes[1] != codeInvalid || codes[2] != "font_too_large" {
+	codes := make([]string, 0, len(saved.Diagnostics))
+	for _, found := range saved.Diagnostics {
+		codes = append(codes, string(found.Code))
+	}
+
+	if !slices.Equal(codes, []string{fontUnreadableCode, codeInvalid, "font_too_large"}) {
 		t.Errorf("codes %v", codes)
 	}
 }

@@ -119,8 +119,13 @@ func validateSnapshotEmbeds(source, snapshot, output string) error {
 }
 
 func validatePackageEmbeds(source, snapshot, resolved string, pkg *discoveredPackage, checked map[string]bool) error {
+	directory, err := filepath.EvalSymlinks(pkg.Dir)
+	if err != nil {
+		return fmt.Errorf("resolve compiler asset package directory: %w", err)
+	}
+
 	for _, file := range slices.Concat(pkg.EmbedFiles, pkg.TestEmbedFiles, pkg.XTestEmbedFiles) {
-		name, relErr := filepath.Rel(resolved, filepath.Join(pkg.Dir, file))
+		name, relErr := filepath.Rel(resolved, filepath.Join(directory, file))
 		if relErr != nil {
 			return fmt.Errorf("compiler asset path: %w", relErr)
 		}

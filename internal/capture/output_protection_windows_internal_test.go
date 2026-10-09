@@ -6,6 +6,7 @@
 package capture
 
 import (
+	"bytes"
 	"errors"
 	"maps"
 	"os"
@@ -43,7 +44,7 @@ func TestWindowsVolumeRootIsNotAnUnavailableArtifactParent(t *testing.T) {
 	}
 }
 
-func TestWindowsProtectedOutputDeviceReplacementRefusesReportAndRetainsClaims(t *testing.T) {
+func TestWindowsUnresolvableProtectedDeviceLinkRefusesReportAndRetainsClaims(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -59,20 +60,29 @@ func TestWindowsProtectedOutputDeviceReplacementRefusesReportAndRetainsClaims(t 
 	claims := maps.Clone(registry.byIdentity)
 
 	replaceOutputWithWindowsDeviceLink(t, output)
-	requireWindowsCharacterDevice(t, output)
+	requireWindowsInvalidDeviceLink(t, output)
 
-	if identity, err := inspectArtifactIdentity(RoleOutput, output); identity != (Identity{}) || !errors.Is(err, errNotDiskFile) {
-		t.Fatalf("native device identity guessed as a filesystem object: %v/%v", identity, err)
+	if identity, err := inspectArtifactIdentity(RoleOutput, output); identity != (Identity{}) ||
+		!errors.Is(err, windows.ERROR_INVALID_REPARSE_DATA) {
+		t.Fatalf("failed native link observation guessed as a filesystem identity: %v/%v", identity, err)
 	}
 
 	_, err := registry.Add(RoleReport, filepath.Join(t.TempDir(), "safe-report.json"))
-	if !errors.Is(err, errNotDiskFile) || !maps.Equal(bindings, registry.artifactBindings) || !maps.Equal(claims, registry.byIdentity) {
+	if !errors.Is(err, windows.ERROR_INVALID_REPARSE_DATA) || !maps.Equal(bindings, registry.artifactBindings) ||
+		!maps.Equal(claims, registry.byIdentity) {
 		t.Fatalf("unobservable protected object authorized report or changed claims: %v", err)
+	}
+
+	var source *SourceError
+	if !errors.As(err, &source) || source.Path != output || source.Operation != "identify output" {
+		t.Fatalf("failed protected observation lost its path or operation: %v", err)
 	}
 }
 
 func replaceOutputWithWindowsDeviceLink(t *testing.T, output string) {
 	t.Helper()
+
+	original := readTestFile(t, output)
 
 	retained := filepath.Join(filepath.Dir(output), "retained-output.pdf")
 	if err := os.Rename(output, retained); err != nil {
@@ -87,6 +97,10 @@ func replaceOutputWithWindowsDeviceLink(t *testing.T, output string) {
 		if err := os.Rename(retained, output); err != nil {
 			t.Error(err)
 		}
+
+		if !bytes.Equal(readTestFile(t, output), original) {
+			t.Error("restored output bytes differ from the original object")
+		}
 	})
 
 	if err := os.Symlink(`\\.\NUL`, output); err != nil {
@@ -94,21 +108,27 @@ func replaceOutputWithWindowsDeviceLink(t *testing.T, output string) {
 	}
 }
 
-func requireWindowsCharacterDevice(t *testing.T, path string) {
+func requireWindowsInvalidDeviceLink(t *testing.T, path string) {
 	t.Helper()
 
-	file, err := os.Open(filepath.Clean(path))
+	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
+
+	handle, openErr := windows.CreateFile(
+		name, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0,
+	)
+	if openErr == nil {
+		if closeErr := windows.CloseHandle(handle); closeErr != nil {
 			t.Error(closeErr)
 		}
-	}()
 
-	kind, queryErr := windows.GetFileType(windows.Handle(file.Fd()))
-	if queryErr != nil || kind != windows.FILE_TYPE_CHAR {
-		t.Fatalf("device-link prerequisite not independently established: type=%#x/%v", kind, queryErr)
+		t.Fatal("required native unresolvable device link unexpectedly opened")
+	}
+
+	if !errors.Is(openErr, windows.ERROR_INVALID_REPARSE_DATA) {
+		t.Fatalf("native unresolvable device-link prerequisite not established: %v", openErr)
 	}
 }

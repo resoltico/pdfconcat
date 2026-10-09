@@ -188,11 +188,12 @@ func TestProgressWindowsFullNonblockingBytePipeReportsNoProgress(t *testing.T) {
 	t.Parallel()
 	pair := newProgressNamedPair(t, windows.PIPE_TYPE_BYTE, 0)
 	client := pair.wrapClient(t)
+	server := progressProducerHandle(t, pair.server)
 	mode := uint32(windows.PIPE_NOWAIT)
-	requireProgressNoError(t, windows.SetNamedPipeHandleState(pair.serverHandle, &mode, nil, nil))
+	requireProgressNoError(t, windows.SetNamedPipeHandleState(server, &mode, nil, nil))
 	t.Cleanup(func() {
 		blocking := uint32(windows.PIPE_WAIT)
-		requireProgressNoError(t, windows.SetNamedPipeHandleState(pair.serverHandle, &blocking, nil, nil))
+		requireProgressNoError(t, windows.SetNamedPipeHandleState(server, &blocking, nil, nil))
 	})
 
 	buffer := make([]byte, 4096)
@@ -201,7 +202,7 @@ func TestProgressWindowsFullNonblockingBytePipeReportsNoProgress(t *testing.T) {
 
 	for range 16 {
 		var written uint32
-		requireProgressNoError(t, windows.WriteFile(pair.serverHandle, buffer, &written, nil))
+		requireProgressNoError(t, windows.WriteFile(server, buffer, &written, nil))
 
 		if written == 0 {
 			full = true

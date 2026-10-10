@@ -52,7 +52,10 @@ func TestEventEvidenceSurvivesMalformedOversizedOutputAndReapsChild(t *testing.T
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	// The fixed 16 MiB overflow fixture takes about nine seconds under isolated atomic
+	// coverage here; ten seconds confuses instrumentation/load with a drain failure.
+	// Retain a finite deadline plus exact raw-byte, parsing-error and joined-child checks.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 
 	run := &command{name: executable, args: []string{"-test.run=^TestEventEvidenceHelper$"}, env: []string{evidenceHelperEnv + "=1"}}

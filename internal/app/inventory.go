@@ -85,11 +85,15 @@ func (p *pipeline) loadFonts(ctx context.Context) error {
 			if stop := p.cancelled(ctx, stageInput); stop != nil {
 				return stop
 			}
+			template := p.fontFailure(use, err)
 			for _, origin := range use.Declarations {
 				if stop := p.cancelled(ctx, stageInput); stop != nil {
 					return stop
 				}
-				problems = append(problems, p.fontFailure(use, origin, err))
+				found := template
+				found.diagnostic.Location = p.at(origin, "/blank/text/font")
+				found.diagnostic.Consumers = p.fontConsumers[fontConsumerKey{origin: origin, font: index}]
+				problems = append(problems, found)
 			}
 
 			continue
@@ -102,7 +106,7 @@ func (p *pipeline) loadFonts(ctx context.Context) error {
 }
 
 // fontFailure builds the problem for a font that could not be used.
-func (p *pipeline) fontFailure(use *assembly.FontFileUse, origin assembly.Origin, err error) problem {
+func (p *pipeline) fontFailure(use *assembly.FontFileUse, err error) problem {
 	found := classify(stageInput, err)
 
 	switch {
@@ -116,9 +120,6 @@ func (p *pipeline) fontFailure(use *assembly.FontFileUse, origin assembly.Origin
 	}
 
 	found.diagnostic.Path = use.Path
-
-	found.diagnostic.Location = p.at(origin, "/blank/text/font")
-	found.diagnostic.Consumers = p.fontConsumers[fontConsumerKey{origin: origin, path: use.Path}]
 
 	return found
 }
@@ -408,21 +409,38 @@ func (p *pipeline) inspectResource(ctx context.Context, captured capture.Capture
 
 type fontConsumerKey struct {
 	origin assembly.Origin
-	path   string
+	font   int
 }
 
 // indexFontConsumers performs one ordered pass; diagnostics never rescan contributions.
 func (p *pipeline) indexFontConsumers(ctx context.Context) error {
 	p.fontConsumers = make(map[fontConsumerKey][]string)
+	fontIndexes := make(map[string]int, len(p.flat.Fonts))
+	for index := range p.flat.Fonts {
+		if err := p.cancelled(ctx, stageInput); err != nil {
+			return err
+		}
+		fontIndexes[p.flat.Fonts[index].Path] = index
+	}
+	styleFonts := make([]int, len(p.flat.Styles))
+	for index := range p.flat.Styles {
+		if err := p.cancelled(ctx, stageInput); err != nil {
+			return err
+		}
+		styleFonts[index] = -1
+		if font, found := fontIndexes[p.flat.Styles[index].Style.Text.Font.Value.File]; found {
+			styleFonts[index] = font
+		}
+	}
 	for index := range p.flat.Contributions {
 		if err := p.cancelled(ctx, stageInput); err != nil {
 			return err
 		}
 		contribution := &p.flat.Contributions[index]
-		if contribution.Kind != assembly.ItemBlank {
+		if contribution.Kind != assembly.ItemBlank || styleFonts[contribution.Style] < 0 {
 			continue
 		}
-		key := fontConsumerKey{origin: fontDeclarationOrigin(p.flat, contribution), path: p.flat.Styles[contribution.Style].Style.Text.Font.Value.File}
+		key := fontConsumerKey{origin: fontDeclarationOrigin(p.flat, contribution), font: styleFonts[contribution.Style]}
 		p.fontConsumers[key] = append(p.fontConsumers[key], p.flat.Source.Pointer(contribution.Origin.Ref, ""))
 	}
 	return nil

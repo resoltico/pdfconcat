@@ -145,10 +145,6 @@ func (p *pipeline) loadFont(ctx context.Context, use *assembly.FontFileUse) (*ty
 		return font.font, font.err
 	}
 
-	if captured.Size > maxFontBytes {
-		return nil, fmt.Errorf("%w: %d bytes; the limit is %d", errFontTooLarge, captured.Size, int64(maxFontBytes))
-	}
-
 	data, err := os.ReadFile(captured.Path)
 	if err != nil {
 		return nil, &capture.ScratchError{Dir: p.workspace.Dir(), Operation: "read the copy of " + use.Path, Err: err}

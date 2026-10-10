@@ -422,8 +422,7 @@ func (p *pipeline) writeFailureReport(ctx context.Context, rep *report.Report) e
 		return err
 	}
 
-	err = staged.Publish(ctx, p.reportPolicy())
-	p.reportCleanupWarning(staged.CleanupError())
+	err = p.reportPublicationResult(staged, staged.Publish(ctx, p.reportPolicy()))
 
 	if err != nil {
 		return fmt.Errorf("publish report: %w", err)
@@ -566,4 +565,14 @@ func resourcePage(spec *assembly.BlankSpec) genpage.Page {
 	}
 
 	return page
+}
+
+// reportPublicationResult preserves observed report commits despite native finalization faults.
+func (p *pipeline) reportPublicationResult(staged *publish.Staged, err error) error {
+	p.reportCleanupWarning(staged.CleanupError())
+	if finalization, committed := errors.AsType[*publish.FinalizationError](err); committed {
+		p.warnings = append(p.warnings, finalization.Error()+"; the report is visible")
+		return nil
+	}
+	return err
 }

@@ -416,8 +416,7 @@ func (p *pipeline) finishCheck(ctx context.Context) error {
 
 	p.beforePublish()
 
-	err = staged.Publish(ctx, p.reportPolicy())
-	p.reportCleanupWarning(staged.CleanupError())
+	err = p.reportPublicationResult(staged, staged.Publish(ctx, p.reportPolicy()))
 
 	if err != nil {
 		return p.reportFailure(err)

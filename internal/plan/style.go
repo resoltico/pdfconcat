@@ -6,6 +6,7 @@ package plan
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
 )
@@ -90,7 +91,7 @@ func (p *parser) numberLength(value token) (assembly.Field[assembly.Length], err
 	raw := value.value.String()
 
 	points, err := strconv.ParseFloat(raw, 64)
-	if err == nil {
+	if err == nil && compareDecimalMagnitude(raw, int64(assembly.MaxLength)) <= 0 {
 		var length assembly.Length
 
 		length, err = assembly.NewLength(points)
@@ -115,7 +116,8 @@ func (p *parser) readLeading() (assembly.Field[float64], error) {
 	}
 
 	leading, err := strconv.ParseFloat(value.value.String(), 64)
-	if err != nil || leading < assembly.MinLeading || leading > assembly.MaxLeading {
+	raw := value.value.String()
+	if err != nil || strings.HasPrefix(raw, "-") || compareDecimalMagnitude(raw, int64(assembly.MinLeading)) < 0 || compareDecimalMagnitude(raw, int64(assembly.MaxLeading)) > 0 {
 		return assembly.Field[float64]{}, p.failHere(StageShape, CodeOutOfRange, value, "%s is out of range; want %.0f to %.0f",
 			value.value.String(), assembly.MinLeading, assembly.MaxLeading)
 	}

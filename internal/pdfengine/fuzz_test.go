@@ -67,6 +67,7 @@ func knownCodes() []pdfengine.Code {
 	return []pdfengine.Code{
 		pdfengine.CodeUnreadable, pdfengine.CodeInvalid, pdfengine.CodeEncrypted, pdfengine.CodeNoPages,
 		pdfengine.CodePageGeometry, pdfengine.CodeCanceled, pdfengine.CodeUnsupportedRendering,
+		pdfengine.CodeSignatureUnsupported, pdfengine.CodeFormUnsupported,
 	}
 }
 

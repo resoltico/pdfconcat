@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"version\":1,\"blank\":{\"text\":{\"leading\":10.0000000000000001}},\"items\":[\"0\"]}")

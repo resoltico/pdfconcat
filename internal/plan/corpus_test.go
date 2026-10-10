@@ -650,6 +650,11 @@ func corpusLeadingBounds() []corpusCase {
 	return []corpusCase{
 		{Name: "leading 10", Doc: `{"version":1,"blank":{"text":{"leading":10}},"items":["a"]}`, Schema: schemaAccept},
 		{Name: "leading 10.0", Doc: `{"version":1,"blank":{"text":{"leading":10.0}},"items":["a"]}`, Schema: schemaAccept},
+		{Name: "leading rounded from above maximum", Doc: `{"version":1,"blank":{"text":{"leading":10.0000000000000001}},"items":["a"]}`, Code: plan.CodeOutOfRange, Schema: schemaReject},
+		{Name: "leading rounded from below minimum", Doc: `{"version":1,"blank":{"text":{"leading":0.999999999999999999}},"items":["a"]}`, Code: plan.CodeOutOfRange, Schema: schemaReject},
+		{Name: "leading in range rounded to maximum", Doc: `{"version":1,"blank":{"text":{"leading":9.99999999999999999}},"items":["a"]}`, Schema: schemaAccept},
+		{Name: "leading in range rounded to minimum", Doc: `{"version":1,"blank":{"text":{"leading":1.000000000000000001}},"items":["a"]}`, Schema: schemaAccept},
+		{Name: "point length rounded from above maximum", Doc: `{"version":1,"blank":{"text":{"x":14400.0000000000001}},"items":["a"]}`, Code: plan.CodeOutOfRange, Schema: schemaReject},
 		{
 			Name:   "leading just above 10",
 			Doc:    `{"version":1,"blank":{"text":{"leading":10.000000000000002}},"items":["a"]}`,

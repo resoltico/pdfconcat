@@ -11,6 +11,7 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Fixed
 
+- Plans reject decimal leading and point lengths mathematically outside their limits even when floating-point conversion rounds them back to a boundary; correct such near-boundary values in plans. Report finalization faults preserve the fact that a check/failure report was already written.
 - Font capture enforces the 64 MiB limit before scratch creation and while reading, including file growth, with owned partial-copy cleanup.
 - Physical source/font aliases share captured bytes and reusable inspection/parsed-font facts within a job. Repeated forms and links retain independent occurrence identities.
 - Failed PDF inspections retain completed capture digests and byte counts without inventing known pages or ranges. Font failure provenance uses one indexed traversal, and registration/report validation observes cancellation.

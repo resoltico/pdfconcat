@@ -131,3 +131,40 @@ func exactInt64(text string) (int64, error) {
 
 	return value, nil
 }
+
+// compareDecimalMagnitude compares a valid JSON number's magnitude with a positive integer.
+// The significant-digit count and saturated exponent determine its order; the existing fixed
+// digit prefix and trailing-zero count settle equal orders without big-number allocation.
+func compareDecimalMagnitude(text string, boundary int64) int {
+	unsigned := strings.TrimPrefix(text, "-")
+	mantissa, exponent, _ := strings.Cut(strings.ToLower(unsigned), "e")
+	parsed, fraction := scanMantissa(mantissa)
+	if parsed.significant == 0 {
+		return -1
+	}
+	bound := strconv.FormatInt(boundary, decimalBase)
+	order := parsed.significant + scanExponent(exponent) - fraction
+	if order < int64(len(bound)) {
+		return -1
+	}
+	if order > int64(len(bound)) {
+		return 1
+	}
+	digits := parsed.digits()
+	for index := range len(bound) {
+		digit := byte('0')
+		if index < len(digits) {
+			digit = digits[index]
+		}
+		if digit < bound[index] {
+			return -1
+		}
+		if digit > bound[index] {
+			return 1
+		}
+	}
+	if parsed.significant-parsed.trailingZeros > int64(len(bound)) {
+		return 1
+	}
+	return 0
+}

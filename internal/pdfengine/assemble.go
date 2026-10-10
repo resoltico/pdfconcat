@@ -166,6 +166,8 @@ func (p *pool) sourcePages(ctx context.Context, req *AssembleRequest, run Run, w
 		}
 
 		whole[source.Path] = imported
+	} else if len(imported) != source.Info.Pages {
+		return nil, newError(CodeInvalid, run.Index, source.Path, fmt.Errorf("%w: it has %d pages, inspection found %d", errImportedPageCount, len(imported), source.Info.Pages))
 	}
 
 	return imported[run.Start-1 : run.Start-1+run.Count], nil

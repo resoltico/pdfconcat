@@ -481,3 +481,20 @@ func TestFixturesCarryWhatThePolicyDrops(t *testing.T) {
 		t.Error("attach fixture has no attachment")
 	}
 }
+
+func TestSharedSnapshotImportRejectsContradictoryPageEvidence(t *testing.T) {
+	t.Parallel()
+	env := newWorld(t)
+	compiled := env.compile(filepath.Join(t.TempDir(), outputFilename), []part{whole(fixturePlainA)})
+	alias := compiled.request.Sources[0]
+	alias.Info.Pages++
+	compiled.request.Sources = append(compiled.request.Sources, alias)
+	run := compiled.request.Order[0]
+	run.Index = 1
+	compiled.request.Order = append(compiled.request.Order, run)
+	compiled.request.ExpectedPages *= 2
+	err := env.engine.Assemble(t.Context(), &compiled.request)
+	if pdfengine.CodeOf(err) != pdfengine.CodeInvalid {
+		t.Fatalf("shared snapshot admitted contradictory inspection pages: %v", err)
+	}
+}

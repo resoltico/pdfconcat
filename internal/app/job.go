@@ -221,7 +221,7 @@ func (p *pipeline) flatten() error {
 		flat.FitTo = assembly.Set(p.command.FitTo, assembly.Origin{})
 	}
 
-	p.files = make([]inspectedSource, len(flat.Files))
+	p.files = make([]sourceEvidence, len(flat.Files))
 
 	return nil
 }

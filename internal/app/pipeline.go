@@ -43,7 +43,7 @@ type (
 		flat          *assembly.Flattened
 		fonts         loadedFonts
 		fontConsumers map[fontConsumerKey][]string
-		files         []inspectedSource
+		files         []sourceEvidence
 		inspections   map[capture.Identity]*inspectionEntry
 		inspectionMu  sync.Mutex
 		layout        *assembly.Layout

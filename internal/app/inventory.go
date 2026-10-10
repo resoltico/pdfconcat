@@ -19,8 +19,8 @@ import (
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
-// inspectedSource is one distinct source after capture and inspection.
-type inspectedSource struct {
+// sourceEvidence keeps complete capture and successful inspection as independent facts.
+type sourceEvidence struct {
 	captured  capture.Captured
 	info      pdfengine.SourceInfo
 	inspected bool

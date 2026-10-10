@@ -38,7 +38,7 @@ func (p *pipeline) describe() {
 			part.Kind = report.PartPDF
 			part.Source = &sources[contribution.File]
 
-			if captured := &p.files[contribution.File]; captured.captured.Path != "" {
+			if captured := &p.files[contribution.File]; captured.inspected {
 				pages := int64(captured.info.Pages)
 				part.Pages = &pages
 			}

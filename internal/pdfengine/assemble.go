@@ -10,12 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 
+	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/observation"
 )
 
@@ -23,11 +25,6 @@ const (
 	// cancelCheckInterval is how many page clones pass between context checks while compiling a long
 	// repeated run, so cancellation stays prompt without a check per page.
 	cancelCheckInterval = 4096
-
-	// outputPermissions is the mode requested for the assembled PDF; the process umask narrows it, so the
-	// published deliverable has the permissions an ordinary tool would give it. The file is staged inside the
-	// job's private (0700) workspace, so it is unreadable by others until it is published.
-	outputPermissions = 0o666
 )
 
 var errOutputPageCount = errors.New("the output page count differs from the request")
@@ -121,7 +118,7 @@ func (p *pool) compile(ctx context.Context, req *AssembleRequest) ([]*poolPage, 
 		return nil, err
 	}
 
-	whole := make(map[int][]*poolPage)
+	whole := make(map[string][]*poolPage)
 	final := make([]*poolPage, 0, req.ExpectedPages)
 
 	for _, run := range req.Order {
@@ -155,11 +152,11 @@ func (p *pool) importGenerated(ctx context.Context, req *AssembleRequest) ([]*po
 }
 
 // sourcePages returns the pool pages a source run draws from. A source is imported once and shared by its
-// runs unless it must be imported anew for every occurrence; whole caches the shared imports by source index.
-func (p *pool) sourcePages(ctx context.Context, req *AssembleRequest, run Run, whole map[int][]*poolPage) ([]*poolPage, error) {
+// runs unless it must be imported anew for every occurrence; whole caches shared imports by immutable snapshot path.
+func (p *pool) sourcePages(ctx context.Context, req *AssembleRequest, run Run, whole map[string][]*poolPage) ([]*poolPage, error) {
 	source := &req.Sources[run.Index]
 
-	imported, seen := whole[run.Index]
+	imported, seen := whole[source.Path]
 	if !seen || source.Info.ImportPerOccurrence() {
 		var err error
 
@@ -168,7 +165,7 @@ func (p *pool) sourcePages(ctx context.Context, req *AssembleRequest, run Run, w
 			return nil, err
 		}
 
-		whole[run.Index] = imported
+		whole[source.Path] = imported
 	}
 
 	return imported[run.Start-1 : run.Start-1+run.Count], nil
@@ -240,7 +237,7 @@ func asOutputFailure(err error) error {
 }
 
 // write optimizes the pool and writes it to path in one pass.
-func (p *pool) write(ctx context.Context, path string) (string, error) {
+func (p *pool) write(ctx context.Context, path string) (outputDigest string, failure error) {
 	p.observe(observation.Milestone{Phase: observation.Optimization, Advance: true})
 
 	if err := api.OptimizeContext(ctx, p.pdf); err != nil {
@@ -249,14 +246,26 @@ func (p *pool) write(ctx context.Context, path string) (string, error) {
 
 	p.observe(observation.Milestone{Phase: observation.OutputWriting, Advance: true})
 
-	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, outputPermissions)
+	file, err := capture.CreatePrivateTemp(filepath.Dir(path), ".pdfconcat-output-*")
 	if err != nil {
 		return "", fmt.Errorf("create output: %w", err)
 	}
 
+	defer func() {
+		removeErr := os.Remove(file.Name())
+		if removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			failure = errors.Join(failure, fmt.Errorf("remove staged output: %w", removeErr))
+		}
+	}()
 	digest := sha256.New()
 	writeErr := api.WriteContext(ctx, p.pdf, io.MultiWriter(file, digest))
 	closeErr := file.Close()
 
-	return hex.EncodeToString(digest.Sum(nil)), errors.Join(writeErr, closeErr)
+	if finishErr := errors.Join(writeErr, closeErr); finishErr != nil {
+		return "", finishErr
+	}
+	if placeErr := os.Rename(file.Name(), path); placeErr != nil {
+		return "", fmt.Errorf("place staged output: %w", placeErr)
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }

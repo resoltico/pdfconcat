@@ -86,7 +86,7 @@ func checkContributionPaths(t *testing.T, flat *assembly.Flattened) {
 
 	want := []string{
 		"pdf:/cwd/top/a.pdf", "blank:", "pdf:/cwd/top/a.pdf", "pdf:/cwd/top/chapters/c1.pdf",
-		"pdf:/cwd/top/shared/s.pdf", "pdf:/abs/x.pdf", "blank:",
+		"pdf:/cwd/top/chapters/../shared/s.pdf", "pdf:/abs/x.pdf", "blank:",
 	}
 
 	if len(got) != len(want) {

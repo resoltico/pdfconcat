@@ -82,3 +82,13 @@ func (e *SourceError) Error() string {
 
 // Unwrap exposes the underlying error.
 func (e *SourceError) Unwrap() error { return e.Err }
+
+// LimitError reports that a resource exceeded its maximum captured byte count.
+type LimitError struct {
+	Path  string
+	Limit int64
+}
+
+func (e *LimitError) Error() string {
+	return fmt.Sprintf("%q exceeds the capture limit of %d bytes", e.Path, e.Limit)
+}

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 
 	"golang.org/x/sys/windows"
 )
@@ -27,8 +26,8 @@ func IsDiskFull(err error) bool {
 // a console or another device) before the caller can read from it. Reparse-point symbolic links
 // are followed deliberately.
 func openSource(path string) (*os.File, error) {
-	// The path is the source the user named; opening it is the point, so it is only normalized.
-	file, err := os.Open(filepath.Clean(path))
+	// Preserve native parent traversal in the literal source expression.
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
 	}

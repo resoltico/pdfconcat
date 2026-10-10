@@ -65,18 +65,17 @@ func (p *pipeline) snapshot(status report.Status) *report.Report {
 	p.builder.SetPhases(p.phases)
 	p.builder.SetCounts(p.counts)
 
-	p.publication.OutputDigest = p.outputDigest
-	if p.publication.ReportStatus == report.ReportWritten {
-		p.publication.ReportWrite = "written"
+	publication := p.publication
+	publication.OutputDigest = p.outputDigest
+	if publication.ReportStatus == report.ReportWritten {
+		publication.ReportWrite = "written"
 	} else if p.reportPath != "" {
-		p.publication.ReportWrite = "not_written"
+		publication.ReportWrite = "not_written"
 	}
-
 	if p.reportPath != "" {
-		p.publication.ReportTargetObservation = unknownMetadata
+		publication.ReportTargetObservation = unknownMetadata
 	}
-
-	p.builder.SetPublication(p.publication)
+	p.builder.SetPublication(publication)
 
 	rep := p.builder.Build(status)
 	for index := range rep.Diagnostics {
@@ -118,11 +117,10 @@ func (p *pipeline) stageFile(ctx context.Context, target string, rep *report.Rep
 func (p *pipeline) stageReport(ctx context.Context) (*publish.Staged, error) {
 	p.describe()
 
-	p.publication = report.Publication{
-		Output: p.output, Published: p.isBuild(), ReportStatus: report.ReportWritten, ReportPath: p.reportPath,
-	}
-
-	staged, err := p.stageFile(ctx, p.reportPath, p.snapshot(report.StatusOK))
+	prospective := p.snapshot(report.StatusOK)
+	prospective.Publication = report.Publication{Output: p.output, OutputDigest: p.outputDigest, Published: p.isBuild(), ReportStatus: report.ReportWritten, ReportPath: p.reportPath, ReportWrite: "written", ReportTargetObservation: unknownMetadata}
+	prospective.FinalizeDiagnostics()
+	staged, err := p.stageFile(ctx, p.reportPath, prospective)
 	if err != nil {
 		return nil, p.reportFailure(err)
 	}

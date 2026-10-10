@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"syscall"
 )
 
@@ -26,8 +25,8 @@ func IsDiskFull(err error) bool {
 // no writer return immediately and O_NOCTTY stops a terminal device becoming the controlling
 // terminal. Symbolic links are followed deliberately. The caller must fstat the handle.
 func openSource(path string) (*os.File, error) {
-	// The path is the source the user named; opening it is the point, so it is only normalized.
-	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
+	// Preserve native parent traversal in the literal source expression.
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
 	}

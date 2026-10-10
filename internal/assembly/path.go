@@ -143,9 +143,9 @@ func pathForm(style PathStyle, what, path string) (Code, error) {
 	return "", nil
 }
 
-// ResolvePath resolves name against the absolute base directory base, lexically and under the rules of
-// the host: an absolute name stands alone, and the result is cleaned. The text is a literal path, not
-// a pattern or a URL, and no filesystem is consulted, so ".." is collapsed lexically. A name that depends
+// ResolvePath resolves name against the absolute base directory base, under the rules of
+// the host: an absolute name stands alone, and relative expressions retain every component. The text is a literal path, not
+// a pattern or a URL, and no filesystem is consulted. Native traversal is deferred to opening. A name that depends
 // on process state (a Windows "C:x" or "\x") is rejected, and what names the field in the message.
 func ResolvePath(base, what, name string) (string, error) {
 	_, path, err := resolvePathAs(HostPathStyle(), base, what, name)
@@ -173,5 +173,5 @@ func resolvePathAs(style PathStyle, base, what, name string) (Code, string, erro
 		return CodeBaseNotAbsolute, "", fmt.Errorf("%w: %q must be an absolute path to resolve %s %q", ErrBaseNotAbsolute, base, what, name)
 	}
 
-	return "", filepath.Clean(JoinDir(base, name)), nil
+	return "", JoinDir(base, name), nil
 }

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/resoltico/pdfconcat/internal/capture"
 )
@@ -24,7 +23,7 @@ func openInputWith(ctx context.Context, path string, open func(string) (*os.File
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 
-	file, err := open(filepath.Clean(path))
+	file, err := open(path)
 	if err != nil {
 		return nil, err
 	}

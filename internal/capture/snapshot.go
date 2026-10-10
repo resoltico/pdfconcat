@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 )
@@ -55,7 +56,7 @@ func (w *Workspace) Snapshot(ctx context.Context, path string) (Captured, error)
 		return Captured{}, &SourceError{Path: path, Operation: "open source", Err: err}
 	}
 
-	captured, err := w.snapshotOpen(ctx, source, path)
+	captured, err := w.snapshotOpen(ctx, source, path, 0)
 
 	err = errors.Join(err, closeSource(source, path))
 	if err != nil {
@@ -77,7 +78,7 @@ func closeSource(source *os.File, path string) error {
 
 // snapshotOpen copies the opened source and verifies it did not change. On failure the returned
 // Captured still names the scratch path so the caller can remove a partial copy.
-func (w *Workspace) snapshotOpen(ctx context.Context, source *os.File, path string) (Captured, error) {
+func (w *Workspace) snapshotOpen(ctx context.Context, source *os.File, path string, limit int64) (Captured, error) {
 	before, err := source.Stat()
 	if err != nil {
 		return Captured{}, &SourceError{Path: path, Operation: "inspect source", Err: err}
@@ -87,6 +88,9 @@ func (w *Workspace) snapshotOpen(ctx context.Context, source *os.File, path stri
 		return Captured{}, &NotRegularFileError{Path: path, Kind: describeMode(before.Mode())}
 	}
 
+	if limit > 0 && before.Size() > limit {
+		return Captured{}, &LimitError{Path: path, Limit: limit}
+	}
 	identity, err := identityOfOpen(source, before)
 	if err != nil {
 		return Captured{}, &SourceError{Path: path, Operation: "identify source", Err: err}
@@ -94,7 +98,7 @@ func (w *Workspace) snapshotOpen(ctx context.Context, source *os.File, path stri
 
 	captured := Captured{Path: w.NewPath(""), SourcePath: path, Source: identity}
 
-	err = w.copyStream(ctx, source, &captured)
+	err = w.copyStream(ctx, source, &captured, limit)
 	if err == nil {
 		err = verifyUnchanged(source, before, &captured)
 	}
@@ -117,7 +121,7 @@ func removeScratch(path string) error {
 }
 
 // copyStream copies source into captured.Path and fills Size and SHA256.
-func (w *Workspace) copyStream(ctx context.Context, source io.Reader, captured *Captured) error {
+func (w *Workspace) copyStream(ctx context.Context, source io.Reader, captured *Captured, limit int64) error {
 	path := captured.SourcePath
 
 	scratch, err := w.openScratch(captured.Path)
@@ -126,7 +130,7 @@ func (w *Workspace) copyStream(ctx context.Context, source io.Reader, captured *
 	}
 
 	digest := sha256.New()
-	copyErr := w.copyChunks(ctx, source, io.MultiWriter(scratch, digest), captured)
+	copyErr := w.copyChunks(ctx, source, io.MultiWriter(scratch, digest), captured, limit)
 	closeErr := scratch.Close()
 
 	if copyErr != nil {
@@ -144,7 +148,7 @@ func (w *Workspace) copyStream(ctx context.Context, source io.Reader, captured *
 
 // copyChunks moves bytes from source to sink in bounded chunks, counting them in
 // captured.Size and checking cancellation before each read.
-func (w *Workspace) copyChunks(ctx context.Context, source io.Reader, sink io.Writer, captured *Captured) error {
+func (w *Workspace) copyChunks(ctx context.Context, source io.Reader, sink io.Writer, captured *Captured, limit int64) error {
 	path := captured.SourcePath
 	buffer := make([]byte, copyChunkSize)
 
@@ -154,7 +158,14 @@ func (w *Workspace) copyChunks(ctx context.Context, source io.Reader, sink io.Wr
 			return fmt.Errorf(captureFailureFormat, path, err)
 		}
 
-		count, readErr := source.Read(buffer)
+		chunk := buffer
+		if limit > 0 {
+			chunk = buffer[:min(int64(len(buffer)), limit-captured.Size+1)]
+		}
+		count, readErr := source.Read(chunk)
+		if limit > 0 && int64(count) > limit-captured.Size {
+			return &LimitError{Path: path, Limit: limit}
+		}
 		if count > 0 {
 			err = w.storeChunk(sink, buffer[:count], captured)
 			if err != nil {
@@ -174,11 +185,17 @@ func (w *Workspace) copyChunks(ctx context.Context, source io.Reader, sink io.Wr
 
 // storeChunk writes one chunk to the sink (the scratch copy and the digest) and records its size.
 func (w *Workspace) storeChunk(sink io.Writer, chunk []byte, captured *Captured) error {
-	_, err := sink.Write(chunk)
+	count, err := sink.Write(chunk)
+	if err == nil && count != len(chunk) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
 		return &ScratchError{Dir: w.dir, Operation: "copy " + captured.SourcePath, Err: err}
 	}
 
+	if captured.Size > math.MaxInt64-int64(len(chunk)) {
+		return &LimitError{Path: captured.SourcePath, Limit: math.MaxInt64}
+	}
 	captured.Size += int64(len(chunk))
 
 	if w.afterChunk != nil {

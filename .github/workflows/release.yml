@@ -1,8 +1,9 @@
 name: Source release
 
 # Publishes the tagged source and CHANGELOG notes only. Binary packages, their attestations,
-# and manually triggered campaigns are separate work and are not claimed by this workflow.
+# and their attestations remain separate work. Baseline and exact-SHA campaigns are required.
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -20,9 +21,15 @@ jobs:
     permissions:
       contents: read
 
+  campaigns:
+    uses: ./.github/workflows/campaigns.yml
+    permissions:
+      contents: read
+
   publish:
     name: Publish tagged source and changelog notes
-    needs: verify
+    needs: [verify, campaigns]
+    if: github.event_name == 'push' && needs.campaigns.outputs.verified_sha == github.sha
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -22,6 +22,12 @@ func TestSummaryJSONLinePreservesExactlyFittingForeignCause(t *testing.T) {
 	const wireLimit = 2048
 
 	saved := mustDecode(t, failedCheck)
+	saved.Command = "build"
+	saved.Status = report.StatusFailed
+	saved.Phases = report.Phases{Instructions: report.PhaseComplete, InputInspection: report.PhaseComplete, Layout: report.PhaseComplete, OutputVerification: report.PhaseComplete}
+	saved.Counts = report.Counts{SourcePages: new(int64), GeneratedPages: new(int64), TotalPages: new(int64)}
+	saved.Parts = nil
+	saved.Sources = nil
 	saved.Diagnostics[0].Cause = "x"
 
 	initial, err := report.Encode(saved.Summary())
@@ -55,6 +61,12 @@ func TestSummaryMessageCutFlagsDescribeBothPreviewLimits(t *testing.T) {
 
 	for _, message := range []string{strings.Repeat("m", 1000), strings.Repeat("😀", 160)} {
 		saved := mustDecode(t, failedCheck)
+		saved.Command = "build"
+		saved.Status = report.StatusFailed
+		saved.Phases = report.Phases{Instructions: report.PhaseComplete, InputInspection: report.PhaseComplete, Layout: report.PhaseComplete, OutputVerification: report.PhaseComplete}
+		saved.Counts = report.Counts{SourcePages: new(int64), GeneratedPages: new(int64), TotalPages: new(int64)}
+		saved.Parts = nil
+		saved.Sources = nil
 		saved.Diagnostics[0].Message = message
 		saved.Diagnostics[0].Cause = strings.Repeat("cause ", 1000)
 		saved = mustDecode(t, encodeReport(t, saved))
@@ -80,6 +92,12 @@ func summaryFailureWithProtectedRecovery(t *testing.T) *report.Report {
 	t.Helper()
 
 	saved := mustDecode(t, failedCheck)
+	saved.Command = "build"
+	saved.Status = report.StatusFailed
+	saved.Phases = report.Phases{Instructions: report.PhaseComplete, InputInspection: report.PhaseComplete, Layout: report.PhaseComplete, OutputVerification: report.PhaseComplete}
+	saved.Counts = report.Counts{SourcePages: new(int64), GeneratedPages: new(int64), TotalPages: new(int64)}
+	saved.Parts = nil
+	saved.Sources = nil
 	saved.Publication.Output = strings.Repeat("o", 96)
 	saved.Publication.ReportPath = strings.Repeat("r", 96)
 	saved.Publication.ReportStatus = report.ReportFailed
@@ -171,7 +189,18 @@ func requireSummaryDetail(t *testing.T, got report.DiagnosticView, original repo
 func summaryWithQuotedRecoveryBasename(t *testing.T) *report.Report {
 	t.Helper()
 	saved := mustDecode(t, failedCheck)
-	saved.Command = strings.Repeat("c", 32)
+	saved.Command = "build"
+	saved.Status = report.StatusFailed
+	saved.Phases = report.Phases{Instructions: report.PhaseComplete, InputInspection: report.PhaseComplete, Layout: report.PhaseComplete, OutputVerification: report.PhaseComplete}
+	saved.Counts = report.Counts{SourcePages: new(int64), GeneratedPages: new(int64), TotalPages: new(int64)}
+	saved.Parts = nil
+	saved.Sources = nil
+	saved.Command = "build"
+	saved.Status = report.StatusFailed
+	saved.Parts = []report.Part{{ID: "argv:0", Kind: report.PartPDF, Origin: report.Position{File: "argv"}, Source: new(int)}}
+	saved.Sources = []report.Source{{Path: "/source.pdf"}}
+	saved.Parts[0].Pages = new(int64(1<<63 - 1))
+	saved.Parts[0].Range = &report.PageRange{Start: 1, End: 1<<63 - 1}
 	saved.Counts = report.Counts{SourcePages: new(int64(1<<63 - 1)), GeneratedPages: new(int64(0)), TotalPages: new(int64(1<<63 - 1))}
 	saved.Publication = report.Publication{
 		Published:    true,

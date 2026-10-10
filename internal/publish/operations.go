@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/resoltico/pdfconcat/internal/capture"
 )
@@ -53,7 +52,7 @@ func realOperations() operations {
 // syncFile opens path read-write (Windows requires write access to flush) and flushes it. The
 // path is a staged file this package created or one the caller named.
 func syncFile(path string) error {
-	handle, err := os.OpenFile(filepath.Clean(path), os.O_RDWR, 0)
+	handle, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("open for sync: %w", err)
 	}

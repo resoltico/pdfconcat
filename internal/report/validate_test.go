@@ -44,7 +44,7 @@ func headerInvariantCases() []invariantCase {
 		{func(r *report.Report) {
 			r.Command = testCommandBuild
 			r.Publication.Published, r.Publication.Output = true, "/o.pdf"
-		}, "build verification incomplete", pointerStatus, report.CodeInvalidValue},
+		}, "build verification incomplete", "/phases/output_verification", report.CodeInvalidValue},
 		{func(r *report.Report) {
 			r.Phases.Layout, r.Phases.OutputVerification = report.PhaseIncomplete, report.PhaseComplete
 		}, "verification complete before layout", "/phases/output_verification", report.CodeInvalidValue},

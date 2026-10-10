@@ -25,6 +25,9 @@ func (v *validator) fitting() *fault {
 	}
 
 	for index := range v.report.Geometries {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		if found := geometryFault("/geometries/"+strconv.Itoa(index), &v.report.Geometries[index]); found != nil {
 			return found
 		}
@@ -36,12 +39,18 @@ func (v *validator) fitting() *fault {
 	}
 
 	for index := range v.report.Sources {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		if found := v.sourceFits(index, pages[index]); found != nil {
 			return found
 		}
 	}
 
 	for index := range v.report.Styles {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		if found := v.styleFit(index); found != nil {
 			return found
 		}
@@ -57,6 +66,9 @@ func (v *validator) fitSourcePageCounts() ([]*int64, *fault) {
 	}
 
 	for index := range v.report.Parts {
+		if found := v.checkpoint(); found != nil {
+			return nil, found
+		}
 		part := &v.report.Parts[index]
 		if part.Source != nil && part.Pages != nil {
 			if prior := pages[*part.Source]; prior != nil && *prior != *part.Pages {
@@ -172,6 +184,9 @@ func (v *validator) sourceFits(index int, pages *int64) *fault {
 
 	next := 1
 	for position, interval := range source.Geometries {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		if interval.First != next || interval.Last < next {
 			return newFault(at(pointer, position, ""), CodeInvalidValue, "source geometry ranges must cover consecutive pages")
 		}

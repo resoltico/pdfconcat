@@ -90,6 +90,7 @@ func TestCapturedWarningContextFollowsPublicationAndHistoricalQuery(t *testing.T
 		},
 	)
 	saved = builder.Build(report.StatusFailed)
+	saved.Command = "build"
 	decoded := mustDecode(t, encodeReport(t, saved))
 
 	query := report.QueryResultOf(

@@ -328,7 +328,7 @@ func TestCopyStreamReportsReadFailure(t *testing.T) {
 	workspace := newTestWorkspace(t)
 	captured := Captured{Path: workspace.NewPath(""), SourcePath: "src.pdf"}
 
-	err := workspace.copyStream(context.Background(), &brokenReader{}, &captured)
+	err := workspace.copyStream(context.Background(), &brokenReader{}, &captured, 0)
 
 	var sourceErr *SourceError
 	if !errors.As(err, &sourceErr) || !errors.Is(err, syscall.EIO) {

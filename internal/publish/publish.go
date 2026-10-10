@@ -21,8 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/resoltico/pdfconcat/internal/capture"
 	"os"
-	"path/filepath"
 )
 
 type (
@@ -121,7 +121,7 @@ func commitFileChecked(ctx context.Context, ops operations, staged, destination 
 		return fmt.Errorf(publicationFailureFormat, destination, err)
 	}
 
-	err = ops.syncDirectory(filepath.Dir(destination))
+	err = ops.syncDirectory(capture.NativeParent(destination))
 	if err != nil {
 		return &FinalizationError{Path: destination, Err: fmt.Errorf("flush publication directory: %w", err)}
 	}
@@ -139,7 +139,7 @@ func validateDestination(destination string, existing existingFile) error {
 		return ErrOutputPathEmpty
 	}
 
-	dir := filepath.Dir(destination)
+	dir := capture.NativeParent(destination)
 
 	info, err := os.Stat(dir)
 	if err != nil {

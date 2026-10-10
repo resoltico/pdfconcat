@@ -6,6 +6,7 @@
 package capture
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -21,6 +22,9 @@ func createWorkspaceDirectory(parent, pattern string) (string, error) {
 		return "", fmt.Errorf("create private workspace: %w", err)
 	}
 
+	if accessErr := removeInheritedAccess(path); accessErr != nil {
+		return "", errors.Join(accessErr, os.Remove(path))
+	}
 	return path, nil
 }
 
@@ -36,5 +40,8 @@ func CreatePrivateTemp(dir, pattern string) (*os.File, error) {
 		return nil, fmt.Errorf("create private temporary file: %w", err)
 	}
 
+	if accessErr := removeInheritedAccess(file.Name()); accessErr != nil {
+		return nil, errors.Join(accessErr, file.Close(), os.Remove(file.Name()))
+	}
 	return file, nil
 }

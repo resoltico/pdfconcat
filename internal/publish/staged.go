@@ -198,7 +198,7 @@ func stageContentWith(ctx context.Context, ops operations, target string, produc
 		return nil, fmt.Errorf("stage %q: %w", target, err)
 	}
 
-	file, err := ops.createTemp(filepath.Dir(target), ".pdfconcat-report-*")
+	file, err := ops.createTemp(capture.NativeParent(target), ".pdfconcat-report-*")
 	if err != nil {
 		return nil, &StageError{Target: target, Err: err}
 	}

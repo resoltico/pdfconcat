@@ -9,12 +9,10 @@ This inventory lists the modules linked into application executables for macOS, 
 | Go standard library | Go 1.27.2 toolchain | BSD 3-Clause | Runtime and standard-library code linked by the Go toolchain | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
 | `github.com/pdfcpu/pdfcpu` | v0.16.1 | Apache-2.0 | PDF parsing, validation, merging, and writing of the assembled output (the text of generated pages is shaped with go-text/typesetting and written by PDFConcat's own page writer) | `third_party/licenses/Apache-2.0.txt` |
 | `github.com/benoitkugler/pdf` | v0.0.15 | MIT | Predefined PDF encodings/glyph mappings and bounded incremental fitting-content parsing; maintained limits/cancellation patch under `third_party/benoitkugler` | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
-| `github.com/benoitkugler/pstokenizer` | v1.0.1 | MIT | Bounded PDF content tokenization for the maintained parser; exact local patch under `third_party/benoitkugler` | `third_party/licenses/benoitkugler-pstokenizer-MIT.txt` |
-| `github.com/benoitkugler/pstokenizer` | v1.0.1 | MIT | Maintained PDF tokenization with the byte/token/cancellation patch recorded in `third_party/pdf-sources.json` | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
+| `github.com/benoitkugler/pstokenizer` | v1.0.1 | MIT | Bounded PDF content tokenization; maintained byte/token/cancellation patch in `third_party/pdf-sources.json` | `third_party/licenses/benoitkugler-pstokenizer-MIT.txt` |
 | `github.com/clipperhouse/uax29/v2` | v2.7.0 | MIT | pdfcpu dependency graph | `third_party/licenses/clipperhouse-uax29-MIT.txt` |
 | `github.com/go-text/typesetting` | v0.3.5 | Unlicense OR BSD 3-Clause | text shaping (HarfBuzz port) and TrueType parsing for generated-page text; used under the BSD 3-Clause terms | `third_party/licenses/go-text-typesetting-LICENSE.txt` |
-| `github.com/hhrutter/lzw` | v1.0.0 | BSD 3-Clause | Maintained PDF inline-image LZW decoder | `third_party/licenses/hhrutter-lzw-BSD-3-Clause.txt` |
-| `github.com/hhrutter/lzw` | v1.0.0 | BSD 3-Clause | Maintained LZW decoder used only to recognize bounded inline-image filter boundaries | `third_party/licenses/hhrutter-lzw-BSD-3-Clause.txt` |
+| `github.com/hhrutter/lzw` | v1.0.0 | BSD 3-Clause | Bounded recognition of inline-image LZW filter boundaries in the maintained parser | `third_party/licenses/hhrutter-lzw-BSD-3-Clause.txt` |
 | `github.com/hhrutter/tiff` | v1.0.7 | BSD 3-Clause | pdfcpu dependency graph | `third_party/licenses/hhrutter-tiff-BSD-3-Clause.txt` |
 | `github.com/mattn/go-runewidth` | v0.0.30 | MIT | pdfcpu dependency graph | `third_party/licenses/mattn-go-runewidth-MIT.txt` |
 | `go.yaml.in/yaml/v3` | v3.0.5 | MIT AND Apache-2.0 | pdfcpu dependency graph | `third_party/licenses/go-yaml-LICENSE.txt`; `third_party/licenses/Apache-2.0.txt`; `third_party/licenses/go-yaml-NOTICE.txt` |

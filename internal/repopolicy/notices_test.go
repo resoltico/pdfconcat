@@ -249,3 +249,16 @@ func TestNoticeIssuesRejectsFileDrift(t *testing.T) {
 		})
 	}
 }
+
+func TestNoticeDuplicateIdentityIsRejected(t *testing.T) {
+	root, toolchain, modules := noticesFixture(t, func(files map[string]string) {
+		files["root/THIRD_PARTY_NOTICES.md"] += "| `example.test/dep` | v1.2.3 | MIT | duplicate purpose | `third_party/licenses/MIT.txt` |\n"
+	})
+	issues, err := repopolicy.NoticeIssues(root, toolchain, modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(issues, "\n"), "duplicate") {
+		t.Fatalf("duplicate not rejected: %v", issues)
+	}
+}

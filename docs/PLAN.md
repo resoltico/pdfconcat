@@ -85,7 +85,7 @@ The plan's **base directory** is the directory of a named plan file; for a plan 
 
 `count` is an integer: `3`, `3.0` and `3e0` are accepted, `2.5` is not, and nothing is rounded.
 
-Paths are literal filesystem paths, not URLs or templates; there is no wildcard, glob, or directory scan. The plan lists exactly the files that are assembled, in exactly that order. `/` is the recommended separator; absolute paths are used as given and are platform-specific. A group is not a sandbox: `..` and absolute paths inside a group are allowed.
+Paths are literal filesystem paths, not URLs or templates; there is no wildcard, glob, or directory scan. The plan lists exactly the files that are assembled, in exactly that order. `/` is the recommended separator; absolute paths are used as given and are platform-specific. A group is not a sandbox: `..` and absolute paths inside a group are allowed. Paths follow native filesystem traversal; unresolved `..` components are preserved until opening. For example, when `link` points to another directory, `link/../file.pdf` refers to that directory's native parent, not the lexical parent of `link`. A plan supplied through a file symlink anchors relative entries at the location used to supply it, rather than the target file's directory.
 
 ### Blank settings
 

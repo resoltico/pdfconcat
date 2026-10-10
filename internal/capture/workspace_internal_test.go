@@ -27,7 +27,11 @@ func TestWorkspaceBesideIsPrivateAndRemovedOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if filepath.Dir(workspace.Dir()) != parent {
+	nativeParent, resolveErr := filepath.EvalSymlinks(parent)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
+	}
+	if filepath.Dir(workspace.Dir()) != nativeParent {
 		t.Fatalf("workspace %q is not beside the destination in %q", workspace.Dir(), parent)
 	}
 

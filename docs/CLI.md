@@ -149,6 +149,8 @@ pdfconcat report job.report.json --page 5001                    # the contributi
 
 ### What `--overwrite` covers
 
+PDFs, reports and recovery files are created privately before sensitive bytes are written: owner-only POSIX permissions, with inherited macOS access ACLs removed, and a protected current-user DACL on Windows. Replacing a shared artifact narrows its access; change permissions separately when sharing is intended. Literal paths follow the host filesystem, including symbolic-link parent traversal; see [path semantics](PLAN.md).
+
 `--overwrite` permits replacing an existing file at the explicitly named output artifacts: the PDF (`-o` or the plan's `output`) and the `--report` file. Without it, either existing file is an error and publication uses the operating system's no-clobber primitive. It never permits replacing a source PDF, the plan file, a font file, or any file the job reads: an output that is also an input is refused with or without `--overwrite`. Symbolic-link and non-regular targets are always refused. New PDF/report basenames in the same filesystem directory are conservatively compared after Unicode normalization and case folding, even on case-sensitive filesystems. Choose clearly distinct names; actual filesystem identities are rechecked at publication, including before report replacement after PDF commit. `check` creates no PDF; an output it is given (`-o` or the plan's `output`) only checks what `build` would be allowed to do. A failure report written before the instructions were fully understood is only created at a new path, whatever `--overwrite` says.
 
 ### A failed PDF target and its report

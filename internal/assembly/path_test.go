@@ -127,17 +127,17 @@ func TestResolvePath(t *testing.T) {
 	}{
 		{"relative", aPath, "/work/plan/a.pdf"},
 		{"nested relative", "x/y/a.pdf", "/work/plan/x/y/a.pdf"},
-		{"parent segment", "../a.pdf", "/work/a.pdf"},
-		{"parent segment inside", "x/../a.pdf", "/work/plan/a.pdf"},
-		{"parent segment above the root", "../../../../a.pdf", "/a.pdf"},
+		{"parent segment", "../a.pdf", "/work/plan/../a.pdf"},
+		{"parent segment inside", "x/../a.pdf", "/work/plan/x/../a.pdf"},
+		{"parent segment above the root", "../../../../a.pdf", "/work/plan/../../../../a.pdf"},
 		{"unicode", "Ābols ļ/ž.pdf", "/work/plan/Ābols ļ/ž.pdf"},
 		{"spaces", "a b  c.pdf", "/work/plan/a b  c.pdf"},
 		{"metacharacters are literal", "$HOME/*?[a]~%PATH%.pdf", "/work/plan/$HOME/*?[a]~%PATH%.pdf"},
 		{"directive shaped", blankOperand, "/work/plan/--blank"},
-		{"dot slash directive shaped", "./--blank", "/work/plan/--blank"},
-		{"url-like is a path", "file:///a.pdf", "/work/plan/file:/a.pdf"},
+		{"dot slash directive shaped", "./--blank", "/work/plan/./--blank"},
+		{"url-like is a path", "file:///a.pdf", "/work/plan/file:///a.pdf"},
 		{"empty is the base", "", "/work/plan"},
-		{"redundant separators", "x//y/./a.pdf", "/work/plan/x/y/a.pdf"},
+		{"redundant separators", "x//y/./a.pdf", "/work/plan/x//y/./a.pdf"},
 		{"absolute stands alone", hostPath("/abs/a.pdf"), "/abs/a.pdf"},
 	}
 

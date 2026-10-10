@@ -4,6 +4,7 @@
 package report
 
 import (
+	"context"
 	"math"
 	"regexp"
 	"strconv"
@@ -23,6 +24,7 @@ type (
 	// validator walks a report once.
 	validator struct {
 		report *Report
+		ctx    context.Context
 	}
 )
 
@@ -70,11 +72,19 @@ func at(pointer string, index int, member string) string {
 // Validate checks every invariant of a report that JSON syntax and types cannot: enumerations, references,
 // ranges, counts, and the relations between status, phases, and publication. It returns an *Error.
 func (r *Report) Validate() error {
-	found := (&validator{report: r}).run()
+	return r.ValidateContext(context.Background())
+}
+
+// ValidateContext checks semantic relationships with cooperative cancellation in owned traversals.
+func (r *Report) ValidateContext(ctx context.Context) error {
+	found := (&validator{report: r, ctx: ctx}).run()
 	if found == nil {
 		return nil
 	}
 
+	if found.code == CodeInterrupted {
+		return newError(StatusInterrupted, StageRead, CodeInterrupted, &Location{File: memoryFile, Pointer: found.pointer}, ctx.Err(), "validating the report was interrupted")
+	}
 	return invalid(StageShape, found.code, &Location{File: memoryFile, Pointer: found.pointer}, "%s", found.message)
 }
 
@@ -90,6 +100,9 @@ func (v *validator) identity() *fault {
 			{"platform", report.Producer.Platform},
 		}
 		for _, field := range fields {
+			if found := v.checkpoint(); found != nil {
+				return found
+			}
 			if field.value == "" || utf8.RuneCountInString(field.value) > 256 {
 				return newFault("/producer/"+field.name, CodeInvalidValue, "producer identity must be 1–256 characters")
 			}
@@ -154,6 +167,9 @@ func (v *validator) header() *fault {
 		return found
 	}
 
+	if relationFault := v.outcomeRelationships(); relationFault != nil {
+		return relationFault
+	}
 	return v.statusRelations()
 }
 
@@ -188,7 +204,10 @@ func phasesFault(phases *Phases) *fault {
 
 func (v *validator) statusRelations() *fault {
 	rep := v.report
-	counts := diagnosticCounts(rep.Diagnostics)
+	counts, interrupted := v.diagnosticCounts()
+	if interrupted != nil {
+		return interrupted
+	}
 
 	if rep.Status != StatusOK {
 		if counts.ErrorCount == 0 {
@@ -238,6 +257,9 @@ func (v *validator) counts() *fault {
 	}
 
 	for _, entry := range entries {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		if found := countFault(entry.pointer, entry.count); found != nil {
 			return found
 		}
@@ -305,6 +327,9 @@ func recoveryRelationship(pub Publication) *fault {
 
 func (v *validator) diagnostics() *fault {
 	for index := range v.report.Diagnostics {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		diagnostic := &v.report.Diagnostics[index]
 
 		if found := diagnosticSeverityFault(at(pointerDiagnostics, index, ""), diagnostic, v.report.Publication); found != nil {
@@ -316,7 +341,10 @@ func (v *validator) diagnostics() *fault {
 		}
 	}
 
-	counts := diagnosticCounts(v.report.Diagnostics)
+	counts, interrupted := v.diagnosticCounts()
+	if interrupted != nil {
+		return interrupted
+	}
 
 	declared := DiagnosticCounts{
 		DiagnosticCount: v.report.DiagnosticCount,
@@ -407,6 +435,9 @@ func positionFault(pointer string, pos *Position) *fault {
 
 func (v *validator) sources() *fault {
 	for index, s := range v.report.Sources {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		switch {
 		case s.Path == "":
 			return newFault(at(pointerSources, index, "/path"), CodeInvalidValue, "a source needs its path")
@@ -422,6 +453,9 @@ func (v *validator) sources() *fault {
 
 func (v *validator) fonts() *fault {
 	for index, f := range v.report.Fonts {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		switch {
 		case !digestPattern.MatchString(f.Digest):
 			return newFault(at("/fonts", index, "/digest"), CodeInvalidValue, "digest must be 64 lower-case hexadecimal digits")
@@ -439,6 +473,9 @@ func within(value, low, high float64) bool {
 
 func (v *validator) styles() *fault {
 	for index := range v.report.Styles {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		style := &v.report.Styles[index]
 		pointer := at("/styles", index, "")
 
@@ -494,7 +531,7 @@ func (v *validator) text(pointer string, text *Text) *fault {
 		return found
 	}
 
-	return textFindingsFault(pointer, text.Findings)
+	return v.textFindingsFault(pointer, text.Findings)
 }
 
 func textContentFault(pointer string, text *TextSettings) *fault {
@@ -561,6 +598,9 @@ func (v *validator) parts() *fault {
 	previousEnd := int64(0)
 
 	for index := range v.report.Parts {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		part := &v.report.Parts[index]
 		pointer := at(pointerParts, index, "")
 
@@ -592,6 +632,9 @@ func (v *validator) parts() *fault {
 // partShape checks one part in the order of its members: identity, kind, references, then extent.
 func (v *validator) partShape(pointer string, part *Part) *fault {
 	for _, check := range []func(string, *Part) *fault{partIdentityFault, partKindFault, v.partReferenceFault, partExtentFault} {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		found := check(pointer, part)
 		if found != nil {
 			return found
@@ -670,6 +713,9 @@ func (v *validator) layout() *fault {
 	generated := int64(0)
 
 	for index := range rep.Parts {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		part := &rep.Parts[index]
 
 		found := placementFault(index, part, next)
@@ -713,12 +759,15 @@ func placementFault(index int, part *Part, next int64) *fault {
 	}
 }
 
-func textFindingsFault(pointer string, findings []TextFinding) *fault {
+func (v *validator) textFindingsFault(pointer string, findings []TextFinding) *fault {
 	if len(findings) > MaxTextRunes {
 		return newFault(pointer+"/findings", CodeInvalidValue, "too many text findings")
 	}
 
 	for index, finding := range findings {
+		if cancelled := v.checkpoint(); cancelled != nil {
+			return cancelled
+		}
 		validLine := finding.Line == -1
 		switch finding.Kind {
 		case "word-wider-than-box":
@@ -760,13 +809,22 @@ func recoveryStateFault(pub *Publication) *fault {
 func (v *validator) consumerLinks() *fault {
 	parts := map[string]bool{}
 	for _, part := range v.report.Parts {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		parts[part.ID] = true
 	}
 
 	for index := range v.report.Diagnostics {
+		if found := v.checkpoint(); found != nil {
+			return found
+		}
 		seen := map[string]bool{}
 
 		for consumerIndex, id := range v.report.Diagnostics[index].Consumers {
+			if found := v.checkpoint(); found != nil {
+				return found
+			}
 			pointer := at(at(pointerDiagnostics, index, "/consumers"), consumerIndex, "")
 			if !parts[id] {
 				return newFault(pointer, CodeDanglingReference, "consumer does not identify a recorded part")
@@ -884,4 +942,27 @@ func requestedReportPathFault(pub Publication) *fault {
 	}
 
 	return nil
+}
+
+func (v *validator) checkpoint() *fault {
+	if v.ctx != nil && v.ctx.Err() != nil {
+		return newFault("", CodeInterrupted, "report validation interrupted")
+	}
+	return nil
+}
+
+func (v *validator) diagnosticCounts() (DiagnosticCounts, *fault) {
+	counts := DiagnosticCounts{DiagnosticCount: len(v.report.Diagnostics)}
+	for _, record := range v.report.Diagnostics {
+		if found := v.checkpoint(); found != nil {
+			return counts, found
+		}
+		switch record.Severity {
+		case SeverityWarning:
+			counts.WarningCount++
+		case SeverityError:
+			counts.ErrorCount++
+		}
+	}
+	return counts, nil
 }

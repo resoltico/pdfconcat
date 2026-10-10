@@ -258,3 +258,9 @@ imports of this package are rejected, and C imports elsewhere are denied. Source
 includes both Darwin architectures for this lane, while native execution and compiler analysis
 require the actual Darwin host. Formatting, directives, secrets and source limits include these
 owned files regardless of tags.
+
+### Native paths and resource evidence
+
+The assembly layer retains anchored literal path expressions. The filesystem boundary resolves native parents without collapsing unresolved symbolic-link/parent traversal and leaves artifact leaves available for symlink refusal. Physical capture single-flight uses checked open-handle identity and reconciles it with role protection. The job shares immutable capture, inspection and parsed-font results while keeping logical declarations and occurrence-local PDF imports separate.
+
+Complete capture and successful inspection are independent states. Reports derive digest/bytes from capture and pages/geometry from successful inspection. Font declarations use an ordered reverse consumer index; owned registration and saved-report validation traversals check cancellation. Prospective success serialization changes a detached report; native publication alone changes the live committed outcome.

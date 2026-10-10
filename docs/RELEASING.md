@@ -42,3 +42,9 @@ GoReleaser snapshots derive their version from the same file and append `-SNAPSH
 ## Corresponding source
 
 The application is MPL-2.0; third-party runtime components and development tooling retain their own licenses. Keep `LICENSE`, `THIRD_PARTY_NOTICES.md`, `third_party/licenses/` and development-tool license notices available in the source repository. A published executable must identify the matching source tag at `https://github.com/resoltico/pdfconcat`; do not delete or move published source tags.
+
+## Exact-source verification
+
+Required native CI includes `macos-26-intel`, asserting `darwin/amd64` and `x86_64` before test/race execution. Cross-builds remain compilation evidence. Retain actual native results and independent PDF tool versions for the candidate.
+
+Source publication depends on baseline CI and reusable campaigns for the exact source SHA. Campaign approval explicitly rejects failed, skipped, cancelled and wrong-source jobs; missing required artifacts fail their upload. Dispatching the source-release workflow runs verification only and cannot publish. These checks do not authorize pushing, tagging or publishing a release.

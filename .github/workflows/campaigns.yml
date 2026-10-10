@@ -1,9 +1,13 @@
 name: Verification campaigns
 
-# Long and mutation verification is explicitly dispatched by an authorized operator.
-# Ordinary CI and source-only release verification never invoke this workflow.
+# Exact-source campaigns are reusable by source-release verification and may be dispatched alone.
 on:
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      verified_sha:
+        description: Source commit whose complete campaign jobs succeeded
+        value: ${{ jobs.approve.outputs.verified_sha }}
 
 permissions:
   contents: read
@@ -22,15 +26,43 @@ jobs:
     name: Fuzz smoke
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
           cache: "false"
+      - name: Record exact source and native environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          test "$source_sha" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+          { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
-      - run: go run ./tools/qualitygate fuzz -time 30s
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/campaign-source.txt
+          if-no-files-found: error
+      - name: Execute discovered targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./tools/qualitygate fuzz -time 30s 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: release-fuzz-${{ github.sha }}
+          path: ${{ runner.temp }}/fuzz.log
+          if-no-files-found: error
       - name: Keep failing inputs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -48,15 +80,33 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
           tools: gremlins golangci-lint
           cache: "false"
+      - name: Record exact source and native environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          test "$source_sha" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+          { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/campaign-source.txt
+          if-no-files-found: error
       - run: go run ./tools/qualitygate mutation -max-duration=2h -workers=2 -report "${{ runner.temp }}/mutation-report.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -74,14 +124,32 @@ jobs:
     name: Mutation negative controls
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
           cache: "false"
+      - name: Record exact source and native environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          test "$source_sha" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+          { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/campaign-source.txt
+          if-no-files-found: error
       - run: go run ./tools/qualitygate controls
 
   # ./test/scale defines TestScaleAcceptance. The job fails if the package or the test does not exist, or if the test
@@ -93,14 +161,32 @@ jobs:
     env:
       PDFCONCAT_SCALE: "1"
     timeout-minutes: 60
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
           cache: "false"
+      - name: Record exact source and native environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          test "$source_sha" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+          { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/campaign-source.txt
+          if-no-files-found: error
       - run: >-
           go run ./tools/qualitygate test -events "${{ runner.temp }}/test-events.json"
           -run '^TestScaleAcceptance$' -require TestScaleAcceptance -timeout 30m ./test/scale
@@ -115,3 +201,29 @@ jobs:
             ${{ runner.temp }}/test-events.json
             ${{ runner.temp }}/test-events.json.stderr
           if-no-files-found: error
+
+  approve:
+    name: Require complete exact-source campaign outcomes
+    if: always()
+    needs: [fuzz, mutation, mutation-controls, scale]
+    runs-on: ubuntu-latest
+    outputs:
+      verified_sha: ${{ steps.approve.outputs.sha }}
+    steps:
+      - name: Reject failed, skipped, cancelled or wrong-source campaigns
+        id: approve
+        env:
+          FUZZ_RESULT: ${{ needs.fuzz.result }}
+          MUTATION_RESULT: ${{ needs.mutation.result }}
+          CONTROLS_RESULT: ${{ needs.mutation-controls.result }}
+          SCALE_RESULT: ${{ needs.scale.result }}
+          FUZZ_SHA: ${{ needs.fuzz.outputs.source_sha }}
+          MUTATION_SHA: ${{ needs.mutation.outputs.source_sha }}
+          CONTROLS_SHA: ${{ needs.mutation-controls.outputs.source_sha }}
+          SCALE_SHA: ${{ needs.scale.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for result in "$FUZZ_RESULT" "$MUTATION_RESULT" "$CONTROLS_RESULT" "$SCALE_RESULT"; do test "$result" = success; done
+          for sha in "$FUZZ_SHA" "$MUTATION_SHA" "$CONTROLS_SHA" "$SCALE_SHA"; do test "$sha" = "$GITHUB_SHA"; done
+          printf 'sha=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"

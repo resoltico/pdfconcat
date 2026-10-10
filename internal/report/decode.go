@@ -177,15 +177,22 @@ func decodeBytes(ctx context.Context, name string, data []byte, limits Limits) (
 
 	var report Report
 
-	err = json.Unmarshal(data, &report, json.RejectUnknownMembers(true))
+	err = json.UnmarshalRead(&contextReader{ctx: ctx, reader: bytes.NewReader(data)}, &report, json.RejectUnknownMembers(true))
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, newError(StatusInterrupted, StageRead, CodeInterrupted, &Location{File: name}, ctx.Err(), "materializing the report was interrupted")
+		}
 		return nil, prescan.unmarshalError(data, err)
 	}
 
-	err = report.Validate()
+	err = report.ValidateContext(ctx)
 	if err != nil {
 		found, _ := AsError(err)
 
+		if found.Diagnostic.Code == CodeInterrupted {
+			found.Diagnostic.Location = &Location{File: name}
+			return nil, found
+		}
 		return nil, prescan.locate(data, found.Diagnostic.Location.Pointer, found)
 	}
 
@@ -647,4 +654,17 @@ func textShape() shape {
 		nullable: []string{memberBounds, memberInkBounds},
 		children: map[string]string{memberBounds: shapeRect, memberInkBounds: shapeRect, "findings": "[text_finding]"},
 	}
+}
+
+// contextReader bounds uninterrupted owned materialization between input reads.
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p[:min(len(p), readChunk)])
 }

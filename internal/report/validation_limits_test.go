@@ -132,7 +132,7 @@ func TestRecoveryReferenceRequiresBothPublicationFacts(t *testing.T) {
 		t.Run(change.name, func(t *testing.T) {
 			t.Parallel()
 
-			saved := mustDecode(t, failedCheck)
+			saved := mustDecode(t, richFailure)
 			saved.Publication = report.Publication{
 				Published:      true,
 				Output:         "/output.pdf",

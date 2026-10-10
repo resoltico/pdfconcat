@@ -9,7 +9,7 @@ type (
 	Contribution struct {
 		// TextOverrides references the original item declarations, independent of appearance deduplication.
 		TextOverrides *TextStyle
-		// Path is the absolute, lexically cleaned path of a PDF; empty for a blank.
+		// Path is the anchored native path expression of a PDF; empty for a blank.
 		Path string
 		// Origin is the item that wrote the contribution; explain it with Locate.
 		Origin Origin
@@ -24,7 +24,7 @@ type (
 		Kind  ItemKind
 	}
 
-	// SourceFile is one distinct source PDF, identified by its normalized path.
+	// SourceFile is one distinct source PDF, identified by its declared anchored expression.
 	SourceFile struct {
 		Path string
 		// FirstUse is the first contribution that names the file.
@@ -35,7 +35,7 @@ type (
 
 	// FontFileUse is one distinct font file a blank's text asks for.
 	FontFileUse struct {
-		// Path is the absolute, lexically cleaned path.
+		// Path is the anchored native path expression.
 		Path string
 		// Declarations are each distinct declaration of this captured file, in input order.
 		Declarations []Origin

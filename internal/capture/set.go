@@ -5,58 +5,96 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
 
-type (
-	// Set captures each distinct normalized path of a job once, however many times and from however
-	// many goroutines it is requested. Sources and fonts share one Set when they share a Workspace.
-	// Normalizing equivalent spellings of one path is the caller's responsibility; the Set keys on
-	// the string it is given. A Set is safe for concurrent use.
-	Set struct {
-		workspace *Workspace
-		entries   map[string]*setEntry
-		mu        sync.Mutex
-	}
-
-	setEntry struct {
-		done     chan struct{}
-		err      error
-		captured Captured
-	}
-)
-
-// NewSet returns an empty Set that copies into workspace.
-func NewSet(workspace *Workspace) *Set {
-	return &Set{workspace: workspace, entries: make(map[string]*setEntry)}
+// Set owns one job's physical captures. Logical paths retain their own provenance.
+// Concurrent aliases await one copy; unrelated copies never hold the catalog lock.
+type Set struct {
+	workspace *Workspace
+	entries   map[string]*setEntry
+	resources map[Identity]*setEntry
+	mu        sync.Mutex
+}
+type setEntry struct {
+	done     chan struct{}
+	err      error
+	captured Captured
 }
 
-// Capture returns the private copy of path, copying it on the first request only. Concurrent
-// requests for the same path wait for that one copy; a request whose context ends while waiting
-// returns the context error. A failed capture is remembered, so every request for the path in
-// this job reports the same failure.
+func NewSet(workspace *Workspace) *Set {
+	return &Set{workspace: workspace, entries: make(map[string]*setEntry), resources: make(map[Identity]*setEntry)}
+}
+
+// Capture returns one immutable private snapshot of the opened physical source.
 func (s *Set) Capture(ctx context.Context, path string) (Captured, error) {
+	return s.capture(ctx, path, 0)
+}
+
+// CaptureLimited enforces a positive byte limit before creating scratch content and while reading.
+func (s *Set) CaptureLimited(ctx context.Context, path string, limit int64) (Captured, error) {
+	if limit <= 0 {
+		return Captured{}, fmt.Errorf("capture limit must be positive")
+	}
+	return s.capture(ctx, path, limit)
+}
+func (s *Set) capture(ctx context.Context, path string, limit int64) (Captured, error) {
+	if err := ctx.Err(); err != nil {
+		return Captured{}, fmt.Errorf(captureFailureFormat, path, err)
+	}
 	s.mu.Lock()
-
-	entry, found := s.entries[path]
-	if !found {
-		entry = &setEntry{done: make(chan struct{})}
-		s.entries[path] = entry
+	if entry, ok := s.entries[path]; ok {
+		s.mu.Unlock()
+		return awaitCapture(ctx, path, limit, entry)
 	}
-
-	s.mu.Unlock()
-
-	if !found {
-		entry.captured, entry.err = s.workspace.Snapshot(ctx, path)
+	source, err := openSource(path)
+	if err != nil {
+		entry := &setEntry{done: make(chan struct{}), err: &SourceError{Path: path, Operation: "open source", Err: err}}
 		close(entry.done)
-
-		return entry.captured, entry.err
+		s.entries[path] = entry
+		s.mu.Unlock()
+		return Captured{}, entry.err
 	}
-
+	identity, err := IdentityOfFile(source)
+	if err != nil {
+		s.mu.Unlock()
+		return Captured{}, errors.Join(err, closeSource(source, path))
+	}
+	if entry, ok := s.resources[identity]; ok {
+		s.entries[path] = entry
+		s.mu.Unlock()
+		if closeErr := closeSource(source, path); closeErr != nil {
+			return Captured{}, closeErr
+		}
+		return awaitCapture(ctx, path, limit, entry)
+	}
+	entry := &setEntry{done: make(chan struct{})}
+	s.entries[path] = entry
+	s.resources[identity] = entry
+	s.mu.Unlock()
+	entry.captured, entry.err = s.workspace.snapshotOpen(ctx, source, path, limit)
+	entry.err = errors.Join(entry.err, closeSource(source, path))
+	if entry.err != nil {
+		entry.err = errors.Join(entry.err, removeScratch(entry.captured.Path))
+		entry.captured = Captured{}
+	}
+	close(entry.done)
+	return awaitCapture(ctx, path, limit, entry)
+}
+func awaitCapture(ctx context.Context, path string, limit int64, entry *setEntry) (Captured, error) {
 	select {
 	case <-entry.done:
-		return entry.captured, entry.err
+		captured := entry.captured
+		if entry.err != nil {
+			return Captured{}, entry.err
+		}
+		if limit > 0 && captured.Size > limit {
+			return Captured{}, &LimitError{Path: path, Limit: limit}
+		}
+		captured.SourcePath = path
+		return captured, nil
 	case <-ctx.Done():
 		return Captured{}, fmt.Errorf(captureFailureFormat, path, ctx.Err())
 	}

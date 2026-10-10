@@ -38,3 +38,27 @@ func TestCanceledFontCaptureRetainsNoScratchBytes(t *testing.T) {
 		t.Fatalf("canceled capture retained scratch: %v %v", files, readErr)
 	}
 }
+
+func TestInitiallyOversizedFontCreatesNoSnapshot(t *testing.T) {
+	workspace := openScratch(t)
+	source := filepath.Join(t.TempDir(), "oversized.ttf")
+	f, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Truncate(maxFontBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	current := &pipeline{registry: capture.NewRegistry(), captures: capture.NewSet(workspace), workspace: workspace}
+	_, err = current.loadFont(t.Context(), &assembly.FontFileUse{Path: source})
+	if !errors.Is(err, errFontTooLarge) {
+		t.Fatalf("wrong limit failure: %v", err)
+	}
+	entries, err := os.ReadDir(workspace.Dir())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("oversize copied content: %v %v", entries, err)
+	}
+}

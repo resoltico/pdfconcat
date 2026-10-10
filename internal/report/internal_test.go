@@ -222,7 +222,14 @@ func diagnosticFeatureSamples() map[string]*Report {
 
 func publicationFeatureSamples() map[string]*Report {
 	publish := func(p Publication) *Report {
-		return singleFeatureReport(func(r *Report) { r.Publication = p })
+		return singleFeatureReport(func(r *Report) {
+			r.Publication = p
+			if p.Published {
+				r.Command = commandBuild
+				r.Phases = Phases{Instructions: PhaseComplete, InputInspection: PhaseComplete, Layout: PhaseComplete, OutputVerification: PhaseComplete}
+				r.Counts = Counts{SourcePages: new(int64), GeneratedPages: new(int64), TotalPages: new(int64)}
+			}
+		})
 	}
 
 	return map[string]*Report{

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
 )
 
@@ -18,7 +17,7 @@ import (
 // because there is nothing further the program can do there.
 func syncDirectory(dir string) error {
 	// dir is the directory that was just published into, which the caller derived from the destination.
-	handle, err := os.Open(filepath.Clean(dir))
+	handle, err := os.Open(dir)
 	if err != nil {
 		return fmt.Errorf("open directory: %w", err)
 	}

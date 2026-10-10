@@ -104,14 +104,18 @@ func (g *generated) items(tb testing.TB, choose chooser, depth int, base string,
 		case kind == 0 && depth < genMaxDepth:
 			dir := []string{"g", "../h", "", "x y"}[choose(4)]
 			items[index] = assembly.NewGroupItem(assembly.Origin{Ref: ref}, dir, nil)
-			items[index].Items = g.items(tb, choose, depth+1, filepath.Join(base, dir), next)
+			nestedBase := base
+			if dir != "" {
+				nestedBase = base + "/" + dir
+			}
+			items[index].Items = g.items(tb, choose, depth+1, nestedBase, next)
 		case kind <= 2:
 			file := choose(genFiles)
 			items[index] = pdfAt(ref, fileName(file))
 
 			info := fileGeometry(file)
 			for page := range info.Pages {
-				g.expansion = append(g.expansion, outputPage{file: filepath.Join(base, fileName(file)), page: page + 1})
+				g.expansion = append(g.expansion, outputPage{file: base + "/" + fileName(file), page: page + 1})
 				g.inherit = append(g.inherit, false)
 			}
 		default:

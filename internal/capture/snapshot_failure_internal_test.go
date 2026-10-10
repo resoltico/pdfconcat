@@ -76,7 +76,7 @@ func TestSnapshotOpenReportsAnUninspectableHandle(t *testing.T) {
 
 	requireTestFileClosed(t, source)
 
-	_, err = workspace.snapshotOpen(context.Background(), source, path)
+	_, err = workspace.snapshotOpen(context.Background(), source, path, 0)
 
 	failure, isSource := errors.AsType[*SourceError](err)
 	if !isSource || failure.Operation != "inspect source" || failure.Path != path || failure.Err == nil {

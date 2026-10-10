@@ -7,8 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
@@ -42,7 +42,10 @@ type (
 		generatedFits []pdfengine.PageFit
 		flat          *assembly.Flattened
 		fonts         loadedFonts
+		fontConsumers map[fontConsumerKey][]string
 		files         []inspectedSource
+		inspections   map[capture.Identity]*inspectionEntry
+		inspectionMu  sync.Mutex
 		layout        *assembly.Layout
 		placed        []*typeset.Placed
 
@@ -71,7 +74,8 @@ type (
 	// loadedFonts are the fonts of the job, loaded once, by absolute file path; the empty path is the
 	// built-in font.
 	loadedFonts struct {
-		byPath map[string]*typeset.Font
+		byPath     map[string]*typeset.Font
+		byResource map[capture.Identity]fontResource
 	}
 )
 
@@ -185,7 +189,7 @@ func (p *pipeline) executeResources(ctx context.Context) error {
 
 	defer func() { p.observePhase(observation.Finalization); p.closeWorkspace() }()
 
-	inputSteps := []func() error{func() error { return p.loadFonts(ctx) }, func() error { return p.validateText(ctx) }, p.registerSources}
+	inputSteps := []func() error{func() error { return p.loadFonts(ctx) }, func() error { return p.validateText(ctx) }, func() error { return p.registerSources(ctx) }}
 	for _, step := range inputSteps {
 		err = step()
 		if err != nil {
@@ -279,11 +283,7 @@ func (p *pipeline) abs(path string) string {
 }
 
 func absolutePath(base, path string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-
-	return filepath.Join(base, path)
+	return capture.NativePath(base, path)
 }
 
 // jobCount is the number of inspection workers: --jobs, or min(4, GOMAXPROCS), never above the number of sources.
@@ -423,6 +423,8 @@ func (p *pipeline) finishCheck(ctx context.Context) error {
 		return p.reportFailure(err)
 	}
 
+	p.publication = report.Publication{Output: p.output, ReportStatus: report.ReportWritten, ReportPath: p.reportPath}
+	p.reportSettled = true
 	return nil
 }
 
@@ -444,4 +446,10 @@ func (p *pipeline) observeCount(phase observation.Phase, unit observation.Unit, 
 	if p.progress != nil {
 		p.progress.Observe(observation.Milestone{Phase: phase, Unit: unit, Completed: completed, Total: total, TotalKnown: true})
 	}
+}
+
+// fontResource retains parsed facts, including a deterministic font rejection, once per capture.
+type fontResource struct {
+	font *typeset.Font
+	err  error
 }

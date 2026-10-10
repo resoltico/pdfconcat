@@ -21,8 +21,9 @@ import (
 
 // inspectedSource is one distinct source after capture and inspection.
 type inspectedSource struct {
-	captured capture.Captured
-	info     pdfengine.SourceInfo
+	captured  capture.Captured
+	info      pdfengine.SourceInfo
+	inspected bool
 }
 
 // maxFontBytes bounds a font file read into memory.
@@ -54,7 +55,13 @@ func combine(problems []problem) report.Status {
 // loadFonts registers, captures and loads every font file of the job before any PDF is touched, so a
 // bad font fails in milliseconds rather than after thousands of sources were read.
 func (p *pipeline) loadFonts(ctx context.Context) error {
-	p.fonts = loadedFonts{byPath: make(map[string]*typeset.Font)}
+	if err := p.cancelled(ctx, stageInput); err != nil {
+		return err
+	}
+	if err := p.indexFontConsumers(ctx); err != nil {
+		return err
+	}
+	p.fonts = loadedFonts{byPath: make(map[string]*typeset.Font), byResource: make(map[capture.Identity]fontResource)}
 
 	if p.usesDefaultFont() {
 		builtin, err := typeset.LoadDefaultFont()
@@ -68,11 +75,20 @@ func (p *pipeline) loadFonts(ctx context.Context) error {
 	var problems []problem
 
 	for index := range p.flat.Fonts {
+		if err := p.cancelled(ctx, stageInput); err != nil {
+			return err
+		}
 		use := &p.flat.Fonts[index]
 
 		font, err := p.loadFont(ctx, use)
 		if err != nil {
+			if stop := p.cancelled(ctx, stageInput); stop != nil {
+				return stop
+			}
 			for _, origin := range use.Declarations {
+				if stop := p.cancelled(ctx, stageInput); stop != nil {
+					return stop
+				}
 				problems = append(problems, p.fontFailure(use, origin, err))
 			}
 
@@ -102,20 +118,7 @@ func (p *pipeline) fontFailure(use *assembly.FontFileUse, origin assembly.Origin
 	found.diagnostic.Path = use.Path
 
 	found.diagnostic.Location = p.at(origin, "/blank/text/font")
-	for index := range p.flat.Contributions {
-		contribution := &p.flat.Contributions[index]
-		if contribution.Kind != assembly.ItemBlank {
-			continue
-		}
-
-		if fontDeclarationOrigin(p.flat, contribution) != origin {
-			continue
-		}
-
-		if p.flat.Styles[contribution.Style].Style.Text.Font.Value.File == use.Path {
-			found.diagnostic.Consumers = append(found.diagnostic.Consumers, p.flat.Source.Pointer(contribution.Origin.Ref, ""))
-		}
-	}
+	found.diagnostic.Consumers = p.fontConsumers[fontConsumerKey{origin: origin, path: use.Path}]
 
 	return found
 }
@@ -127,9 +130,19 @@ func (p *pipeline) loadFont(ctx context.Context, use *assembly.FontFileUse) (*ty
 		return nil, fmt.Errorf("font file: %w", err)
 	}
 
-	captured, err := p.captures.Capture(ctx, use.Path)
+	captured, err := p.captures.CaptureLimited(ctx, use.Path, maxFontBytes)
 	if err != nil {
+		var limit *capture.LimitError
+		if errors.As(err, &limit) {
+			return nil, fmt.Errorf("%w: %w", errFontTooLarge, err)
+		}
 		return nil, fmt.Errorf("font file: %w", err)
+	}
+	if claimErr := p.registry.ClaimCaptured(capture.RoleFont, use.Path, captured.Source); claimErr != nil {
+		return nil, claimErr
+	}
+	if font, ok := p.fonts.byResource[captured.Source]; ok {
+		return font.font, font.err
 	}
 
 	if captured.Size > maxFontBytes {
@@ -143,10 +156,14 @@ func (p *pipeline) loadFont(ctx context.Context, use *assembly.FontFileUse) (*ty
 
 	font, err := typeset.LoadFont(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errFontInvalid, err)
+		err = fmt.Errorf("%w: %w", errFontInvalid, err)
 	}
 
-	return font, nil
+	if p.fonts.byResource == nil {
+		p.fonts.byResource = make(map[capture.Identity]fontResource)
+	}
+	p.fonts.byResource[captured.Source] = fontResource{font: font, err: err}
+	return font, err
 }
 
 // stopProblems records the problems of one stage, in the order given, and ends the pipeline; it does
@@ -167,10 +184,13 @@ func (p *pipeline) stopProblems(problems []problem) error {
 // registerSources records every distinct source in the file registry, so that no source is also the
 // output, the report, the plan or a font. Once every file is recorded the inventory is complete and the
 // destination policy of the report is known.
-func (p *pipeline) registerSources() error {
+func (p *pipeline) registerSources(ctx context.Context) error {
 	var aliases, unreadable []problem
 
 	for index := range p.flat.Files {
+		if err := p.cancelled(ctx, stageInput); err != nil {
+			return err
+		}
 		file := &p.flat.Files[index]
 
 		_, err := p.registry.Add(capture.RoleSource, file.Path)
@@ -281,9 +301,14 @@ func (p *pipeline) inspectOne(ctx context.Context, index int) *problem {
 
 		var info pdfengine.SourceInfo
 
-		info, err = p.pdf.Inspect(ctx, captured.Path, p.target)
+		p.files[index].captured = captured
+		err = p.registry.ClaimCaptured(capture.RoleSource, file.Path, captured.Source)
 		if err == nil {
-			p.files[index] = inspectedSource{captured: captured, info: info}
+			info, err = p.inspectResource(ctx, captured)
+		}
+		if err == nil {
+			p.files[index].info = info
+			p.files[index].inspected = true
 
 			return nil
 		}
@@ -353,4 +378,56 @@ func (p *pipeline) usesDefaultFont() bool {
 	}
 
 	return false
+}
+
+// inspectionEntry owns reusable immutable facts; occurrence-local imports remain separate.
+type inspectionEntry struct {
+	done chan struct{}
+	info pdfengine.SourceInfo
+	err  error
+}
+
+func (p *pipeline) inspectResource(ctx context.Context, captured capture.Captured) (pdfengine.SourceInfo, error) {
+	p.inspectionMu.Lock()
+	if p.inspections == nil {
+		p.inspections = make(map[capture.Identity]*inspectionEntry)
+	}
+	entry, found := p.inspections[captured.Source]
+	if !found {
+		entry = &inspectionEntry{done: make(chan struct{})}
+		p.inspections[captured.Source] = entry
+	}
+	p.inspectionMu.Unlock()
+	if !found {
+		entry.info, entry.err = p.pdf.Inspect(ctx, captured.Path, p.target)
+		close(entry.done)
+	}
+	select {
+	case <-entry.done:
+		return entry.info, entry.err
+	case <-ctx.Done():
+		return pdfengine.SourceInfo{}, ctx.Err()
+	}
+}
+
+type fontConsumerKey struct {
+	origin assembly.Origin
+	path   string
+}
+
+// indexFontConsumers performs one ordered pass; diagnostics never rescan contributions.
+func (p *pipeline) indexFontConsumers(ctx context.Context) error {
+	p.fontConsumers = make(map[fontConsumerKey][]string)
+	for index := range p.flat.Contributions {
+		if err := p.cancelled(ctx, stageInput); err != nil {
+			return err
+		}
+		contribution := &p.flat.Contributions[index]
+		if contribution.Kind != assembly.ItemBlank {
+			continue
+		}
+		key := fontConsumerKey{origin: fontDeclarationOrigin(p.flat, contribution), path: p.flat.Styles[contribution.Style].Style.Text.Font.Value.File}
+		p.fontConsumers[key] = append(p.fontConsumers[key], p.flat.Source.Pointer(contribution.Origin.Ref, ""))
+	}
+	return nil
 }

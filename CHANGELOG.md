@@ -4,6 +4,23 @@ Notable changes to this project are documented in this file. The format is based
 
 ## [Unreleased]
 
+### Changed
+
+- Literal file paths now follow native filesystem traversal through symbolic-link parents. A path such as `link/../document.pdf` can select a different file than earlier lexical cleanup; review plans that depended on that cleanup. Relative entries in a symlinked plan remain anchored at its supplied location.
+- Published PDFs are private by default, including replacements of existing shared files. Reports and recovery files use the same policy; macOS inherited access ACLs are cleared before sensitive bytes are written. Deliberate sharing requires a separate permission change.
+
+### Fixed
+
+- Font capture enforces the 64 MiB limit before scratch creation and while reading, including file growth, with owned partial-copy cleanup.
+- Physical source/font aliases share captured bytes and reusable inspection/parsed-font facts within a job. Repeated forms and links retain independent occurrence identities.
+- Failed PDF inspections retain completed capture digests and byte counts without inventing known pages or ranges. Font failure provenance uses one indexed traversal, and registration/report validation observes cancellation.
+- Saved reports reject publication claims inconsistent with command, status or verification. Preparing a success report preserves the live uncommitted outcome.
+- Runtime dependency notices contain one row per component/version and reject duplicate identities.
+
+### Internal
+
+- Required CI includes native Intel macOS and discovered-target fuzz smoke. Source release verification depends on reusable exact-SHA campaigns; verification-only dispatch does not publish. These workflow changes require successful hosted candidate execution before foundation or release readiness can be claimed.
+
 ## [0.2.0] - 2026-10-09
 
 ### Changed

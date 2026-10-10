@@ -143,7 +143,7 @@ func (r *Registry) Add(role Role, path string) (Identity, error) {
 		return r.addInput(role, path)
 	}
 
-	absolute, err := filepath.Abs(path)
+	absolute, err := artifactAbsolutePath(path)
 	if err != nil {
 		return Identity{}, &SourceError{Path: path, Operation: "resolve " + role.String(), Err: err}
 	}
@@ -159,7 +159,7 @@ func (r *Registry) ProtectOutput(path string) error {
 		return &SourceError{Path: path, Operation: "protect output", Err: errEmptyPath}
 	}
 
-	absolute, err := filepath.Abs(path)
+	absolute, err := artifactAbsolutePath(path)
 	if err != nil {
 		return &SourceError{Path: path, Operation: "resolve protected output", Err: err}
 	}
@@ -210,7 +210,7 @@ func artifactParentUnavailable(path string) bool {
 // RetireReport abandons one failed report destination before publishing a distinct recovery file.
 // Inputs, other artifact paths and conservative name reservations remain protected.
 func (r *Registry) RetireReport(path string) error {
-	absolute, err := filepath.Abs(path)
+	absolute, err := artifactAbsolutePath(path)
 	if err != nil {
 		return &SourceError{Path: path, Operation: "resolve retired report", Err: err}
 	}
@@ -271,7 +271,7 @@ func inspectArtifact(role Role, path string) (Identity, error) {
 }
 
 func (r *Registry) addNewArtifact(role Role, path string) error {
-	dir := filepath.Dir(path)
+	dir := NativeParent(path)
 
 	identity, isDirectory, err := inspectIdentity(dir)
 	if err != nil {
@@ -430,4 +430,22 @@ func (r *Registry) commitArtifactBindings(bindings map[artifactBinding]Identity,
 	maps.Copy(r.byIdentity, claims)
 
 	r.artifactBindings = bindings
+}
+
+func artifactAbsolutePath(path string) (string, error) {
+	base, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	return base + string(os.PathSeparator) + path, nil
+}
+
+// ClaimCaptured reconciles role safety with the identity actually opened for capture.
+func (r *Registry) ClaimCaptured(role Role, path string, identity Identity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claimIdentity(role, path, identity)
 }

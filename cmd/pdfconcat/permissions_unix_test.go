@@ -171,7 +171,7 @@ func TestProgressAppearsOnlyOnARealTerminal(t *testing.T) {
 	verifyPages(t, filepath.Join(dir, fileOut), sourceAMarker, sourceBFirstMarker)
 }
 
-func TestPublishedPDFHasThePermissionsOfAnOrdinaryFile(t *testing.T) {
+func TestPublishedPDFHasOwnerOnlyPermissions(t *testing.T) {
 	t.Parallel()
 
 	dir := tempDir(t)
@@ -180,16 +180,12 @@ func TestPublishedPDFHasThePermissionsOfAnOrdinaryFile(t *testing.T) {
 	res := run(t, dir, "", commandBuild, "-o", fileOut, fileA)
 	requireExit(t, res, 0)
 
-	// The umask can only be read by setting it; the value is restored immediately.
-	umask := syscall.Umask(0)
-	syscall.Umask(umask)
-
 	info, err := os.Stat(filepath.Join(dir, fileOut))
 	ensure(t, err)
 
-	want := 0o666 &^ umask
+	want := 0o600
 	if got := int(info.Mode().Perm()); got != want {
-		t.Errorf("published mode %04o, want %04o (0666 narrowed by umask %04o)", got, want, umask)
+		t.Errorf("published mode %04o, want owner-only %04o", got, want)
 	}
 }
 

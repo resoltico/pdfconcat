@@ -146,11 +146,16 @@ func noticeProblems(tree *os.Root, goroot string, modules []LinkedModule) ([]str
 	byComponent := map[string]noticeRow{}
 	linked := map[string]bool{standardLibraryName: true}
 
+	var problems []string
+	identities := make(map[string]bool)
 	for _, row := range rows {
+		key := row.component + "@" + row.version
+		if identities[key] {
+			problems = append(problems, "THIRD_PARTY_NOTICES.md has duplicate component/version "+key)
+		}
+		identities[key] = true
 		byComponent[row.component] = row
 	}
-
-	var problems []string
 
 	for _, module := range modules {
 		linked[module.Path] = true

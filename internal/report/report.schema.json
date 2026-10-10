@@ -1264,6 +1264,62 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "publication": {
+            "properties": {
+              "published": {
+                "const": true
+              }
+            },
+            "required": [
+              "published"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "command": {
+            "const": "build"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "phases": {
+            "properties": {
+              "output_verification": {
+                "const": "complete"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "check"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "phases": {
+            "properties": {
+              "output_verification": {
+                "const": "not_run"
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

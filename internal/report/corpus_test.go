@@ -277,8 +277,7 @@ func corpusCountsAndOutcome() []corpusCase {
 			Old:    `"published":false`,
 			New:    `"published":true`,
 			Code:   report.CodeInvalidValue,
-			Schema: schemaAccept,
-			Gap:    gapRelations,
+			Schema: schemaReject,
 		},
 		{Name: "report status unknown", Base: "ok", Old: `"written"`, New: `"saved"`, Code: report.CodeInvalidValue, Schema: schemaReject},
 	}

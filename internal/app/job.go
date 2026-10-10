@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
@@ -99,7 +99,7 @@ func (p *pipeline) loadPlanFile(ctx context.Context) error {
 // decodePlanFile decodes the plan from file, which it closes. A plan that decoded but whose file then
 // failed to close is reported as an unreadable file, because the bytes read may not be the bytes stored.
 func (p *pipeline) decodePlanFile(ctx context.Context, path string, file io.ReadCloser) error {
-	job, err := plan.Decode(ctx, plan.Input{Name: path, BaseDir: filepath.Dir(path)}, file)
+	job, err := plan.Decode(ctx, plan.Input{Name: path, BaseDir: capture.NativeParent(path)}, file)
 	closeErr := file.Close()
 
 	if err != nil {
@@ -194,7 +194,7 @@ func (p *pipeline) resolveOutput() error {
 			})
 		}
 
-		p.output = path
+		p.output = capture.NativePath(p.job.Base, path)
 	case p.isBuild():
 		return p.stopWith(problem{
 			diagnostic: report.Diagnostic{

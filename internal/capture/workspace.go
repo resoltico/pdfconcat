@@ -34,7 +34,7 @@ const (
 // output, so that staged files can be published by a same-filesystem rename. The directory must
 // already exist.
 func NewWorkspaceBeside(destination string) (*Workspace, error) {
-	return newWorkspace(filepath.Dir(destination), besideOutputPattern)
+	return newWorkspace(NativePath(".", NativeParent(destination)), besideOutputPattern)
 }
 
 // NewTemporaryWorkspace creates the workspace in the operating system's temporary directory, for

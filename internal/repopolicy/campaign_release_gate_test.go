@@ -4,12 +4,13 @@
 package repopolicy_test
 
 import (
-	"go.yaml.in/yaml/v3"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func TestReleaseCampaignApprovalRejectsIncompleteEvidence(t *testing.T) {

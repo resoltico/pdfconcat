@@ -34,7 +34,7 @@ func TestStagingPreservesSimultaneousCopyAndCloseFailures(t *testing.T) {
 	}
 
 	_, err := finishStaged(file, func(file *os.File) (int64, error) {
-		return copyChunks(t.Context(), ops, file, strings.NewReader(stagedContent), 100)
+		return copyChunks(StageTestContext(t), ops, file, readerRequiringStorage(strings.NewReader(stagedContent)), 100)
 	})
 	if !errors.Is(err, errInjected) || !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("copy/close error lost: %v", err)
@@ -67,7 +67,7 @@ func TestStagingSizeLimitRetainsOwnershipCleanupFailure(t *testing.T) {
 		return copy(p, "exceeds limit"), io.EOF
 	})
 	target := filepath.Join(dir, reportPath)
-	_, err := stageWith(t.Context(), ops, target, reader, 1)
+	_, err := stageWith(StageTestContext(t), ops, target, reader, 1)
 
 	limit, isLimit := errors.AsType[*SizeLimitError](err)
 	if !isLimit || !errors.Is(err, errOwnerChanged) {

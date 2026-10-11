@@ -39,8 +39,6 @@ const (
 	sourceVendorMode   = "-mod=vendor"
 	sourceRaceFlag     = "-race"
 	sourceModuleFile   = "go.mod"
-	linterPinPrefix    = "GOLANGCI_LINT"
-	linterModule       = "github.com/golangci/golangci-lint/v2"
 )
 
 // sourceBuildEnv verifies public dependencies and prevents ambient workspaces or toolchain substitution.

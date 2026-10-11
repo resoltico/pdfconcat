@@ -13,6 +13,9 @@ import (
 )
 
 func TestProgressCompletedNativePipeWriteSurvivesLateCancellation(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 
 	reader, caller := progressPipe(t)

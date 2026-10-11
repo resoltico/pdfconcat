@@ -40,6 +40,7 @@ func (s *Set) CaptureLimited(ctx context.Context, path string, limit int64) (Cap
 	}
 	return s.capture(ctx, path, limit)
 }
+
 func (s *Set) capture(ctx context.Context, path string, limit int64) (Captured, error) {
 	if err := ctx.Err(); err != nil {
 		return Captured{}, fmt.Errorf(captureFailureFormat, path, err)
@@ -83,6 +84,7 @@ func (s *Set) capture(ctx context.Context, path string, limit int64) (Captured, 
 	close(entry.done)
 	return awaitCapture(ctx, path, limit, entry)
 }
+
 func awaitCapture(ctx context.Context, path string, limit int64, entry *setEntry) (Captured, error) {
 	select {
 	case <-entry.done:

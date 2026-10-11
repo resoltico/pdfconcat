@@ -4,12 +4,13 @@ package app
 
 import (
 	"context"
+	"strings"
+	"testing"
+
 	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/plan"
 	"github.com/resoltico/pdfconcat/internal/report"
-	"strings"
-	"testing"
 )
 
 func TestCanceledFontLoadingDoesNotFanOutDiagnostics(t *testing.T) {

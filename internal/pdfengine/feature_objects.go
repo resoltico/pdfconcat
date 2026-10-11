@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/pdfcpu/pdfcpu/pkg/filter"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -176,7 +177,7 @@ func (o *featureObserver) treeValue(ctx context.Context, value types.Object, key
 	}
 
 	entries, ok := value.(types.Array)
-	if !ok || len(entries) == 0 {
+	if !ok {
 		return false, nil
 	}
 
@@ -186,8 +187,8 @@ func (o *featureObserver) treeValue(ctx context.Context, value types.Object, key
 
 	material := false
 
-	for index := 1; index < len(entries); index += 2 {
-		found, err := o.nameValue(ctx, entries[index], kind)
+	for pair := range slices.Chunk(entries, 2) {
+		found, err := o.nameValue(ctx, pair[1], kind)
 		if err != nil {
 			return false, err
 		}

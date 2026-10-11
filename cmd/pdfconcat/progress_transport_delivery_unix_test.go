@@ -30,12 +30,18 @@ type (
 	}
 )
 
-const progressDeliveryCases = 200
+const (
+	progressDeliveryCases  = 200
+	progressDeliveryBudget = 10 * time.Second
+)
 
 func TestProgressCancellationAndNativeDeliveryRemainTruthful(t *testing.T) {
+	if runProgressTransportChild(t, progressDeliveryBudget+progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), progressDeliveryBudget)
 	defer cancel()
 
 	for index := range progressDeliveryCases {

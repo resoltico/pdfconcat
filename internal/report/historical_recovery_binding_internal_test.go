@@ -99,7 +99,7 @@ func copiedRecoveryEvidence(t *testing.T, saved *Report) (*Report, string) {
 		t.Fatal(err)
 	}
 
-	copied, decodeErr := Decode(DecoderTestContext(t.Context(), t), path, file)
+	copied, decodeErr := Decode(DecoderTestContext(t.Context(), t), path, ReaderRequiringStorage(file))
 
 	closeErr := file.Close()
 	if decodeErr != nil || closeErr != nil {

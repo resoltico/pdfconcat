@@ -18,6 +18,9 @@ import (
 )
 
 func TestProgressTransportNativePipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, writer := progressPipe(t)
 	transport := progressNativeTransport(t, writer)
@@ -42,6 +45,9 @@ func TestProgressTransportNativePipe(t *testing.T) {
 }
 
 func TestProgressTransportNativeStoppedPipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 
 	cases := []struct {
@@ -66,6 +72,9 @@ func TestProgressTransportNativeStoppedPipe(t *testing.T) {
 }
 
 func TestProgressTransportNativeBrokenPipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, writer := progressPipe(t)
 	transport := progressNativeTransport(t, writer)

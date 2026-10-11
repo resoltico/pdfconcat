@@ -195,7 +195,7 @@ func saveEnvelopeFixture(t *testing.T, saved *report.Report) *report.Report {
 		}
 	})
 
-	decoded, err := report.Decode(report.DecoderTestContext(t.Context(), t), path, file)
+	decoded, err := report.Decode(report.DecoderTestContext(t.Context(), t), path, report.ReaderRequiringStorage(file))
 	if err != nil {
 		t.Fatal(err)
 	}

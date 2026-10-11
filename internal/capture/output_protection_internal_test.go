@@ -16,7 +16,7 @@ func TestProtectedUnusableOutputDoesNotBlockDistinctReport(t *testing.T) {
 	parentFile := filepath.Join(dir, "parent-file")
 	writeTestFile(t, parentFile, []byte("not a directory"))
 
-	targets := []string{dir, filepath.Join(dir, "absent-parent", outputPath), filepath.Join(parentFile, "nested-file", outputPath)}
+	targets := []string{dir, filepath.Join(dir, "absent-parent", outputPath), filepath.Join(parentFile, outputPath), filepath.Join(parentFile, "nested-file", outputPath)}
 	for _, output := range targets {
 		registry := NewRegistry()
 		if err := registry.ProtectOutput(output); err != nil {

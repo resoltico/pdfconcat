@@ -18,7 +18,7 @@ func TestMutationCaptureReaderPreservesBytesAndRejectsOtherObjects(t *testing.T)
 		t.Fatal(err)
 	}
 
-	open := mutationCaptureReader(directory)
+	open := regularArtifactReader(directory)
 
 	reader, err := open("capture.json")
 	if err != nil {

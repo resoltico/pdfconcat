@@ -32,7 +32,9 @@ func TestStaticTextValidationAndSingleSpecLocateEffectiveDeclarations(t *testing
 	err := layout.ValidateText(t.Context(), flat, builtIn(font))
 
 	problems := assembly.Diagnostics(err)
-	if len(problems) != 1 || problems[0].Location.Pointer != unsupportedTextDeclarationPointer {
+	if len(problems) != 1 || problems[0].Location.Pointer != unsupportedTextDeclarationPointer ||
+		problems[0].Affected != 2 || len(problems[0].Consumers) != 2 ||
+		problems[0].Consumers[0].Ref != 9 || problems[0].Consumers[1].Ref != 10 {
 		t.Fatalf("declaration and cached static failures: %v", err)
 	}
 

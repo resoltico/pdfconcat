@@ -164,10 +164,15 @@ func TestRetiredReportLeavesInputsAndOtherArtifactsProtected(t *testing.T) {
 	if err := registry.RetireReport(original); err != nil {
 		t.Fatal(err)
 	}
+	// Inputs must see retained artifact identities immediately, before any
+	// artifact registration could refresh and repair an incorrectly lost claim.
+	requireRegistryAlias(t, registry, RoleFont, original, RoleOutput, output)
+	requireRegistryAlias(t, registry, RoleFont, source, RoleSource, source)
 
 	if err := registry.RetireReport(original); err != nil {
 		t.Fatal(err)
 	}
+	requireRegistryAlias(t, registry, RoleFont, original, RoleOutput, output)
 
 	if _, err := registry.Add(RoleOutput, output); err != nil {
 		t.Fatal(err)

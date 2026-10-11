@@ -26,7 +26,7 @@ func TestFinalInterruptionAnnotatesCopyAndSavedQueryRetainsFact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded, err := Decode(t.Context(), interruptedReportFile, bytes.NewReader(saved.Bytes()))
+	decoded, err := Decode(DecoderTestContext(t.Context(), t), interruptedReportFile, ReaderRequiringStorage(bytes.NewReader(saved.Bytes())))
 	if err != nil || !decoded.ProgressInterrupted || !decoded.Summary().ProgressInterrupted {
 		t.Fatalf("saved interruption lost: %v", err)
 	}
@@ -51,19 +51,19 @@ func TestInterruptionUsesOrdinarySavedNodeAndByteLimits(t *testing.T) {
 	limits := DefaultLimits()
 
 	limits.MaxNodes = final.nodes()
-	if _, err := DecodeLimited(t.Context(), interruptedReportFile, bytes.NewReader(saved.Bytes()), limits); err != nil {
+	if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), interruptedReportFile, ReaderRequiringStorage(bytes.NewReader(saved.Bytes())), limits); err != nil {
 		t.Fatal(err)
 	}
 
 	limits.MaxNodes--
-	if _, err := DecodeLimited(t.Context(), interruptedReportFile, bytes.NewReader(saved.Bytes()), limits); err == nil {
+	if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), interruptedReportFile, ReaderRequiringStorage(bytes.NewReader(saved.Bytes())), limits); err == nil {
 		t.Fatal("extra interruption node escaped budget")
 	}
 
 	limits = DefaultLimits()
 
 	limits.MaxBytes = int64(saved.Len()) - 1
-	if _, err := DecodeLimited(t.Context(), interruptedReportFile, bytes.NewReader(saved.Bytes()), limits); err == nil {
+	if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), interruptedReportFile, ReaderRequiringStorage(bytes.NewReader(saved.Bytes())), limits); err == nil {
 		t.Fatal("interruption bytes escaped saved-file budget")
 	}
 }

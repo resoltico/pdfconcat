@@ -905,6 +905,64 @@ index 0000000..84f602e
 +		t.Fatal("active mutation test survived cancellation")
 +	}
 +}
+diff --git a/internal/engine/coverage_census_test.go b/internal/engine/coverage_census_test.go
+new file mode 100644
+index 0000000..0c257f6
+--- /dev/null
++++ b/internal/engine/coverage_census_test.go
+@@ -0,0 +1,52 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++ "bytes"
++ "context"
++ "os"
++ "os/exec"
++ "path/filepath"
++ "testing"
++ "time"
++
++ "github.com/go-gremlins/gremlins/internal/execution"
++ "github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestWorkerCoverageModePreservesNoTestPackageCensus(t *testing.T) {
++ root:=t.TempDir()
++ files:=map[string]string{
++ "go.mod":"module coveragecensus.example\n\ngo 1.27.2\n",
++ "empty/empty.go":"package empty\nfunc Value()int{return 1}\n",
++ "tested/tested.go":"package tested\nfunc Value()int{return 1}\n",
++ "tested/value_test.go":"package tested\nimport \"testing\"\nfunc TestValue(t *testing.T){if Value()!=1{t.Fatal(\"value\")}}\n",
++ }
++ for name,data:=range files{
++ path:=filepath.Join(root,name)
++ if err:=os.MkdirAll(filepath.Dir(path),0700);err!=nil{t.Fatal(err)}
++ if err:=os.WriteFile(path,[]byte(data),0600);err!=nil{t.Fatal(err)}
++ }
++ run:=func(args []string,expected *execution.TestCensus)(execution.TestJudgment,error){
++ ctx,cancel:=context.WithTimeout(t.Context(),time.Minute);defer cancel()
++ command:=exec.CommandContext(ctx,"go",args...);command.Dir=root
++ command.Env=append(os.Environ(),"GOWORK=off","GOFLAGS=-mod=readonly")
++ var output,stderr bytes.Buffer;command.Stdout=&output;command.Stderr=&stderr
++ runErr:=command.Run()
++ judgment,err:=execution.JudgeTestStream(bytes.NewReader(output.Bytes()),root,runErr,false,expected)
++ if ctx.Err()!=nil{t.Fatalf("fixture did not settle: %v %s",ctx.Err(),stderr.String())}
++ return judgment,err
++ }
++ baseline,err:=run([]string{"test","-json","-cover","./..."},nil)
++ if err!=nil{t.Fatal(err)}
++ if baseline.Census["coveragecensus.example/empty"].Outcome!="pass"{t.Fatal("coverage no-test positive control absent")}
++ if _,err:=run([]string{"test","-json","./..."},&baseline.Census);err==nil{t.Fatal("unmatched coverage modes did not reject changed package outcomes")}
++ executor:=&mutantExecutor{integrationMode:true,testExecutionTime:time.Minute}
++ judged,err:=run(executor.getTestArgs("coveragecensus.example/tested"),&baseline.Census)
++ if err!=nil||judged.Status!=mutator.Lived{t.Fatalf("actual worker arguments changed census: %v %v",judged.Status,err)}
++ testFile:=filepath.Join(root,"tested/value_test.go")
++ if err:=os.WriteFile(testFile,[]byte("package tested\nimport \"testing\"\nfunc TestValue(t *testing.T){t.Skip(\"unavailable\")}\n"),0600);err!=nil{t.Fatal(err)}
++ if _,err:=run(executor.getTestArgs("coveragecensus.example/tested"),&baseline.Census);err==nil{t.Fatal("skipped required test passed")}
++ if err:=os.Remove(testFile);err!=nil{t.Fatal(err)}
++ if _,err:=run(executor.getTestArgs("coveragecensus.example/tested"),&baseline.Census);err==nil{t.Fatal("missing required test passed")}
++}
 diff --git a/internal/engine/deadline_control_test.go b/internal/engine/deadline_control_test.go
 new file mode 100644
 index 0000000..367f00e
@@ -1089,18 +1147,19 @@ index 0000000..049ade4
 +	}
 +}
 diff --git a/internal/engine/engine.go b/internal/engine/engine.go
-index df452f4..980e5a4 100644
+index df452f4..69e7841 100644
 --- a/internal/engine/engine.go
 +++ b/internal/engine/engine.go
-@@ -19,6 +19,7 @@ package engine
+@@ -19,7 +19,7 @@ package engine
  
  import (
  	"context"
+-	"fmt"
 +	"errors"
- 	"fmt"
  	"go/ast"
  	"go/parser"
-@@ -116,6 +117,14 @@ func (mu *Engine) Run(ctx context.Context) report.Results {
+ 	"go/token"
+@@ -116,6 +116,14 @@ func (mu *Engine) Run(ctx context.Context) report.Results {
  	res := mu.executeTests(ctx)
  	res.Elapsed = time.Since(start)
  	res.Module = mu.module.Name
@@ -1115,7 +1174,16 @@ index df452f4..980e5a4 100644
  
  	return res
  }
-@@ -151,7 +160,7 @@ func (mu *Engine) findMutations(fileName string, set *token.FileSet, file *ast.F
+@@ -143,7 +151,7 @@ func (mu *Engine) findMutations(fileName string, set *token.FileSet, file *ast.F
+ 		return
+ 	}
+ 
+-	pkg := mu.pkgName(fileName, file.Name.Name)
++	pkg := mu.pkgName(fileName)
+ 	for _, mt := range mutantTypes {
+ 		if !configuration.Get[bool](configuration.MutantTypeEnabledKey(mt)) {
+ 			continue
+@@ -151,38 +159,41 @@ func (mu *Engine) findMutations(fileName string, set *token.FileSet, file *ast.F
  		mutantType := mt
  		tm := NewTokenMutant(pkg, set, file, node)
  		tm.SetType(mutantType)
@@ -1124,7 +1192,64 @@ index df452f4..980e5a4 100644
  
  		mu.mutantStream <- tm
  	}
-@@ -204,6 +213,7 @@ func (mu *Engine) executeTests(ctx context.Context) report.Results {
+ }
+ 
+-func (mu *Engine) pkgName(fileName, fPkg string) string {
+-	var pkg string
+-	fn := fmt.Sprintf("%s/%s", mu.module.CallingDir, fileName)
+-	p := filepath.Dir(fn)
+-	for {
+-		if strings.HasSuffix(p, fPkg) {
+-			pkg = fmt.Sprintf("%s/%s", mu.module.Name, p)
+-
+-			break
++// pkgName identifies the package from the source file directory.
++// Relative fs.FS filenames follow CallingDir; absolute directories resolve root aliases.
++func (mu *Engine) pkgName(fileName string) string {
++	directory := filepath.Join(mu.module.CallingDir, filepath.Dir(fileName))
++	if filepath.IsAbs(fileName) {
++		root, err := filepath.Abs(mu.module.Root)
++		if err != nil {
++			return ""
+ 		}
+-		d := filepath.Dir(p)
+-		if d == p {
+-			pkg = mu.module.Name
+-
+-			break
++		root, err = filepath.EvalSymlinks(root)
++		if err != nil {
++			return ""
++		}
++		sourceDir, err := filepath.EvalSymlinks(filepath.Dir(fileName))
++		if err != nil {
++			return ""
++		}
++		directory, err = filepath.Rel(root, sourceDir)
++		if err != nil {
++			return ""
+ 		}
+-		p = d
+ 	}
+-
+-	return normalisePkgPath(pkg)
+-}
+-
+-func normalisePkgPath(pkg string) string {
+-	sep := fmt.Sprintf("%c", os.PathSeparator)
+-
+-	return strings.ReplaceAll(pkg, sep, "/")
++	if !filepath.IsLocal(directory) || mu.module.Name == "" {
++		return ""
++	}
++	if directory == "." {
++		return mu.module.Name
++	}
++	return mu.module.Name + "/" + filepath.ToSlash(directory)
+ }
+ 
+ func (mu *Engine) mutationStatus(pos token.Position) mutator.Status {
+@@ -204,6 +215,7 @@ func (mu *Engine) executeTests(ctx context.Context) report.Results {
  	pool.Start()
  
  	var mutants []mutator.Mutator
@@ -1132,7 +1257,7 @@ index df452f4..980e5a4 100644
  	outCh := make(chan mutator.Mutator)
  	wg := &sync.WaitGroup{}
  	wg.Add(1)
-@@ -212,13 +222,12 @@ func (mu *Engine) executeTests(ctx context.Context) report.Results {
+@@ -212,13 +224,12 @@ func (mu *Engine) executeTests(ctx context.Context) report.Results {
  		for mut := range mu.mutantStream {
  			ok := checkDone(ctx)
  			if !ok {
@@ -1148,7 +1273,7 @@ index df452f4..980e5a4 100644
  	}()
  
  	go func() {
-@@ -231,7 +240,9 @@ func (mu *Engine) executeTests(ctx context.Context) report.Results {
+@@ -231,7 +242,9 @@ func (mu *Engine) executeTests(ctx context.Context) report.Results {
  		mutants = append(mutants, m)
  	}
  
@@ -1159,8 +1284,28 @@ index df452f4..980e5a4 100644
  }
  
  func checkDone(ctx context.Context) bool {
+diff --git a/internal/engine/engine_test.go b/internal/engine/engine_test.go
+index 714271e..bcf9ffa 100644
+--- a/internal/engine/engine_test.go
++++ b/internal/engine/engine_test.go
+@@ -675,13 +675,13 @@ func TestPackageDiscovery(t *testing.T) {
+ 			name:     "from root, normal mode",
+ 			fromPkg:  ".",
+ 			intMode:  false,
+-			wantPath: "example.com",
++			wantPath: "example.com/testdata/fixtures",
+ 		},
+ 		{
+ 			name:     "from subpackage, normal mode",
+ 			fromPkg:  "testdata/main/fixture",
+ 			intMode:  false,
+-			wantPath: "example.com/testdata/main",
++			wantPath: "example.com/testdata/main/fixture/testdata/fixtures",
+ 		},
+ 	}
+ 	for _, tc := range testCases {
 diff --git a/internal/engine/executor.go b/internal/engine/executor.go
-index 3fb5ee4..0d7b23b 100644
+index 3fb5ee4..4b1e982 100644
 --- a/internal/engine/executor.go
 +++ b/internal/engine/executor.go
 @@ -18,7 +18,6 @@ package engine
@@ -1215,7 +1360,7 @@ index 3fb5ee4..0d7b23b 100644
  		integrationMode:   m.integrationMode,
  		buildTags:         m.buildTags,
  		execContext:       m.execContext,
-@@ -143,6 +155,11 @@ type mutantExecutor struct {
+@@ -143,6 +155,12 @@ type mutantExecutor struct {
  	buildTags         string
  	testExecutionTime time.Duration
  	dryRun            bool
@@ -1224,10 +1369,19 @@ index 3fb5ee4..0d7b23b 100644
 +	expectedTests     execution.TestCensus
 +	ctx               context.Context
 +	cache             *execution.GoCache
++	executionSettled  bool
  	integrationMode   bool
  	testCPU           int
  }
-@@ -168,22 +185,47 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -158,6 +176,7 @@ type mutantExecutor struct {
+ // a context with timeout. This is done because the Go test command doesn't
+ // make it easy to distinguish failures from timeouts.
+ func (m *mutantExecutor) Start(w *workerpool.Worker) {
++	m.executionSettled = false
+ 	defer m.wg.Done()
+ 	workerName := fmt.Sprintf("%s-%d", w.Name, w.ID)
+ 	rootDir, err := m.wdDealer.Get(workerName)
+@@ -168,22 +187,54 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  	workingDir := filepath.Join(rootDir, m.module.CallingDir)
  	m.mutant.SetWorkdir(workingDir)
  
@@ -1238,9 +1392,16 @@ index 3fb5ee4..0d7b23b 100644
  		return
  	}
  
++	if m.mutant.Pkg() == "" {
++		w.Invalid = true
++		m.mutant.SetStatus(mutator.ExecutionError)
++		log.Errorf("mutation source has no owned module package: %s", m.mutant.Position())
++		m.outCh <- m.mutant
++		return
++	}
 +	if w.Invalid {
 +		m.mutant.SetStatus(mutator.ExecutionError)
-+		log.Errorf("worker tree invalid after earlier apply/rollback failure: %s", workerName)
++		log.Errorf("worker tree invalid after earlier execution/apply/rollback failure: %s", workerName)
 +		m.outCh <- m.mutant
 +		return
 +	}
@@ -1266,7 +1427,7 @@ index 3fb5ee4..0d7b23b 100644
  	}
  
  	m.mutant.SetStatus(m.runTests(rootDir, m.mutant.Pkg()))
-+	if m.mutant.Status() == mutator.ExecutionError {
++	if m.mutant.Status() == mutator.ExecutionError && !m.executionSettled {
 +		w.Invalid = true
 +	}
  
@@ -1277,16 +1438,21 @@ index 3fb5ee4..0d7b23b 100644
  		log.Errorf("failed to restore mutation at %s - %s\n\t%v", m.mutant.Position(), m.mutant.Status(), err)
  	}
  
-@@ -191,7 +233,7 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -191,33 +242,27 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  }
  
  func (m *mutantExecutor) runTests(rootDir, pkg string) mutator.Status {
 -	ctx, cancel := context.WithTimeout(context.Background(), m.testExecutionTime)
++	m.executionSettled = false
 +	ctx, cancel := context.WithTimeout(m.callerContext(), m.testExecutionTime)
  	defer cancel()
  
  	cmd := m.execContext(ctx, "go", m.getTestArgs(pkg)...)
-@@ -202,22 +244,15 @@ func (m *mutantExecutor) runTests(rootDir, pkg string) mutator.Status {
+ 	cmd.Dir = m.mutant.Workdir()
+-	if m.integrationMode {
++	if m.integrationMode || cmd.Dir == "" {
+ 		cmd.Dir = rootDir
+ 	}
  	cmd.Env = append(cmd.Env, os.Environ()...)
  	cmd.Env = append(cmd.Env, fmt.Sprintf("GOTMPDIR=%s", m.wdDealer.WorkDir()))
  
@@ -1310,11 +1476,11 @@ index 3fb5ee4..0d7b23b 100644
  
  func (m *mutantExecutor) getTestArgs(pkg string) []string {
 -	args := []string{"test"}
-+	args := []string{"test", "-json"}
++	args := []string{"test", "-json", "-cover"}
  	if m.buildTags != "" {
  		args = append(args, "-tags", m.buildTags)
  	}
-@@ -228,7 +263,7 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -228,11 +273,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	args = append(args, "-failfast")
  
  	if m.testCPU != 0 {
@@ -1323,7 +1489,14 @@ index 3fb5ee4..0d7b23b 100644
  	}
  
  	path := pkg
-@@ -240,27 +275,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+ 	if m.integrationMode {
++		// SDK failfast stops pending packages; run the affected package before the whole suite.
++		// Go deduplicates packages also selected by ./...; survivors retain the full census.
++		args = append(args, "-p", "1", pkg)
+ 		path = "./..."
+ 	}
+ 	args = append(args, path)
+@@ -240,27 +288,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	return args
  }
  
@@ -1362,7 +1535,7 @@ index 3fb5ee4..0d7b23b 100644
 +	return func(m MutantExecutorDealer) MutantExecutorDealer { m.ctx = ctx; return m }
  }
 diff --git a/internal/engine/executor_test.go b/internal/engine/executor_test.go
-index e5a1c67..42ef0fc 100644
+index e5a1c67..e0d7c08 100644
 --- a/internal/engine/executor_test.go
 +++ b/internal/engine/executor_test.go
 @@ -134,28 +134,28 @@ func TestMutatorTestExecution(t *testing.T) {
@@ -1401,15 +1574,523 @@ index e5a1c67..42ef0fc 100644
  			defer viperReset()
  			wdDealer := newWdDealerStub(t)
  			holder := &commandHolder{}
+@@ -251,7 +251,7 @@ func TestMutatorRun(t *testing.T) {
+ 			pkg:      "example.com/my/package",
+ 			callDir:  "test/dir",
+ 			tags:     "tag1,t1g2",
+-			wantPath: "./...",
++			wantPath: "-p 1 example.com/my/package ./...",
+ 		},
+ 		{
+ 			name:               "it can override timeout coefficient",
 @@ -308,7 +308,7 @@ func TestMutatorRun(t *testing.T) {
  			if tc.timeoutCoefficient != 0 {
  				wantTimeout = 2*time.Second + expectedTimeout*time.Duration(tc.timeoutCoefficient)
  			}
 -			want := fmt.Sprintf("go test -tags %s -timeout %s -failfast %s", tc.tags, wantTimeout, tc.wantPath)
-+			want := fmt.Sprintf("go test -json -tags %s -timeout %s -failfast %s", tc.tags, wantTimeout, tc.wantPath)
++			want := fmt.Sprintf("go test -json -cover -tags %s -timeout %s -failfast %s", tc.tags, wantTimeout, tc.wantPath)
  			got := fmt.Sprintf("go %v", strings.Join(holder.args, " "))
  
  			if !cmp.Equal(got, want) {
+diff --git a/internal/engine/invalid_source_package_test.go b/internal/engine/invalid_source_package_test.go
+new file mode 100644
+index 0000000..52d3d3f
+--- /dev/null
++++ b/internal/engine/invalid_source_package_test.go
+@@ -0,0 +1,104 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"github.com/go-gremlins/gremlins/internal/engine/workerpool"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestRealTokenMutatorRejectsMissingAndInvalidSource(t *testing.T) {
++	for _, kind := range []string{"missing-file", "directory-file", "relative-outside", "absolute-outside"} {
++		t.Run(kind, func(t *testing.T) {
++			root := t.TempDir()
++			source := []byte("package main\nconst Shift = 1 << 2\n")
++			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module invalidsource.example\ngo 1.24\n"), 0600); err != nil {
++				t.Fatal(err)
++			}
++			mod, err := gomodule.Init(root)
++			if err != nil {
++				t.Fatal(err)
++			}
++			fileName := "value.go"
++			var outside string
++			switch kind {
++			case "directory-file":
++				if err := os.Mkdir(filepath.Join(root, fileName), 0700); err != nil {
++					t.Fatal(err)
++				}
++			case "relative-outside", "absolute-outside":
++				outside = filepath.Join(t.TempDir(), "value.go")
++				if err := os.WriteFile(outside, source, 0600); err != nil {
++					t.Fatal(err)
++				}
++				if kind == "relative-outside" {
++					fileName, err = filepath.Rel(root, outside)
++					if err != nil {
++						t.Fatal(err)
++					}
++				} else {
++					fileName = outside
++				}
++			}
++			set := token.NewFileSet()
++			file, err := parser.ParseFile(set, fileName, source, 0)
++			if err != nil {
++				t.Fatal(err)
++			}
++			var node *NodeToken
++			ast.Inspect(file, func(n ast.Node) bool {
++				if candidate, ok := NewTokenNode(n); ok && candidate.Tok() == token.SHL {
++					node = candidate
++				}
++				return true
++			})
++			if node == nil {
++				t.Fatal("fixture operator absent")
++			}
++			discoverer := &Engine{module: mod}
++			mutant := NewTokenMutant(discoverer.pkgName(fileName), set, file, node)
++			mutant.SetType(mutator.InvertBitwise)
++			mutant.SetStatus(mutator.Runnable)
++			launched := false
++			out := make(chan mutator.Mutator, 1)
++			wg := &sync.WaitGroup{}
++			wg.Add(1)
++			executor := &mutantExecutor{executionSettled: true, mutant: mutant, module: mod, wdDealer: directDealer{root: root}, outCh: out, wg: wg, integrationMode: true, testExecutionTime: time.Minute, executionLogDir: t.TempDir(), ctx: context.Background(), execContext: func(ctx context.Context, name string, args ...string) *exec.Cmd {
++				launched = true
++				return exec.CommandContext(ctx, name, args...)
++			}}
++			worker := &workerpool.Worker{Name: "invalid-source", ID: 1}
++			executor.Start(worker)
++			wg.Wait()
++			if worker.Cache != nil {
++				if err := worker.Cache.Close(); err != nil {
++					t.Fatal(err)
++				}
++			}
++			result := <-out
++			if result.Status() != mutator.ExecutionError || !worker.Invalid || launched || executor.executionSettled {
++				t.Fatalf("invalid source accepted: status=%s invalid=%v launched=%v settled=%v", result.Status(), worker.Invalid, launched, executor.executionSettled)
++			}
++			if outside != "" {
++				actual, err := os.ReadFile(outside)
++				if err != nil || !bytes.Equal(actual, source) {
++					t.Fatalf("outside source modified: err=%v", err)
++				}
++			}
++			if node.Tok() != token.SHL {
++				t.Fatal("invalid source changed shared AST")
++			}
++		})
++	}
++}
+diff --git a/internal/engine/package_alias_scope_unix_test.go b/internal/engine/package_alias_scope_unix_test.go
+new file mode 100644
+index 0000000..cd86d4b
+--- /dev/null
++++ b/internal/engine/package_alias_scope_unix_test.go
+@@ -0,0 +1,84 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"github.com/go-gremlins/gremlins/internal/engine/workerpool"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"sync"
++	"testing"
++)
++
++func TestAbsolutePackageDirectoryAliasRejectsOutsideSource(t *testing.T) {
++	root := t.TempDir()
++	outside := t.TempDir()
++	source := []byte("package main\nconst Shift = 1 << 2\n")
++	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module aliasscope.example\ngo 1.24\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	foreign := filepath.Join(outside, "value.go")
++	if err := os.WriteFile(foreign, source, 0600); err != nil {
++		t.Fatal(err)
++	}
++	alias := filepath.Join(root, "alias")
++	if err := os.Symlink(outside, alias); err != nil {
++		t.Fatal(err)
++	}
++	fileName := filepath.Join(alias, "value.go")
++	mod, err := gomodule.Init(root)
++	if err != nil {
++		t.Fatal(err)
++	}
++	discoverer := &Engine{module: mod}
++	pkg := discoverer.pkgName(fileName)
++	if pkg != "" {
++		t.Fatalf("outside directory alias acquired module identity: %q", pkg)
++	}
++	set := token.NewFileSet()
++	file, err := parser.ParseFile(set, fileName, source, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var node *NodeToken
++	ast.Inspect(file, func(n ast.Node) bool {
++		if candidate, ok := NewTokenNode(n); ok && candidate.Tok() == token.SHL {
++			node = candidate
++		}
++		return true
++	})
++	if node == nil {
++		t.Fatal("fixture operator absent")
++	}
++	mutant := NewTokenMutant(pkg, set, file, node)
++	mutant.SetType(mutator.InvertBitwise)
++	mutant.SetStatus(mutator.Runnable)
++	out := make(chan mutator.Mutator, 1)
++	wg := &sync.WaitGroup{}
++	wg.Add(1)
++	launched := false
++	executor := &mutantExecutor{mutant: mutant, module: mod, wdDealer: directDealer{root: root}, outCh: out, wg: wg, ctx: context.Background(), execContext: func(ctx context.Context, name string, args ...string) *exec.Cmd {
++		launched = true
++		return exec.CommandContext(ctx, name, args...)
++	}}
++	worker := &workerpool.Worker{Name: "outside-alias", ID: 1}
++	executor.Start(worker)
++	wg.Wait()
++	result := <-out
++	if result.Status() != mutator.ExecutionError || !worker.Invalid || launched || worker.Cache != nil {
++		t.Fatalf("outside alias accepted: status=%s invalid=%v launched=%v", result.Status(), worker.Invalid, launched)
++	}
++	actual, err := os.ReadFile(foreign)
++	if err != nil || !bytes.Equal(actual, source) {
++		t.Fatalf("outside alias source changed: err=%v", err)
++	}
++}
+diff --git a/internal/engine/package_failfast_test.go b/internal/engine/package_failfast_test.go
+new file mode 100644
+index 0000000..c3227ed
+--- /dev/null
++++ b/internal/engine/package_failfast_test.go
+@@ -0,0 +1,133 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"encoding/json"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestNativePackageFailfastPreservesWholeSuiteCensus(t *testing.T) {
++	root := t.TempDir()
++	files := map[string]string{
++		"go.mod":     "module scheduling.example\ngo 1.24\n",
++		"a/value.go": "package a\nfunc Value() int { return 1 }\n",
++		"b/value.go": "package b\nfunc Value() int { return 2 }\n",
++		"a/value_test.go": `package a
++import("os";"testing";"time")
++func TestFirst(t *testing.T) {
++ mode := os.Getenv("CONTROL_MODE")
++ if mode=="skip" { t.Skip("deliberate missing survivor evidence") }
++ if mode=="unknown" { os.Exit(2) }
++ if mode=="fail" {
++  if os.Getenv("CONTROL_WAIT_FOR_LATER")=="1" {
++   deadline:=time.Now().Add(5*time.Second)
++   for {if _,err:=os.Stat(os.Getenv("CONTROL_MARKER"));err==nil{break};if time.Now().After(deadline){t.Fatal("later package did not start")};time.Sleep(time.Millisecond)}
++  }
++  t.Fatal("deliberate named failure")
++ }
++ if Value()!=1 {t.Fatal("value")}
++}
++`,
++		"b/value_test.go": `package b
++import("os";"testing";"time")
++func TestLater(t *testing.T){
++ if err:=os.WriteFile(os.Getenv("CONTROL_MARKER"),[]byte("started"),0600);err!=nil{t.Fatal(err)}
++ time.Sleep(100*time.Millisecond)
++ if os.Getenv("CONTROL_MODE")=="fail-later" {t.Fatal("deliberate later package failure")}
++ if Value()!=2 {t.Fatal("value")}
++}
++`,
++	}
++	for name, body := range files {
++		path := filepath.Join(root, name)
++		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	run := func(name, mode, parallel string, expected *execution.TestCensus) execution.TestJudgment {
++		t.Helper()
++		marker := filepath.Join(t.TempDir(), "marker")
++		args := []string{"test", "-p", parallel, "-json", "-cover", "-failfast", "-count=1"}
++		args = append(args, "./...")
++		if strings.HasPrefix(name, "priority-") {
++			executor := &mutantExecutor{integrationMode: true, testExecutionTime: time.Minute}
++			args = append(executor.getTestArgs("scheduling.example/b"), "-count=1")
++		}
++		cmd := exec.CommandContext(t.Context(), "go", args...)
++		cmd.Dir = root
++		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOWORK=off", "CONTROL_MODE="+mode, "CONTROL_MARKER="+marker)
++		if name == "parallel-failure" {
++			cmd.Env = append(cmd.Env, "CONTROL_WAIT_FOR_LATER=1")
++		} else {
++			cmd.Env = append(cmd.Env, "CONTROL_WAIT_FOR_LATER=0")
++		}
++		var stdout, stderr bytes.Buffer
++		cmd.Stdout = &stdout
++		cmd.Stderr = &stderr
++		runErr := cmd.Run()
++		judgment, err := execution.JudgeTestStream(bytes.NewReader(stdout.Bytes()), root, runErr, false, expected)
++		_, markerErr := os.Stat(marker)
++		var starts []string
++		for _, line := range bytes.Split(stdout.Bytes(), []byte("\n")) {
++			if len(line) == 0 {
++				continue
++			}
++			var event struct{ Action, Package string }
++			if e := json.Unmarshal(line, &event); e != nil {
++				t.Fatal(e)
++			}
++			if event.Action == "start" {
++				starts = append(starts, event.Package)
++			}
++		}
++		t.Logf("case=%s later-started=%v packages=%v status=%s error=%v", name, markerErr == nil, starts, judgment.Status, err)
++		switch name {
++		case "baseline", "survivor", "priority-survivor":
++			if err != nil || judgment.Status != mutator.Lived || markerErr != nil || len(judgment.Census) != 2 {
++				t.Fatalf("missing whole suite evidence: %+v %v", judgment, err)
++			}
++		case "parallel-failure":
++			if err != nil || judgment.Status != mutator.Killed || markerErr != nil {
++				t.Fatalf("parallel scheduling unexpected: %+v %v marker=%v", judgment, err, markerErr)
++			}
++		case "serial-failure":
++			if err != nil || judgment.Status != mutator.Killed || !os.IsNotExist(markerErr) {
++				t.Fatalf("serial scheduling unexpected: %+v %v marker=%v", judgment, err, markerErr)
++			}
++		case "priority-failure":
++			if err != nil || judgment.Status != mutator.Killed || len(starts) != 1 || starts[0] != "scheduling.example/b" {
++				t.Fatalf("priority did not fail fast: starts=%v status=%s err=%v", starts, judgment.Status, err)
++			}
++		case "skipped-survivor", "unknown-failure":
++			if err == nil || judgment.Status != mutator.ExecutionError {
++				t.Fatalf("invalid run accepted: %+v %v", judgment, err)
++			}
++		}
++		return judgment
++	}
++	baseline := run("baseline", "pass", "4", nil)
++	encoded, err := json.Marshal(baseline.Census)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Logf("baseline census=%s", encoded)
++	run("parallel-failure", "fail", "4", &baseline.Census)
++	run("serial-failure", "fail", "1", &baseline.Census)
++	run("survivor", "pass", "1", &baseline.Census)
++	run("skipped-survivor", "skip", "1", &baseline.Census)
++	run("unknown-failure", "unknown", "1", &baseline.Census)
++	run("priority-failure", "fail-later", "1", &baseline.Census)
++	run("priority-survivor", "pass", "1", &baseline.Census)
++}
+diff --git a/internal/engine/physical_package_priority_test.go b/internal/engine/physical_package_priority_test.go
+new file mode 100644
+index 0000000..a9d8c9d
+--- /dev/null
++++ b/internal/engine/physical_package_priority_test.go
+@@ -0,0 +1,154 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestPhysicalMutationPackagePriorityUsesRealTokenMutator(t *testing.T) {
++	for _, integration := range []bool{true, false} {
++		mode := "integration"
++		if !integration {
++			mode = "debugger"
++		}
++		t.Run(mode, func(t *testing.T) {
++			for _, fixture := range []struct {
++				name, callingDir, sourceDir string
++				absolute, canonical         bool
++			}{
++				{"nested-main-from-root", ".", "cmd/nested", false, false},
++				{"nested-main-from-calling-dir", "cmd", "cmd/nested", false, false},
++				{"module-root-main", ".", ".", false, false},
++				{"absolute-physical-source", ".", "cmd/nested", true, false},
++				{"absolute-source-root-alias", ".", "cmd/nested", true, true},
++			} {
++				t.Run(fixture.name, func(t *testing.T) {
++					root := t.TempDir()
++					source := []byte("package main\nfunc Value() int { return 1 << 2 }\n")
++					files := map[string]string{
++						"go.mod": "module physicalpriority.example\ngo 1.24\n",
++						filepath.Join(fixture.sourceDir, "value.go"):      string(source),
++						filepath.Join(fixture.sourceDir, "value_test.go"): "package main\nimport \"testing\"\nfunc TestValue(t *testing.T){if Value()<0{t.Fatal(\"value\")}}\n",
++						"other/value.go":      "package other\nfunc Value() int {return 1}\n",
++						"other/value_test.go": "package other\nimport \"testing\"\nfunc TestOther(t *testing.T){if Value()!=1{t.Fatal(\"other\")}}\n",
++					}
++					for name, body := range files {
++						path := filepath.Join(root, name)
++						if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
++							t.Fatal(err)
++						}
++						if err := os.WriteFile(path, []byte(body), 0600); err != nil {
++							t.Fatal(err)
++						}
++					}
++					mod, err := gomodule.Init(filepath.Join(root, fixture.callingDir))
++					if err != nil {
++						t.Fatal(err)
++					}
++					pattern := "./..."
++					packages := 2
++					if !integration {
++						pattern = "./" + filepath.ToSlash(fixture.sourceDir)
++						packages = 1
++					}
++					baseline := exec.CommandContext(t.Context(), "go", "test", "-json", "-cover", "-count=1", pattern)
++					baseline.Dir = root
++					baseline.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOWORK=off")
++					var stdout, stderr bytes.Buffer
++					baseline.Stdout = &stdout
++					baseline.Stderr = &stderr
++					runErr := baseline.Run()
++					census, err := execution.JudgeTestStream(&stdout, root, runErr, false, nil)
++					if err != nil || census.Status != mutator.Lived || len(census.Census) != packages {
++						t.Fatalf("baseline: %+v %v stderr=%s", census, err, stderr.Bytes())
++					}
++					fileName, err := filepath.Rel(filepath.Join(root, fixture.callingDir), filepath.Join(root, fixture.sourceDir, "value.go"))
++					if err != nil {
++						t.Fatal(err)
++					}
++					workdir := filepath.Join(root, fixture.callingDir)
++					if fixture.absolute {
++						fileName = filepath.Join(root, fixture.sourceDir, "value.go")
++						workdir = ""
++						if fixture.canonical {
++							fileName, err = filepath.EvalSymlinks(fileName)
++							if err != nil {
++								t.Fatal(err)
++							}
++						}
++					}
++					set := token.NewFileSet()
++					file, err := parser.ParseFile(set, fileName, source, 0)
++					if err != nil {
++						t.Fatal(err)
++					}
++					var node *NodeToken
++					ast.Inspect(file, func(n ast.Node) bool {
++						if candidate, ok := NewTokenNode(n); ok && candidate.Tok() == token.SHL {
++							node = candidate
++						}
++						return true
++					})
++					if node == nil {
++						t.Fatal("fixture operator absent")
++					}
++					discoverer := &Engine{module: mod}
++					mutant := NewTokenMutant(discoverer.pkgName(fileName), set, file, node)
++					mutant.SetType(mutator.InvertBitwise)
++					mutant.SetStatus(mutator.Runnable)
++					mutant.SetWorkdir(workdir)
++					t.Logf("actual TokenMutator pkg=%q physical-source=%q calling-dir=%q", mutant.Pkg(), mutant.Position().Filename, mod.CallingDir)
++					if err := mutant.Apply(); err != nil {
++						t.Fatal(err)
++					}
++					t.Cleanup(func() {
++						if mutant.origFile != nil {
++							if err := mutant.Rollback(); err != nil {
++								t.Error(err)
++							}
++						}
++					})
++					executor := &mutantExecutor{mutant: mutant, module: mod, integrationMode: integration, testExecutionTime: time.Minute, expectedTests: census.Census, executionLogDir: t.TempDir(), execContext: exec.CommandContext, wdDealer: directDealer{root: root}, ctx: context.Background()}
++					if status := executor.runTests(root, mutant.Pkg()); status != mutator.Lived {
++						t.Fatalf("real nested-package survivor not resolved: %s", status)
++					}
++					if err := mutant.Rollback(); err != nil {
++						t.Fatal(err)
++					}
++					restored, err := os.ReadFile(filepath.Join(root, fixture.sourceDir, "value.go"))
++					if err != nil || !bytes.Equal(restored, source) {
++						t.Fatalf("physical source restoration err=%v", err)
++					}
++					// The same physical mutant must prioritize its named failure while preserving strict judgment.
++					failureTest := "package main\nimport \"testing\"\nfunc TestValue(t *testing.T){if Value()!=4{t.Fatal(\"mutated value\")}}\n"
++					if err := os.WriteFile(filepath.Join(root, fixture.sourceDir, "value_test.go"), []byte(failureTest), 0600); err != nil {
++						t.Fatal(err)
++					}
++					if err := mutant.Apply(); err != nil {
++						t.Fatal(err)
++					}
++					executor.executionLogDir = t.TempDir()
++					if status := executor.runTests(root, mutant.Pkg()); status != mutator.Killed {
++						t.Fatalf("real nested-package named failure not resolved: %s", status)
++					}
++					if err := mutant.Rollback(); err != nil {
++						t.Fatal(err)
++					}
++				})
++			}
++		})
++	}
++}
 diff --git a/internal/engine/physical_position_test.go b/internal/engine/physical_position_test.go
 new file mode 100644
 index 0000000..57891d6
@@ -1528,10 +2209,10 @@ index efa93f5..e309b6b 100644
  
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
-index 0000000..db5008f
+index 0000000..8c65530
 --- /dev/null
 +++ b/internal/engine/test_execution.go
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,142 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
@@ -1552,6 +2233,7 @@ index 0000000..db5008f
 +)
 +
 +func (m *mutantExecutor) executeJudgedTest(ctx context.Context, cmd *exec.Cmd, root string) (mutator.Status, error) {
++	m.executionSettled = false
 +	if m.executionLogDir == "" {
 +		return mutator.ExecutionError, errors.New("missing execution-log-dir")
 +	}
@@ -1651,6 +2333,8 @@ index 0000000..db5008f
 +	if encodeErr != nil || resultErr != nil {
 +		status = mutator.ExecutionError
 +	}
++	// Judgment uncertainty remains ERROR; only completed ownership/evidence permits reuse.
++	m.executionSettled = artifactErr == nil && encodeErr == nil && resultErr == nil
 +	return status, errors.Join(judgmentErr, artifactErr, encodeErr, resultErr)
 +}
 +func errorText(err error) string {
@@ -1673,7 +2357,7 @@ index 0000000..db5008f
 +}
 diff --git a/internal/engine/test_judgment_test.go b/internal/engine/test_judgment_test.go
 new file mode 100644
-index 0000000..782cf32
+index 0000000..4fd9006
 --- /dev/null
 +++ b/internal/engine/test_judgment_test.go
 @@ -0,0 +1,233 @@
@@ -1860,7 +2544,7 @@ index 0000000..782cf32
 +	mustWrite(t, filepath.Join(root, "value.go"), "package probe\nfunc broken(){_ = |nil}\n")
 +	logs := t.TempDir()
 +	m := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: logs}
-+	cmd := exec.Command("go", "test", "-json", "./...")
++	cmd := exec.Command("go", "test", "-json", "-cover", "./...")
 +	cmd.Dir = root
 +	status, err := m.executeJudgedTest(context.Background(), cmd, root)
 +	if status != mutator.NotViable || err != nil {
@@ -1910,8 +2594,113 @@ index 0000000..782cf32
 +		t.Fatalf("incomplete compiler receipt: %+v found%t", receipt, found)
 +	}
 +}
+diff --git a/internal/engine/token_apply_failure_test.go b/internal/engine/token_apply_failure_test.go
+new file mode 100644
+index 0000000..8aaad42
+--- /dev/null
++++ b/internal/engine/token_apply_failure_test.go
+@@ -0,0 +1,99 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestTokenApplyRestoresSharedASTAfterWriteFailure(t *testing.T) {
++	source := []byte("package shared\nconst Shift = 1 << 2\n")
++	set := token.NewFileSet()
++	file, err := parser.ParseFile(set, "value.go", source, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var candidate *NodeToken
++	ast.Inspect(file, func(node ast.Node) bool {
++		if tokenNode, ok := NewTokenNode(node); ok && tokenNode.Tok() == token.SHL {
++			candidate = tokenNode
++		}
++		return true
++	})
++	if candidate == nil {
++		t.Fatal("fixture operator absent")
++	}
++
++	for _, writable := range []bool{false, true} {
++		name := "write-failure"
++		mode := os.FileMode(0o400)
++		if writable {
++			name = "next-worker"
++			mode = 0o600
++		}
++		t.Run(name, func(t *testing.T) {
++			root := t.TempDir()
++			path := filepath.Join(root, "value.go")
++			if err := os.WriteFile(path, source, mode); err != nil {
++				t.Fatal(err)
++			}
++			mutant := NewTokenMutant("shared.example", set, file, candidate)
++			mutant.SetType(mutator.InvertBitwise)
++			mutant.SetWorkdir(root)
++			applyErr := mutant.Apply()
++			if (applyErr == nil) != writable {
++				t.Fatalf("writable=%v apply=%v", writable, applyErr)
++			}
++			if candidate.Tok() != token.SHL {
++				t.Fatalf("shared token changed after Apply: %s", candidate.Tok())
++			}
++			actual, err := os.ReadFile(path)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !writable {
++				if !bytes.Equal(actual, source) {
++					t.Fatal("failed write changed source bytes")
++				}
++				return
++			}
++			parsed, err := parser.ParseFile(token.NewFileSet(), "value.go", actual, 0)
++			if err != nil {
++				t.Fatal(err)
++			}
++			operators := 0
++			ast.Inspect(parsed, func(node ast.Node) bool {
++				if binary, ok := node.(*ast.BinaryExpr); ok {
++					operators++
++					if binary.Op != token.SHR {
++						t.Errorf("worker source has unexpected operator: %s", binary.Op)
++					}
++				}
++				return true
++			})
++			if operators != 1 {
++				t.Fatalf("worker source operator count=%d want 1", operators)
++			}
++			if err := mutant.Rollback(); err != nil {
++				t.Fatal(err)
++			}
++			restored, err := os.ReadFile(path)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !bytes.Equal(restored, source) {
++				t.Fatal("rollback did not restore exact source bytes")
++			}
++			if candidate.Tok() != token.SHL {
++				t.Fatal("rollback changed shared token")
++			}
++		})
++	}
++}
 diff --git a/internal/engine/tokenmutator.go b/internal/engine/tokenmutator.go
-index 1ef1bc2..d6a554a 100644
+index 1ef1bc2..6e7a988 100644
 --- a/internal/engine/tokenmutator.go
 +++ b/internal/engine/tokenmutator.go
 @@ -39,15 +39,18 @@ import (
@@ -1960,6 +2749,22 @@ index 1ef1bc2..d6a554a 100644
  }
  
  // Pos returns the token.Pos where the TokenMutator resides.
+@@ -118,13 +125,13 @@ func (m *TokenMutator) Apply() error {
+ 
+ 	m.actualToken = m.tokenNode.Tok()
+ 	m.tokenNode.SetTok(tokenMutations[m.Type()][m.tokenNode.Tok()])
++	// The AST is shared by workers; restore it even when printing or writing fails.
++	defer m.tokenNode.SetTok(m.actualToken)
+ 
+ 	if err = m.writeMutatedFile(filename); err != nil {
+ 		return err
+ 	}
+ 
+-	// Rollback here to facilitate the atomicity of the operation.
+-	m.tokenNode.SetTok(m.actualToken)
+ 
+ 	return nil
+ }
 @@ -201,3 +208,12 @@ func (m *TokenMutator) resetOrigFile() {
  	var zeroByte []byte
  	m.origFile = zeroByte
@@ -2543,6 +3348,221 @@ index 0000000..e464c72
 +		})
 +	}
 +}
+diff --git a/internal/engine/worker_settlement_test.go b/internal/engine/worker_settlement_test.go
+new file mode 100644
+index 0000000..6026ec8
+--- /dev/null
++++ b/internal/engine/worker_settlement_test.go
+@@ -0,0 +1,209 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"encoding/json"
++	"fmt"
++	"go/ast"
++	"go/format"
++	"go/parser"
++	"go/token"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/engine/workerpool"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestSettledUnknownExecutionRetainsErrorAndReusesRestoredWorker(t *testing.T) {
++	for _, kind := range []string{"exit", "stack"} {
++		t.Run(kind, func(t *testing.T) {
++			root, original, mutants := workerSettlementFixture(t, kind)
++			worker := workerpool.NewWorker(1, "settlement")
++			t.Cleanup(func() {
++				if worker.Cache != nil {
++					if err := worker.Cache.Close(); err != nil {
++						t.Error(err)
++					}
++				}
++			})
++			calls := 0
++			logs := t.TempDir()
++			for index, mutant := range mutants {
++				result, settled := startSettlementMutant(t, root, logs, worker, mutant, &calls)
++				want := mutator.ExecutionError
++				if index == 1 {
++					want = mutator.Killed
++				}
++				if result.Status() != want || !settled || worker.Invalid {
++					t.Fatalf("mutant%d status=%s settled=%t invalid=%t", index, result.Status(), settled, worker.Invalid)
++				}
++				actual, err := os.ReadFile(filepath.Join(root, "value.go"))
++				if err != nil || !bytes.Equal(actual, original) {
++					t.Fatalf("source restoration%d: %v", index, err)
++				}
++				if mutant.tokenNode.Tok() != mutant.actualToken {
++					t.Fatal("shared AST token remained mutated")
++				}
++				files, err := filepath.Glob(filepath.Join(logs, "*.result.json"))
++				if err != nil || len(files) != index+1 {
++					t.Fatalf("retained receipts%d: %v", index, err)
++				}
++			}
++			t.Logf("real source %s: first ERROR retained, second KILLED, SDK calls=%d; exact bytes/AST restored", kind, calls)
++			if calls != 2 {
++				t.Fatalf("second actual SDK execution refused: calls=%d", calls)
++			}
++			var statuses []string
++			files, _ := filepath.Glob(filepath.Join(logs, "*.result.json"))
++			for _, file := range files {
++				data, err := os.ReadFile(file)
++				if err != nil {
++					t.Fatal(err)
++				}
++				var receipt struct {
++					Status   string `json:"judgment_status"`
++					Artifact string `json:"artifact_error"`
++					Started  bool   `json:"go_started"`
++				}
++				if err := json.Unmarshal(data, &receipt); err != nil {
++					t.Fatal(err)
++				}
++				if !receipt.Started || receipt.Artifact != "" {
++					t.Fatalf("receipt settlement: %+v", receipt)
++				}
++				statuses = append(statuses, receipt.Status)
++			}
++			if !containsStatus(statuses, "ERROR") || !containsStatus(statuses, "KILLED") {
++				t.Fatalf("error rewritten by later result: %v", statuses)
++			}
++		})
++	}
++}
++
++func TestUnsettledEvidenceRefusesNextWorkerExecution(t *testing.T) {
++	for _, suffix := range []string{".result.json", ".cache.json"} {
++		t.Run(suffix, func(t *testing.T) {
++			root, original, mutants := workerSettlementFixture(t, "exit")
++			worker := workerpool.NewWorker(1, "settlement")
++			t.Cleanup(func() {
++				if worker.Cache != nil {
++					if err := worker.Cache.Close(); err != nil {
++						t.Error(err)
++					}
++				}
++			})
++			calls := 0
++			logs := t.TempDir()
++			key := fmt.Sprintf("%s:%s", mutants[0].Position(), mutants[0].Type())
++			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
++			if err := os.Mkdir(filepath.Join(logs, digest+suffix), 0700); err != nil {
++				t.Fatal(err)
++			}
++			first, settled := startSettlementMutant(t, root, logs, worker, mutants[0], &calls)
++			if first.Status() != mutator.ExecutionError || settled || !worker.Invalid {
++				t.Fatalf("unsafe boundary status=%s settled=%t invalid=%t", first.Status(), settled, worker.Invalid)
++			}
++			second, _ := startSettlementMutant(t, root, logs, worker, mutants[1], &calls)
++			if second.Status() != mutator.ExecutionError || calls != 1 {
++				t.Fatalf("unsafe worker reused: status=%s calls=%d", second.Status(), calls)
++			}
++			actual, err := os.ReadFile(filepath.Join(root, "value.go"))
++			if err != nil || !bytes.Equal(actual, original) {
++				t.Fatalf("unsafe source rollback: %v", err)
++			}
++		})
++	}
++}
++
++func TestExecutionSettlementResetsBeforeEarlyFailure(t *testing.T) {
++	m := mutantExecutor{mutant: judgmentMutant{}, executionSettled: true}
++	status, err := m.executeJudgedTest(t.Context(), exec.Command("go", "version"), t.TempDir())
++	if status != mutator.ExecutionError || err == nil || m.executionSettled {
++		t.Fatalf("stale settlement survived early failure: %s/%v/%t", status, err, m.executionSettled)
++	}
++}
++
++func containsStatus(statuses []string, want string) bool {
++	for _, s := range statuses {
++		if s == want {
++			return true
++		}
++	}
++	return false
++}
++
++func workerSettlementFixture(t *testing.T, kind string) (string, []byte, []*TokenMutator) {
++	t.Helper()
++	root := t.TempDir()
++	source, err := format.Source([]byte("package probe\nfunc Value() int {return 1+1}\nfunc Other() bool {return true&&false}\n"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	mustWrite(t, filepath.Join(root, "go.mod"), "module settlement.example\ngo 1.27.1\n")
++	if err := os.WriteFile(filepath.Join(root, "value.go"), source, 0600); err != nil {
++		t.Fatal(err)
++	}
++	body := `package probe
++import("os";"runtime/debug";"testing")
++func overflow(n int)int{return overflow(n+1)+1}
++func TestValue(t *testing.T){if Value()==0{if "KIND"=="stack"{debug.SetMaxStack(64<<10);overflow(0)};os.Exit(2)};if Value()!=2{t.Fatal("value")}}
++func TestOther(t *testing.T){if Other(){t.Fatal("other semantic behavior")}}
++`
++	mustWrite(t, filepath.Join(root, "value_test.go"), strings.ReplaceAll(body, "KIND", kind))
++	set := token.NewFileSet()
++	file, err := parser.ParseFile(set, "value.go", source, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	nodes := map[token.Token]*NodeToken{}
++	ast.Inspect(file, func(node ast.Node) bool {
++		if binary, ok := node.(*ast.BinaryExpr); ok {
++			candidate, present := NewTokenNode(binary)
++			if present {
++				nodes[binary.Op] = candidate
++			}
++		}
++		return true
++	})
++	var mutants []*TokenMutator
++	for _, entry := range []struct {
++		token token.Token
++		kind  mutator.Type
++	}{{token.ADD, mutator.ArithmeticBase}, {token.LAND, mutator.InvertLogical}} {
++		node := nodes[entry.token]
++		if node == nil {
++			t.Fatal("real source operator absent")
++		}
++		m := NewTokenMutant("settlement.example", set, file, node)
++		m.SetType(entry.kind)
++		m.SetStatus(mutator.Runnable)
++		mutants = append(mutants, m)
++	}
++	return root, source, mutants
++}
++
++func startSettlementMutant(t *testing.T, root, logs string, worker *workerpool.Worker, mutant *TokenMutator, calls *int) (mutator.Mutator, bool) {
++	t.Helper()
++	out := make(chan mutator.Mutator, 1)
++	wg := &sync.WaitGroup{}
++	wg.Add(1)
++	run := func(ctx context.Context, name string, args ...string) *exec.Cmd {
++		*calls++
++		return exec.CommandContext(ctx, name, args...)
++	}
++	executor := mutantExecutor{mutant: mutant, module: gomodule.GoModule{Name: "settlement.example", Root: root, CallingDir: "."}, wdDealer: directDealer{root}, outCh: out, wg: wg, execContext: run, testExecutionTime: time.Minute, executionLogDir: logs, integrationMode: true}
++	executor.Start(worker)
++	wg.Wait()
++	result := <-out
++	return result, executor.executionSettled
++}
 diff --git a/internal/engine/workerpool/workerpool.go b/internal/engine/workerpool/workerpool.go
 index 5ebc801..8ddc899 100644
 --- a/internal/engine/workerpool/workerpool.go
@@ -2604,6 +3624,118 @@ index 5ebc801..8ddc899 100644
  }
  
  // ActiveWorkers gives the number of active workers on the Pool.
+diff --git a/internal/execution/compiler_physical_path_unix_test.go b/internal/execution/compiler_physical_path_unix_test.go
+new file mode 100644
+index 0000000..8fd8426
+--- /dev/null
++++ b/internal/execution/compiler_physical_path_unix_test.go
+@@ -0,0 +1,79 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"bytes"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestCoverageCompilerDiagnosticThroughPhysicalRootAlias(t *testing.T) {
++	physical := t.TempDir()
++	for name, body := range map[string]string{
++		"go.mod":         "module physical.example\ngo 1.24\n",
++		"broken.go":      "package physical\nfunc Value() int { return ( }\n",
++		"broken_test.go": "package physical\nimport \"testing\"\nfunc TestValue(t *testing.T) { _ = Value() }\n",
++	} {
++		if err := os.WriteFile(filepath.Join(physical, name), []byte(body), 0o600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	alias := filepath.Join(t.TempDir(), "worker")
++	if err := os.Symlink(physical, alias); err != nil {
++		t.Fatal(err)
++	}
++	command := exec.CommandContext(t.Context(), "go", "test", "-json", "-cover", ".")
++	command.Dir = alias
++	command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=readonly")
++	var stdout, stderr bytes.Buffer
++	command.Stdout, command.Stderr = &stdout, &stderr
++	runErr := command.Run()
++	if runErr == nil {
++		t.Fatal("compiler-invalid source passed")
++	}
++	judgment, err := JudgeTestStream(bytes.NewReader(stdout.Bytes()), alias, runErr, false, nil)
++	if err != nil || judgment.Status != mutator.NotViable {
++		t.Fatalf("alias source judgment=%s err=%v\nstdout=%s\nstderr=%s", judgment.Status, err, stdout.Bytes(), stderr.Bytes())
++	}
++}
++
++func TestCompilerDiagnosticRequiresPhysicalSourceContainment(t *testing.T) {
++	root := t.TempDir()
++	source := filepath.Join(root, "owned.go")
++	foreign := filepath.Join(t.TempDir(), "foreign.go")
++	for _, path := range []string{source, foreign} {
++		if err := os.WriteFile(path, []byte("package fixture\n"), 0o600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	escaped := filepath.Join(root, "escaped.go")
++	if err := os.Symlink(foreign, escaped); err != nil {
++		t.Fatal(err)
++	}
++	directory := filepath.Join(root, "directory.go")
++	if err := os.Mkdir(directory, 0o700); err != nil {
++		t.Fatal(err)
++	}
++	alias := filepath.Join(t.TempDir(), "worker")
++	if err := os.Symlink(root, alias); err != nil {
++		t.Fatal(err)
++	}
++	for _, fixture := range []struct {
++		path  string
++		owned bool
++	}{
++		{source, true}, {"owned.go", true}, {escaped, false}, {foreign, false},
++		{filepath.Join(root, "missing.go"), false}, {directory, false},
++	} {
++		diagnostic := fixture.path + ":2:3: expected operand"
++		if got := ownedCompilerDiagnostic(diagnostic, alias); got != fixture.owned {
++			t.Errorf("source=%q ownership=%t want %t", fixture.path, got, fixture.owned)
++		}
++	}
++}
+diff --git a/internal/execution/cover_diagnostic_test.go b/internal/execution/cover_diagnostic_test.go
+new file mode 100644
+index 0000000..47da238
+--- /dev/null
++++ b/internal/execution/cover_diagnostic_test.go
+@@ -0,0 +1,21 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++import("os";"path/filepath";"testing")
++func TestCoverageCompilerDiagnosticRequiresMatchingOwnedSource(t *testing.T){
++ root:=t.TempDir();source:=filepath.Join(root,"value.go");other:=filepath.Join(root,"other.go")
++ for _,p:=range []string{source,other}{if err:=os.WriteFile(p,[]byte("package fixture\n"),0600);err!=nil{t.Fatal(err)}}
++ prefix:="2026/10/10 06:01:11 cover: "
++ cases:=[]struct{line string;want bool}{
++ {source+":52:14: expected operand, found '|'",true},
++ {prefix+source+": "+source+":52:14: expected operand, found '|'",true},
++ {prefix+source+": "+other+":52:14: expected operand, found '|'",false},
++ {prefix+source+": open "+source+": permission denied",false},
++ {prefix+source+": no space left on device",false},
++ {prefix+source+": "+source+": note without a source location",false},
++ {"unexpected wrapper: "+source+":52:14: expected operand",false},
++ {prefix+filepath.Join(root,"missing.go")+": "+filepath.Join(root,"missing.go")+":1:2: expected operand",false},
++ }
++ for _,c:=range cases{if got:=ownedCompilerDiagnostic(c.line,root);got!=c.want{t.Fatalf("diagnostic %q: got %t want %t",c.line,got,c.want)}}
++ foreign:=filepath.Join(t.TempDir(),"foreign.go");if err:=os.WriteFile(foreign,[]byte("package fixture\n"),0600);err!=nil{t.Fatal(err)}
++ if ownedCompilerDiagnostic(prefix+foreign+": "+foreign+":1:2: expected operand",root){t.Fatal("foreign source accepted")}
++}
 diff --git a/internal/execution/go_cache.go b/internal/execution/go_cache.go
 new file mode 100644
 index 0000000..a34a904
@@ -2918,9 +4050,72 @@ index 0000000..9f29d3b
 +		t.Fatalf("clean cause lost: %v", err)
 +	}
 +}
+diff --git a/internal/execution/go_process_output_unix_test.go b/internal/execution/go_process_output_unix_test.go
+new file mode 100644
+index 0000000..a217a15
+--- /dev/null
++++ b/internal/execution/go_process_output_unix_test.go
+@@ -0,0 +1,57 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++	"time"
++)
++
++func TestOwnedProcessOutputCopyFailureRemainsCleanupError(t *testing.T) {
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
++	defer cancel()
++	out, err := os.Create(filepath.Join(t.TempDir(), "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := out.Close(); err != nil {
++		t.Fatal(err)
++	}
++	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer func() {
++		if err := stderr.Close(); err != nil {
++			t.Error(err)
++		}
++	}()
++	command := exec.CommandContext(ctx, executable, "-test.run=^TestOwnedOutputCopyFailureHelper$")
++	command.Env = append(os.Environ(), "GREMLINS_OUTPUT_COPY_FAILURE=1")
++	_, cleanupErr, started := RunGoCommand(ctx, command, out, stderr)
++	if !started || ctx.Err() != nil || !errors.Is(cleanupErr, os.ErrClosed) {
++		t.Fatalf("real closed output accepted: started=%t context=%v cleanup=%v", started, ctx.Err(), cleanupErr)
++	}
++	if command.ProcessState == nil {
++		t.Fatal("owned child was not joined before cleanup result")
++	}
++}
++func TestOwnedOutputCopyFailureHelper(t *testing.T) {
++	if os.Getenv("GREMLINS_OUTPUT_COPY_FAILURE") != "1" {
++		return
++	}
++	if _, err := fmt.Fprintln(os.Stdout, "actual owned output"); err != nil {
++		t.Fatal(err)
++	}
++}
 diff --git a/internal/execution/go_process_unix.go b/internal/execution/go_process_unix.go
 new file mode 100644
-index 0000000..1f483f5
+index 0000000..6a7cdfa
 --- /dev/null
 +++ b/internal/execution/go_process_unix.go
 @@ -0,0 +1,130 @@
@@ -2976,7 +4171,7 @@ index 0000000..1f483f5
 +		if errors.Is(err, unix.ESRCH) {
 +			return nil
 +		}
-+		return normalizeGroupKillError(cmd.Process.Pid, err, cleanupDeadline)
++		return verifyOwnedGroupTermination(cmd.Process.Pid, err, cleanupDeadline)
 +	}
 +	if cmd.Cancel != nil {
 +		cmd.Cancel = func() error {
@@ -3606,9 +4801,105 @@ index 0000000..8115afa
 +		})
 +	}
 +}
+diff --git a/internal/execution/parallel_failfast_test.go b/internal/execution/parallel_failfast_test.go
+new file mode 100644
+index 0000000..ff75d6d
+--- /dev/null
++++ b/internal/execution/parallel_failfast_test.go
+@@ -0,0 +1,90 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"bytes"
++	"encoding/json"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++)
++
++func TestNativeFailfastSettlesStartedParallelTests(t *testing.T) {
++	root := t.TempDir()
++	files := map[string]string{
++		"go.mod":   "module parallel.example\ngo 1.24\n",
++		"value.go": "package parallel\nfunc Value() int {return 1}\n",
++		"value_test.go": `package parallel
++import("os";"testing")
++func TestQueued(t *testing.T){t.Parallel();if os.Getenv("CONTROL_MODE")=="exit"{os.Exit(2)}}
++func TestFailure(t *testing.T){t.Fatal("named failure")}
++`,
++	}
++	for name, body := range files {
++		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	for _, mode := range []string{"failfast", "exit"} {
++		t.Run(mode, func(t *testing.T) {
++			cmd := exec.CommandContext(t.Context(), "go", "test", "-json", "-cover", "-failfast", "-count=1", ".")
++			cmd.Dir = root
++			cmd.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOWORK=off", "CONTROL_MODE="+mode)
++			var stdout, stderr bytes.Buffer
++			cmd.Stdout = &stdout
++			cmd.Stderr = &stderr
++			runErr := cmd.Run()
++			if runErr == nil {
++				t.Fatal("named failure passed")
++			}
++			judgment, err := JudgeTestStream(bytes.NewReader(stdout.Bytes()), root, runErr, false, nil)
++			var actions []string
++			for _, line := range bytes.Split(stdout.Bytes(), []byte("\n")) {
++				if len(line) == 0 {
++					continue
++				}
++				var e testEvent
++				if err := json.Unmarshal(line, &e); err != nil {
++					t.Fatal(err)
++				}
++				if e.Test == "TestQueued" && e.Action != "output" {
++					actions = append(actions, e.Action)
++				}
++			}
++			t.Logf("mode=%s queued=%v status=%s error=%v", mode, actions, judgment.Status, err)
++			if mode == "failfast" {
++				if err != nil || judgment.Status != mutator.Killed {
++					t.Fatalf("native settled failure: %s %v\n%s", judgment.Status, err, stdout.Bytes())
++				}
++				if len(actions) != 4 || actions[0] != "run" || actions[1] != "pause" || actions[2] != "cont" || actions[3] != "pass" {
++					t.Fatalf("started parallel test did not settle: %v", actions)
++				}
++				// Drop a real terminal event while retaining named failure/package termination.
++				// A failure elsewhere must not hide incomplete telemetry.
++				var incomplete bytes.Buffer
++				for _, line := range bytes.Split(stdout.Bytes(), []byte("\n")) {
++					if len(line) == 0 {
++						continue
++					}
++					var event testEvent
++					if err := json.Unmarshal(line, &event); err != nil {
++						t.Fatal(err)
++					}
++					if event.Test == "TestQueued" && event.Action == "pass" {
++						continue
++					}
++					incomplete.Write(line)
++					incomplete.WriteByte('\n')
++				}
++				missing, missingErr := JudgeTestStream(&incomplete, root, runErr, false, nil)
++				if missingErr == nil || missing.Status != mutator.ExecutionError {
++					t.Fatalf("missing parallel terminal accepted: %s %v", missing.Status, missingErr)
++				}
++			} else if err == nil || judgment.Status != mutator.ExecutionError {
++				t.Fatalf("unknown post-failure exit accepted: %s %v", judgment.Status, err)
++			}
++		})
++	}
++}
 diff --git a/internal/execution/process_group_darwin.go b/internal/execution/process_group_darwin.go
 new file mode 100644
-index 0000000..3c85649
+index 0000000..0cfe3f9
 --- /dev/null
 +++ b/internal/execution/process_group_darwin.go
 @@ -0,0 +1,119 @@
@@ -3632,8 +4923,8 @@ index 0000000..3c85649
 +// P_WEXIT is the irreversible kernel exit transition exposed by Darwin sys/proc.h.
 +const darwinProcessExitingFlag = 0x2000
 +
-+func normalizeGroupKillError(pid int, err error, deadline time.Time) error {
-+	if !errors.Is(err, unix.EPERM) {
++func verifyOwnedGroupTermination(pid int, err error, deadline time.Time) error {
++	if err != nil && !errors.Is(err, unix.EPERM) {
 +		return err
 +	}
 +	return proveOwnedGroupTermination(pid, err, deadline, func() ([]unix.KinfoProc, error) { return unix.SysctlKinfoProcSlice("kern.proc.pgrp", pid) })
@@ -3663,7 +4954,7 @@ index 0000000..3c85649
 +		if err != nil {
 +			return failure(fmt.Errorf("query owned process group: %w", err))
 +		}
-+		zombie, err := zombieGroupState(pid, group)
++		zombie, err := zombieGroupState(pid, group, signalErr == nil)
 +		if err != nil {
 +			return failure(err)
 +		}
@@ -3692,7 +4983,7 @@ index 0000000..3c85649
 +	}
 +	return strings.Join(sample, ",")
 +}
-+func zombieGroupState(pid int, group []unix.KinfoProc) (bool, error) {
++func zombieGroupState(pid int, group []unix.KinfoProc, signalDelivered bool) (bool, error) {
 +	if len(group) == 0 {
 +		return false, errors.New("owned process-group query empty")
 +	}
@@ -3704,7 +4995,7 @@ index 0000000..3c85649
 +		}
 +		switch member.Proc.P_stat {
 +		case 1, 2, 3, 4:
-+			if member.Proc.P_flag&darwinProcessExitingFlag == 0 {
++			if !signalDelivered && member.Proc.P_flag&darwinProcessExitingFlag == 0 {
 +				return false, errors.New("owned process group has live member without exit transition")
 +			}
 +			allZombie = false
@@ -3722,7 +5013,7 @@ index 0000000..3c85649
 +	return allZombie, nil
 +}
 +func verifyZombieGroup(pid int, group []unix.KinfoProc) error {
-+	zombie, err := zombieGroupState(pid, group)
++	zombie, err := zombieGroupState(pid, group, false)
 +	if err != nil {
 +		return err
 +	}
@@ -3733,7 +5024,7 @@ index 0000000..3c85649
 +}
 diff --git a/internal/execution/process_group_darwin_test.go b/internal/execution/process_group_darwin_test.go
 new file mode 100644
-index 0000000..4fc96f0
+index 0000000..7068198
 --- /dev/null
 +++ b/internal/execution/process_group_darwin_test.go
 @@ -0,0 +1,104 @@
@@ -3785,7 +5076,7 @@ index 0000000..4fc96f0
 +		_ = cmd.Wait()
 +		t.Fatalf("expected native zombie-only EPERM: %v", killErr)
 +	}
-+	if err := normalizeGroupKillError(pid, killErr, time.Now().Add(goCommandCleanupBudget)); err != nil {
++	if err := verifyOwnedGroupTermination(pid, killErr, time.Now().Add(goCommandCleanupBudget)); err != nil {
 +		_ = cmd.Wait()
 +		t.Fatal(err)
 +	}
@@ -3823,7 +5114,7 @@ index 0000000..4fc96f0
 +			}
 +		})
 +	}
-+	if normalizeGroupKillError(pid, unix.EIO, time.Now().Add(goCommandCleanupBudget)) == nil {
++	if verifyOwnedGroupTermination(pid, unix.EIO, time.Now().Add(goCommandCleanupBudget)) == nil {
 +		t.Fatal("unknown syscall error accepted")
 +	}
 +	cmd := exec.Command("/bin/sleep", "10")
@@ -3831,7 +5122,7 @@ index 0000000..4fc96f0
 +	if err := cmd.Start(); err != nil {
 +		t.Fatal(err)
 +	}
-+	if normalizeGroupKillError(cmd.Process.Pid, unix.EPERM, time.Now().Add(goCommandCleanupBudget)) == nil {
++	if verifyOwnedGroupTermination(cmd.Process.Pid, unix.EPERM, time.Now().Add(goCommandCleanupBudget)) == nil {
 +		_ = cmd.Process.Kill()
 +		_ = cmd.Wait()
 +		t.Fatal("real live owned group accepted as zombie")
@@ -3843,18 +5134,161 @@ index 0000000..4fc96f0
 +}
 diff --git a/internal/execution/process_group_linux.go b/internal/execution/process_group_linux.go
 new file mode 100644
-index 0000000..f6a7a9d
+index 0000000..7925bd9
 --- /dev/null
 +++ b/internal/execution/process_group_linux.go
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,118 @@
 +//go:build linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
-+import "time"
++import (
++	"context"
++	"errors"
++	"fmt"
++	"maps"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"time"
++)
 +
-+func normalizeGroupKillError(_ int, err error, _ time.Time) error { return err }
++// The unreaped leader pins the private group while killed members settle.
++func verifyOwnedGroupTermination(pid int, signalErr error, deadline time.Time) error {
++	if signalErr != nil {
++		return signalErr
++	}
++	ctx, cancel := context.WithDeadline(context.Background(), deadline)
++	defer cancel()
++	var previous map[int]byte
++	for {
++		if err := ctx.Err(); err != nil {
++			return fmt.Errorf("owned process group did not terminate: %w", err)
++		}
++		group, err := readLinuxProcessGroup(pid)
++		if err != nil {
++			return err
++		}
++		if _, present := group[pid]; !present {
++			return errors.New("owned unreaped group leader absent")
++		}
++		terminal := true
++		for member, state := range group {
++			switch state {
++			case 'Z', 'X':
++			case 'R', 'S', 'D', 'T', 't', 'I':
++				terminal = false
++			default:
++				return fmt.Errorf("owned process %d has unknown state %q", member, state)
++			}
++		}
++		if err := ctx.Err(); err != nil {
++			return fmt.Errorf("owned process group did not terminate: %w", err)
++		}
++		// /proc enumeration is not atomic. A repeated terminal membership census
++		// excludes offspring omitted by an earlier listing while a parent was exiting.
++		if terminal && maps.Equal(previous, group) {
++			return nil
++		}
++		previous = nil
++		if terminal {
++			previous = group
++		}
++		timer := time.NewTimer(time.Millisecond)
++		select {
++		case <-ctx.Done():
++			timer.Stop()
++			return fmt.Errorf("owned process group did not terminate: %w", ctx.Err())
++		case <-timer.C:
++		}
++	}
++}
++
++func readLinuxProcessGroup(groupID int) (map[int]byte, error) {
++	entries, err := os.ReadDir("/proc")
++	if err != nil {
++		return nil, fmt.Errorf("enumerate owned process group: %w", err)
++	}
++	group := map[int]byte{}
++	for _, entry := range entries {
++		pid, err := strconv.Atoi(entry.Name())
++		if err != nil || pid <= 0 {
++			continue
++		}
++		content, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
++		if os.IsNotExist(err) {
++			continue
++		}
++		if err != nil {
++			return nil, fmt.Errorf("inspect process %d: %w", pid, err)
++		}
++		actual, pgrp, state, err := linuxProcessIdentity(content)
++		if err != nil || actual != pid {
++			return nil, errors.Join(fmt.Errorf("process %d identity/state unknown", pid), err)
++		}
++		if pgrp == groupID {
++			group[pid] = state
++		}
++	}
++	return group, nil
++}
++
++func linuxProcessIdentity(content []byte) (pid, group int, state byte, err error) {
++	line := string(content)
++	pidText, _, found := strings.Cut(line, " (")
++	end := strings.LastIndexByte(line, ')')
++	if !found || end < 0 {
++		return 0, 0, 0, errors.New("malformed process stat identity")
++	}
++	pid, err = strconv.Atoi(pidText)
++	if err != nil || pid <= 0 {
++		return 0, 0, 0, errors.New("invalid process stat PID")
++	}
++	fields := strings.Fields(line[end+1:])
++	if len(fields) < 3 || len(fields[0]) != 1 {
++		return 0, 0, 0, errors.New("malformed process stat state/group")
++	}
++	group, err = strconv.Atoi(fields[2])
++	if err != nil || group < 0 {
++		return 0, 0, 0, errors.New("invalid process stat group")
++	}
++	return pid, group, fields[0][0], nil
++}
+diff --git a/internal/execution/process_group_linux_test.go b/internal/execution/process_group_linux_test.go
+new file mode 100644
+index 0000000..b49275f
+--- /dev/null
++++ b/internal/execution/process_group_linux_test.go
+@@ -0,0 +1,27 @@
++//go:build linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import "testing"
++
++func TestLinuxProcessIdentityPreservesKernelStatFields(t *testing.T) {
++	for _, fixture := range []struct {
++		stat       string
++		pid, group int
++		state      byte
++	}{
++		{"123 (worker) Z 12 123 0", 123, 123, 'Z'},
++		{"124 (worker ) name) S 123 123 0", 124, 123, 'S'},
++	} {
++		pid, group, state, err := linuxProcessIdentity([]byte(fixture.stat))
++		if err != nil || pid != fixture.pid || group != fixture.group || state != fixture.state {
++			t.Fatalf("stat=%q got=%d/%d/%q err=%v", fixture.stat, pid, group, state, err)
++		}
++	}
++	for _, stat := range []string{"", "not-a-pid (worker) Z 0 123", "123 worker Z 0 123", "123 (worker) Z", "123 (worker) Z 0 unknown", "123 (worker) ZZ 0 123"} {
++		if _, _, _, err := linuxProcessIdentity([]byte(stat)); err == nil {
++			t.Fatalf("malformed process identity accepted: %q", stat)
++		}
++	}
++}
 diff --git a/internal/execution/sparse_unix_test.go b/internal/execution/sparse_unix_test.go
 new file mode 100644
 index 0000000..68669de
@@ -3887,12 +5321,117 @@ index 0000000..11a6a86
 +	var returned uint32
 +	return windows.DeviceIoControl(windows.Handle(file.Fd()), windows.FSCTL_SET_SPARSE, nil, 0, nil, 0, &returned, nil)
 +}
+diff --git a/internal/execution/successful_kill_darwin_test.go b/internal/execution/successful_kill_darwin_test.go
+new file mode 100644
+index 0000000..a8bce09
+--- /dev/null
++++ b/internal/execution/successful_kill_darwin_test.go
+@@ -0,0 +1,99 @@
++//go:build darwin
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"context"
++	"errors"
++	"golang.org/x/sys/unix"
++	"os/exec"
++	"syscall"
++	"testing"
++	"time"
++)
++
++func TestSuccessfulKillRequiresFinalZombieState(t *testing.T) {
++	const pid = 123
++	leader := unix.KinfoProc{}
++	leader.Proc.P_pid = pid
++	leader.Eproc.Pgid = pid
++	leader.Proc.P_stat = 2
++	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++	defer cancel()
++	calls := 0
++	err := waitForZombieGroup(ctx, pid, nil, func() ([]unix.KinfoProc, error) {
++		calls++
++		record := leader
++		if calls > 1 {
++			record.Proc.P_stat = darwinZombieState
++		}
++		return []unix.KinfoProc{record}, nil
++	})
++	if err != nil || calls < 2 {
++		t.Fatalf("successful kill did not await terminal state: calls=%d err=%v", calls, err)
++	}
++	queryErr := errors.New("group query unavailable")
++	if err := waitForZombieGroup(ctx, pid, nil, func() ([]unix.KinfoProc, error) { return nil, queryErr }); !errors.Is(err, queryErr) {
++		t.Fatalf("unknown query accepted: %v", err)
++	}
++	if err := waitForZombieGroup(ctx, pid, nil, func() ([]unix.KinfoProc, error) {
++		record := leader
++		record.Proc.P_stat = 99
++		return []unix.KinfoProc{record}, nil
++	}); err == nil {
++		t.Fatal("unknown state accepted after successful kill")
++	}
++	if err := waitForZombieGroup(ctx, pid, unix.EPERM, func() ([]unix.KinfoProc, error) { return []unix.KinfoProc{leader}, nil }); !errors.Is(err, unix.EPERM) {
++		t.Fatalf("EPERM admitted live member: %v", err)
++	}
++}
++func TestNativeSuccessfulGroupKillSettlesBeforeLeaderWait(t *testing.T) {
++	cmd := exec.Command("/bin/sh", "-c", "sleep 10 & wait")
++	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++	if err := cmd.Start(); err != nil {
++		t.Fatal(err)
++	}
++	defer func() { _ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL); _ = cmd.Wait() }()
++	deadline := time.Now().Add(goCommandCleanupBudget)
++	for {
++		group, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", cmd.Process.Pid)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if len(group) >= 2 {
++			t.Logf("active owned group: %s", boundedGroupState(group))
++			break
++		}
++		if !time.Now().Before(deadline) {
++			t.Fatal("silent descendant did not join owned group")
++		}
++		time.Sleep(time.Millisecond)
++	}
++	if err := unix.Kill(-cmd.Process.Pid, unix.SIGKILL); err != nil {
++		t.Fatal(err)
++	}
++	if err := verifyOwnedGroupTermination(cmd.Process.Pid, nil, deadline); err != nil {
++		t.Fatal(err)
++	}
++	group, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", cmd.Process.Pid)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Logf("settled owned group before Wait: %s", boundedGroupState(group))
++	if err := verifyZombieGroup(cmd.Process.Pid, group); err != nil {
++		t.Fatal(err)
++	}
++}
++func TestNativeMissingKillCannotSatisfyGroupSettlement(t *testing.T) {
++	cmd := exec.Command("/bin/sleep", "10")
++	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
++	if err := cmd.Start(); err != nil {
++		t.Fatal(err)
++	}
++	defer func() { _ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL); _ = cmd.Wait() }()
++	err := verifyOwnedGroupTermination(cmd.Process.Pid, nil, time.Now().Add(20*time.Millisecond))
++	if !errors.Is(err, context.DeadlineExceeded) {
++		t.Fatalf("live unsignalled group accepted: %v", err)
++	}
++}
 diff --git a/internal/execution/test_judgment.go b/internal/execution/test_judgment.go
 new file mode 100644
-index 0000000..a333826
+index 0000000..6a0bf86
 --- /dev/null
 +++ b/internal/execution/test_judgment.go
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,321 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -3923,6 +5462,7 @@ index 0000000..a333826
 +}
 +
 +var compilerSourceLocation = regexp.MustCompile(`^(.+\.go):[0-9]+(?::[0-9]+)?: .+`)
++var coverSourceLocation = regexp.MustCompile(`^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} cover: (.+\.go): (.+)$`)
 +
 +func JudgeTestStream(reader io.Reader, root string, runErr error, timedOut bool, expected *TestCensus) (TestJudgment, error) {
 +	packages := map[string]*packageJudgment{}
@@ -4123,6 +5663,13 @@ index 0000000..a333826
 +	return TestJudgment{Status: mutator.Lived, Census: census}, nil
 +}
 +func ownedCompilerDiagnostic(line, root string) bool {
++	if cover := coverSourceLocation.FindStringSubmatch(line); cover != nil {
++		inner := compilerSourceLocation.FindStringSubmatch(cover[2])
++		if inner == nil || filepath.Clean(cover[1]) != filepath.Clean(inner[1]) {
++			return false
++		}
++		line = cover[2]
++	}
 +	match := compilerSourceLocation.FindStringSubmatch(line)
 +	if match == nil {
 +		return false
@@ -4131,12 +5678,22 @@ index 0000000..a333826
 +	if !filepath.IsAbs(path) {
 +		path = filepath.Join(root, path)
 +	}
-+	relative, err := filepath.Rel(root, path)
++	// Go's coverage compiler reports physical paths even when the worker root is an alias.
++	physicalRoot, err := filepath.EvalSymlinks(root)
++	if err != nil {
++		return false
++	}
++	physicalSource, err := filepath.EvalSymlinks(path)
++	if err != nil {
++		return false
++	}
++	relative, err := filepath.Rel(physicalRoot, physicalSource)
 +	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 +		return false
 +	}
-+	info, err := os.Stat(path)
-+	return err == nil && info.Mode().IsRegular()
++	rootInfo, rootErr := os.Stat(physicalRoot)
++	info, err := os.Stat(physicalSource)
++	return rootErr == nil && rootInfo.IsDir() && err == nil && info.Mode().IsRegular()
 +}
 +func InfrastructureOutput(line string) bool {
 +	return strings.HasPrefix(line, "signal: ") || strings.Contains(line, "runtime: out of memory") || strings.Contains(line, "runtime: cannot allocate memory") || strings.Contains(line, "runtime: failed to create new OS thread") || strings.Contains(line, "fatal error: newosproc")
@@ -4198,7 +5755,7 @@ index 0000000..a333826
 +}
 diff --git a/internal/execution/zombie_wait_darwin_test.go b/internal/execution/zombie_wait_darwin_test.go
 new file mode 100644
-index 0000000..7c31964
+index 0000000..21ea127
 --- /dev/null
 +++ b/internal/execution/zombie_wait_darwin_test.go
 @@ -0,0 +1,165 @@
@@ -4302,7 +5859,7 @@ index 0000000..7c31964
 +	}
 +	defer func() { _ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL); _ = cmd.Wait() }()
 +	_, _ = io.Copy(io.Discard, p)
-+	if err := normalizeGroupKillError(cmd.Process.Pid, unix.EPERM, time.Now().Add(goCommandCleanupBudget)); err == nil {
++	if err := verifyOwnedGroupTermination(cmd.Process.Pid, unix.EPERM, time.Now().Add(goCommandCleanupBudget)); err == nil {
 +		t.Fatal("zombie leader with live child accepted")
 +	}
 +}
@@ -4359,7 +5916,7 @@ index 0000000..7c31964
 +			}
 +			observedExiting = true
 +		} else {
-+			observedZombie, err = zombieGroupState(pid, group)
++			observedZombie, err = zombieGroupState(pid, group, false)
 +		}
 +		return group, err
 +	})

@@ -24,12 +24,12 @@ func TestMutationRejectsStaleRegistryBeforeModuleOrToolLookup(t *testing.T) {
 	}
 
 	for _, entry := range []*repopolicy.Entry{
-		{ID: "stale-coverage", Tool: repopolicy.ToolCoverage, Path: file, Function: "Guard", Anchor: "return 2"},
+		{ID: "stale-anchor", Tool: repopolicy.ToolMutation, Path: file, Anchor: "if x > 9 {", Operator: "CONDITIONALS_BOUNDARY", Column: new(7)},
 		{
 			ID: "stale-mutation", Tool: repopolicy.ToolMutation, Path: file,
 			Anchor: "if x > 0 {", Operator: "CONDITIONALS_BOUNDARY", Column: new(8),
 		},
-		{ID: "stale-lint", Tool: repopolicy.ToolLint, Path: "missing.go"},
+		{ID: "stale-unrelated", Tool: "unrelated", Path: "missing.go"},
 	} {
 		registry := &repopolicy.Registry{Exceptions: []*repopolicy.Entry{entry}}
 

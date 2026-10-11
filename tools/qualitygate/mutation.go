@@ -47,7 +47,7 @@ const (
 // judges the result against the registry: mutants must be killed or not viable; survivors and
 // timeouts fail unless a precise registry entry accepts them. A final uncovered outcome is
 // incomplete and always fails; a tool failure is a failure, never a pass.
-func runMutation(ctx context.Context, args []string) error {
+func runMutation(ctx context.Context, args []string) (resultErr error) {
 	started := time.Now()
 
 	options, err := parseMutationFlags(args)
@@ -73,7 +73,7 @@ func runMutation(ctx context.Context, args []string) error {
 	if options.keep {
 		log.Printf("mutation: snapshot kept at %s", snapshot)
 	} else {
-		defer removeAll(snapshot)
+		defer cleanupMutationSnapshot(&resultErr, snapshot)
 	}
 
 	registry, err := repopolicy.LoadRegistry(filepath.Join(snapshot, registryName))
@@ -95,6 +95,13 @@ func runMutation(ctx context.Context, args []string) error {
 		result.Problems,
 		fmt.Sprintf("%d mutants judged, none unkilled beyond %d registry-accepted", result.Evaluated, result.Accepted),
 	)
+}
+
+// cleanupMutationSnapshot preserves the campaign verdict and makes unsettled owned cleanup fail.
+func cleanupMutationSnapshot(result *error, snapshot string) {
+	if err := os.RemoveAll(snapshot); err != nil {
+		*result = errors.Join(*result, fmt.Errorf("remove owned mutation snapshot %s: %w", snapshot, err))
+	}
 }
 
 // mutateSnapshot runs gremlins in the snapshot and judges its report.
@@ -133,7 +140,7 @@ func mutateSnapshot(ctx context.Context, options *mutationOptions, registry *rep
 
 	discoveryProblems := repopolicy.MutationDiscoveryIssues(evidence.discovery, evidence.campaign, scope.hostFiles)
 	executionProblems := repopolicy.MutationExecutionEvidenceIssues(
-		evidence.campaign, mutationCaptureReader(mutationExecutionDirectory(reportFile)),
+		evidence.campaign, regularArtifactReader(mutationExecutionDirectory(reportFile)),
 	)
 
 	mutableFiles := map[string]bool{}

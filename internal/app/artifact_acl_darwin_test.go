@@ -36,6 +36,7 @@ func TestPublishedArtifactsExcludeInheritedDarwinACL(t *testing.T) {
 		}
 	}
 }
+
 func darwinHasACL(t *testing.T, path string) bool {
 	t.Helper()
 	data, err := exec.CommandContext(t.Context(), "/bin/ls", "-le", path).Output()

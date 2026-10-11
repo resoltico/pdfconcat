@@ -423,7 +423,6 @@ func (p *pipeline) writeFailureReport(ctx context.Context, rep *report.Report) e
 	}
 
 	err = p.reportPublicationResult(staged, staged.Publish(ctx, p.reportPolicy()))
-
 	if err != nil {
 		return fmt.Errorf("publish report: %w", err)
 	}

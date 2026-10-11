@@ -6,7 +6,9 @@ package pdfengine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"reflect"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -63,6 +65,101 @@ func TestFeatureNameTreeChildValuesAndActionSequences(t *testing.T) {
 	}
 }
 
+func TestNonDestinationNameTreesUsePairedValues(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	names := types.Dict{
+		keyDests: types.Integer(7), // Destination names are retained by assembly, not reported as removed.
+		"Renditions": types.Dict{keyNames: types.Array{
+			types.StringLiteral("material key"), types.StringLiteral(""),
+			types.StringLiteral("empty key"), types.StringLiteral("material value"),
+		}},
+	}
+	expected := types.Dict{
+		keyDests: types.Integer(7),
+		"Renditions": types.Dict{keyNames: types.Array{
+			types.StringLiteral("material key"), types.StringLiteral(""),
+			types.StringLiteral("empty key"), types.StringLiteral("material value"),
+		}},
+	}
+	if err := observer.nameTrees(t.Context(), names); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.found[FeatureOtherCatalogNames] {
+		t.Fatal("non-destination name tree lost its material second value")
+	}
+	if !reflect.DeepEqual(names, expected) {
+		t.Fatalf("name observation modified the parsed model dictionary: %v", names)
+	}
+
+	for _, entries := range []types.Array{
+		{},
+		{types.StringLiteral("material key"), types.StringLiteral("")},
+	} {
+		material, err := observer.treeValue(t.Context(), entries, keyNames, FeatureOtherCatalogNames)
+		if err != nil || material {
+			t.Fatalf("empty name values warned: entries=%v material=%v err=%v", entries, material, err)
+		}
+	}
+	if material, err := observer.treeValue(t.Context(), types.Array{types.StringLiteral("unpaired")}, keyNames, FeatureOtherCatalogNames); !errors.Is(err, errUnpairedNameEntry) || material {
+		t.Fatalf("odd name array accepted: material=%v err=%v", material, err)
+	}
+	for _, entries := range []types.Array{
+		{types.StringLiteral("first"), types.StringLiteral("material"), types.StringLiteral("second"), types.StringLiteral("")},
+		{types.StringLiteral("first"), types.StringLiteral(""), types.StringLiteral("second"), types.StringLiteral("material")},
+	} {
+		if material, err := observer.treeValue(t.Context(), entries, keyNames, FeatureOtherCatalogNames); err != nil || !material {
+			t.Fatalf("material name value lost at one pair position: entries=%v material=%v err=%v", entries, material, err)
+		}
+	}
+}
+
+func TestFeatureStreamMaterialityDistinguishesStoredPayload(t *testing.T) {
+	t.Parallel()
+	zero, one := int64(0), int64(1)
+	for _, tc := range []struct {
+		name   string
+		value  types.StreamDict
+		active bool
+	}{
+		{"no stream data", types.StreamDict{StreamLength: &zero}, false},
+		{"declared byte", types.StreamDict{StreamLength: &one}, true},
+		{"raw byte", types.StreamDict{StreamLength: &zero, Raw: []byte("x")}, true},
+		{"decoded byte", types.StreamDict{Content: []byte("x")}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := materialFeatureValue(tc.value); got != tc.active {
+				t.Fatalf("stored payload materiality=%v, want %v", got, tc.active)
+			}
+		})
+	}
+}
+
+func TestActionMaterialityFollowsPageAndCatalogPolicy(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		kind   FeatureKind
+		action types.Dict
+		want   bool
+	}{
+		{"page local target", FeaturePageActions, types.Dict{"S": types.Name("GoTo")}, false},
+		{"catalog local target", FeatureCatalogActions, types.Dict{"S": types.Name("GoTo")}, true},
+		{"page external URI", FeaturePageActions, types.Dict{"S": types.Name(keyURI), keyURI: types.StringLiteral("https://example.invalid")}, false},
+		{"catalog external URI", FeatureCatalogActions, types.Dict{"S": types.Name(keyURI), keyURI: types.StringLiteral("https://example.invalid")}, true},
+		{"page script", FeaturePageActions, types.Dict{"S": types.Name("JavaScript"), "JS": types.StringLiteral("app.alert('x')")}, true},
+		{"empty catalog script", FeatureCatalogActions, types.Dict{"S": types.Name("JavaScript"), "JS": types.StringLiteral("")}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			observer := featureTestObserver(t)
+			got, err := observer.materialAction(t.Context(), tc.action, tc.kind)
+			if err != nil || got != tc.want {
+				t.Fatalf("action materiality=%v, want %v: %v", got, tc.want, err)
+			}
+		})
+	}
+}
+
 func TestMalformedLazyFeatureObjectsRemainErrors(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +200,120 @@ func TestMalformedLazyFeatureObjectsRemainErrors(t *testing.T) {
 				t.Fatal("malformed object-stream entry was ignored")
 			}
 		})
+	}
+}
+
+func TestMaterialFeatureTreeAcceptsInclusiveDepthBoundary(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	leaf := types.Dict{keyNames: types.Array{types.StringLiteral("item"), types.StringLiteral("material value")}}
+	tree := leaf
+	for range maxFeatureDepth {
+		tree = types.Dict{"Kids": types.Array{tree}}
+	}
+
+	material, err := observer.materialTree(t.Context(), tree, keyNames, FeatureOtherCatalogNames, map[types.IndirectRef]bool{}, 0)
+	if err != nil || !material {
+		t.Fatalf("material name tree at inclusive depth %d: material=%t err=%v", maxFeatureDepth, material, err)
+	}
+
+	tooDeep := types.Dict{"Kids": types.Array{tree}}
+	if material, err := observer.materialTree(t.Context(), tooDeep, keyNames, FeatureOtherCatalogNames, map[types.IndirectRef]bool{}, 0); !errors.Is(err, errTreeTooDeep) || material {
+		t.Fatalf("name tree beyond depth %d: material=%t err=%v", maxFeatureDepth, material, err)
+	}
+}
+
+func TestMaterialActionChainAcceptsInclusiveTerminalDepth(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	var action types.Object = types.Dict{"S": types.Name(featureJavaScript), "JS": types.StringLiteral("app.alert('test')")}
+	for range maxFeatureDepth - 1 {
+		action = types.Array{action}
+	}
+	material, err := observer.action(t.Context(), action, FeaturePageActions, map[types.IndirectRef]bool{}, 0)
+	if err != nil || !material {
+		t.Fatalf("material action at inclusive terminal depth %d: material=%t err=%v", maxFeatureDepth, material, err)
+	}
+
+	tooDeep := types.Array{action}
+	if material, err := observer.action(t.Context(), tooDeep, FeaturePageActions, map[types.IndirectRef]bool{}, 0); !errors.Is(err, errTreeTooDeep) || material {
+		t.Fatalf("material action beyond terminal depth %d: material=%t err=%v", maxFeatureDepth, material, err)
+	}
+}
+
+func TestEmptyCatalogDestinationDoesNotInventAction(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	observer.pdf.RootDict["OpenAction"] = types.Array{}
+	facts, err := observeFeatures(t.Context(), observer.pdf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts) != 0 {
+		t.Fatalf("empty catalog destination invented source features: %v", facts)
+	}
+}
+
+func TestCatalogNameTreeFactsSurviveEmptySiblingTrees(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	names := types.Dict{
+		"ZMaterial": types.Dict{keyNames: types.Array{types.StringLiteral("entry"), types.StringLiteral("content")}},
+	}
+	for index := range 32 {
+		names[fmt.Sprintf("AEmpty%02d", index)] = types.Dict{}
+	}
+	observer.pdf.RootDict[keyNames] = names
+
+	for attempt := range 32 {
+		facts, err := observeFeatures(t.Context(), observer.pdf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(facts) != 1 || facts[0] != (SourceFeature{Kind: FeatureOtherCatalogNames, Disposition: FeatureRemoved}) {
+			t.Fatalf("name-tree scan %d lost material sibling: %v", attempt, facts)
+		}
+	}
+}
+
+func TestNonAttachmentAnnotationDoesNotClaimEmbeddedPayload(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	attachmentLike := types.Dict{
+		keySubtype: types.Name("Link"),
+		"FS":       types.Dict{"EF": types.Dict{"F": types.StreamDict{Raw: []byte("payload")}}},
+	}
+	if retained, err := observer.attachmentPayload(t.Context(), attachmentLike["FS"]); err != nil || !retained {
+		t.Fatalf("embedded-file precondition: retained=%t err=%v", retained, err)
+	}
+	if err := observer.annotation(t.Context(), attachmentLike); err != nil {
+		t.Fatal(err)
+	}
+	if observer.found[FeaturePageAttachments] {
+		t.Fatal("non-attachment annotation claimed a retained embedded file")
+	}
+	if err := observer.annotation(t.Context(), types.Dict{}); err != nil {
+		t.Fatalf("annotation without subtype: %v", err)
+	}
+	if observer.found[FeaturePageAttachments] {
+		t.Fatal("non-attachment annotation claimed a retained embedded file")
+	}
+}
+
+func TestFieldActionsAcceptInclusiveTerminalDepth(t *testing.T) {
+	t.Parallel()
+	observer := featureTestObserver(t)
+	field := types.Dict{"A": types.Dict{"S": types.Name(featureJavaScript), "JS": types.StringLiteral("app.alert('field')")}}
+	for range maxFeatureDepth - 1 {
+		field = types.Dict{"Kids": types.Array{field}}
+	}
+	if err := observer.fieldActions(t.Context(), types.Array{field}, map[types.IndirectRef]bool{}, 0); err != nil || !observer.found[FeaturePageActions] {
+		t.Fatalf("field action at inclusive terminal depth %d: found=%t err=%v", maxFeatureDepth, observer.found[FeaturePageActions], err)
+	}
+
+	tooDeep := types.Dict{"Kids": types.Array{field}}
+	if err := observer.fieldActions(t.Context(), types.Array{tooDeep}, map[types.IndirectRef]bool{}, 0); !errors.Is(err, errTreeTooDeep) {
+		t.Fatalf("field actions beyond terminal depth %d: %v", maxFeatureDepth, err)
 	}
 }
 
@@ -212,6 +423,19 @@ func TestScriptDataSemanticsAndDecodeFailures(t *testing.T) {
 
 	if material, err := materialScript(t.Context(), types.Integer(7)); err != nil || material {
 		t.Fatalf("non-script object became active content: %v %v", material, err)
+	}
+	for _, tc := range []struct {
+		value types.Object
+		want  bool
+	}{
+		{types.HexLiteral(""), false},
+		{types.HexLiteral("61"), true},
+		{types.StringLiteral(""), false},
+		{types.StringLiteral("a"), true},
+	} {
+		if material, err := materialScript(t.Context(), tc.value); err != nil || material != tc.want {
+			t.Fatalf("script payload %v: material=%v error=%v", tc.value, material, err)
+		}
 	}
 
 	for _, value := range []types.Object{types.StringLiteral("named"), types.HexLiteral("61"), types.StreamDict{Content: []byte("named")}} {

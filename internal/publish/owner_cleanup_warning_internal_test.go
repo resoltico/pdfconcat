@@ -14,7 +14,7 @@ import (
 func TestPublishedReportRemainsVisibleWhenIdentityPinCloseFails(t *testing.T) {
 	t.Parallel()
 
-	staged, stageErr := Stage(t.Context(), filepath.Join(t.TempDir(), reportPath), strings.NewReader(reportContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), filepath.Join(t.TempDir(), reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}

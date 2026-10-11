@@ -13,7 +13,7 @@ import (
 )
 
 func TestPublishedPDFIsPrivateUnderPermissiveUmask(t *testing.T) {
-	for _, mask := range []int{0022, 0000} {
+	for _, mask := range []int{0o022, 0o000} {
 		t.Run(fmt.Sprintf("%04o", mask), func(t *testing.T) {
 			dir := workDir(t)
 			writePDF(t, dir, "source.pdf")
@@ -22,7 +22,7 @@ func TestPublishedPDFIsPrivateUnderPermissiveUmask(t *testing.T) {
 			for _, overwrite := range []bool{false, true} {
 				target := filepath.Join(dir, "output.pdf")
 				if overwrite {
-					if err := os.Chmod(target, 0600); err != nil {
+					if err := os.Chmod(target, 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -35,7 +35,7 @@ func TestPublishedPDFIsPrivateUnderPermissiveUmask(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if info.Mode().Perm() != 0600 {
+				if info.Mode().Perm() != 0o600 {
 					t.Errorf("overwrite=%t published mode=%o", overwrite, info.Mode().Perm())
 				}
 			}
@@ -46,7 +46,7 @@ func TestPublishedPDFIsPrivateUnderPermissiveUmask(t *testing.T) {
 func TestArtifactParentPreservesLiteralBackslashDirectory(t *testing.T) {
 	dir := workDir(t)
 	parent := filepath.Join(dir, `literal\`)
-	if err := os.Mkdir(parent, 0700); err != nil {
+	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writePDF(t, dir, "source.pdf")

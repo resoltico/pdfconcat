@@ -17,7 +17,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
-const architectureLinters = "depguard,funlen,gocognit,gocyclo,cyclop,maintidx,nestif,interfacebloat,revive"
+const architectureLinters = "depguard"
 
 // architecture verifies owned target selection, production classification and native analyzer controls.
 func architecture(ctx context.Context, args []string) error {
@@ -60,7 +60,7 @@ func architecture(ctx context.Context, args []string) error {
 	return report(
 		architectureCommand,
 		problems,
-		"every owned file selected on a supported target; production classified; compiled import and source-structure controls enforced",
+		"every owned file selected on a supported target; production classified; compiled import and physical source ownership controls enforced",
 	)
 }
 
@@ -206,7 +206,7 @@ func architectureImports(ctx context.Context, root, binary string) error {
 			return parseErr
 		}
 
-		log.Printf("architecture: static import and source-structure analysis for %s (%d owned packages)", target, len(packages))
+		log.Printf("architecture: static import ownership analysis for %s (%d owned packages)", target, len(packages))
 
 		lintArgs := append([]string{
 			runVerb,

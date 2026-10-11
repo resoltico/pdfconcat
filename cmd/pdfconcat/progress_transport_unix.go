@@ -66,15 +66,26 @@ func newProgressTransport(file *os.File) (*progressTransport, error) {
 	if err != nil {
 		return nil, err
 	}
+	return progressTransportFromSink(sink)
+}
 
-	if sink.fd < 0 || sink.fd > math.MaxInt32 {
-		return nil, errors.Join(errProgressDescriptorRange, unix.Close(sink.fd))
+// progressTransportFromSink settles a prepared acquisition before starting its native worker.
+func progressTransportFromSink(sink progressNativeSink) (*progressTransport, error) {
+	pollDescriptor, err := checkedProgressDescriptorNumber(sink.fd)
+	if err != nil {
+		return nil, errors.Join(err, closeProgressNativeSink(sink))
+	}
+	if sink.guard != -1 {
+		_, err := checkedProgressDescriptorNumber(sink.guard)
+		if err != nil || sink.guard == sink.fd {
+			return nil, errors.Join(os.ErrInvalid, closeProgressNativeSink(sink))
+		}
 	}
 
 	state := &progressTransportState{
 		fd:                sink.fd,
 		guard:             sink.guard,
-		pollDescriptor:    int32(sink.fd),
+		pollDescriptor:    pollDescriptor,
 		interruptiblePipe: sink.interruptiblePipe,
 		admission:         make(chan struct{}, 1),
 		closed:            make(chan struct{}),
@@ -87,6 +98,36 @@ func newProgressTransport(file *os.File) (*progressTransport, error) {
 	transport.startNativeProgress()
 
 	return transport, nil
+}
+
+// checkedProgressDescriptorNumber checks namespace and ABI bounds, not resource ownership.
+func checkedProgressDescriptorNumber(descriptor int) (int32, error) {
+	if descriptor < progressMinimumOwnedDescriptor {
+		return 0, os.ErrInvalid
+	}
+	if descriptor > math.MaxInt32 {
+		return 0, errProgressDescriptorRange
+	}
+	return int32(descriptor), nil
+}
+
+// closeProgressNativeSink retires only protected acquisitions, never borrowed
+// standard descriptors, and closes each owned slot at most once.
+func closeProgressNativeSink(sink progressNativeSink) error {
+	var result error
+	if _, err := checkedProgressDescriptorNumber(sink.fd); err != nil {
+		result = fmt.Errorf("refuse invalid progress descriptor: %w", os.ErrInvalid)
+	} else {
+		result = unix.Close(sink.fd)
+	}
+	if sink.guard != -1 {
+		_, err := checkedProgressDescriptorNumber(sink.guard)
+		if err != nil || sink.guard == sink.fd {
+			return errors.Join(result, fmt.Errorf("refuse invalid progress guard: %w", os.ErrInvalid))
+		}
+		result = errors.Join(result, unix.Close(sink.guard))
+	}
+	return result
 }
 
 func (transport *progressTransport) WriteRecord(ctx context.Context, record []byte) error {

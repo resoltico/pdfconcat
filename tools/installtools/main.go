@@ -3,10 +3,10 @@
 
 // Command installtools installs the development tools pinned in tools/versions.env into .tools/bin.
 //
-// golangci-lint and gremlins are built from verified upstream modules with reviewed
-// source patches, preserving upstream dependency files. GoReleaser comes from an official
+// Gremlins is built from a verified upstream module with the reviewed executor
+// patch, preserving upstream dependency files. GoReleaser comes from an official
 // archive whose digest and, when GitHub CLI is available, immutable-release attestation are checked.
-// govulncheck and actionlint publish no
+// golangci-lint, govulncheck and actionlint publish no
 // attested archives, so they are built from source with `go install`, which verifies every module
 // against the Go checksum database.
 package main
@@ -109,6 +109,7 @@ func archiveTools() []archiveTool {
 
 func sourceTools() []sourceTool {
 	return []sourceTool{
+		{name: "golangci-lint", versionKey: "GOLANGCI_LINT_VERSION", pkg: "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"},
 		{name: "govulncheck", versionKey: "GOVULNCHECK_VERSION", pkg: "golang.org/x/vuln/cmd/govulncheck"},
 		{name: "actionlint", versionKey: "ACTIONLINT_VERSION", pkg: "github.com/rhysd/actionlint/cmd/actionlint"},
 	}
@@ -506,12 +507,6 @@ func readZipMember(file *zip.File) ([]byte, error) {
 }
 
 func installPatchedTools(ctx context.Context, root string, selected map[string]bool, versions map[string]string, binDir string) error {
-	if selected["golangci-lint"] {
-		if err := installLinter(ctx, root, versions, binDir); err != nil {
-			return fmt.Errorf("golangci-lint: %w", err)
-		}
-	}
-
 	if selected["gremlins"] {
 		if err := installGremlins(ctx, root, versions, binDir); err != nil {
 			return fmt.Errorf("gremlins: %w", err)

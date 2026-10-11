@@ -93,9 +93,9 @@ func names(t *testing.T, dir string) []string {
 func stageText(t *testing.T, ops operations, target, content string) *Staged {
 	t.Helper()
 
-	staged, err := stageWith(context.Background(), ops, target, strings.NewReader(content), 1<<20)
+	staged, err := stageWith(StageTestContext(t), ops, target, readerRequiringStorage(strings.NewReader(content)), 1<<20)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("stage failure %v; leftovers %v", err, names(t, filepath.Dir(target)))
 	}
 
 	return staged
@@ -223,7 +223,7 @@ func TestConcurrentPublishersCreateExactlyOneDestination(t *testing.T) {
 
 	for _, content := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"}[:writers] {
 		group.Go(func() {
-			staged, err := Stage(context.Background(), destination, strings.NewReader(content), 16)
+			staged, err := Stage(StageTestContext(t), destination, readerRequiringStorage(strings.NewReader(content)), 16)
 			if err != nil {
 				t.Error(err)
 
@@ -375,7 +375,7 @@ func TestStageContentAndPrivacy(t *testing.T) {
 	dir := t.TempDir()
 	destination := filepath.Join(dir, reportPath)
 
-	staged, err := Stage(context.Background(), destination, strings.NewReader("12345"), 5)
+	staged, err := Stage(StageTestContext(t), destination, readerRequiringStorage(strings.NewReader("12345")), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,12 +409,12 @@ func TestStageRejectsBadInputsAndCleansUp(t *testing.T) {
 	dir := t.TempDir()
 	destination := filepath.Join(dir, reportPath)
 
-	_, err := Stage(context.Background(), "relative.json", strings.NewReader("x"), 5)
+	_, err := Stage(StageTestContext(t), "relative.json", readerRequiringStorage(strings.NewReader("x")), 5)
 	if !errors.Is(err, ErrNotAbsolute) {
 		t.Fatalf("relative target = %v", err)
 	}
 
-	_, err = Stage(context.Background(), destination, strings.NewReader("123456"), 5)
+	_, err = Stage(StageTestContext(t), destination, readerRequiringStorage(strings.NewReader("123456")), 5)
 
 	var tooLarge *SizeLimitError
 	if !errors.As(err, &tooLarge) || tooLarge.Limit != 5 || tooLarge.Target != destination {
@@ -424,17 +424,17 @@ func TestStageRejectsBadInputsAndCleansUp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = Stage(ctx, destination, strings.NewReader("x"), 5)
+	_, err = Stage(ctx, destination, readerRequiringStorage(strings.NewReader("x")), 5)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled before staging = %v", err)
 	}
 
-	_, err = Stage(context.Background(), destination, &errReader{}, 5)
+	_, err = Stage(StageTestContext(t), destination, &errReader{}, 5)
 	if !errors.Is(err, errInjected) {
 		t.Fatalf("read failure = %v", err)
 	}
 
-	_, err = Stage(context.Background(), filepath.Join(dir, missingPath, shortReportPath), strings.NewReader("x"), 5)
+	_, err = Stage(StageTestContext(t), filepath.Join(dir, missingPath, shortReportPath), readerRequiringStorage(strings.NewReader("x")), 5)
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing directory = %v", err)
 	}
@@ -483,7 +483,7 @@ func TestStageDiskFullPermissionAndFlushFailures(t *testing.T) {
 	full := realOperations()
 	full.writeChunk = func(io.Writer, []byte) error { return errDiskFull }
 
-	_, err := stageWith(context.Background(), full, destination, strings.NewReader("x"), 5)
+	_, err := stageWith(StageTestContext(t), full, destination, readerRequiringStorage(strings.NewReader("x")), 5)
 
 	var stageErr *StageError
 	if !errors.As(err, &stageErr) || !strings.Contains(err.Error(), "volume is full") || !errors.Is(err, errDiskFull) {
@@ -493,7 +493,7 @@ func TestStageDiskFullPermissionAndFlushFailures(t *testing.T) {
 	finalizationFailed := realOperations()
 	finalizationFailed.syncFile = func(string) error { return errInjected }
 
-	_, err = stageWith(context.Background(), finalizationFailed, destination, strings.NewReader("x"), 5)
+	_, err = stageWith(StageTestContext(t), finalizationFailed, destination, readerRequiringStorage(strings.NewReader("x")), 5)
 	if !errors.Is(err, errInjected) {
 		t.Fatalf("flush failure = %v", err)
 	}
@@ -513,7 +513,7 @@ func TestStageDiskFullPermissionAndFlushFailures(t *testing.T) {
 
 	permissiontest.DenyDirectoryChanges(t, readOnly)
 
-	_, err = Stage(context.Background(), filepath.Join(readOnly, shortReportPath), strings.NewReader("x"), 5)
+	_, err = Stage(StageTestContext(t), filepath.Join(readOnly, shortReportPath), readerRequiringStorage(strings.NewReader("x")), 5)
 	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), "not writable") {
 		t.Fatalf("read-only directory = %v", err)
 	}

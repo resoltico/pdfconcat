@@ -27,7 +27,7 @@ func TestNativeParentTraversalSelectsCapturedPDF(t *testing.T) {
 	dir := workDir(t)
 	logical, physical := filepath.Join(dir, "logical"), filepath.Join(dir, "physical")
 	for _, path := range []string{logical, filepath.Join(physical, "child")} {
-		if err := os.MkdirAll(path, 0700); err != nil {
+		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestNativeParentTraversalSelectsCapturedPDF(t *testing.T) {
 func TestFailedInspectionRetainsCapturedEvidence(t *testing.T) {
 	dir := workDir(t)
 	data := []byte("deterministic invalid PDF\n")
-	if err := os.WriteFile(filepath.Join(dir, "invalid.pdf"), data, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "invalid.pdf"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	res := execute(t.Context(), t, appOf(newFake(t)), dir, "check", "--report", "proof.json", "invalid.pdf")
@@ -115,7 +115,7 @@ func TestNativeTraversalControlsPlanFontAndArtifactRoles(t *testing.T) {
 	dir := workDir(t)
 	logical, physical := filepath.Join(dir, "logical"), filepath.Join(dir, "physical")
 	for _, path := range []string{logical, filepath.Join(physical, "child")} {
-		if err := os.MkdirAll(path, 0700); err != nil {
+		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,7 +153,7 @@ func TestNativeTraversalControlsPlanFontAndArtifactRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(physical, "font.ttf"), bytes, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(physical, "font.ttf"), bytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(logical, "font.ttf"), "not a font")

@@ -33,7 +33,7 @@ The executable embeds the Noto Sans Regular font (version 2.015, unhinted TrueTy
 
 ## Development linter source
 
-The development-only golangci-lint is built from checksum-verified upstream source with the reviewed physical-source attribution and concrete-comparison field-use patches under `tools/lint-patches`. Its upstream GPLv3 license and the corresponding patch/source instructions are kept there, separately from the runtime license inventory and release archives. Upstream dependencies retain their own licenses; the installer verifies the unchanged upstream module graph. The linter is not linked into PDFConcat, and the runtime remains licensed as stated above. The build/cache identity derives from the upstream version and patch digest; the source-tag epoch in its metadata is not a claim about build time.
+The development-only golangci-lint is the pinned stock Go module, installed through the public Go module proxy and checksum database. Its upstream GPLv3 license and source are available in the downloaded module `github.com/golangci/golangci-lint/v2` at the version declared in `tools/versions.env`. It is not linked into PDFConcat or included in product archives. Owned-source physical-position guards and the compiled import controls are project checks; PDFConcat no longer maintains a linter source variant.
 
 ## Development mutation tool source
 

@@ -52,7 +52,7 @@ func checkPinnedReplacement(t *testing.T, destination string) {
 		t.Fatal(statErr)
 	}
 
-	staged, stageErr := Stage(t.Context(), destination, strings.NewReader(replacementContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), destination, readerRequiringStorage(strings.NewReader(replacementContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}
@@ -96,7 +96,7 @@ func TestNoClobberPreservesPinnedDestination(t *testing.T) {
 		}
 	})
 
-	staged, stageErr := Stage(t.Context(), destination, strings.NewReader(replacementContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), destination, readerRequiringStorage(strings.NewReader(replacementContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}
@@ -236,7 +236,7 @@ func TestReportPinRejectsNULInsteadOfOpeningValidPrefix(t *testing.T) {
 func TestReportNamespaceGuardPreservesDisappearanceAfterLstat(t *testing.T) {
 	t.Parallel()
 
-	staged, stageErr := Stage(t.Context(), filepath.Join(t.TempDir(), reportPath), strings.NewReader(reportContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), filepath.Join(t.TempDir(), reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}

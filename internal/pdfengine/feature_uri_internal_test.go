@@ -18,6 +18,22 @@ const (
 	uriRootBase   = "https://example.invalid/"
 )
 
+func TestCatalogURIActionDoesNotClaimRetainedPageURIBase(t *testing.T) {
+	t.Parallel()
+	pdf := readUnvalidated(t, pdffixture.Plain("catalog URI action"))
+	pdf.RootDict[keyURI] = types.Dict{keyURIBase: types.StringLiteral(uriRootBase)}
+	pdf.RootDict["OpenAction"] = types.Dict{"S": types.Name(keyURI), keyURI: types.StringLiteral(uriAnnex)}
+
+	facts, err := observeFeatures(t.Context(), pdf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SourceFeature{{Kind: FeatureCatalogActions, Disposition: FeatureRemoved}}
+	if !reflect.DeepEqual(facts, want) {
+		t.Fatalf("catalog-only action facts %v, want %v", facts, want)
+	}
+}
+
 func TestURIBaseDisclosureUsesDecodedTargetAndActiveBinding(t *testing.T) {
 	t.Parallel()
 

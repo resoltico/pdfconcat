@@ -16,7 +16,7 @@ import (
 
 const (
 	// registryHeader starts every registry fixture.
-	registryHeader = "version: 1\ncoverage_threshold_percent: 100\nexceptions:\n"
+	registryHeader = "version: 1\nexceptions:\n"
 	// rationaleComment is a valid attached rationale.
 	rationaleComment = "  # This exception exists because the repair would contradict the documented project design here.\n"
 	// goModFile is the module file at the repository root.
@@ -28,9 +28,6 @@ const (
 	unexpectedProblemsFormat = "unexpected problems: %q"
 	directiveSourcePath      = "p/file.go"
 	discoveredStatus         = "RUNNABLE"
-	fileReadDiagnostic       = "G304: Potential file inclusion"
-	broadPatternProblem      = "too broad"
-	coverageThresholdField   = "coverage_threshold_percent"
 )
 
 // repoRoot returns the repository root: the nearest ancestor of the test directory holding go.mod.

@@ -5,7 +5,10 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
+
+	"github.com/resoltico/pdfconcat/internal/capture"
 )
 
 // mutationOptions are the flags of the mutation command.
@@ -42,6 +45,15 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 
 	if *duration < 0 || (*duration > 0 && *duration <= mutationCleanupReserve) {
 		return mutationOptions{}, fmt.Errorf("%w: max-duration must be zero or greater than %s", errGate, mutationCleanupReserve)
+	}
+
+	// The executor changes directory to the source snapshot; retained evidence belongs to the caller.
+	if *reportOut != "" {
+		caller, err := os.Getwd()
+		if err != nil {
+			return mutationOptions{}, fmt.Errorf("resolve mutation report path: %w", err)
+		}
+		*reportOut = capture.NativePath(caller, *reportOut)
 	}
 
 	return mutationOptions{

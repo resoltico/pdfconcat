@@ -5,11 +5,52 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
 )
+
+func TestMutationReportPathRemainsAtCallerLocation(t *testing.T) {
+	t.Parallel()
+	caller, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, requested := range []string{"", "mutation-report.json", filepath.Join(t.TempDir(), "mutation-report.json")} {
+		options, err := parseMutationFlags([]string{"-report", requested})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if requested == "" {
+			if options.report != "" {
+				t.Fatalf("default report acquired a caller destination: %q", options.report)
+			}
+			continue
+		}
+		if !filepath.IsAbs(options.report) {
+			t.Fatal("executor directory can reinterpret retained report path")
+		}
+		parent := caller
+		if filepath.IsAbs(requested) {
+			parent = filepath.Dir(requested)
+		}
+		wantParent, err := os.Stat(parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotParent, err := os.Stat(filepath.Dir(options.report))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(wantParent, gotParent) || filepath.Base(options.report) != filepath.Base(requested) {
+			t.Fatalf("report %q changed caller destination to %q", requested, options.report)
+		}
+	}
+}
 
 func TestMutationFlagsBoundActualWorkersAndReserveCleanup(t *testing.T) {
 	t.Parallel()

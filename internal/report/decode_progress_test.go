@@ -31,7 +31,7 @@ func TestReportDecoderChecksFinalReadCancellationBeforeStructuralFault(t *testin
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err := report.Decode(ctx, savedReport, &cancelAfterRead{cancel: cancel, data: []byte("null")})
+	_, err := report.Decode(ctx, savedReport, report.ReaderRequiringStorage(&cancelAfterRead{cancel: cancel, data: []byte("null")}))
 	found, ok := report.AsError(err)
 
 	if !ok || found.Diagnostic.Code != report.CodeInterrupted || found.Status().ExitCode() != 130 || !errors.Is(err, context.Canceled) {

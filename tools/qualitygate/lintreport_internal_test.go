@@ -15,7 +15,7 @@ import (
 
 const (
 	selectedLintAdapter   = "selected"
-	unexcludedLintAdapter = "unexcluded"
+	configuredLintAdapter = "configured"
 	positionLintAdapter   = "positions"
 	lintCacheEnvironment  = "GOLANGCI_LINT_CACHE"
 )
@@ -38,7 +38,7 @@ func TestMissingLintReportPreservesRealCacheInitializationFailure(t *testing.T) 
 
 	t.Setenv(lintCacheEnvironment, filepath.Join(t.TempDir(), "blocked"))
 
-	cases := []string{selectedLintAdapter, unexcludedLintAdapter, architectureCommand, positionLintAdapter}
+	cases := []string{selectedLintAdapter, configuredLintAdapter, architectureCommand, positionLintAdapter}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			scratch := t.TempDir()
@@ -80,7 +80,7 @@ func TestFailedLintRunCannotReusePreviousRealReport(t *testing.T) {
 
 	t.Setenv(lintCacheEnvironment, filepath.Join(t.TempDir(), "outer-cache"))
 
-	for _, name := range []string{selectedLintAdapter, unexcludedLintAdapter, architectureCommand, positionLintAdapter} {
+	for _, name := range []string{selectedLintAdapter, configuredLintAdapter, architectureCommand, positionLintAdapter} {
 		t.Run(name, func(t *testing.T) {
 			scratch := t.TempDir()
 			writeFailureLintFixture(t, scratch, config)
@@ -128,8 +128,8 @@ func failingLintAdapter(t *testing.T, scratch, binary, name string) error {
 	case selectedLintAdapter:
 		_, err := lintSelectedIssues(t.Context(), scratch, binary, "package fixture\n", "unused")
 		return err
-	case unexcludedLintAdapter:
-		_, err := runUnexcludedLint(t.Context(), scratch, binary,
+	case configuredLintAdapter:
+		_, err := runLintReport(t.Context(), scratch, binary,
 			filepath.Join(scratch, scratchLintConfigName), filepath.Join(scratch, lintReportFileName), scratch)
 
 		return err

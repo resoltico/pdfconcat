@@ -21,8 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/resoltico/pdfconcat/internal/capture"
 	"os"
+
+	"github.com/resoltico/pdfconcat/internal/capture"
 )
 
 type (

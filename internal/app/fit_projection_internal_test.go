@@ -104,8 +104,10 @@ func requireFitProjection(t *testing.T, placement *report.TextPlacement) {
 	}
 
 	if placement.InkBounds == nil || placement.InkBounds.X < 54-1e-10 || placement.InkBounds.X > 54+1e-10 ||
+		placement.InkBounds.Y < 67.2-1e-10 || placement.InkBounds.Y > 67.2+1e-10 ||
 		placement.InkBounds.Width < 67.2-1e-10 ||
-		placement.InkBounds.Width > 67.2+1e-10 {
+		placement.InkBounds.Width > 67.2+1e-10 ||
+		placement.InkBounds.Height < 134.4-1e-10 || placement.InkBounds.Height > 134.4+1e-10 {
 		t.Fatalf("visible clipped ink: %+v", placement.InkBounds)
 	}
 }

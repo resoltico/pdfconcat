@@ -122,6 +122,23 @@ func TestFitAppliedFontStateAndRestrictedTransferBoundaries(t *testing.T) {
 	}
 }
 
+func TestFitRestrictedExtGStateIgnoresInertEntries(t *testing.T) {
+	t.Parallel()
+	keys := []string{"TR", "TR2", "BG", "BG2", "UCR", "UCR2", "HT", "RI"}
+	for _, value := range []types.Object{nil, types.Array{}, types.Dict{}, types.StringLiteral("")} {
+		dict := types.Dict{}
+		for _, key := range keys {
+			dict[key] = value
+		}
+		if err := fitRestrictedExtGState(dict); err != nil {
+			t.Fatalf("inert ExtGState value %T was refused: %v", value, err)
+		}
+	}
+	if err := fitRestrictedExtGState(types.Dict{"TR": types.Array{}, "RI": types.Name("MaterialIntent")}); !errors.Is(err, errFitUnsupported) {
+		t.Fatalf("material state after an empty entry was admitted: %v", err)
+	}
+}
+
 func TestFitUsedResourceResolversPreserveCancellation(t *testing.T) {
 	t.Parallel()
 

@@ -163,7 +163,7 @@ func (j *Job) Validate() error {
 	var walk jobWalk
 
 	if !j.Defaults.IsZero() {
-		walk.nodes += styleNodes(&j.Defaults)
+		walk.nodes = styleNodes(&j.Defaults)
 	}
 
 	err := walk.items(j.Items, 0)

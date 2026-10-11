@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -143,6 +144,9 @@ func TestProgressStreamFailureAllowanceRejectsMalformedCompleteRecords(t *testin
 }
 
 func TestProgressTransportHealthyLongUnicodeRecord(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, writer := progressPipe(t)
 	transport := progressNativeTransport(t, writer)
@@ -180,6 +184,9 @@ func TestProgressTransportHealthyLongUnicodeRecord(t *testing.T) {
 }
 
 func TestProgressTransportLargeStoppedPipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 
 	scenarios := []struct {
@@ -243,12 +250,17 @@ func TestProgressTransportLargeStoppedPipe(t *testing.T) {
 }
 
 func TestProgressTransportUnsentCancellationKeepsExceptionCapability(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, writer := progressPipe(t)
 	transport := progressNativeTransport(t, writer)
 	record := progressLongRecord(t)
 	prefix := make(chan []byte, 1)
 	resume := make(chan struct{})
+	resumeReads := sync.OnceFunc(func() { close(resume) })
+	t.Cleanup(resumeReads)
 	observed := make(chan []byte, 1)
 
 	readErrors := make(chan error, 1)
@@ -269,7 +281,17 @@ func TestProgressTransportUnsentCancellationKeepsExceptionCapability(t *testing.
 	active := make(chan error, 1)
 	go func() { active <- transport.WriteRecord(context.Background(), record) }()
 
-	<-prefix // Actual native bytes establish that the record owner is occupied.
+	// Prefer an already delivered native prefix, but do not wait forever when
+	// the active write ended before occupying the native pipe.
+	select {
+	case <-prefix:
+	default:
+		select {
+		case <-prefix:
+		case err := <-active:
+			t.Fatalf("active record ended before native readiness: %v", err)
+		}
+	}
 
 	unsent, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	err := transport.WriteRecord(unsent, []byte(progressTestRecord))
@@ -284,7 +306,7 @@ func TestProgressTransportUnsentCancellationKeepsExceptionCapability(t *testing.
 		t.Fatal("pre-admission timeout poisoned active healthy channel")
 	}
 
-	close(resume)
+	resumeReads()
 	requireProgressNoError(t, <-active)
 
 	exceptional := []byte("{\"kind\":\"exception\",\"message\":\"actual cleanup\"}\n")

@@ -101,7 +101,7 @@ func TestDirectivesIgnoreLiteralsAndProse(t *testing.T) {
 		"//go:embed data.txt\n" +
 		"var data string\n\n" +
 		"//go:generate stringer -type=Kind\n\n" +
-		"//line other.go:10\n" +
+		"// ordinary line mapping prose\n" +
 		"var text = \"//" + nolint + ":gosec\"\n\n" +
 		"var raw = `// #" + "nosec G101`\n\n" +
 		"// Example usage, indented as documentation code:\n" +
@@ -203,7 +203,7 @@ func TestDirectiveViolationReportsPhysicalLineDespiteDisplayMapping(t *testing.T
 		t.Fatal(err)
 	}
 
-	if len(violations) != 1 || violations[0].File != directiveSourcePath || violations[0].Line != 3 {
+	if len(violations) != 2 || violations[0].File != directiveSourcePath || violations[0].Line != 2 || violations[1].Line != 3 {
 		t.Fatalf("display position replaced the physical directive attribution: %v", violations)
 	}
 }

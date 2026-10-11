@@ -18,6 +18,9 @@ import (
 )
 
 func TestProgressTransportNativePipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, writer := progressPipe(t)
 	descriptor := int(writer.Fd())
@@ -47,6 +50,9 @@ func TestProgressTransportNativePipe(t *testing.T) {
 }
 
 func TestProgressTransportNativeStoppedPipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 
 	scenarios := []struct {
@@ -98,14 +104,22 @@ func TestProgressTransportNativeStoppedPipe(t *testing.T) {
 }
 
 func TestProgressTransportNativeBrokenPipe(t *testing.T) {
-	t.Parallel()
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
+	// Run before parallel subprocess fixtures: a concurrent fork can temporarily inherit
+	// this reader until exec and let the tiny record succeed despite the caller's close.
 	reader, writer := progressPipe(t)
 	transport := progressNativeTransport(t, writer)
 	requireProgressNoError(t, reader.Close())
 
-	if err := transport.WriteRecord(context.Background(), []byte(progressEmptyRecord)); err == nil {
-		t.Fatal("broken pipe reported success")
+	if err := transport.WriteRecord(context.Background(), []byte(progressEmptyRecord)); !errors.Is(err, unix.EPIPE) {
+		t.Fatalf("closed-reader native write did not report EPIPE: %v", err)
 	}
+	if !transport.Interrupted() {
+		t.Fatal("broken native pipe did not poison telemetry")
+	}
+	assertProgressPoisoned(t.Context(), t, transport)
 }
 
 func TestProgressTransportPreservesSharedNonblockingFlags(t *testing.T) {
@@ -130,6 +144,9 @@ func TestProgressTransportPreservesSharedNonblockingFlags(t *testing.T) {
 }
 
 func TestProgressTransportInputFailures(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 
 	if _, err := newProgressTransport(nil); err == nil {

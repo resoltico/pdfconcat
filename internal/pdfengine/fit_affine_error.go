@@ -58,7 +58,7 @@ func fitExactAddition(first, second fitInterval) bool {
 		return true
 	}
 
-	if first.low <= 0 && first.high >= 0 || second.low <= 0 && second.high >= 0 || math.Signbit(first.low) == math.Signbit(second.low) {
+	if first.low < 0 && first.high > 0 || second.low < 0 && second.high > 0 || math.Signbit(first.low) == math.Signbit(second.low) {
 		return false
 	}
 
@@ -99,7 +99,8 @@ func fitUpperMultiply(first, second float64) float64 {
 }
 
 func (interval fitInterval) normal() bool {
-	return !(interval.low <= 0 && interval.high >= 0) && min(math.Abs(interval.low), math.Abs(interval.high)) > fitSmallestNormal
+	// Admitted intervals are ordered and finite; the strict minimum also excludes signed zero.
+	return math.Signbit(interval.low) == math.Signbit(interval.high) && min(math.Abs(interval.low), math.Abs(interval.high)) > fitSmallestNormal
 }
 
 // Exact operations commute algebraically. Nonexact operations commute with

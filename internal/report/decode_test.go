@@ -65,7 +65,7 @@ func TestSamplesDecodeAndRoundTrip(t *testing.T) {
 func TestMissingFormatNamesTheCurrentContract(t *testing.T) {
 	t.Parallel()
 
-	_, err := report.Decode(t.Context(), "historical.json", strings.NewReader(`{"report_version":1,"kind":"report"}`))
+	_, err := report.Decode(report.DecoderTestContext(t.Context(), t), "historical.json", report.ReaderRequiringStorage(strings.NewReader(`{"report_version":1,"kind":"report"}`)))
 
 	failure, ok := report.AsError(err)
 	if !ok || failure.Diagnostic.Code != report.CodeUnsupportedVersion {
@@ -88,7 +88,7 @@ func TestDraftReportShapeCannotBecomeTheCurrentContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := report.Decode(t.Context(), "draft.json", strings.NewReader(draft))
+			_, err := report.Decode(report.DecoderTestContext(t.Context(), t), "draft.json", report.ReaderRequiringStorage(strings.NewReader(draft)))
 
 			failure, ok := report.AsError(err)
 			if !ok || failure.Diagnostic.Code != report.CodeMissingMember {
@@ -288,7 +288,7 @@ func TestLimits(t *testing.T) {
 func TestReadFailuresAndInterruption(t *testing.T) {
 	t.Parallel()
 
-	_, err := report.Decode(report.DecoderTestContext(t.Context(), t), savedReport, iotest.ErrReader(io.ErrClosedPipe))
+	_, err := report.Decode(report.DecoderTestContext(t.Context(), t), savedReport, report.ReaderRequiringStorage(iotest.ErrReader(io.ErrClosedPipe)))
 
 	found, _ := report.AsError(err)
 	if found.Diagnostic.Code != report.CodeReadFailed || found.Status() != report.StatusFailed || !errors.Is(err, io.ErrClosedPipe) {
@@ -298,7 +298,7 @@ func TestReadFailuresAndInterruption(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = report.Decode(ctx, savedReport, strings.NewReader(completeCheck))
+	_, err = report.Decode(ctx, savedReport, report.ReaderRequiringStorage(strings.NewReader(completeCheck)))
 
 	found, _ = report.AsError(err)
 	if found.Diagnostic.Code != report.CodeInterrupted || found.Status().ExitCode() != 130 || !errors.Is(err, context.Canceled) {
@@ -307,7 +307,7 @@ func TestReadFailuresAndInterruption(t *testing.T) {
 
 	// A reader that cancels while delivering the last bytes: the token pass notices it.
 	ctx, cancel = context.WithCancel(context.Background())
-	_, err = report.Decode(ctx, savedReport, &cancelAfterRead{cancel: cancel, data: []byte(completeCheck)})
+	_, err = report.Decode(ctx, savedReport, report.ReaderRequiringStorage(&cancelAfterRead{cancel: cancel, data: []byte(completeCheck)}))
 
 	if errorCode(err) != report.CodeInterrupted {
 		t.Errorf("cancel during read: %v", err)

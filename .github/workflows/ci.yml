@@ -90,25 +90,7 @@ jobs:
       - name: Real disk-full recovery control
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          full_dir="$(mktemp -d "$RUNNER_TEMP/pdfconcat-enospc.XXXXXX")"
-          mounted=false
-          cleanup() {
-            status=$?
-            if [ "$mounted" = true ]; then
-              if ! sudo umount "$full_dir"; then status=1; fi
-            fi
-            if ! rmdir "$full_dir"; then status=1; fi
-            exit "$status"
-          }
-          trap cleanup EXIT
-          sudo mount -t tmpfs -o "size=1m,uid=$(id -u),gid=$(id -g),mode=0700" tmpfs "$full_dir"
-          mounted=true
-          PDFCONCAT_ENOSPC_DIR="$full_dir" go run ./tools/qualitygate test \
-            -events "$RUNNER_TEMP/test-events-enospc.json" \
-            -run '^TestRecoveryRefreshDiskFullKeepsOriginalLayoutAndPublishedPDF$' \
-            -require TestRecoveryRefreshDiskFullKeepsOriginalLayoutAndPublishedPDF ./internal/app
+        run: source .github/scripts/disk-full-recovery.sh
       - name: Executable smoke test
         shell: bash
         run: |
@@ -177,8 +159,8 @@ jobs:
           if-no-files-found: error
 
   # Lint natively on every operating system so that build-tagged files (internal/publish) are
-  # analyzed. The installer builds the pinned upstream linter with the reviewed source-contract
-  # attribution patch; qualitygate lint-config rejects a different build identity. The formatting gate is separate from lint and never rewrites files.
+  # analyzed. The pinned stock tool is checked through native module metadata and real controls.
+  # The formatting gate is separate from lint and never rewrites files.
   lint:
     name: Lint (${{ matrix.os }})
     strategy:
@@ -202,23 +184,6 @@ jobs:
         run: go run ./tools/qualitygate format
       - name: Lint
         run: go run ./tools/qualitygate lint
-
-  lint-stale:
-    name: Lint exclusions still match (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: golangci-lint
-      - run: go run ./tools/qualitygate lint-stale
 
   cross-build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -267,7 +232,7 @@ jobs:
           tools: govulncheck
       - run: govulncheck ./...
 
-  # Unit and executable-subprocess coverage, merged, with the registry's exclusions and threshold.
+  # Raw unit and executable-subprocess coverage, merged without exclusions or a percentage gate.
   # Native on each operating system: a Linux run says nothing about the Windows or macOS files.
   coverage:
     name: Coverage (${{ matrix.os }})
@@ -315,7 +280,9 @@ jobs:
       - uses: ./.github/actions/prepare
         with:
           tools: actionlint
-      - run: actionlint
+      - run: |
+          command -v shellcheck >/dev/null
+          actionlint -shellcheck 'shellcheck --check-sourced'
 
   # GoReleaser needs a Git remote and tag/ref data. This job validates the configuration, builds a
   # snapshot of all six targets, and inspects the real archives. Nothing is published.

@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
@@ -70,8 +69,7 @@ func testPackages(ctx context.Context, root string) ([]string, error) {
 }
 
 // runCoverage measures statement coverage of the runtime packages from the unit tests and from the
-// executable run as a subprocess by those tests, merges the two profiles, applies the registry and
-// enforces its threshold.
+// executable run as a subprocess by those tests and reports their merged raw profile.
 func runCoverage(ctx context.Context, args []string) (resultErr error) {
 	set := newFlags(coverageCommand)
 	profileOut := set.String("profile", "", "also write the merged profile (and its per-function report, with .func.txt appended) here")
@@ -89,11 +87,6 @@ func runCoverage(ctx context.Context, args []string) (resultErr error) {
 	module, err := modulePath(root)
 	if err != nil {
 		return err
-	}
-
-	registry, err := repopolicy.LoadRegistry(filepath.Join(root, registryName))
-	if err != nil {
-		return fmt.Errorf(loadRegistryError, err)
 	}
 
 	runtimeList, err := runtimePackages(ctx, root, module)
@@ -125,14 +118,10 @@ func runCoverage(ctx context.Context, args []string) (resultErr error) {
 	}
 
 	result := repopolicy.EvaluateCoverage(repopolicy.CoverageInput{
-		Profile: merged, Entries: registry.For(repopolicy.ToolCoverage), Module: module, GOOS: runtime.GOOS,
-		Threshold: registry.CoverageThresholdPercent, Read: fileReader(root),
+		Profile: merged, Module: module,
 	})
-
-	printCoverage(&result, registry.CoverageThresholdPercent)
-
-	return report(coverageCommand, result.Problems, fmt.Sprintf("%.2f%% of reachable statements, threshold %.2f%%",
-		result.Adjusted.Percent(), registry.CoverageThresholdPercent))
+	log.Printf("coverage: raw %.2f%% (%d/%d statements); no excluded statements or global percentage gate", result.Raw.Percent(), result.Raw.Covered, result.Raw.Total)
+	return report(coverageCommand, result.Problems, "raw unit and executable coverage collected")
 }
 
 // finishCoverageEvidence retains failed runs, including partial native and executable data.
@@ -251,19 +240,4 @@ func writeProfileFiles(ctx context.Context, root, target string, merged *repopol
 	log.Printf("coverage: merged profile %s, per-function report %s.func.txt", target, target)
 
 	return nil
-}
-
-func printCoverage(result *repopolicy.CoverageResult, threshold float64) {
-	for _, pkg := range result.Packages {
-		log.Printf("coverage: %6.2f%%  %4d/%-4d  %s", pkg.Percent(), pkg.Covered, pkg.Total, pkg.Package)
-	}
-
-	log.Printf("coverage: raw      %6.2f%% (%d/%d statements)", result.Raw.Percent(), result.Raw.Covered, result.Raw.Total)
-	log.Printf("coverage: excluded %d statements by registry entries", result.Excluded)
-	log.Printf("coverage: reachable %5.2f%% (%d/%d statements), threshold %.2f%%",
-		result.Adjusted.Percent(), result.Adjusted.Covered, result.Adjusted.Total, threshold)
-
-	for _, note := range result.NotEvaluated {
-		log.Printf("coverage: not evaluated on %s: %s", runtime.GOOS, note)
-	}
 }

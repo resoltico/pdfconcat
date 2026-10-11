@@ -22,6 +22,9 @@ func TestRoleNames(t *testing.T) {
 			t.Errorf("role %d has no name", role)
 		}
 	}
+	if got := Role(0).String(); got != "file" {
+		t.Errorf("unset role was presented as %q, want generic file", got)
+	}
 }
 
 func TestIdentityOfFollowsLinksAndReportsMissing(t *testing.T) {

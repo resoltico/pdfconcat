@@ -81,7 +81,7 @@ func frozenMutationAuthorityFixture(t *testing.T, root string) string {
 	}
 
 	writeMutationAuthorityFixture(t, snapshot, moduleFileName, []byte("module frozen.source\ngo 1.27.1\n"))
-	writeMutationAuthorityFixture(t, snapshot, registryName, []byte("version: 1\ncoverage_threshold_percent: 100\nexceptions: []\n"))
+	writeMutationAuthorityFixture(t, snapshot, registryName, []byte("version: 1\nexceptions: []\n"))
 
 	return snapshot
 }

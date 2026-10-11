@@ -45,7 +45,7 @@ func TestStagePinRejectsSubstitutedFIFOWithoutWaitingForWriter(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		staged, err := stageWith(t.Context(), ops, filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+		staged, err := stageWith(StageTestContext(t), ops, filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 		if staged != nil {
 			err = errors.Join(err, staged.Discard())
 		}

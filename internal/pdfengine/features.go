@@ -184,11 +184,7 @@ func (o *featureObserver) nameTrees(ctx context.Context, names types.Dict) error
 			return err
 		}
 
-		if !material {
-			continue
-		}
-
-		o.found[kind] = true
+		o.found[kind] = o.found[kind] || material
 	}
 
 	return nil

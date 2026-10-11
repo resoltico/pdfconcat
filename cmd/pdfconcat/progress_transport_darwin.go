@@ -101,7 +101,8 @@ func openProgressPipe(descriptor uintptr) (progressNativeSink, error) {
 		return progressNativeSink{}, fmt.Errorf("duplicate progress pipe: %w", dupErr)
 	}
 
-	guard, openErr := unix.Open("/dev/null", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	// The readonly null guard reserves the slot and rejects late writes with EBADF.
+	guard, openErr := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if openErr != nil {
 		return progressNativeSink{}, errors.Join(fmt.Errorf("reserve progress cancellation sink: %w", openErr), unix.Close(owned))
 	}
@@ -152,10 +153,7 @@ func (transport *progressTransport) stopNativeProgress() {
 }
 
 func (transport *progressTransport) closeNativeProgress() {
-	transport.closeErr = unix.Close(transport.fd)
-	if transport.guard >= 0 {
-		transport.closeErr = errors.Join(transport.closeErr, unix.Close(transport.guard))
-	}
+	transport.closeErr = closeProgressNativeSink(progressNativeSink{fd: transport.fd, guard: transport.guard})
 }
 
 func (transport *progressTransport) run() {

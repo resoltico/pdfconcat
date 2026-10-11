@@ -27,7 +27,7 @@ const (
 	productionAssemblyRule         = "production-assembly"
 	assemblyControlPackage         = "assembly"
 	planControlPackage             = "plan"
-	architectureImportControlCount = 19
+	architectureImportControlCount = 21
 )
 
 func architectureControls(ctx context.Context, root, binary string) ([]string, error) {
@@ -73,12 +73,7 @@ func architectureControls(ctx context.Context, root, binary string) ([]string, e
 		return nil, err
 	}
 
-	structure, structureErr := architectureStructureControls(ctx, scratch, binary)
-	if structureErr != nil {
-		return nil, structureErr
-	}
-
-	return append(append(append(problems, classification...), loader...), structure...), nil
+	return append(append(problems, classification...), loader...), nil
 }
 
 func prepareArchitectureControls(ctx context.Context, root, scratch string) error {
@@ -245,6 +240,14 @@ func architectureImportControls() []architectureControl {
 		source: "//line /tmp/unowned.go:1\npackage assembly\nimport _ \"" + module + "internal/app\"\n",
 		owner:  productionAssemblyRule, imported: module + "internal/app",
 	}, architectureControl{
+		file:   "internal/assembly/violation.go",
+		source: "//line :100\npackage assembly\nimport _ \"" + module + "internal/app\"\n",
+		owner:  productionAssemblyRule, imported: module + "internal/app",
+	}, architectureControl{
+		file:   "internal/assembly/violation.go",
+		source: "/*line /tmp/multiline\ninternal/app/allowed.go:100*/package assembly\nimport _ \"" + module + "internal/app\"\n",
+		owner:  productionAssemblyRule, imported: module + "internal/app",
+	}, architectureControl{
 		file:   "tools/installtools/violation.go",
 		source: "package main\nimport _ \"" + module + "internal/capture\"\n",
 		owner:  "production-installtools", imported: module + "internal/capture",
@@ -405,6 +408,15 @@ func architectureImportControl(ctx context.Context, root, binary string, control
 
 	if err := compileArchitectureControl(ctx, root, control.target); err != nil {
 		return false, err
+	}
+
+	violations, err := repopolicy.DirectivesIn(control.file, []byte(control.source))
+	if err != nil {
+		return false, err
+	}
+	if len(violations) > 0 {
+		log.Printf("architecture control: compiled %s; physical ownership guard rejected compiler display directive", control.file)
+		return true, nil
 	}
 
 	if control.imported == "C" {

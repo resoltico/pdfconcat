@@ -8,7 +8,6 @@ import (
 	"debug/buildinfo"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"strings"
@@ -21,11 +20,6 @@ type SourceBuildIdentity struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
 	Date    string `json:"date"`
-}
-
-// GolangciBuildIdentity derives metadata from the authoritative upstream and patch pins.
-func GolangciBuildIdentity(versions map[string]string) (SourceBuildIdentity, error) {
-	return sourceBuildIdentity(versions, "GOLANGCI_LINT", "source-contracts")
 }
 
 // GremlinsBuildIdentity identifies the reviewed executor source variant without inventing VCS metadata.
@@ -88,30 +82,6 @@ func VerifyGolangciBinaryMetadata(file string) error {
 
 	if settings["GOOS"] != runtime.GOOS || settings["GOARCH"] != runtime.GOARCH {
 		return fmt.Errorf("%w: linter target differs from native host", ErrToolVersions)
-	}
-
-	return nil
-}
-
-// VerifyGolangciReportedIdentity checks every source/patch identity field, not only the version label.
-func VerifyGolangciReportedIdentity(data []byte, expected SourceBuildIdentity) error {
-	var actual SourceBuildIdentity
-	if err := json.Unmarshal(data, &actual); err != nil {
-		return fmt.Errorf("decode linter identity: %w", err)
-	}
-
-	if actual != expected {
-		return fmt.Errorf("%w: linter metadata differs from reviewed source/patch identity", ErrToolVersions)
-	}
-
-	return nil
-}
-
-// VerifyGolangciPatch binds the checked-in patch to the same pin used by the installed build.
-func VerifyGolangciPatch(patch []byte, versions map[string]string) error {
-	digest := sha256.Sum256(patch)
-	if hex.EncodeToString(digest[:]) != versions["GOLANGCI_LINT_PATCH_SHA256"] {
-		return fmt.Errorf("%w: linter source patch digest differs from its pin", ErrToolVersions)
 	}
 
 	return nil

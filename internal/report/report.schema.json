@@ -161,7 +161,75 @@
         "layout",
         "output_verification"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "input_inspection": {
+                "enum": [
+                  "complete",
+                  "incomplete"
+                ]
+              }
+            },
+            "required": [
+              "input_inspection"
+            ]
+          },
+          "then": {
+            "properties": {
+              "instructions": {
+                "const": "complete"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "layout": {
+                "enum": [
+                  "complete",
+                  "incomplete"
+                ]
+              }
+            },
+            "required": [
+              "layout"
+            ]
+          },
+          "then": {
+            "properties": {
+              "input_inspection": {
+                "const": "complete"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "output_verification": {
+                "enum": [
+                  "complete",
+                  "incomplete"
+                ]
+              }
+            },
+            "required": [
+              "output_verification"
+            ]
+          },
+          "then": {
+            "properties": {
+              "layout": {
+                "const": "complete"
+              }
+            }
+          }
+        }
+      ]
     },
     "counts": {
       "type": "object",
@@ -314,6 +382,23 @@
                 ]
               }
             ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "recovery_report"
+            ]
+          },
+          "then": {
+            "properties": {
+              "published": {
+                "const": true
+              },
+              "report_status": {
+                "const": "failed"
+              }
+            }
           }
         }
       ]
@@ -1319,6 +1404,67 @@
             }
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "publication": {
+            "properties": {
+              "report_status": {
+                "not": {
+                  "const": "failed"
+                }
+              }
+            }
+          },
+          "phases": {
+            "properties": {
+              "layout": {
+                "const": "complete"
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "command": {
+                  "const": "build"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "publication": {
+                  "properties": {
+                    "published": {
+                      "const": true
+                    }
+                  }
+                },
+                "phases": {
+                  "properties": {
+                    "output_verification": {
+                      "const": "complete"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     }
   ]

@@ -21,6 +21,7 @@ func (c *validationContext) Err() error {
 	}
 	return nil
 }
+
 func TestSemanticValidationStopsOwnedSourceTraversal(t *testing.T) {
 	builder := NewBuilder("check")
 	builder.AddDiagnostic(0, Diagnostic{Stage: StageRead, Code: CodeReadFailed, Message: "synthetic failure"})

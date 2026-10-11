@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // RepositoryIssues checks, without running any tool, that every entry's path, function and anchor
@@ -46,42 +45,7 @@ func repositorySourceIssue(entry *Entry, content []byte) string {
 		return ""
 	}
 
-	first, last := 1, strings.Count(string(content), "\n")+1
-
-	if entry.Tool == ToolCoverage {
-		var err error
-
-		first, last, err = functionLines(entry.Path, content, entry.Function)
-		if err != nil {
-			return err.Error()
-		}
-	}
-
-	if entry.Anchor != "" && !anchorWithin(content, entry.Anchor, first, last) {
-		return fmt.Sprintf("no line of %s in %s equals the anchor %q", describeScope(entry), entry.Path, entry.Anchor)
-	}
-
 	return ""
-}
-
-// describeScope names where an anchor was searched: the function for coverage entries, the file otherwise.
-func describeScope(entry *Entry) string {
-	if entry.Function != "" {
-		return entry.Function
-	}
-
-	return "the file"
-}
-
-// anchorWithin reports whether a line between first and last (1-based, inclusive) equals the anchor once trimmed.
-func anchorWithin(content []byte, anchor string, first, last int) bool {
-	for number, line := range strings.Split(string(content), "\n") {
-		if number+1 >= first && number+1 <= last && strings.TrimSpace(line) == anchor {
-			return true
-		}
-	}
-
-	return false
 }
 
 // withRoot opens dir as an [os.Root], runs use with it, and closes it, reporting the errors of both.

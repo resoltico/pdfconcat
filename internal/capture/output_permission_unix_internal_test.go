@@ -46,3 +46,34 @@ func TestUnobservableProtectedOutputCannotAuthorizeReportReplacement(t *testing.
 		t.Fatal("filesystem root was considered absent")
 	}
 }
+
+func TestInaccessibleOutputParentIsNotObservedAbsence(t *testing.T) {
+	t.Parallel()
+	permissiontest.RequireEnforcement(t)
+	ancestor := t.TempDir()
+	parent := filepath.Join(ancestor, "parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(parent, outputPath)
+	writeTestFile(t, output, []byte("preserve"))
+	registry := NewRegistry()
+	if err := registry.ProtectOutput(output); err != nil {
+		t.Fatal(err)
+	}
+	restore := permissiontest.DenyDirectoryChanges(t, ancestor)
+	if err := os.Chmod(ancestor, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := inspectIdentity(parent); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("native child-parent observation did not encounter search denial: %v", err)
+	}
+	if err := registry.ProtectOutput(output); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("unknown output identity guessed as absence: %v", err)
+	}
+	if _, err := registry.Add(RoleReport, filepath.Join(t.TempDir(), "safe.json")); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("refresh guessed inaccessible output was absent: %v", err)
+	}
+	restore()
+	requireRegistryAlias(t, registry, RoleFont, output, RoleOutput, output)
+}

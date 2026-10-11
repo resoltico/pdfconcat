@@ -130,7 +130,7 @@ The four phases of a report (`instructions`, `input_inspection`, `layout`, `outp
 - `internal/exectest` builds the executable for tests that run it as a child process, instrumented when the coverage gate asks, so subprocess execution is part of merged coverage.
 - `test/scale` holds the reproducible scale acceptance harness (`PDFCONCAT_SCALE=1`).
 - `internal/doccontract` holds tests that keep the contract documents in agreement with the code: documented options, commands, usage codes and exit statuses against the parser, every `json` example against the plan decoder, every `console` example against the command parser, and every Python recipe against the Python compiler.
-- `internal/repopolicy` holds tests for repository-wide rules: no inline lint exceptions, and every entry in the lint-exception registry is justified.
+- `internal/repopolicy` holds tests for repository-wide rules: physical owned-source guards, stock correctness checks and precise mutation judgments.
 
 ## Dependency rules
 
@@ -140,9 +140,9 @@ The computational domain and typesetting core do not own filesystem or process s
 
 `go run ./tools/qualitygate architecture` derives production classification from that configuration and checks every owned production file against the compiled-file union of all six supported OS/architecture targets. It rejects unclassified or ambiguously classified files, unsupported build-tag gaps, empty discovery and package-loading errors. This is static coverage of policy and target variants; it does not establish native execution. Native lint jobs analyze each operating system's compiled code.
 
-Analysis uses the reviewed source-contract patches to the pinned linter: compiler `//line` directives remain legal and unchanged, while import selectors and diagnostic predicates use actual source files and physical positions. The source installer verifies the upstream module archive and checksum-database identity, applies the pinned patch without changing its dependency files, uses temporary vendor-mode dependencies, tests physical positions and concrete comparison/key field reachability, and builds with a distinct patch-derived version/cache identity. The patch is development tooling, separately licensed from the runtime; [`CONTRIBUTING.md`](../CONTRIBUTING.md) describes prerequisites and source verification. Source-epoch metadata identifies the upstream source, not the build time.
+Analysis uses the pinned stock correctness profile. The physical AST comment guard rejects active compiler display directives in owned source before adjusted filenames can affect analyzer ownership. Compiled negative controls exercise the actual import policy and the display-mapping escape. Directive literals in test fixtures remain supported. Stock field-write behavior is supplemented by identity/form/link regression matrices and independent PDF oracles. [Verification](VERIFICATION.md) records the enforcement disposition and narrow suppressions; [CONTRIBUTING.md](../CONTRIBUTING.md) describes setup and commands.
 
-Tests and support packages have deliberate policies that permit independent fixture/oracle imports while production rules reject runtime imports of test helpers. [`.quality-exceptions.yml`](../.quality-exceptions.yml) is the only exception authority, including the narrow italic-font and native FIFO test controls. New dependencies or responsibility changes update the policy, affected callers and real rejection controls together.
+Tests and support packages have deliberate policies that permit independent fixture/oracle imports while production rules reject runtime imports of test helpers. [`.quality-exceptions.yml`](../.quality-exceptions.yml) records precise mutation judgments. Narrow lint diagnostic suppressions live in the explicit `.golangci.yml` profile. New dependencies or responsibility changes update the policy, affected callers and real rejection controls together.
 
 ## One-pass assembly
 

@@ -225,5 +225,12 @@ func sourceLimits(ctx context.Context, root string) error {
 		return err
 	}
 
+	violations, err := repopolicy.ScanDirectives(ctx, root)
+	if err != nil {
+		return err
+	}
+	for _, violation := range violations {
+		problems = append(problems, violation.String())
+	}
 	return report("source-limits", problems, "every owned physical source file satisfies size and exported-type limits")
 }

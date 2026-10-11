@@ -45,6 +45,10 @@ func (c *endingContext) Err() error {
 }
 
 func (r *endingReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, io.ErrNoProgress
+	}
+
 	if r.done {
 		return 0, io.EOF
 	}
@@ -87,7 +91,7 @@ func TestStageEndedContextIsReportedAsTheContextErrorNotAsAWriteFailure(t *testi
 func TestStageMeasuresTheWholeContentAgainstTheLimit(t *testing.T) {
 	t.Parallel()
 
-	content := bytes.Repeat([]byte("0"), 2*stageChunkSize+7)
+	content := bytes.Repeat([]byte("0"), 2*fixtureChunkBoundaryBytes+7)
 	total := int64(len(content))
 
 	tests := map[string]struct {
@@ -96,10 +100,10 @@ func TestStageMeasuresTheWholeContentAgainstTheLimit(t *testing.T) {
 	}{
 		"limit equals the content":           {total, false},
 		"limit one byte short":               {total - 1, true},
-		"limit just above one chunk":         {stageChunkSize + 10, true},
+		"limit just above one chunk":         {fixtureChunkBoundaryBytes + 10, true},
 		"limit above the content":            {total + 1, false},
-		"limit equals the first chunk":       {stageChunkSize, true},
-		"limit equals the first two chunks":  {2 * stageChunkSize, true},
+		"limit equals the first chunk":       {fixtureChunkBoundaryBytes, true},
+		"limit equals the first two chunks":  {2 * fixtureChunkBoundaryBytes, true},
 		"limit one below the last-chunk end": {total - 2, true},
 	}
 	for name, test := range tests {
@@ -123,10 +127,11 @@ func requireLimitExceeded(t *testing.T, content []byte, limit int64) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, shortReportPath)
 
-	_, err := Stage(t.Context(), target, bytes.NewReader(content), limit)
+	_, err := Stage(StageTestContext(t), target, readerRequiringStorage(bytes.NewReader(content)), limit)
 
 	tooLarge, isLimit := errors.AsType[*SizeLimitError](err)
-	if !isLimit || tooLarge.Limit != limit || tooLarge.Target != target || len(names(t, dir)) != 0 {
+	leftovers := names(t, dir)
+	if !isLimit || tooLarge.Limit != limit || tooLarge.Target != target || len(leftovers) != 0 {
 		t.Fatalf("Stage() = %v; directory %v", err, names(t, dir))
 	}
 }
@@ -137,9 +142,10 @@ func requireStagedExactly(t *testing.T, content []byte, limit int64) {
 
 	total := int64(len(content))
 
-	staged, err := Stage(t.Context(), filepath.Join(t.TempDir(), shortReportPath), bytes.NewReader(content), limit)
+	dir := t.TempDir()
+	staged, err := Stage(StageTestContext(t), filepath.Join(dir, shortReportPath), readerRequiringStorage(bytes.NewReader(content)), limit)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("stage failure %v; leftovers %v", err, names(t, dir))
 	}
 
 	info, statErr := os.Stat(staged.Path())
@@ -159,10 +165,10 @@ func TestStageWritesOnlyNonEmptyChunks(t *testing.T) {
 	}{
 		"empty content":          {0, 0},
 		"one byte":               {1, 1},
-		"exactly one chunk":      {stageChunkSize, 1},
-		"one byte over a chunk":  {stageChunkSize + 1, 2},
-		"exactly two chunks":     {2 * stageChunkSize, 2},
-		"one byte under a chunk": {stageChunkSize - 1, 1},
+		"exactly one chunk":      {fixtureChunkBoundaryBytes, 1},
+		"one byte over a chunk":  {fixtureChunkBoundaryBytes + 1, 2},
+		"exactly two chunks":     {2 * fixtureChunkBoundaryBytes, 2},
+		"one byte under a chunk": {fixtureChunkBoundaryBytes - 1, 1},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -179,9 +185,9 @@ func TestStageWritesOnlyNonEmptyChunks(t *testing.T) {
 
 			target := filepath.Join(t.TempDir(), shortReportPath)
 
-			staged, err := stageWith(t.Context(), ops, target, bytes.NewReader(make([]byte, test.size)), 1<<30)
+			staged, err := stageWith(StageTestContext(t), ops, target, readerRequiringStorage(bytes.NewReader(make([]byte, test.size))), 1<<30)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("stage failure %v; leftovers %v", err, names(t, filepath.Dir(target)))
 			}
 
 			discardStaged(t, staged)

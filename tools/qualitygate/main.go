@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Ervins Strauhmanis
 
 // Command qualitygate runs the repository's quality gates that need more than `go test`: lint
-// configuration and staleness checks against the central exception registry, test discovery,
+// correctness-profile and physical source checks, complete test discovery,
 // merged coverage, bounded fuzzing, mutation testing with its negative controls, and release
 // archive inspection. Run it from anywhere inside the repository.
 //
@@ -47,13 +47,12 @@ const (
 	usage = `usage: go run ./tools/qualitygate <command> [flags]
 
 commands:
-  architecture  verify owned target selection, production ownership and real import/structure controls
+  architecture  verify owned target selection, production ownership and compiled import controls
   lint          run configured lint over every owned compiled package, including fixtures
   format        verify formatting of every owned Go source directory
-  lint-config   verify .golangci.yml against .quality-exceptions.yml and the pinned golangci-lint
-  lint-stale    verify every lint diagnostic exclusion still matches a real diagnostic
+  lint-config   verify explicit correctness profile and pinned stock golangci-lint
   test          run go test with discovery checks (flags: -race -run -require -timeout)
-  coverage      run unit and executable-subprocess coverage, merge, apply the registry, enforce the threshold
+  coverage      run unit and executable-subprocess coverage, merge, report raw statement coverage
   fuzz          run every fuzz target on macOS/Linux (-time duration|Nx)
   mutation      run mutation testing in a clean snapshot and judge it against the registry
   controls      prove the tests detect deliberate mutations listed in tools/mutation-controls.yml
@@ -77,7 +76,6 @@ commands:
 	coverageCommand       = "coverage"
 	loadRegistryError     = "load registry: %w"
 	lintConfigCommand     = "lint-config"
-	lintStaleCommand      = "lint-stale"
 	lintConfigFileName    = ".golangci.yml"
 	scratchLintConfigName = "golangci.yml"
 	lintReportFileName    = "report.json"
@@ -145,7 +143,7 @@ func dispatch(ctx context.Context, args []string) error {
 		return runSecrets(ctx, rest)
 	case architectureCommand:
 		return architecture(ctx, rest)
-	case lintCommand, formatCommand, lintConfigCommand, lintStaleCommand:
+	case lintCommand, formatCommand, lintConfigCommand:
 		return dispatchLint(ctx, command, rest)
 	case testVerb:
 		return runTests(ctx, rest)
@@ -263,8 +261,6 @@ func dispatchLint(ctx context.Context, name string, args []string) error {
 		return formatOwned(ctx, args)
 	case lintConfigCommand:
 		return lintConfig(ctx, args)
-	case lintStaleCommand:
-		return lintStale(ctx, args)
 	default:
 		return fmt.Errorf("%w: unknown lint action %s", errGate, name)
 	}

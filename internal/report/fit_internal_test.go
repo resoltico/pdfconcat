@@ -51,7 +51,7 @@ func TestCapturedFitCodecCountsAndSelectedPageResolveSharedFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded, err := Decode(t.Context(), capturedFitFile, bytes.NewReader(buffer.Bytes()))
+	decoded, err := Decode(DecoderTestContext(t.Context(), t), capturedFitFile, ReaderRequiringStorage(bytes.NewReader(buffer.Bytes())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,12 +75,12 @@ func TestCapturedFitCodecCountsAndSelectedPageResolveSharedFacts(t *testing.T) {
 	limits := DefaultLimits()
 
 	limits.MaxNodes = report.nodes()
-	if _, err = DecodeLimited(t.Context(), capturedFitFile, bytes.NewReader(buffer.Bytes()), limits); err != nil {
+	if _, err = DecodeLimited(DecoderTestContext(t.Context(), t), capturedFitFile, ReaderRequiringStorage(bytes.NewReader(buffer.Bytes())), limits); err != nil {
 		t.Fatalf("exact node budget rejected captured geometry: %v", err)
 	}
 
 	limits.MaxNodes--
-	if _, err = DecodeLimited(t.Context(), capturedFitFile, bytes.NewReader(buffer.Bytes()), limits); err == nil {
+	if _, err = DecodeLimited(DecoderTestContext(t.Context(), t), capturedFitFile, ReaderRequiringStorage(bytes.NewReader(buffer.Bytes())), limits); err == nil {
 		t.Fatal("one-less node budget accepted captured geometry")
 	}
 }
@@ -124,12 +124,12 @@ func TestCapturedFitLocationNodeBudget(t *testing.T) {
 		limits := DefaultLimits()
 
 		limits.MaxNodes = report.nodes()
-		if _, err := DecodeLimited(t.Context(), "fit-location.json", bytes.NewReader(buffer.Bytes()), limits); err != nil {
+		if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), "fit-location.json", ReaderRequiringStorage(bytes.NewReader(buffer.Bytes())), limits); err != nil {
 			t.Fatalf("exact location node budget: %v", err)
 		}
 
 		limits.MaxNodes--
-		if _, err := DecodeLimited(t.Context(), "fit-location.json", bytes.NewReader(buffer.Bytes()), limits); err == nil {
+		if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), "fit-location.json", ReaderRequiringStorage(bytes.NewReader(buffer.Bytes())), limits); err == nil {
 			t.Fatal("one-less location budget admitted")
 		}
 	}

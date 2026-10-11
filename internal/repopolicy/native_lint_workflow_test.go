@@ -25,8 +25,6 @@ type (
 	}
 )
 
-const nativeStaleJob = "lint-stale"
-
 func TestNativeLintUsesEveryHostedNativeTestPlatform(t *testing.T) {
 	t.Parallel()
 
@@ -35,7 +33,7 @@ func TestNativeLintUsesEveryHostedNativeTestPlatform(t *testing.T) {
 		t.Fatalf("native lint platform coverage differs from hosted tests: %v", problems)
 	}
 
-	for _, job := range []string{"lint", nativeStaleJob} {
+	for _, job := range []string{"lint"} {
 		t.Run("missing target in "+job, func(t *testing.T) {
 			t.Parallel()
 
@@ -74,7 +72,7 @@ func nativeLintPlatformProblems(jobs map[string]nativeWorkflowJob) []string {
 
 	var problems []string
 
-	for _, name := range []string{"lint", nativeStaleJob} {
+	for _, name := range []string{"lint"} {
 		got := slices.Clone(jobs[name].Strategy.Matrix.OS)
 		slices.Sort(got)
 

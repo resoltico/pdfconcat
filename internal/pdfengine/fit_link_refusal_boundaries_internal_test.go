@@ -6,6 +6,7 @@ package pdfengine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"strings"
@@ -52,6 +53,57 @@ func TestFitCatalogRejectsMalformedTreesAndEditableFields(t *testing.T) {
 			_, err := inspectPageFits(t.Context(), pdf, PageSize{612, 1008})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("malformed catalog admitted or lost context: %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestFitCatalogDestinationTreeRequiresDepthProgress(t *testing.T) {
+	t.Parallel()
+	for _, depth := range []int{maxFeatureDepth, maxFeatureDepth + 1} {
+		t.Run(fmt.Sprintf("depth-%d", depth), func(t *testing.T) {
+			t.Parallel()
+			pdf, _, _ := fitLinkFixture(t)
+			tree := types.Dict{}
+			for range depth {
+				tree = types.Dict{keyKids: types.Array{tree}}
+			}
+			pdf.RootDict[keyNames] = types.Dict{keyDests: tree}
+			inspector := fitInspector{pdf: pdf, destinations: map[fitDestinationKey]types.Object{}}
+			err := inspector.catalog(t.Context())
+			if depth == maxFeatureDepth {
+				if err != nil {
+					t.Fatalf("inclusive fitted destination depth refused: %v", err)
+				}
+			} else if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), "levels") {
+				t.Fatalf("overdeep fitted destination tree admitted: %v", err)
+			}
+		})
+	}
+}
+
+func TestFitDestinationDictionaryRequiresDepthProgress(t *testing.T) {
+	t.Parallel()
+	for _, depth := range []int{maxFeatureDepth, maxFeatureDepth + 1} {
+		t.Run(fmt.Sprintf("depth-%d", depth), func(t *testing.T) {
+			t.Parallel()
+			pdf, _, _ := fitLinkFixture(t)
+			page := *types.NewIndirectRef(3, 0)
+			var destination types.Object = types.Array{page, types.Name(fitDestinationMode)}
+			for range depth {
+				destination = types.Dict{"D": destination}
+			}
+			pdf.RootDict[keyDests] = types.Dict{"deep": destination}
+			inspector := fitInspector{
+				pdf: pdf, pages: map[types.IndirectRef]bool{page: true}, destinations: map[fitDestinationKey]types.Object{},
+			}
+			err := inspector.catalog(t.Context())
+			if depth == maxFeatureDepth {
+				if err != nil {
+					t.Fatalf("inclusive destination dictionary depth refused: %v", err)
+				}
+			} else if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), "levels") {
+				t.Fatalf("overdeep destination dictionary admitted: %v", err)
 			}
 		})
 	}

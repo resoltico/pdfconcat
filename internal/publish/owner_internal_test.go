@@ -23,7 +23,7 @@ func TestOwnerPinRejectsUnlinkReplacementAndDiscardPreservesUnknownBytes(t *test
 	t.Parallel()
 	dir := t.TempDir()
 
-	staged, stageErr := Stage(t.Context(), filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}
@@ -58,7 +58,7 @@ func TestOwnerPinClosesAfterEveryStagedTerminalOutcome(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 
-			staged, stageErr := Stage(t.Context(), filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+			staged, stageErr := Stage(StageTestContext(t), filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 			if stageErr != nil {
 				t.Fatal(stageErr)
 			}
@@ -147,7 +147,7 @@ func TestStagePinRejectsSubstitutionBeforeWritingAndPreservesUnknownBytes(t *tes
 		return file, nil
 	}
 
-	_, err := stageWith(t.Context(), ops, filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+	_, err := stageWith(StageTestContext(t), ops, filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if !errors.Is(err, errOwnerChanged) {
 		t.Fatalf("substitution accepted: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestStagePinRejectsSubstitutionBeforeWritingAndPreservesUnknownBytes(t *tes
 func TestOwnerVerificationMissingPathAndClosedLiveHandle(t *testing.T) {
 	t.Parallel()
 
-	staged, stageErr := Stage(t.Context(), filepath.Join(t.TempDir(), reportPath), strings.NewReader(reportContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), filepath.Join(t.TempDir(), reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}
@@ -225,7 +225,7 @@ func TestPublishRejectsSubstitutedStageBeforeTouchingTarget(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	staged, err := Stage(t.Context(), filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+	staged, err := Stage(StageTestContext(t), filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestOwnerRejectsSymlinkToPinnedOriginalAndPreservesNamespace(t *testing.T) 
 	t.Parallel()
 	dir := t.TempDir()
 
-	staged, stageErr := Stage(t.Context(), filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}
@@ -293,7 +293,7 @@ func TestOwnerRejectsSymlinkToPinnedOriginalAndPreservesNamespace(t *testing.T) 
 func TestOwnerCleanupMissingNamespaceClosesPin(t *testing.T) {
 	t.Parallel()
 
-	staged, stageErr := Stage(t.Context(), filepath.Join(t.TempDir(), reportPath), strings.NewReader(reportContent), 1000)
+	staged, stageErr := Stage(StageTestContext(t), filepath.Join(t.TempDir(), reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if stageErr != nil {
 		t.Fatal(stageErr)
 	}
@@ -346,7 +346,7 @@ func TestStagePinOpenFailureClosesWriterWithoutRemovingForeignPath(t *testing.T)
 		return file, nil
 	}
 
-	_, err := stageWith(t.Context(), ops, filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+	_, err := stageWith(StageTestContext(t), ops, filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing pin entry accepted: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestStagePinRejectsInitialSymlinkToOriginalObject(t *testing.T) {
 		return file, nil
 	}
 
-	_, stageErr := stageWith(t.Context(), ops, filepath.Join(dir, reportPath), strings.NewReader(reportContent), 1000)
+	_, stageErr := stageWith(StageTestContext(t), ops, filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if !errors.Is(stageErr, errOwnerChanged) {
 		t.Fatalf("initial same-object symlink accepted: %v", stageErr)
 	}

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"

@@ -37,7 +37,7 @@ func fitRestrictedColor(operation cs.Operation) error {
 
 func fitRestrictedExtGState(dict types.Dict) error {
 	for _, key := range []string{"TR", "TR2", "BG", "BG2", "UCR", "UCR2", "HT", "RI"} {
-		if value, found := dict[key]; found && materialFeatureValue(value) {
+		if materialFeatureValue(dict[key]) {
 			return fmt.Errorf("%w: strict fitting color restriction refuses applied ExtGState /%s", errFitUnsupported, key)
 		}
 	}

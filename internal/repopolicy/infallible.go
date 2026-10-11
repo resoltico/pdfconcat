@@ -13,24 +13,16 @@ import (
 
 const stringsBuilderSource = "src/strings/builder.go"
 
-// InfallibleMethodPremiseIssues checks every registered errcheck method exception against the
-// selected Go SDK source. The registry remains the exception authority; this small check recognizes
+// InfallibleMethodPremiseIssues checks each selected errcheck method exception against the
+// selected Go SDK source. The correctness profile selects these sinks; this check recognizes
 // only the concrete library contracts the project has independently reviewed.
-func InfallibleMethodPremiseIssues(entries []*Entry, read SourceReader) []string {
+func InfallibleMethodPremiseIssues(symbols []string, read SourceReader) []string {
 	var problems []string
-
-	for _, entry := range entries {
-		if entry.Tool != ToolLint || entry.Setting != "linters.settings.errcheck.exclude-functions" {
-			continue
-		}
-
-		for _, symbol := range entry.Values {
-			if err := infallibleMethod(symbol, read); err != nil {
-				problems = append(problems, fmt.Sprintf("%s: %v", entry.ID, err))
-			}
+	for _, symbol := range symbols {
+		if err := infallibleMethod(symbol, read); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", symbol, err))
 		}
 	}
-
 	return problems
 }
 

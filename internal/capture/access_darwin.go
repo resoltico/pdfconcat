@@ -7,6 +7,7 @@ package capture
 import (
 	"encoding/binary"
 	"fmt"
+
 	"golang.org/x/sys/unix"
 )
 

@@ -6,14 +6,15 @@ package app
 import (
 	"context"
 	"fmt"
-	"github.com/resoltico/pdfconcat/internal/assembly"
-	"github.com/resoltico/pdfconcat/internal/capture"
-	"github.com/resoltico/pdfconcat/internal/plan"
-	"github.com/resoltico/pdfconcat/internal/report"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/assembly"
+	"github.com/resoltico/pdfconcat/internal/capture"
+	"github.com/resoltico/pdfconcat/internal/plan"
+	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 // visitContext measures cancellation checkpoints at the actual owned traversal boundary.
@@ -29,12 +30,13 @@ func (c *visitContext) Err() error {
 	}
 	return nil
 }
+
 func TestFontFailureProvenanceHasProportionalVisits(t *testing.T) {
 	for _, count := range []int{100, 1000, 10000} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			dir := t.TempDir()
 			font := filepath.Join(dir, "invalid.ttf")
-			if err := os.WriteFile(font, []byte("invalid"), 0600); err != nil {
+			if err := os.WriteFile(font, []byte("invalid"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			item := `{"blank":{"size":"100x100","text":{"value":"x","font":{"file":"invalid.ttf"}}}},`
@@ -76,6 +78,7 @@ func TestFontFailureProvenanceHasProportionalVisits(t *testing.T) {
 		})
 	}
 }
+
 func TestCancelledRegistrationDoesNotTouchFilesystem(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

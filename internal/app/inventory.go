@@ -124,7 +124,7 @@ func (p *pipeline) fontFailure(use *assembly.FontFileUse, err error) problem {
 	return found
 }
 
-// loadFont registers a font file, captures it once and validates it.
+// loadFont registers a font file, captures it once and validates it using the cache established by loadFonts.
 func (p *pipeline) loadFont(ctx context.Context, use *assembly.FontFileUse) (*typeset.Font, error) {
 	_, err := p.registry.Add(capture.RoleFont, use.Path)
 	if err != nil {
@@ -156,9 +156,6 @@ func (p *pipeline) loadFont(ctx context.Context, use *assembly.FontFileUse) (*ty
 		err = fmt.Errorf("%w: %w", errFontInvalid, err)
 	}
 
-	if p.fonts.byResource == nil {
-		p.fonts.byResource = make(map[capture.Identity]fontResource)
-	}
 	p.fonts.byResource[captured.Source] = fontResource{font: font, err: err}
 	return font, err
 }
@@ -412,7 +409,7 @@ type fontConsumerKey struct {
 	font   int
 }
 
-// indexFontConsumers performs one ordered pass; diagnostics never rescan contributions.
+// indexFontConsumers indexes external-font consumers in contribution order.
 func (p *pipeline) indexFontConsumers(ctx context.Context) error {
 	p.fontConsumers = make(map[fontConsumerKey][]string)
 	fontIndexes := make(map[string]int, len(p.flat.Fonts))
@@ -422,12 +419,12 @@ func (p *pipeline) indexFontConsumers(ctx context.Context) error {
 		}
 		fontIndexes[p.flat.Fonts[index].Path] = index
 	}
-	styleFonts := make([]int, len(p.flat.Styles))
+	// Cache external-font styles once so inherited paths are hashed per appearance.
+	styleFonts := make(map[int]int)
 	for index := range p.flat.Styles {
 		if err := p.cancelled(ctx, stageInput); err != nil {
 			return err
 		}
-		styleFonts[index] = -1
 		if font, found := fontIndexes[p.flat.Styles[index].Style.Text.Font.Value.File]; found {
 			styleFonts[index] = font
 		}
@@ -437,10 +434,14 @@ func (p *pipeline) indexFontConsumers(ctx context.Context) error {
 			return err
 		}
 		contribution := &p.flat.Contributions[index]
-		if contribution.Kind != assembly.ItemBlank || styleFonts[contribution.Style] < 0 {
+		if contribution.Kind != assembly.ItemBlank {
 			continue
 		}
-		key := fontConsumerKey{origin: fontDeclarationOrigin(p.flat, contribution), font: styleFonts[contribution.Style]}
+		font, found := styleFonts[contribution.Style]
+		if !found {
+			continue
+		}
+		key := fontConsumerKey{origin: fontDeclarationOrigin(p.flat, contribution), font: font}
 		p.fontConsumers[key] = append(p.fontConsumers[key], p.flat.Source.Pointer(contribution.Origin.Ref, ""))
 	}
 	return nil

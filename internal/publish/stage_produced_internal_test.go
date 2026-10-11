@@ -32,9 +32,9 @@ func TestProducedStageWritesToOwnedFileBeforeProducerReturns(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, reportPath)
-	content := bytes.Repeat([]byte("x"), stageChunkSize+1)
+	content := bytes.Repeat([]byte("x"), fixtureChunkBoundaryBytes+1)
 
-	staged, err := StageProduced(t.Context(), target, int64(2*len(content)), func(w io.Writer) error {
+	staged, err := StageProduced(StageTestContext(t), target, int64(2*len(content)), func(w io.Writer) error {
 		if _, err := w.Write(content); err != nil {
 			return producedWriteError(err)
 		}
@@ -54,7 +54,7 @@ func TestProducedStageWritesToOwnedFileBeforeProducerReturns(t *testing.T) {
 		return producedWriteError(err)
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("stage failure %v; leftovers %v", err, names(t, dir))
 	}
 
 	if staged.Size() != int64(2*len(content)) {
@@ -85,7 +85,7 @@ func checkProducedFailure(t *testing.T, test producedFailureCase) {
 	t.Helper()
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(StageTestContext(t))
 	defer cancel()
 
 	ops := producedFailureOperations(test, cancel)
@@ -99,7 +99,8 @@ func checkProducedFailure(t *testing.T, test producedFailureCase) {
 		calls++
 		return produceFailureContent(w, test)
 	})
-	if err == nil || len(names(t, dir)) != 0 {
+	leftovers := names(t, dir)
+	if err == nil || len(leftovers) != 0 {
 		t.Fatalf("failure %v; leftovers %v", err, names(t, dir))
 	}
 
@@ -172,7 +173,7 @@ func TestProducedStagePreservesCloseAndProductionFailures(t *testing.T) {
 		return errInjected
 	}
 
-	_, err := stageProducedWith(t.Context(), ops, filepath.Join(t.TempDir(), reportPath), 100, func(w io.Writer) error {
+	_, err := stageProducedWith(StageTestContext(t), ops, filepath.Join(t.TempDir(), reportPath), 100, func(w io.Writer) error {
 		_, err := io.WriteString(w, producedContent)
 		return producedWriteError(err)
 	})
@@ -196,7 +197,7 @@ func TestProducedWriterKeepsTheFirstFailureOnLaterWrites(t *testing.T) {
 	ops := realOperations()
 	ops.writeChunk = func(io.Writer, []byte) error { return errInjected }
 
-	_, err := stageProducedWith(t.Context(), ops, filepath.Join(dir, reportPath), 100, func(w io.Writer) error {
+	_, err := stageProducedWith(StageTestContext(t), ops, filepath.Join(dir, reportPath), 100, func(w io.Writer) error {
 		_, firstErr := io.WriteString(w, producedContent)
 
 		_, laterErr := io.WriteString(w, producedContent)
@@ -206,7 +207,8 @@ func TestProducedWriterKeepsTheFirstFailureOnLaterWrites(t *testing.T) {
 
 		return producedWriteError(laterErr)
 	})
-	if !errors.Is(err, errInjected) || len(names(t, dir)) != 0 {
+	leftovers := names(t, dir)
+	if !errors.Is(err, errInjected) || len(leftovers) != 0 {
 		t.Fatalf("stage failure %v, leftovers %v", err, names(t, dir))
 	}
 }
@@ -216,7 +218,7 @@ func TestProducedWriterCancellationBeforeFirstWriteDiscardsTheStage(t *testing.T
 
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(StageTestContext(t))
 	defer cancel()
 
 	_, err := StageProduced(ctx, filepath.Join(dir, reportPath), 100, func(w io.Writer) error {
@@ -229,7 +231,8 @@ func TestProducedWriterCancellationBeforeFirstWriteDiscardsTheStage(t *testing.T
 
 		return producedWriteError(writeErr)
 	})
-	if !errors.Is(err, context.Canceled) || len(names(t, dir)) != 0 {
+	leftovers := names(t, dir)
+	if !errors.Is(err, context.Canceled) || len(leftovers) != 0 {
 		t.Fatalf("stage cancellation %v, leftovers %v", err, names(t, dir))
 	}
 }

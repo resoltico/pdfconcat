@@ -74,7 +74,7 @@ func exerciseLateAlias(t *testing.T, alias string) {
 		t.Fatal(err)
 	}
 
-	report, err := Stage(t.Context(), target, strings.NewReader(reportContent), 1000)
+	report, err := Stage(StageTestContext(t), target, readerRequiringStorage(strings.NewReader(reportContent)), 1000)
 	if err != nil {
 		t.Fatal(err)
 	}

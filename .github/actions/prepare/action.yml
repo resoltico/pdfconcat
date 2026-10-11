@@ -6,8 +6,8 @@ description: >-
 inputs:
   tools:
     description: >-
-      Space-separated names for `go run ./tools/installtools`, including the reviewed source-patched
-      golangci-lint build. Leave empty to install none.
+      Space-separated names for `go run ./tools/installtools`, including the pinned stock
+      golangci-lint and reviewed mutation executor. Leave empty to install none.
     default: ""
   cache:
     description: >-

@@ -20,7 +20,10 @@ func TestProgressPipeCancellationReservesDelayedWriterDescriptor(t *testing.T) {
 	_, source := progressPipe(t)
 	sink, openErr := openProgressDescriptor(source)
 	requireProgressNoError(t, openErr)
-	t.Cleanup(func() { requireProgressNoError(t, errors.Join(unix.Close(sink.fd), unix.Close(sink.guard))) })
+	if sink.fd < progressMinimumOwnedDescriptor || sink.guard < progressMinimumOwnedDescriptor || sink.fd == sink.guard {
+		t.Fatal("pipe acquisition did not own distinct protected descriptors")
+	}
+	t.Cleanup(func() { requireProgressNoError(t, closeProgressNativeSink(sink)) })
 	requireProgressNoError(t, interruptProgressPipe(sink.fd, sink.guard))
 
 	marker := []byte("unrelated file stays unchanged")

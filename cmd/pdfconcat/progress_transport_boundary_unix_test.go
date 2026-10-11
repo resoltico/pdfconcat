@@ -53,6 +53,9 @@ func TestProgressTransportClosedAndUnrepresentableDescriptors(t *testing.T) {
 }
 
 func TestProgressTransportCancellationAfterAdmissionReleasesGate(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	_, writer := progressPipe(t)
 	transport := progressNativeTransport(t, writer)
@@ -82,5 +85,32 @@ func TestProgressNativeWriteErrorsPreserveCompletePendingRecord(t *testing.T) {
 	pending, err := writeProgressChunk(-1, record)
 	if !errors.Is(err, unix.EBADF) || len(pending) != len(record) {
 		t.Fatalf("failed native write lost pending bytes: %q %v", pending, err)
+	}
+}
+
+// The Go wrapper carries a symbolic descriptor here; no live kernel descriptor
+// at MaxInt32 is claimed. Range admission and native validity are distinct.
+func TestProgressNativeDescriptorAcceptsRepresentableInvalidBoundary(t *testing.T) {
+	t.Parallel()
+	file := os.NewFile(uintptr(math.MaxInt32), "representable invalid native descriptor")
+	if file == nil {
+		t.Fatal("native descriptor wrapper unavailable")
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); !errors.Is(err, unix.EBADF) {
+			t.Errorf("invalid symbolic descriptor close: %v", err)
+		}
+	})
+	descriptor, err := nativeProgressDescriptor(file)
+	requireProgressNoError(t, err)
+	if descriptor != uintptr(math.MaxInt32) {
+		t.Fatal("RawConn changed the representable descriptor value")
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(int(descriptor), &stat); !errors.Is(err, unix.EBADF) {
+		t.Fatalf("fixture unexpectedly identifies a live kernel descriptor: %v", err)
+	}
+	if _, err := newProgressTransport(file); !errors.Is(err, unix.EBADF) || errors.Is(err, errProgressDescriptorRange) {
+		t.Fatalf("representable invalid descriptor was confused with ABI range overflow: %v", err)
 	}
 }

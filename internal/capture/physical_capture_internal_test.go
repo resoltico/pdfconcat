@@ -3,6 +3,7 @@
 package capture
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestPhysicalAliasesShareOneConcurrentCapture(t *testing.T) {
@@ -25,6 +27,8 @@ func TestPhysicalAliasesShareOneConcurrentCapture(t *testing.T) {
 	var copies atomic.Int64
 	workspace.openScratch = func(path string) (io.WriteCloser, error) { copies.Add(1); return openExclusiveScratch(path) }
 	set := NewSet(workspace)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	var group sync.WaitGroup
 	for index := range 40 {
 		group.Go(func() {
@@ -32,7 +36,7 @@ func TestPhysicalAliasesShareOneConcurrentCapture(t *testing.T) {
 			if index%2 != 0 {
 				path = alias
 			}
-			captured, err := set.Capture(t.Context(), path)
+			captured, err := set.Capture(ctx, path)
 			if err != nil {
 				t.Error(err)
 				return
@@ -47,6 +51,7 @@ func TestPhysicalAliasesShareOneConcurrentCapture(t *testing.T) {
 		t.Fatalf("physical copies=%d", copies.Load())
 	}
 }
+
 func TestBoundedCaptureBoundaryAndOverflow(t *testing.T) {
 	const limit = 64 << 20
 	for _, size := range []int64{limit, limit + 1} {
@@ -63,7 +68,9 @@ func TestBoundedCaptureBoundaryAndOverflow(t *testing.T) {
 			if err = file.Close(); err != nil {
 				t.Fatal(err)
 			}
-			captured, err := NewSet(workspace).CaptureLimited(t.Context(), source, limit)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			captured, err := NewSet(workspace).CaptureLimited(ctx, source, limit)
 			if size == limit {
 				if err != nil || captured.Size != limit {
 					t.Fatalf("boundary: %+v %v", captured, err)
@@ -77,6 +84,40 @@ func TestBoundedCaptureBoundaryAndOverflow(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureLimitedRejectsNonpositiveLimitsWithoutChangingSnapshots(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
+			workspace := newTestWorkspace(t)
+			source := filepath.Join(t.TempDir(), "one-byte-source")
+			if err := os.WriteFile(source, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			set := NewSet(workspace)
+			if cached {
+				if _, err := set.Capture(t.Context(), source); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := scratchEntries(t, workspace)
+			for _, limit := range []int64{-1, 0} {
+				captured, err := set.CaptureLimited(t.Context(), source, limit)
+				if err == nil || captured != (Captured{}) || scratchEntries(t, workspace) != before {
+					t.Fatalf("invalid limit %d returned content or changed snapshots: %+v, %v", limit, captured, err)
+				}
+			}
+			captured, err := set.CaptureLimited(t.Context(), source, 1)
+			if err != nil || captured.Size != 1 {
+				t.Fatalf("positive one-byte boundary rejected: %+v, %v", captured, err)
+			}
+			content, err := os.ReadFile(captured.Path)
+			if err != nil || string(content) != "x" || scratchEntries(t, workspace) != 1 {
+				t.Fatalf("positive boundary lost actual snapshot bytes: %q, %v", content, err)
+			}
+		})
+	}
+}
+
 func TestGrowingCaptureNeverWritesBeyondLimit(t *testing.T) {
 	workspace := newTestWorkspace(t)
 	source := filepath.Join(t.TempDir(), "growing.ttf")
@@ -84,13 +125,16 @@ func TestGrowingCaptureNeverWritesBeyondLimit(t *testing.T) {
 	var maximum int64
 	workspace.afterChunk = func(size int64) {
 		maximum = max(maximum, size)
-		if err := os.WriteFile(source, make([]byte, copyChunkSize+1), 0600); err != nil {
+		if err := os.WriteFile(source, make([]byte, copyChunkSize+1), 0o600); err != nil {
 			t.Error(err)
 		}
 	}
-	captured, err := NewSet(workspace).CaptureLimited(t.Context(), source, copyChunkSize)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	captured, err := NewSet(workspace).CaptureLimited(ctx, source, copyChunkSize)
 	var failure *LimitError
-	if !errors.As(err, &failure) || maximum > copyChunkSize || captured.Path != "" || scratchEntries(t, workspace) != 0 {
-		t.Fatalf("growth: max=%d captured=%+v err=%v", maximum, captured, err)
+	entries := scratchEntries(t, workspace)
+	if !errors.As(err, &failure) || maximum > copyChunkSize || captured.Path != "" || entries != 0 {
+		t.Fatalf("growth: max=%d captured=%+v scratch entries=%d err=%v", maximum, captured, entries, err)
 	}
 }

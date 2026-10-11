@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -56,6 +58,7 @@ func TestFitBlendingSpacesRetainIndependentComponents(t *testing.T) {
 
 func TestFitBlendingSpaceRefusalsPreserveSafetyAndCancellation(t *testing.T) {
 	t.Parallel()
+	assertUsedBlendingDepthBoundary(t)
 
 	for _, tc := range []struct {
 		scope types.Dict
@@ -93,6 +96,34 @@ func TestFitBlendingSpaceRefusalsPreserveSafetyAndCancellation(t *testing.T) {
 	_, err := newFitProgramInspector(guardContext(t)).blendingSpace(ctx, nil, types.Name(fitDeviceRGB), 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("lost cancellation: %v", err)
+	}
+}
+
+// Check the finite depth boundary before starting the genuinely cyclic children.
+// A broken depth transition must fail ordinarily rather than execute an unbounded cycle.
+func assertUsedBlendingDepthBoundary(t *testing.T) {
+	t.Helper()
+	for _, aliases := range []int{62, 63} {
+		spaces := types.Dict{fitDefaultRGB: types.Name("Depth0")}
+		for index := range aliases {
+			var target types.Object = types.Array{types.Name(fitCalRGB), types.Dict{
+				"WhitePoint": types.Array{types.Integer(1), types.Integer(1), types.Integer(1)},
+			}}
+			if index+1 < aliases {
+				target = types.Name("Depth" + strconv.Itoa(index+1))
+			}
+			spaces["Depth"+strconv.Itoa(index)] = target
+		}
+		inspector := newFitProgramInspector(guardContext(t))
+		err := inspector.group(t.Context(), types.Dict{"S": types.Name(fitTransparency), "CS": types.Name(fitDeviceRGB)}, types.Dict{fitColorSpace: spaces})
+		// One default edge plus these aliases reaches the CalRGB leaf at depth 63 or 64.
+		if aliases == 62 {
+			if err != nil {
+				t.Fatalf("last permitted finite blending chain refused: %v", err)
+			}
+		} else if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), "depth limit") {
+			t.Fatalf("first over-depth finite blending chain admitted or misclassified: %v", err)
+		}
 	}
 }
 

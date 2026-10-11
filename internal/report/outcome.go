@@ -7,6 +7,10 @@ package report
 // It validates structural truth; it cannot authenticate a historical publication.
 func (v *validator) outcomeRelationships() *fault {
 	r := v.report
+
+	if r.Status == StatusOK && r.Publication.ReportStatus == ReportFailed {
+		return newFault("/publication/report_status", CodeInvalidValue, "status ok cannot claim failed report publication")
+	}
 	if r.Command == commandCheck && r.Phases.OutputVerification != PhaseNotRun {
 		return newFault("/phases/output_verification", CodeInvalidValue, "check does not render or verify an output PDF")
 	}

@@ -34,7 +34,7 @@ func TestMutationCaptureReaderRejectsSymlinkAndUnwrittenFIFO(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	open := mutationCaptureReader(directory)
+	open := regularArtifactReader(directory)
 	for _, name := range []string{"alias", mutationFIFOName} {
 		if file, err := open(name); err == nil {
 			if closeErr := file.Close(); closeErr != nil {

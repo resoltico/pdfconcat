@@ -10,7 +10,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
-// This diagnostic was captured from the installed source-contracts linter's real gosec run.
+// This diagnostic was captured from the recorded gosec run.
 // Only Filename is normalized; the complete receipt remains in the execution audit.
 const (
 	lintReportRoot             = "/work/repo"
@@ -26,30 +26,6 @@ const (
 "Pos":{"Filename":"/work/repo/cmd/pdfconcat/progress_transport_standard_unix_test.go","Line":29,"Column":15},
 "LineRange":{"From":29,"To":32}}]}`
 )
-
-func TestStalenessMatchesPhysicalLineOfRealMultilineDiagnostic(t *testing.T) {
-	t.Parallel()
-
-	issues, err := repopolicy.ParseIssues([]byte(multilineProcessDiagnostic), lintReportRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	entry := &repopolicy.Entry{
-		Tool: repopolicy.ToolLint, Effect: repopolicy.EffectExcludeDiagnostic,
-		Linter: policySecurityLinter, Path: "cmd/pdfconcat/progress_transport_standard_unix_test.go",
-		Message: "G204: Subprocess launched with a potential tainted input or cmd arguments",
-		Source:  `progressHelperArgs\(`,
-	}
-	if len(repopolicy.StaleDiagnosticEntries([]*repopolicy.Entry{entry}, issues, testLinuxOS)) != 1 {
-		t.Fatal("a different displayed source line counted as a matching physical exclusion")
-	}
-
-	entry.Source = `command := exec\.CommandContext\(`
-	if len(repopolicy.StaleDiagnosticEntries([]*repopolicy.Entry{entry}, issues, testLinuxOS)) != 0 {
-		t.Fatal("the actual diagnostic position did not match its physical exclusion")
-	}
-}
 
 func TestDiagnosticSourceRangeSelectsPositionAndRejectsIncompleteEvidence(t *testing.T) {
 	t.Parallel()

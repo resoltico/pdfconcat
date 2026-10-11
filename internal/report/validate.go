@@ -192,8 +192,8 @@ func phasesFault(phases *Phases) *fault {
 			return newFault("/phases/"+entry.name, CodeInvalidValue, "phase state must be not_run, incomplete, or complete")
 		}
 
-		if entry.state == PhaseComplete && !previousComplete {
-			return newFault("/phases/"+entry.name, CodeInvalidValue, entry.name+" cannot be complete when "+previousName+" is not")
+		if entry.state != PhaseNotRun && !previousComplete {
+			return newFault("/phases/"+entry.name, CodeInvalidValue, entry.name+" cannot run before "+previousName+" is complete")
 		}
 
 		previousName, previousComplete = entry.name, entry.state == PhaseComplete

@@ -176,7 +176,7 @@ func TestFixedWidthOverflowKeepsIndependentVerticalDeclaration(t *testing.T) {
   "version": 1,
   "blank": {
     "text": {
-      "value": "x",
+      "value": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
       "width": "160mm",
       "anchor": "top",
       "y": "1000pt"

@@ -56,7 +56,7 @@ func (*progressTransport) startNativeProgress() {}
 func (*progressTransport) stopNativeProgress() {}
 
 func (transport *progressTransport) closeNativeProgress() {
-	transport.closeErr = unix.Close(transport.fd)
+	transport.closeErr = closeProgressNativeSink(progressNativeSink{fd: transport.fd, guard: transport.guard})
 }
 
 func (transport *progressTransport) writeNativeRecord(ctx context.Context, record []byte) (bool, error) {

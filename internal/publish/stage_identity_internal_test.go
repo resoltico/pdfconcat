@@ -28,7 +28,7 @@ func TestStageRefusesClosedCreatedHandleAndPreservesUnverifiedPath(t *testing.T)
 
 	ops.createTemp = func(string, string) (*os.File, error) { return file, nil }
 
-	_, stageErr := stageWith(t.Context(), ops, filepath.Join(dir, reportPath), strings.NewReader(stagedContent), 1000)
+	_, stageErr := stageWith(StageTestContext(t), ops, filepath.Join(dir, reportPath), readerRequiringStorage(strings.NewReader(stagedContent)), 1000)
 	if !errors.Is(stageErr, os.ErrClosed) {
 		t.Fatalf("invalid created handle accepted: %v", stageErr)
 	}

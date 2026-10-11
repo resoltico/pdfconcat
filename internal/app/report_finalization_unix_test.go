@@ -16,12 +16,12 @@ func TestCheckReportCommitSurvivesDirectoryFlushFailure(t *testing.T) {
 	dir := workDir(t)
 	runner := appOf(newFake(t))
 	runner.BeforeCommit(func() {
-		if err := os.Chmod(dir, 0300); err != nil {
+		if err := os.Chmod(dir, 0o300); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Cleanup(func() {
-		if err := os.Chmod(dir, 0700); err != nil {
+		if err := os.Chmod(dir, 0o700); err != nil {
 			t.Error(err)
 		}
 	})

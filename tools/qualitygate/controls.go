@@ -265,13 +265,6 @@ func controlGoCommand(snapshot string, stage *foreignTestStage, verb string, arg
 }
 
 // restore puts a lint fixture's original content back after a control.
-func restore(target string, original []byte) {
-	if err := os.WriteFile(target, original, fileMode); err != nil {
-		log.Printf("controls: cannot restore %s: %v", target, err)
-	}
-}
-
-// validateControls requires a nonempty set of complete deliberate mutations.
 func validateControls(set *controlSet) error {
 	if set.Version != 1 || len(set.Controls) == 0 {
 		return fmt.Errorf("%w: %s needs version 1 and at least one control", errGate, controlsFile)

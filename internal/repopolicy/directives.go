@@ -33,7 +33,7 @@ const goSourceSuffix = ".go"
 
 // String formats the violation for a test or gate message.
 func (v DirectiveViolation) String() string {
-	return fmt.Sprintf("%s:%d: %s directive %q; exceptions belong in .quality-exceptions.yml", v.File, v.Line, v.Kind, v.Comment)
+	return fmt.Sprintf("%s:%d: %s directive %q; owned source must preserve diagnostic and import ownership", v.File, v.Line, v.Kind, v.Comment)
 }
 
 // prohibitedDirectives matches the text of a comment (without its // or /* */ delimiters) that
@@ -43,6 +43,7 @@ func (v DirectiveViolation) String() string {
 // indented as code, is not a directive.
 func prohibitedDirectives() []directivePattern {
 	return []directivePattern{
+		{regexp.MustCompile(`(?s)^line .*:[0-9]+(:[0-9]+)?$`), "compiler display"},
 		{regexp.MustCompile(`(?i)^\s*nolint(\s|:|$)`), "nolint"},
 		{regexp.MustCompile(`(?im)^\s*#?nosec(\s|:|$)`), "nosec"},
 		{regexp.MustCompile(`(?i)^\s*lint:(file-)?ignore(\s|$)`), "lint:ignore or lint:file-ignore"},
@@ -61,7 +62,7 @@ func skippedDirectories() map[string]bool {
 
 // ScanDirectives parses every Go file under root, hidden directories included, and reports each
 // comment that is a tool-suppression directive. Parsing the comments, not the text, keeps string
-// literals and prose out of the findings, and leaves //go:build, //go:embed, //go:generate, //line
+// literals and prose out of the findings, and leaves //go:build, //go:embed and //go:generate
 // and SPDX notices alone. A file that does not parse is an error: it cannot be shown clean. Files
 // are read through an [os.Root], so a symbolic link cannot lead the scan outside root.
 func ScanDirectives(ctx context.Context, root string) ([]DirectiveViolation, error) {
@@ -125,6 +126,9 @@ func parseDirectiveComments(name string, content []byte, patterns []directivePat
 	for _, group := range parsed.Comments {
 		for _, comment := range group.List {
 			kind := directiveKind(commentText(comment.Text), patterns)
+			if kind == "compiler display" && strings.HasPrefix(comment.Text, "//") && fset.PositionFor(comment.Pos(), false).Column != 1 {
+				continue
+			}
 			if kind != "" {
 				violations = append(violations, DirectiveViolation{
 					File: name, Line: fset.PositionFor(comment.Pos(), false).Line, Kind: kind, Comment: comment.Text,

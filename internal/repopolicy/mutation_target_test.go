@@ -4,7 +4,6 @@
 package repopolicy_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -18,17 +17,6 @@ func TestMutationColumnsAreRequiredPositiveAndToolSpecific(t *testing.T) {
 		content := registryHeader + mustReplace(t, mutationEntry, "column: 10", replacement)
 		if _, err := repopolicy.ParseRegistry([]byte(content)); err == nil {
 			t.Fatalf("invalid mutation byte-column accepted: %q", replacement)
-		}
-	}
-
-	for _, entry := range []string{disableEntry, coverageEntry} {
-		for _, value := range []string{"0", "1"} {
-			content := registryHeader + entry + "    column: " + value + "\n"
-
-			_, err := repopolicy.ParseRegistry([]byte(content))
-			if !errors.Is(err, repopolicy.ErrRegistry) || !strings.Contains(err.Error(), "column does not apply") {
-				t.Fatalf("column used by another tool: %v", err)
-			}
 		}
 	}
 }

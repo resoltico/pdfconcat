@@ -193,7 +193,7 @@ func inspectArtifactIdentity(role Role, path string) (Identity, error) {
 
 // artifactParentUnavailable requires observed absence or a regular-file ancestor, not an I/O guess.
 func artifactParentUnavailable(path string) bool {
-	for parent := filepath.Dir(path); filepath.Dir(parent) != parent; parent = filepath.Dir(parent) {
+	for parent := NativeParent(path); NativeParent(parent) != parent; parent = NativeParent(parent) {
 		_, directory, err := inspectIdentity(parent)
 		if err == nil {
 			return !directory
@@ -219,15 +219,11 @@ func (r *Registry) RetireReport(path string) error {
 	defer r.mu.Unlock()
 
 	binding := artifactBinding{role: RoleReport, path: absolute}
-	next := make(map[artifactBinding]Identity, len(r.artifactBindings))
+	next := maps.Clone(r.artifactBindings)
+	delete(next, binding)
 
-	claims := make(map[Identity]claim, len(r.artifactBindings))
-	for current, identity := range r.artifactBindings {
-		if current == binding {
-			continue
-		}
-
-		next[current] = identity
+	claims := make(map[Identity]claim, len(next))
+	for current, identity := range next {
 		if identity != (Identity{}) {
 			claims[identity] = claim(current)
 		}
@@ -359,7 +355,7 @@ func (r *Registry) refreshArtifactBindings(
 	binding artifactBinding,
 	inspect func(Role, string) (Identity, error),
 ) (map[artifactBinding]Identity, error) {
-	next := make(map[artifactBinding]Identity, len(r.artifactBindings)+1)
+	next := make(map[artifactBinding]Identity)
 	for current := range r.artifactBindings {
 		if current == binding {
 			continue
@@ -422,7 +418,7 @@ func (r *Registry) checkArtifactIdentity(claims map[Identity]claim, binding arti
 
 func (r *Registry) commitArtifactBindings(bindings map[artifactBinding]Identity, claims map[Identity]claim) {
 	for _, identity := range r.artifactBindings {
-		if other, found := r.byIdentity[identity]; found && other.role.isArtifact() {
+		if r.byIdentity[identity].role.isArtifact() {
 			delete(r.byIdentity, identity)
 		}
 	}

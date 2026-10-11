@@ -27,7 +27,7 @@ func TestCommitRejectsIdenticalReportAndPDFTargetsBeforeReplacingBytes(t *testin
 		t.Fatal(err)
 	}
 
-	report, err := Stage(t.Context(), output, strings.NewReader(`{"kind":"report"}`), 1000)
+	report, err := Stage(StageTestContext(t), output, readerRequiringStorage(strings.NewReader(`{"kind":"report"}`)), 1000)
 	if err != nil {
 		t.Fatal(err)
 	}

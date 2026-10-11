@@ -3,10 +3,11 @@
 package report_test
 
 import (
-	"github.com/resoltico/pdfconcat/internal/report"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/report"
 )
 
 func TestImpossiblePublishedReportsAreRejected(t *testing.T) {
@@ -25,7 +26,7 @@ func TestImpossiblePublishedReportsAreRejected(t *testing.T) {
 					t.Error(closeErr)
 				}
 			}()
-			_, err = report.Decode(t.Context(), path, f)
+			_, err = report.Decode(report.DecoderTestContext(t.Context(), t), path, report.ReaderRequiringStorage(f))
 			if err == nil {
 				t.Fatal("accepted impossible publication")
 			}

@@ -228,8 +228,7 @@ func corpusEnvelopeValues() []corpusCase {
 			Old:    `"input_inspection":"complete"`,
 			New:    `"input_inspection":"incomplete"`,
 			Code:   report.CodeInvalidValue,
-			Schema: schemaAccept,
-			Gap:    gapRelations,
+			Schema: schemaReject,
 		},
 	}
 }
@@ -307,8 +306,7 @@ func corpusPublication() []corpusCase {
 			Old:    `"published":false`,
 			New:    `"published":false,"recovery_report":"/w/rec.json","recovery_state":"current"`,
 			Code:   report.CodeInvalidValue,
-			Schema: schemaAccept,
-			Gap:    gapRelations,
+			Schema: schemaReject,
 		},
 	}
 }

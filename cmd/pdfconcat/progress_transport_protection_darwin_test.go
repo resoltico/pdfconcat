@@ -233,6 +233,10 @@ func (raw *progressProtectionDescriptors) release(t *testing.T) {
 
 func closeProgressProtectionIdentity(t *testing.T, descriptor int, expected unix.Stat_t) {
 	t.Helper()
+	if descriptor < progressMinimumOwnedDescriptor {
+		t.Error("cleanup refused an unowned standard descriptor")
+		return
+	}
 
 	var actual unix.Stat_t
 	if err := unix.Fstat(descriptor, &actual); err != nil {

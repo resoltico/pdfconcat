@@ -6,12 +6,248 @@ package pdfengine
 import (
 	"errors"
 	"math"
+	"math/big"
 	"strings"
 	"testing"
 )
 
 func childProofFit(matrix Affine, scale float64) PageFit {
 	return PageFit{Matrix: matrix, Scale: scale, Original: PageSize{100, 100}}
+}
+
+func TestFitChildVerticalBudgetUsesScaledExtent(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{200, 200})
+	if err != nil || fit.Scale != 2 || fit.Matrix != (Affine{2, 0, 0, 2, 0, 0}) {
+		t.Fatalf("twofold canvas fit: %+v err=%v", fit, err)
+	}
+	identity := Affine{1, 0, 0, 1, 0, 0}
+	original := [4]float64{0, 0, 1, 1}
+	for _, scenario := range []struct {
+		name       string
+		shift      float64
+		lower      float64
+		upper      float64
+		wantRefuse bool
+	}{
+		{name: "safe movement above divided-height budget", shift: 5e-8, lower: 5e-8, upper: 2e-7},
+		{name: "excess movement below absolute cap", shift: 2e-7, lower: 2e-7, upper: 1e-6, wantRefuse: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+			movement := new(big.Rat).Mul(new(big.Rat).SetFloat64(scenario.shift), big.NewRat(2, 1))
+			if movement.Cmp(new(big.Rat).SetFloat64(scenario.lower)) <= 0 || movement.Cmp(new(big.Rat).SetFloat64(scenario.upper)) >= 0 {
+				t.Fatalf("independent fitted movement %s is outside (%g, %g)", movement.RatString(), scenario.lower, scenario.upper)
+			}
+			emittedBox := [4]float64{0, scenario.shift, 1, 1}
+			err := fitChildGeometry(fit, identity, fit.Matrix, original, emittedBox)
+			if scenario.wantRefuse {
+				if !errors.Is(err, errFitGeometry) {
+					t.Fatalf("excess vertical child movement admitted: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("safe vertical child movement refused: %v", err)
+			}
+		})
+	}
+}
+
+func TestFitChildAcceptsInheritedVerticalRoundingUnderExactDoubling(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{200, 200})
+	if err != nil || fit.Scale != 2 || fit.Matrix != (Affine{2, 0, 0, 2, 0, 0}) {
+		t.Fatalf("twofold canvas fit: %+v err=%v", fit, err)
+	}
+	const origin = 0x1p53
+	source := Affine{1, 0, 0, 1.5, 0, -1.5 * origin}
+	emitted := Affine{2, 0, 0, 3, 0, -3 * origin}
+	box := [4]float64{0, origin, 1, origin + 4}
+	row, finite := fitEvaluateRow(source, 1, box)
+	if !finite || row.errorBound <= 2e-7 {
+		t.Fatalf("inherited vertical rounding precondition: finite=%t bound=%g", finite, row.errorBound)
+	}
+	for _, y := range []float64{origin, origin + 2, origin + 4} {
+		point := [2]float64{0, y}
+		originalActual, originalExact := affineRowWitness(source, 1, point)
+		emittedActual, emittedExact := affineRowWitness(emitted, 1, point)
+		if new(big.Rat).Mul(originalExact, big.NewRat(2, 1)).Cmp(emittedExact) != 0 || float64(2*originalActual) != emittedActual {
+			t.Fatalf("vertical power-of-two witness differs at %g: source=%g emitted=%g", y, originalActual, emittedActual)
+		}
+	}
+	if err := fitChildGeometry(fit, source, emitted, box, box); err != nil {
+		t.Fatalf("inherited vertical rounding was charged as fitting loss: %v", err)
+	}
+}
+
+func TestFitChildRefusesRoundedInteriorDespiteMatchingZeroTerms(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{150, 150})
+	if err != nil || fit.Scale != 1.5 || fit.Matrix != (Affine{1.5, 0, 0, 1.5, 0, 0}) {
+		t.Fatalf("one-and-a-half-fold canvas fit: %+v err=%v", fit, err)
+	}
+	const origin = 0x1p53
+	point := [2]float64{origin + 2, 0}
+	actual, exact := affineRowWitness(fit.Matrix, 0, point)
+	difference := new(big.Rat).Sub(exact, new(big.Rat).SetFloat64(actual))
+	difference.Abs(difference)
+	if difference.Cmp(big.NewRat(1, 1)) != 0 {
+		t.Fatalf("independent interior rounding witness is %s pt, want one point", difference.RatString())
+	}
+	identity := Affine{1, 0, 0, 1, 0, 0}
+	box := [4]float64{origin, 0, origin + 4, 1}
+	if err := fitChildGeometry(fit, identity, fit.Matrix, box, box); !errors.Is(err, errFitGeometry) {
+		t.Fatalf("one-point fit-created interior loss bypassed child precision guard: %v", err)
+	}
+}
+
+func TestFitChildIdentityPreservesInheritedZeroCrossingRounding(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{100, 100})
+	identity := Affine{1, 0, 0, 1, 0, 0}
+	if err != nil || fit.Scale != 1 || fit.Matrix != identity {
+		t.Fatalf("identity canvas fit: %+v err=%v", fit, err)
+	}
+	const low, high = 0x1p53, 0x1p70
+	source := Affine{1.5, 0, -0.15, 1, 0, 0}
+	box := [4]float64{low, low, high, high}
+	row, finite := fitEvaluateRow(source, 0, box)
+	if !finite || row.errorBound <= 1e-7 || row.intervals[2].normal() || row.exact[2] {
+		t.Fatalf("inherited zero-crossing precondition: finite=%t row=%+v", finite, row)
+	}
+	for _, point := range [][2]float64{{low, low}, {high, high}, {high, low}} {
+		actual, exact := affineRowWitness(source, 0, point)
+		emittedActual, emittedExact := affineRowWitness(source, 0, point)
+		if actual != emittedActual || exact.Cmp(emittedExact) != 0 {
+			t.Fatalf("identity fit changed inherited arithmetic at %v", point)
+		}
+		if point == ([2]float64{high, high}) {
+			inherited := new(big.Rat).Sub(exact, new(big.Rat).SetFloat64(actual))
+			inherited.Abs(inherited)
+			if inherited.Cmp(big.NewRat(1, 1)) < 0 {
+				t.Fatalf("independent inherited rounding witness is %s pt, want at least one point", inherited.RatString())
+			}
+		}
+	}
+	if err := fitChildGeometry(fit, source, source, box, box); err != nil {
+		t.Fatalf("identity fit charged inherited zero-crossing rounding: %v", err)
+	}
+}
+
+func TestFitChildChangedZeroWidthDomainCannotBypassPrecision(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{100, 100})
+	identity := Affine{1, 0, 0, 1, 0, 0}
+	if err != nil || fit.Scale != 1 || fit.Matrix != identity {
+		t.Fatalf("identity canvas fit: %+v err=%v", fit, err)
+	}
+	const moved = 1.1e-8
+	source := Affine{1e18, 0, 0, 1, 0, 0}
+	emitted := Affine{2e18, 0, 0, 1, 0, 0}
+	originalBox, emittedBox := [4]float64{0, 0, 0, 1}, [4]float64{moved, 0, moved, 1}
+	point := [2]float64{moved, 0}
+	actual, exact := affineRowWitness(emitted, 0, point)
+	loss := new(big.Rat).Sub(exact, new(big.Rat).SetFloat64(actual))
+	loss.Abs(loss)
+	if loss.Cmp(new(big.Rat).SetFloat64(1e-7)) <= 0 {
+		t.Fatalf("independent changed-domain rounding witness is %s pt, want above budget", loss.RatString())
+	}
+	if err := fitChildGeometry(fit, source, emitted, originalBox, emittedBox); !errors.Is(err, errFitGeometry) {
+		t.Fatalf("changed zero-width child domain bypassed fit precision guard: %v", err)
+	}
+}
+
+func TestFitChildUnchangedZeroWidthCoordinateIgnoresInertCoefficient(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{100, 100})
+	identity := Affine{1, 0, 0, 1, 0, 0}
+	if err != nil || fit.Scale != 1 || fit.Matrix != identity {
+		t.Fatalf("identity canvas fit: %+v err=%v", fit, err)
+	}
+	source := Affine{1e18, 0, 0, 1, 0, 0}
+	emitted := Affine{2e18, 0, 0, 1, 0, 0}
+	box := [4]float64{0, 0, 0, 1}
+	for _, point := range [][2]float64{{0, 0}, {0, 0.5}, {0, 1}} {
+		originalActual, originalExact := affineRowWitness(source, 0, point)
+		emittedActual, emittedExact := affineRowWitness(emitted, 0, point)
+		if originalActual != emittedActual || originalExact.Cmp(emittedExact) != 0 {
+			t.Fatalf("constant-zero child coordinate changed at %v", point)
+		}
+	}
+	if err := fitChildGeometry(fit, source, emitted, box, box); err != nil {
+		t.Fatalf("inert coefficient on unchanged zero-width domain refused: %v", err)
+	}
+}
+
+func TestFitChildVerticalIdentityUsesTranslationComponent(t *testing.T) {
+	t.Parallel()
+	fit, err := CanvasFit(PageSize{100, 100}, PageSize{100, 100})
+	identity := Affine{1, 0, 0, 1, 0, 0}
+	if err != nil || fit.Scale != 1 || fit.Matrix != identity {
+		t.Fatalf("identity canvas fit: %+v err=%v", fit, err)
+	}
+	const low, high = 0x1p53, 0x1p70
+	source := Affine{1, 1.5, 0, -0.15, 0, 0}
+	box := [4]float64{low, low, high, high}
+	row, finite := fitEvaluateRow(source, 1, box)
+	if !finite || row.errorBound <= 1e-7 || row.intervals[2].normal() || row.exact[2] {
+		t.Fatalf("inherited vertical zero-crossing precondition: finite=%t row=%+v", finite, row)
+	}
+	point := [2]float64{high, high}
+	actual, exact := affineRowWitness(source, 1, point)
+	inherited := new(big.Rat).Sub(exact, new(big.Rat).SetFloat64(actual))
+	inherited.Abs(inherited)
+	if inherited.Cmp(big.NewRat(1, 1)) < 0 {
+		t.Fatalf("independent vertical inherited rounding witness is %s pt, want at least one point", inherited.RatString())
+	}
+	if err := fitChildGeometry(fit, source, source, box, box); err != nil {
+		t.Fatalf("vertical identity fit charged inherited rounding: %v", err)
+	}
+}
+
+func TestFitPageConstructionDefectKeepsZeroAndTiedEndpointValues(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []struct {
+		name                 string
+		coefficient, shift   float64
+		box                  [4]float64
+		offset, extent, want float64
+	}{
+		{name: "positive zero tied", coefficient: 0, shift: 0.5, box: [4]float64{1, 0, 3, 1}, offset: 0, extent: 1, want: 0.5},
+		{name: "negative zero tied", coefficient: math.Copysign(0, -1), shift: 0.5, box: [4]float64{1, 0, 3, 1}, offset: 0, extent: 1, want: 0.5},
+		{name: "zero asymmetric", coefficient: 0, shift: 0, box: [4]float64{1, 0, 3, 1}, offset: 0, extent: 1, want: 1},
+		{name: "nonzero tied", coefficient: 1, shift: 0, box: [4]float64{0, 0, 1, 1}, offset: 0.5, extent: 1, want: 0.5},
+		{name: "negative reversed", coefficient: -1, shift: 0, box: [4]float64{0, 0, 1, 1}, offset: -1, extent: 1, want: 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+			matrix := Affine{scenario.coefficient, 0, 0, 1, scenario.shift, 0}
+			if got := fitPageConstructionDefect(matrix, 0, scenario.box, scenario.offset, scenario.extent); got != scenario.want {
+				t.Fatalf("endpoint defect %g, want %g", got, scenario.want)
+			}
+		})
+	}
+}
+
+func TestFitBoxMovementKeepsEqualAndUnequalEdgeMaxima(t *testing.T) {
+	t.Parallel()
+	matrix := Affine{2, 0, 3, 1, 0, 0}
+	original := [4]float64{0, 0, 10, 20}
+	for _, scenario := range []struct {
+		name    string
+		emitted [4]float64
+		want    float64
+	}{
+		{name: "equal opposite edges", emitted: [4]float64{1, -2, 9, 22}, want: 8},
+		{name: "last edge larger", emitted: [4]float64{1, -2, 8, 22}, want: 10},
+		{name: "first edge larger", emitted: [4]float64{3, -2, 9, 22}, want: 12},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+			if got := fitBoxMovement(matrix, 0, original, scenario.emitted); got != scenario.want {
+				t.Fatalf("weighted edge movement %g, want %g", got, scenario.want)
+			}
+		})
+	}
 }
 
 func TestFitChildRejectsCrossCornerOverflowAndInteriorLoss(t *testing.T) {

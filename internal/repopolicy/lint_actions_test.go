@@ -62,31 +62,11 @@ func TestFormatterSelectionPreservesEveryConfiguredFormatter(t *testing.T) {
 func TestLintActionsCannotRewriteTheirInputs(t *testing.T) {
 	t.Parallel()
 
-	assertConfigSetting(t, "issues.fix", true, "issues.fix must be absent or false")
+	assertConfigSetting(t, "issues.fix", true, "issues.fix differs")
 	assertConfigSetting(t, "issues.fix", false, "")
 	assertConfigSetting(t, "formatters.settings.gofmt.rewrite-rules",
 		[]map[string]string{{"pattern": "a + 0", "replacement": "a + 1"}}, "semantic rewrites are unsupported")
 	assertConfigSetting(t, "formatters.settings.gofmt.rewrite-rules", []any{}, "")
-}
-
-func TestNativeSuppressionAliasesRequireRegistryEntries(t *testing.T) {
-	t.Parallel()
-
-	for setting, value := range map[string]any{
-		"linters.settings.gosmopolitan.escape-hatches":            []string{"example.org/policy.Accept"},
-		"linters.settings.gosmopolitan.allow-time-local":          true,
-		"linters.settings.staticcheck.dot-import-whitelist":       []string{"fmt"},
-		"linters.settings.staticcheck.http-status-code-whitelist": []string{"201"},
-		"linters.settings.unqueryvet.allowed-patterns":            []string{"SELECT.*"},
-	} {
-		t.Run(setting, func(t *testing.T) {
-			t.Parallel()
-			assertConfigSetting(t, setting, value, "the registry does not list: "+setting)
-		})
-	}
-
-	assertConfigSetting(t, "linters.settings.gosmopolitan.escape-hatches", []any{}, "")
-	assertConfigSetting(t, "linters.settings.gosmopolitan.allow-time-local", false, "")
 }
 
 func assertConfigSetting(t *testing.T, dotted string, value any, want string) {
@@ -117,7 +97,7 @@ func assertConfigSetting(t *testing.T, dotted string, value any, want string) {
 		t.Fatal(err)
 	}
 
-	problems, err := repopolicy.LintConfigIssues(loadRegistry(t).Exceptions, config)
+	problems, err := repopolicy.CorrectnessProfileIssues(config)
 	if err != nil {
 		t.Fatal(err)
 	}

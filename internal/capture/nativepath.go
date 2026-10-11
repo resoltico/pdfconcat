@@ -35,15 +35,20 @@ func NativeParent(path string) string {
 	if parent == "" {
 		return "."
 	}
-	// Keep root separators; EvalSymlinks accepts a trailing separator.
-	if len(parent) > len(filepath.VolumeName(parent))+1 {
-		separators := string(os.PathSeparator)
-		if os.PathSeparator == '\\' {
+	return trimNativeParent(parent, filepath.VolumeName(parent), os.PathSeparator)
+}
+
+// trimNativeParent receives a nonempty native split parent and its volume and separator.
+// Keep root separators; EvalSymlinks accepts a trailing separator.
+func trimNativeParent(parent, volume string, separator byte) string {
+	if len(parent) > len(volume)+1 {
+		separators := string(separator)
+		if separator == '\\' {
 			separators = "/\\"
 		}
 		trimmed := strings.TrimRight(parent, separators)
-		if trimmed == "" || trimmed == filepath.VolumeName(parent) {
-			return trimmed + string(os.PathSeparator)
+		if trimmed == "" || trimmed == volume {
+			return trimmed + string(separator)
 		}
 		return trimmed
 	}

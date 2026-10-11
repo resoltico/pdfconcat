@@ -11,6 +11,8 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Fixed
 
+- Native Unix progress cleanup preserves standard streams when initialization returns invalid, duplicate or unrepresentable descriptor values.
+- Fitting accepts exact Type 3 geometry with a zero-valued box endpoint that a conservative precision guard previously rejected.
 - Plans reject decimal leading and point lengths mathematically outside their limits even when floating-point conversion rounds them back to a boundary; correct such near-boundary values in plans. Report finalization faults preserve the fact that a check/failure report was already written.
 - Font capture enforces the 64 MiB limit before scratch creation and while reading, including file growth, with owned partial-copy cleanup.
 - Physical source/font aliases share captured bytes and reusable inspection/parsed-font facts within a job. Repeated forms and links retain independent occurrence identities.
@@ -20,6 +22,8 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Internal
 
+- Contributor verification uses the pinned stock correctness linter profile and one formatter. Physical source guards and compiled import/error/security controls replace the linter variant and source-regex registry. Coverage reports all measured statements without exclusions or a global percentage gate; required invariant and campaign proof remains mandatory. See [Verification](docs/VERIFICATION.md).
+- Mutation judgments retain complete compiler/coverage diagnostics with owned-source attribution and matching baseline/worker instrumentation. Missing test evidence, process/resource failures and snapshot cleanup failures remain errors. Fuzz discovery joins package-initialization processes and verifies the complete compiler-recognized target inventory with package attribution. Mutation evidence paths preserve caller-side native traversal. Required native controls verify inactive/healthy progress and later transport failures.
 - Required CI includes native Intel macOS and discovered-target fuzz smoke. Source release verification depends on reusable exact-SHA campaigns; verification-only dispatch does not publish. These workflow changes require successful hosted candidate execution before foundation or release readiness can be claimed.
 
 ## [0.2.0] - 2026-10-09

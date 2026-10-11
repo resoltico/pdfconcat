@@ -7,13 +7,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 )
-
-// minOKFields is the fewest fields of a `go test` package result line: "ok" and the package.
-const minOKFields = 2
 
 func runPlatformFuzz(ctx context.Context, patterns []string, duration string) error {
 	if len(patterns) == 0 {
@@ -57,29 +57,75 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) er
 // discoverFuzzTargets lists every Fuzz function with `go test -list`, which also compiles the test
 // binaries, so a package that does not build fails discovery instead of vanishing from it.
 func discoverFuzzTargets(ctx context.Context, root string, patterns []string) ([]fuzzTarget, error) {
-	output, err := goCommand(root, append([]string{testVerb, "-list", "^Fuzz"}, patterns...)...).output(ctx)
+	compiled, err := compilerFuzzManifest(ctx, root, patterns)
+	if err != nil {
+		return nil, err
+	}
+	run := goCommand(root, append([]string{testVerb, jsonFlag, "-list", "^Fuzz"}, patterns...)...)
+	// Listing runs package init and TestMain, so discovery owns their descendants too.
+	run.fuzzLifecycle = true
+	output, err := run.output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("go test -list: %w", err)
 	}
 
-	var (
-		targets []fuzzTarget
-		pending []string
-	)
+	listed, err := parseFuzzDiscovery(strings.NewReader(output))
+	if err != nil {
+		return nil, err
+	}
+	if err = compareFuzzManifest(listed, compiled); err != nil {
+		return nil, err
+	}
+	return listed, nil
+}
 
-	for line := range strings.SplitSeq(output, "\n") {
-		fields := strings.Fields(line)
+// parseFuzzDiscovery uses Go's package attribution rather than status text printed
+// by a test binary. Listed names still require an actual passing fuzz lifecycle.
+func parseFuzzDiscovery(reader io.Reader) ([]fuzzTarget, error) {
+	decoder := json.NewDecoder(reader)
+	outcome := newTestOutcome()
+	seen := map[fuzzTarget]bool{}
+	var targets []fuzzTarget
 
-		switch {
-		case len(fields) == 1 && strings.HasPrefix(fields[0], "Fuzz"):
-			pending = append(pending, fields[0])
-		case len(fields) >= minOKFields && fields[0] == "ok":
-			for _, name := range pending {
-				targets = append(targets, fuzzTarget{pkg: fields[1], name: name})
+	for {
+		var event testEvent
+		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("%w: invalid fuzz discovery event: %w", errGate, err)
+		}
+		outcome.record(&event)
+		if event.Action != "output" {
+			continue
+		}
+
+		for line := range strings.SplitSeq(event.Output, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 1 || !strings.HasPrefix(fields[0], "Fuzz") {
+				continue
 			}
+			if event.Package == "" {
+				return nil, fmt.Errorf("%w: fuzz discovery target lacks package attribution", errGate)
+			}
+			target := fuzzTarget{pkg: event.Package, name: fields[0]}
+			if !seen[target] {
+				targets = append(targets, target)
+				seen[target] = true
+			}
+		}
+	}
 
-			pending = nil
-		default:
+	if len(outcome.streamErrors) != 0 {
+		return nil, fmt.Errorf("%w: fuzz discovery lifecycle: %s", errGate, strings.Join(outcome.streamErrors, "; "))
+	}
+	for pkg := range outcome.started {
+		if outcome.packages[pkg] != actionPass && outcome.packages[pkg] != actionSkip {
+			return nil, fmt.Errorf("%w: fuzz discovery package %s did not complete successfully", errGate, pkg)
+		}
+	}
+	for _, target := range targets {
+		if !outcome.started[target.pkg] || outcome.packages[target.pkg] != actionPass {
+			return nil, fmt.Errorf("%w: fuzz discovery target %s %s lacks a passing package lifecycle", errGate, target.pkg, target.name)
 		}
 	}
 

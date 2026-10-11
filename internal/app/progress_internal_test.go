@@ -61,10 +61,24 @@ func TestProgressBlockedPresentationDoesNotBlockCallbacksOrLoseFinalPhases(t *te
 
 	sink := &progressCapture{entered: make(chan struct{}), release: make(chan struct{})}
 	session := NewProgress(t.Context(), cli.ProgressJSON, progressTestAttempt, sink)
+	var finished <-chan struct{}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(sink.release) }) }
+	t.Cleanup(func() {
+		release()
+		session.Stop()
+		if finished != nil {
+			<-finished
+		}
+	})
 	session.Observe(observation.Milestone{Phase: observation.Preparation})
-	<-sink.entered
-
-	finished := make(chan struct{})
+	select {
+	case <-sink.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("presenter did not enter the deliberately blocked sink")
+	}
+	callbackDone := make(chan struct{})
+	finished = callbackDone
 
 	go func() {
 		for value := range int64(100000) {
@@ -89,7 +103,7 @@ func TestProgressBlockedPresentationDoesNotBlockCallbacksOrLoseFinalPhases(t *te
 			},
 		)
 		session.Observe(observation.Milestone{Phase: observation.Finalization})
-		close(finished)
+		close(callbackDone)
 	}()
 
 	select {
@@ -98,7 +112,7 @@ func TestProgressBlockedPresentationDoesNotBlockCallbacksOrLoseFinalPhases(t *te
 		t.Fatal("worker callback waited on blocked sink")
 	}
 
-	close(sink.release)
+	release()
 	session.Stop()
 
 	records := requireFinalProgressPhases(t, sink)

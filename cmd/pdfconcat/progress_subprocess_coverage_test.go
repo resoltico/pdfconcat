@@ -4,63 +4,56 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"fmt"
+	"errors"
 	"os"
-	"os/exec"
-	"sync"
-	"testing"
-	"time"
+	"path/filepath"
 
 	"github.com/resoltico/pdfconcat/internal/exectest"
 )
 
 const progressVerboseHelperArgument = "-test.v"
 
-const progressCoverageMetadataChild = "TestProgressCoverageMetadataChild"
-
-var prepareProgressCoverageMetadata = sync.OnceValue(func() error {
-	const budget = 5 * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), budget)
-	defer cancel()
-
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate covered test executable: %w", err)
-	}
-
-	command := exec.CommandContext(ctx, executable,
-		"-test.run=^"+progressCoverageMetadataChild+"$",
-		progressVerboseHelperArgument,
-		"-test.gocoverdir="+os.Getenv(exectest.EnvCoverDir))
-	command.WaitDelay = time.Second
-	output, runErr := command.CombinedOutput()
-	if ctx.Err() != nil || runErr != nil || !bytes.Contains(output, []byte("--- PASS: "+progressCoverageMetadataChild)) {
-		return fmt.Errorf("covered metadata child: context=%v process=%v output=%s", ctx.Err(), runErr, output)
-	}
-
-	return nil
-})
-
-// The pinned Go test harness emits binary coverage at teardown when its
-// -test.gocoverdir flag is forwarded; GOCOVERDIR alone does not collect test helpers.
-// A joined selected child writes canonical metadata before parallel children
-// start, so their temporary metadata files cannot collide on first emission.
+// Every instrumented child owns metadata/counters in one directory. Parallel processes must
+// never rename temporary metadata in the same directory; completed directories are merged by the gate.
 func progressHelperArgs(args ...string) []string {
-	directory := os.Getenv(exectest.EnvCoverDir)
-	if directory != "" {
-		if testing.CoverMode() != "" {
-			if err := prepareProgressCoverageMetadata(); err != nil {
-				panic("prepare private child coverage metadata: " + err.Error())
-			}
-		}
-		args = append(args, "-test.gocoverdir="+directory)
-	}
-
-	return args
+	return progressOwnedHelperArgs("progress-child-", args...)
 }
 
-// This selected child has no product work; its normal Go test exit emits the
-// binary metadata that sibling native controls share.
-func TestProgressCoverageMetadataChild(_ *testing.T) {}
+func progressOwnedHelperArgs(prefix string, args ...string) []string {
+	root := os.Getenv(exectest.EnvCoverDir)
+	if root == "" {
+		return args
+	}
+	directory, err := os.MkdirTemp(root, prefix)
+	if err != nil {
+		panic("create owned child coverage: " + err.Error())
+	}
+	return append(args, "-test.gocoverdir="+directory)
+}
+
+// Deliberately killed/fatal test-protocol controls retain instrumented partial evidence in the
+// same caller-owned attempt, separate from the completed child profiles used for measurement.
+func progressControlArgs(args ...string) ([]string, string) {
+	root := os.Getenv(exectest.EnvCoverDir)
+	if root == "" {
+		return args, ""
+	}
+	controls := filepath.Join(filepath.Dir(root), "native-helper-controls")
+	attempt, err := os.OpenRoot(filepath.Dir(root))
+	if err != nil {
+		panic("open control evidence root: " + err.Error())
+	}
+	createErr := attempt.Mkdir("native-helper-controls", 0o700)
+	closeErr := attempt.Close()
+	if createErr != nil && !errors.Is(createErr, os.ErrExist) {
+		panic("create control evidence: " + createErr.Error())
+	}
+	if closeErr != nil {
+		panic("close control evidence root: " + closeErr.Error())
+	}
+	directory, err := os.MkdirTemp(controls, "child-")
+	if err != nil {
+		panic("create owned control coverage: " + err.Error())
+	}
+	return append(args, "-test.gocoverdir="+directory), exectest.EnvCoverDir + "=" + directory
+}

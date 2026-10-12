@@ -17,8 +17,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/resoltico/pdfconcat/internal/exectest"
 )
 
 type progressProducerRead struct {
@@ -117,17 +115,7 @@ func runProgressProducerChild(t *testing.T, executable, scenario string) {
 func progressWindowsHelperArgs(t *testing.T, args ...string) []string {
 	t.Helper()
 
-	args = progressHelperArgs(args...)
-
-	if root := os.Getenv(exectest.EnvCoverDir); root != "" {
-		// Each child owns its metadata rename; the gate merges these retained directories.
-		directory, err := os.MkdirTemp(root, "progress-child-")
-		requireProgressNoError(t, err)
-
-		args[len(args)-1] = "-test.gocoverdir=" + directory
-	}
-
-	return args
+	return progressHelperArgs(args...)
 }
 
 func collectProgressProducerPipe(reader io.ReadCloser) <-chan progressProducerRead {

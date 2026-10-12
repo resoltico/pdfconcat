@@ -30,11 +30,14 @@ func TestProgressTransportChildCompletionContract(t *testing.T) {
 	for _, scenario := range []string{"success", "assertion", "false-completion", "false-failure", "cleanup-stall", "startup-stall", "held-stdio", "killed-held-stdio", "unknown-exit", "runtime-fatal"} {
 		t.Run(scenario, func(t *testing.T) {
 			state := filepath.Join(t.TempDir(), "state")
-			helperArguments := progressHelperArgs(progressChildControlSelector, progressVerboseHelperArgument)
+			helperArguments, controlEnv := progressControlArgs(progressChildControlSelector, progressVerboseHelperArgument)
 			ctx, cancel := context.WithTimeout(t.Context(), progressTransportChildBudget+4*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, executable, helperArguments...)
 			command.Env = append(os.Environ(), progressChildControl+"="+scenario, progressChildState+"="+state)
+			if controlEnv != "" {
+				command.Env = append(command.Env, controlEnv)
+			}
 			output, runErr := command.CombinedOutput()
 			t.Cleanup(func() {
 				if t.Failed() {

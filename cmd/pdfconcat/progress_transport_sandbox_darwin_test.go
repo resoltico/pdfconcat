@@ -30,7 +30,7 @@ func TestProgressNativeTerminalPathPolicyFailure(t *testing.T) {
 
 	executable, err := os.Executable()
 	requireProgressNoError(t, err)
-	helperArguments := progressHelperArgs(progressSandboxSelector, progressNativeVerbose)
+	helperArguments := progressOwnedHelperArgs("native-sandbox-", progressSandboxSelector, progressNativeVerbose)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 
 	defer cancel()

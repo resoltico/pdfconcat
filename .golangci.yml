@@ -27,9 +27,6 @@ linters:
     presets: []
     rules:
       - linters: [gosec]
-        path: ^cmd/pdfconcat/progress_subprocess_coverage_test\.go$
-        text: 'G204: Subprocess launched with variable'
-      - linters: [gosec]
         path: ^cmd/pdfconcat/progress_transport_child_test\.go$
         text: 'G204: Subprocess launched with variable'
       - linters: [gosec]

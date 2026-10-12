@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// Coverage metadata preparation has its own joined five-second bound. It must not consume the
+// Child coverage directory preparation must not consume the
 // tested operation's deadline. The process watchdog separately bounds startup, cleanup and exit.
 func runClosedStderrChild(t *testing.T, stall string, operationBudget, processBudget time.Duration) (string, error) {
 	t.Helper()
@@ -27,7 +27,23 @@ func runClosedStderrChild(t *testing.T, stall string, operationBudget, processBu
 func runProgressPhaseChild(t *testing.T, selector string, environment []string, operationBudget, processBudget time.Duration) (string, error) {
 	t.Helper()
 	started := time.Now()
-	args := progressHelperArgs("-test.run=^"+selector+"$", "-test.v")
+	helperArgs := []string{"-test.run=^" + selector + "$", "-test.v"}
+	negative := false
+	for _, entry := range environment {
+		if entry == "PDFCONCAT_CLOSED_STDERR_STALL=operation" || entry == "PDFCONCAT_CLOSED_STDERR_STALL=cleanup" {
+			negative = true
+		}
+	}
+	var args []string
+	if negative {
+		var controlEnv string
+		args, controlEnv = progressControlArgs(helperArgs...)
+		if controlEnv != "" {
+			environment = append(environment, controlEnv)
+		}
+	} else {
+		args = progressHelperArgs(helperArgs...)
+	}
 	metadataTime := time.Since(started)
 	executable, err := os.Executable()
 	if err != nil {
@@ -83,7 +99,7 @@ func runProgressPhaseChild(t *testing.T, selector string, environment []string, 
 		cancel()
 	}
 	waitErr := command.Wait() // Required reap, including both deliberate stalls and cancellation.
-	trace := phases + fmt.Sprintf("metadata_preparation=%s process=%s last_phase=%s reaped=%t context=%v", metadataTime, time.Since(launched), phase, command.ProcessState != nil, ctx.Err())
+	trace := phases + fmt.Sprintf("coverage_preparation=%s process=%s last_phase=%s reaped=%t context=%v", metadataTime, time.Since(launched), phase, command.ProcessState != nil, ctx.Err())
 	data, readErr := os.ReadFile(output.Name())
 	if protocolErr != nil || waitErr != nil {
 		trace += fmt.Sprintf(" output=%s", data)

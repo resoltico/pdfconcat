@@ -117,7 +117,7 @@ func TestNativeProgressPhysicalCImportBoundary(t *testing.T) {
 func TestNativeProgressChildLayoutRejectsMissingDuplicateAndForeignData(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
-	sandbox := directory
+	sandbox := filepath.Join(directory, "native-sandbox-fixture")
 	stimulus := filepath.Join(directory, "native-signal-stimulus-owned")
 	retry := filepath.Join(directory, "native-signal-retry-owned")
 

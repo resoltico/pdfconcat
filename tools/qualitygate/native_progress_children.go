@@ -73,10 +73,6 @@ func nativeCoverageLayout(directory string, inputs map[string]bool) error {
 	counts := map[string]int{}
 
 	for input := range inputs {
-		if input == directory {
-			counts["sandbox"]++
-			continue
-		}
 
 		if filepath.Dir(input) != directory {
 			return fmt.Errorf("%w: nested native child coverage has no scenario owner", errGate)
@@ -84,6 +80,8 @@ func nativeCoverageLayout(directory string, inputs map[string]bool) error {
 
 		name := filepath.Base(input)
 		switch {
+		case strings.HasPrefix(name, "native-sandbox-"):
+			counts["sandbox"]++
 		case strings.HasPrefix(name, "native-signal-stimulus-"):
 			counts["stimulus"]++
 		case strings.HasPrefix(name, "native-signal-retry-"):

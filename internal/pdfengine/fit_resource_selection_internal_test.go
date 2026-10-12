@@ -45,14 +45,37 @@ func TestFitColorSpaceSelectionHandlesEmptyAndScalarResources(t *testing.T) {
 	}
 }
 
-func TestFitStrokeDoesNotPaintUnselectedFillPattern(t *testing.T) {
+func TestFitPaintingConsultsOnlySelectedPatternModes(t *testing.T) {
 	t.Parallel()
 	inspector := newFitProgramInspector(guardContext(t))
-	state := &fitGraphicsState{fillPattern: true}
-	if err := inspector.paintPatterns(t.Context(), state, fitPaintStroke); err != nil {
-		t.Fatalf("stroke consulted unused fill pattern: %v", err)
+	for _, fixture := range []struct {
+		state           *fitGraphicsState
+		unused, painted fitPaintMode
+	}{
+		{&fitGraphicsState{fillPattern: true}, fitPaintStroke, fitPaintFill},
+		{&fitGraphicsState{strokePattern: true}, fitPaintFill, fitPaintStroke},
+	} {
+		if err := inspector.paintPatterns(t.Context(), fixture.state, fixture.unused); err != nil {
+			t.Fatalf("mode %d consulted an unused pattern: %v", fixture.unused, err)
+		}
+		if err := inspector.paintPatterns(t.Context(), fixture.state, fixture.painted); !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("painted mode %d without pattern selection accepted: %v", fixture.painted, err)
+		}
 	}
-	if err := inspector.paintPatterns(t.Context(), state, fitPaintFill); !errors.Is(err, errFitUnsupported) {
-		t.Fatalf("painted fill without selection accepted: %v", err)
+}
+
+func TestFitTextRenderingModeDomainFromActualContent(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"0", "1", "2", "3", "4", "5", "6", "7"} {
+		inspector := newFitProgramInspector(guardContext(t))
+		if err := guardInspect(t, inspector, "BT "+mode+" Tr ET", nil); err != nil {
+			t.Fatalf("supported text rendering mode %s refused: %v", mode, err)
+		}
+	}
+	for _, mode := range []string{"-1", "8", "0.5"} {
+		inspector := newFitProgramInspector(guardContext(t))
+		if err := guardInspect(t, inspector, "BT "+mode+" Tr ET", nil); err == nil {
+			t.Fatalf("unsupported text rendering mode %s accepted", mode)
+		}
 	}
 }

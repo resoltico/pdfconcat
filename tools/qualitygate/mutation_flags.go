@@ -6,9 +6,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/capture"
 )
 
@@ -50,13 +51,17 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 
 	// The executor changes directory to the source snapshot; retained evidence belongs to the caller.
 	if *reportOut != "" {
-		caller, err := os.Getwd()
-		if err != nil {
-			return mutationOptions{}, fmt.Errorf("resolve mutation report path: %w", err)
-		}
-		bound, err := assembly.ResolvePath(caller, "mutation report", *reportOut)
-		if err != nil {
-			return mutationOptions{}, err
+		bound := *reportOut
+		var err error
+		if !filepath.IsAbs(bound) {
+			if filepath.Separator == '\\' && (filepath.VolumeName(bound) != "" || strings.HasPrefix(bound, `\`) || strings.HasPrefix(bound, "/")) {
+				return mutationOptions{}, &os.PathError{Op: "validate mutation report", Path: bound, Err: os.ErrInvalid}
+			}
+			caller, lookupErr := os.Getwd()
+			if lookupErr != nil {
+				return mutationOptions{}, fmt.Errorf("resolve mutation report path: %w", lookupErr)
+			}
+			bound = caller + string(filepath.Separator) + bound
 		}
 		*reportOut, err = capture.NativeArtifactPath(bound)
 		if err != nil {

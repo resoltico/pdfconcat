@@ -19,6 +19,7 @@ package model
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -53,6 +54,25 @@ func TestHexStringIgnoresPDFWhitespaceBetweenNibbles(t *testing.T) {
 		if valid != test.valid || valid && (result == nil || *result != test.expected) || !valid && result != nil {
 			t.Fatalf("input %q: value=%v valid=%v expected=%q valid=%v", test.input, result, valid, test.expected, test.valid)
 		}
+	}
+}
+
+func TestHexStringLargeCanonicalAndFormattedValues(t *testing.T) {
+	canonical := strings.Repeat("ABCDEF0123456789", 2048)
+	for _, test := range []struct {
+		name, input, expected string
+		valid                 bool
+	}{
+		{"canonical", canonical, canonical, true},
+		{"formatted", strings.Repeat("a b C\td\n", 4096), strings.Repeat("ABCD", 4096), true},
+		{"late-invalid-digit", canonical + "G", "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, valid := hexString(test.input)
+			if valid != test.valid || valid && (result == nil || *result != test.expected) || !valid && result != nil {
+				t.Fatalf("valid=%t, want %t; normalized value differs", valid, test.valid)
+			}
+		})
 	}
 }
 

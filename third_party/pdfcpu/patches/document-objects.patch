@@ -1727,10 +1727,10 @@ index 0000000..e5333a5
 +}
 diff --git a/pkg/pdfcpu/model/hex_parse_test.go b/pkg/pdfcpu/model/hex_parse_test.go
 new file mode 100644
-index 0000000..7e18c6e
+index 0000000..bdcf4c0
 --- /dev/null
 +++ b/pkg/pdfcpu/model/hex_parse_test.go
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,122 @@
 +/*
 +Copyright 2026 The pdfcpu Authors.
 +
@@ -1752,6 +1752,7 @@ index 0000000..7e18c6e
 +import (
 +	"context"
 +	"errors"
++	"strings"
 +	"testing"
 +
 +	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -1786,6 +1787,25 @@ index 0000000..7e18c6e
 +		if valid != test.valid || valid && (result == nil || *result != test.expected) || !valid && result != nil {
 +			t.Fatalf("input %q: value=%v valid=%v expected=%q valid=%v", test.input, result, valid, test.expected, test.valid)
 +		}
++	}
++}
++
++func TestHexStringLargeCanonicalAndFormattedValues(t *testing.T) {
++	canonical := strings.Repeat("ABCDEF0123456789", 2048)
++	for _, test := range []struct {
++		name, input, expected string
++		valid                 bool
++	}{
++		{"canonical", canonical, canonical, true},
++		{"formatted", strings.Repeat("a b C\td\n", 4096), strings.Repeat("ABCD", 4096), true},
++		{"late-invalid-digit", canonical + "G", "", false},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			result, valid := hexString(test.input)
++			if valid != test.valid || valid && (result == nil || *result != test.expected) || !valid && result != nil {
++				t.Fatalf("valid=%t, want %t; normalized value differs", valid, test.valid)
++			}
++		})
 +	}
 +}
 +
@@ -1834,7 +1854,7 @@ index 0000000..7e18c6e
 +	}
 +}
 diff --git a/pkg/pdfcpu/model/parse.go b/pkg/pdfcpu/model/parse.go
-index 34427ca..b532b6b 100644
+index 34427ca..bd882b7 100644
 --- a/pkg/pdfcpu/model/parse.go
 +++ b/pkg/pdfcpu/model/parse.go
 @@ -20,6 +20,7 @@ import (
@@ -1853,10 +1873,20 @@ index 34427ca..b532b6b 100644
  	errHexLiteralCorrupt       = errors.New("parse: corrupt hex literal")
  	errHexLiteralNotTerminated = errors.New("parse: hex literal not terminated")
  	errNameObjectCorrupt       = errors.New("parse: corrupt name object")
-@@ -165,18 +167,11 @@ func hexString(s string) (*string, bool) {
+@@ -158,35 +160,37 @@ func hexString(s string) (*string, bool) {
+ 	}
+ 
+ 	var sb strings.Builder
+-	i := 0
++	start := 0
++	s = strings.ToUpper(s)
+ 
+-	for _, c := range strings.ToUpper(s) {
++	for index, c := range s {
+ 		if strings.ContainsRune("\x00\x09\x0A\x0C\x0D ", c) {
  			// Ignore whitespace within digit pairs (PDF 2.0, 7.3.4.3).
- 			continue
- 		}
+-			continue
+-		}
 -		isHexChar := false
 -		for _, hexch := range "ABCDEF1234567890" {
 -			if c == hexch {
@@ -1864,18 +1894,40 @@ index 34427ca..b532b6b 100644
 -				sb.WriteRune(c)
 -				i++
 -				break
--			}
--		}
++			if start == 0 {
++				sb.Grow(len(s))
+ 			}
++			sb.WriteString(s[start:index])
++			start = index + 1
++			continue
+ 		}
 -		if !isHexChar {
 +		if !('0' <= c && c <= '9') && !('A' <= c && c <= 'F') {
  			return nil, false
  		}
-+		sb.WriteByte(byte(c))
-+		i++
  	}
++	// Canonical literals already have the required representation. When whitespace
++	// occurs, copy complete digit runs rather than rebuilding every digit.
++	if start != 0 {
++		sb.WriteString(s[start:])
++		s = sb.String()
++	}
  
  	// If the final digit of a hexadecimal string is missing -
-@@ -554,26 +549,6 @@ func parseName(line *string) (*types.Name, error) {
+ 	// that is, if there is an odd number of digits - the final digit shall be assumed to be 0.
+-	if i%2 > 0 {
+-		sb.WriteString("0")
++	if len(s)%2 > 0 {
++		s += "0"
+ 	}
+ 
+-	ss := sb.String()
+-	return &ss, true
++	return &s, true
+ }
+ 
+ // balancedParenthesesPrefix returns the index of the end position of the balanced parentheses prefix of s
+@@ -554,26 +558,6 @@ func parseName(line *string) (*types.Name, error) {
  	return &nameObj, nil
  }
  
@@ -1902,7 +1954,7 @@ index 34427ca..b532b6b 100644
  func dictString(l string) bool {
  	return len(l) > 0 && !strings.HasPrefix(l, ">>")
  }
-@@ -582,6 +557,7 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
+@@ -582,6 +566,7 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
  	l := *line
  	var eol bool
  	d := types.NewDict()
@@ -1910,7 +1962,7 @@ index 34427ca..b532b6b 100644
  
  	for dictString(l) {
  
-@@ -610,6 +586,12 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
+@@ -610,6 +595,12 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
  			continue
  		}
  
@@ -1923,7 +1975,7 @@ index 34427ca..b532b6b 100644
  		if len(l) == 0 {
  			// Only whitespace after key.
  			return nil, errDictionaryNotTerminated
-@@ -628,9 +610,11 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
+@@ -628,9 +619,11 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
  
  		// Specifying the null object as the value of a dictionary entry (7.3.7, "Dictionary Objects")
  		// shall be equivalent to omitting the entry entirely.
@@ -1938,7 +1990,7 @@ index 34427ca..b532b6b 100644
  		}
  
  		// We are positioned on the char behind the last parsed dict value.
-@@ -715,25 +699,6 @@ func startParseNumericOrIndRef(l string) (string, string, int) {
+@@ -715,25 +708,6 @@ func startParseNumericOrIndRef(l string) (string, string, int) {
  		str = l[:i1]
  	}
  
@@ -1964,7 +2016,7 @@ index 34427ca..b532b6b 100644
  	return str, l1, i1
  }
  
-@@ -802,27 +767,36 @@ func isPDFReal(s string) bool {
+@@ -802,27 +776,36 @@ func isPDFReal(s string) bool {
  }
  
  func parseFloat(s string) (types.Object, error) {
@@ -2013,7 +2065,7 @@ index 34427ca..b532b6b 100644
  func parseNumericOrIndRef(line *string) (types.Object, error) {
  	if noBuf(line) {
  		return nil, errBufNotAvailable
-@@ -834,15 +808,18 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
+@@ -834,15 +817,18 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
  	// otherwise it has to be a float
  	// we have to check first for integer
  	s, l1, i1 := startParseNumericOrIndRef(l)
@@ -2036,7 +2088,7 @@ index 34427ca..b532b6b 100644
  		}
  		*line = l1
  		return parseFloat(s)
-@@ -870,7 +847,7 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
+@@ -870,7 +856,7 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
  		return types.Integer(i), nil
  	}
  
@@ -2045,7 +2097,7 @@ index 34427ca..b532b6b 100644
  
  	// if only 2 token, can't be indirect reference.
  	// if not followed by whitespace return sole integer value.
-@@ -1033,6 +1010,9 @@ func parseObject(c context.Context, line *string, level, depthLimit, validationM
+@@ -1033,6 +1019,9 @@ func parseObject(c context.Context, line *string, level, depthLimit, validationM
  
  	// position to first non whitespace char
  	l, _ = trimLeftSpace(l, false)
@@ -2055,7 +2107,7 @@ index 34427ca..b532b6b 100644
  	if len(l) == 0 {
  		// only whitespace
  		return nil, errBufNotAvailable
-@@ -1040,6 +1020,9 @@ func parseObject(c context.Context, line *string, level, depthLimit, validationM
+@@ -1040,6 +1029,9 @@ func parseObject(c context.Context, line *string, level, depthLimit, validationM
  
  	value, err := parseObjectValue(c, &l, level, depthLimit, validationMode, repair)
  	if err != nil {
@@ -2065,7 +2117,7 @@ index 34427ca..b532b6b 100644
  		return nil, err
  	}
  
-@@ -1081,7 +1064,7 @@ func ParseObjectWithPolicy(c context.Context, line *string, level, validationMod
+@@ -1081,7 +1073,7 @@ func ParseObjectWithPolicy(c context.Context, line *string, level, validationMod
  	if err == nil {
  		return ParseObjectResult{Object: value}, nil
  	}
@@ -2074,7 +2126,7 @@ index 34427ca..b532b6b 100644
  		return ParseObjectResult{}, err
  	}
  	if validationMode != ValidationRelaxed &&
-@@ -1117,7 +1100,7 @@ func ParseObject(c context.Context, line *string, level int, maxDepth ...int) (t
+@@ -1117,7 +1109,7 @@ func ParseObject(c context.Context, line *string, level int, maxDepth ...int) (t
  	depthLimit := parseObjectDepthLimit(maxDepth)
  	original := *line
  	value, err := parseObject(c, line, level, depthLimit, ValidationRelaxed, false)

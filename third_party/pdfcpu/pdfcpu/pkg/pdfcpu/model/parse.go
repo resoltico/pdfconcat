@@ -160,28 +160,37 @@ func hexString(s string) (*string, bool) {
 	}
 
 	var sb strings.Builder
-	i := 0
+	start := 0
+	s = strings.ToUpper(s)
 
-	for _, c := range strings.ToUpper(s) {
+	for index, c := range s {
 		if strings.ContainsRune("\x00\x09\x0A\x0C\x0D ", c) {
 			// Ignore whitespace within digit pairs (PDF 2.0, 7.3.4.3).
+			if start == 0 {
+				sb.Grow(len(s))
+			}
+			sb.WriteString(s[start:index])
+			start = index + 1
 			continue
 		}
 		if !('0' <= c && c <= '9') && !('A' <= c && c <= 'F') {
 			return nil, false
 		}
-		sb.WriteByte(byte(c))
-		i++
+	}
+	// Canonical literals already have the required representation. When whitespace
+	// occurs, copy complete digit runs rather than rebuilding every digit.
+	if start != 0 {
+		sb.WriteString(s[start:])
+		s = sb.String()
 	}
 
 	// If the final digit of a hexadecimal string is missing -
 	// that is, if there is an odd number of digits - the final digit shall be assumed to be 0.
-	if i%2 > 0 {
-		sb.WriteString("0")
+	if len(s)%2 > 0 {
+		s += "0"
 	}
 
-	ss := sb.String()
-	return &ss, true
+	return &s, true
 }
 
 // balancedParenthesesPrefix returns the index of the end position of the balanced parentheses prefix of s

@@ -4,6 +4,7 @@
 package plan_test
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestDecodedJobHeader(t *testing.T) {
 
 	job := mustDecode(t, `{"$schema":"x","version":1.0,"output":"out/o.pdf","dir":"src","items":["a.pdf"]}`)
 
-	if job.Base != baseDir || job.Output.Value != "out/o.pdf" || job.Dir.Value != "src" || job.ItemsBase() != "/base/src" {
+	if job.Base != baseDir || job.Output.Value != "out/o.pdf" || job.Dir.Value != "src" || job.ItemsBase() != filepath.FromSlash("/base/src") {
 		t.Fatalf("job header: %+v", job)
 	}
 }
@@ -111,11 +112,11 @@ func TestFontBasesFollowTheDeclaringScope(t *testing.T) {
 
 	for name, row := range map[string]struct{ got, want assembly.Font }{
 		"default font (initial base, not dir)": {job.Defaults.Text.Font.Value, assembly.Font{File: "fonts/Root.ttf", Base: baseDir}},
-		"root item font":                       {fontOf(&job.Items[0]), assembly.Font{File: "item.ttf", Base: "/base/src"}},
+		"root item font":                       {fontOf(&job.Items[0]), assembly.Font{File: "item.ttf", Base: filepath.FromSlash("/base/src")}},
 		"explicit default":                     {fontOf(&job.Items[1]), assembly.Font{}},
-		"group font":                           {fontOf(&group.Items[0]), assembly.Font{File: "inner.ttf", Base: "/base/src/grp"}},
-		"nested absolute":                      {fontOf(&deep[0]), assembly.Font{File: "/abs/Deep.ttf", Base: "/base/src/grp/deep"}},
-		"nested group font":                    {fontOf(&deep[1]), assembly.Font{File: "deep.ttf", Base: "/base/src/grp/deep"}},
+		"group font":                           {fontOf(&group.Items[0]), assembly.Font{File: "inner.ttf", Base: filepath.FromSlash("/base/src/grp")}},
+		"nested absolute":                      {fontOf(&deep[0]), assembly.Font{File: "/abs/Deep.ttf", Base: filepath.FromSlash("/base/src/grp/deep")}},
+		"nested group font":                    {fontOf(&deep[1]), assembly.Font{File: "deep.ttf", Base: filepath.FromSlash("/base/src/grp/deep")}},
 	} {
 		if row.got != row.want {
 			t.Errorf("%s: %+v, want %+v", name, row.got, row.want)

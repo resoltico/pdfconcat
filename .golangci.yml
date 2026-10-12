@@ -193,7 +193,7 @@ linters:
         text: 'G204: Subprocess launched with variable'
       - linters:
           - gosec
-        path: ^cmd/pdfconcat/progress_owner_phase_unix_test\.go$
+        path: ^cmd/pdfconcat/progress_helper_phase_unix_test\.go$
         text: 'G204: Subprocess launched with variable'
       - linters:
           - gosec

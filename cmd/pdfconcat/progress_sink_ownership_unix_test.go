@@ -6,11 +6,9 @@
 package main
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
@@ -33,8 +31,6 @@ func TestProgressSinkConstructorRejectsMalformedAcquisitions(t *testing.T) {
 func verifyProgressSinkOwnership(t *testing.T, operation string) {
 	t.Helper()
 	t.Parallel()
-	executable, err := os.Executable()
-	requireProgressNoError(t, err)
 	for _, scenario := range []string{
 		"zero", "borrowed-target", "borrowed-output-target", "borrowed-error-target",
 		"borrowed-input-guard", "borrowed-guard", "borrowed-error-guard", "duplicate",
@@ -42,15 +38,11 @@ func verifyProgressSinkOwnership(t *testing.T, operation string) {
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
-			helperArguments := progressHelperArgs("-test.run=^TestProgressSinkOwnershipHelper$", "-test.v")
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			command := exec.CommandContext(ctx, executable, helperArguments...)
-			command.Env = append(os.Environ(), progressSinkOwnershipScenario+"="+scenario, progressSinkOwnershipOperation+"="+operation)
-			output, runErr := command.CombinedOutput()
-			if ctx.Err() != nil || runErr != nil || !strings.Contains(string(output), "--- PASS: TestProgressSinkOwnershipHelper") {
-				t.Fatalf("private sink ownership boundary (watchdog=%v): %v\n%s", ctx.Err(), runErr, output)
+			trace, err := runProgressPhaseChild(t, "TestProgressSinkOwnershipHelper", []string{progressSinkOwnershipScenario + "=" + scenario, progressSinkOwnershipOperation + "=" + operation}, 3*time.Second, 10*time.Second)
+			if err != nil {
+				t.Fatalf("private sink ownership boundary: %v; %s", err, trace)
 			}
+			t.Log(trace)
 		})
 	}
 }
@@ -60,6 +52,7 @@ func TestProgressSinkOwnershipHelper(t *testing.T) {
 	if scenario == "" {
 		return
 	}
+	control := progressPhaseControl(t)
 	// Restore borrowed descriptors before assertions or Go's final test output,
 	// even if the negative control closes stdout or stderr.
 	var before [3]unix.Stat_t
@@ -119,6 +112,9 @@ func TestProgressSinkOwnershipHelper(t *testing.T) {
 	default:
 		t.Fatal("unknown private sink ownership scenario")
 	}
+	if _, err := fmt.Fprintln(control, "ready"); err != nil {
+		t.Fatal(err)
+	}
 	var closeErr error
 	accepted := false
 	if os.Getenv(progressSinkOwnershipOperation) == "construct" {
@@ -158,7 +154,7 @@ func TestProgressSinkOwnershipHelper(t *testing.T) {
 		requireProgressNoError(t, err)
 	}
 	for descriptor := range after {
-		// Shared pipe activity may change stat timestamps and byte counts;
+		// Shared stream activity may change stat timestamps and byte counts;
 		// ownership is its native identity plus descriptor and status flags.
 		left, right := before[descriptor], after[descriptor]
 		if inspect[descriptor] != nil || left.Dev != right.Dev || left.Ino != right.Ino || left.Rdev != right.Rdev || left.Mode != right.Mode ||
@@ -182,5 +178,8 @@ func TestProgressSinkOwnershipHelper(t *testing.T) {
 		if !errors.Is(ownedErr, unix.EBADF) {
 			t.Errorf("cleanup retained the owned descriptor: %v", ownedErr)
 		}
+	}
+	if _, err := fmt.Fprintln(control, "operation"); err != nil {
+		t.Fatal(err)
 	}
 }

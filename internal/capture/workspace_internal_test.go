@@ -27,12 +27,16 @@ func TestWorkspaceBesideIsPrivateAndRemovedOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nativeParent, resolveErr := filepath.EvalSymlinks(parent)
-	if resolveErr != nil {
-		t.Fatal(resolveErr)
+	actualParent, err := os.Stat(filepath.Dir(workspace.Dir()))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if filepath.Dir(workspace.Dir()) != nativeParent {
-		t.Fatalf("workspace %q is not beside the destination in %q", workspace.Dir(), parent)
+	expectedParent, err := os.Stat(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(actualParent, expectedParent) {
+		t.Fatalf("workspace %q is not beside native destination %q", workspace.Dir(), parent)
 	}
 
 	permissiontest.RequirePrivateDirectory(t, workspace.Dir())

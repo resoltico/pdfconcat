@@ -21,8 +21,13 @@ import (
 // tested operation's deadline. The process watchdog separately bounds startup, cleanup and exit.
 func runClosedStderrChild(t *testing.T, stall string, operationBudget, processBudget time.Duration) (string, error) {
 	t.Helper()
+	return runProgressPhaseChild(t, "TestProgressClosedCallerStderrHelper", []string{progressOwnedCloseFault + "=1", "PDFCONCAT_CLOSED_STDERR_STALL=" + stall}, operationBudget, processBudget)
+}
+
+func runProgressPhaseChild(t *testing.T, selector string, environment []string, operationBudget, processBudget time.Duration) (string, error) {
+	t.Helper()
 	started := time.Now()
-	args := progressHelperArgs("-test.run=^TestProgressClosedCallerStderrHelper$", "-test.v")
+	args := progressHelperArgs("-test.run=^"+selector+"$", "-test.v")
 	metadataTime := time.Since(started)
 	executable, err := os.Executable()
 	if err != nil {
@@ -45,7 +50,7 @@ func runClosedStderrChild(t *testing.T, stall string, operationBudget, processBu
 	command.ExtraFiles = []*os.File{writer}
 	command.Stdout = output
 	command.Stderr = output
-	command.Env = append(os.Environ(), progressOwnedCloseFault+"=1", "PDFCONCAT_CLOSED_STDERR_STALL="+stall)
+	command.Env = append(os.Environ(), environment...)
 	launched := time.Now()
 	if err := command.Start(); err != nil {
 		return "", err
@@ -84,4 +89,20 @@ func runClosedStderrChild(t *testing.T, stall string, operationBudget, processBu
 		trace += fmt.Sprintf(" output=%s", data)
 	}
 	return trace, errors.Join(protocolErr, waitErr, readErr)
+}
+
+// Register first so this receipt is emitted only after every native cleanup/restore callback.
+func progressPhaseControl(t *testing.T) *os.File {
+	t.Helper()
+	control := os.NewFile(3, "native-helper-control")
+	if control == nil {
+		t.Fatal("missing private phase channel")
+	}
+	t.Cleanup(func() {
+		if _, err := fmt.Fprintln(control, "cleanup"); err != nil {
+			t.Error(err)
+		}
+		closeProgressResource(t, control)
+	})
+	return control
 }

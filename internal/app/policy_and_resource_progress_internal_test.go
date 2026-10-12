@@ -6,6 +6,7 @@ package app
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
@@ -96,10 +97,39 @@ func TestProducedResourceReportsEveryCompletedSpec(t *testing.T) {
 	if final == nil || final.Completed == nil || *final.Completed != 2 || final.Total == nil || *final.Total != 2 {
 		t.Fatalf("actual generated-spec progress: %+v", final)
 	}
-	if err := tools.Check(path); err != nil {
+	// Independent tools receive an ordinary short fixture path containing the exact produced bytes.
+	// Windows qpdf's argument handling does not accept the private extended namespace spelling.
+	privateRoot, err := os.OpenRoot(workspace.Dir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := pdforacle.Load(tools, path)
+	t.Cleanup(func() {
+		if err := privateRoot.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	produced, err := privateRoot.ReadFile(filepath.Base(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oracleDirectory := t.TempDir()
+	oracleRoot, err := os.OpenRoot(oracleDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := oracleRoot.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	oraclePath := filepath.Join(oracleDirectory, "resource.pdf")
+	if err := oracleRoot.WriteFile("resource.pdf", produced, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Check(oraclePath); err != nil {
+		t.Fatal(err)
+	}
+	document, err := pdforacle.Load(tools, oraclePath)
 	if err != nil || document.PageCount() != 2 {
 		t.Fatalf("independent resource page count: %v, %v", document, err)
 	}

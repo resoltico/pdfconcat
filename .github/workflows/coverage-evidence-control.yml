@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - .github/workflows/coverage-evidence-control.yml
+env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 permissions:
   contents: read
 jobs:
@@ -16,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -26,8 +28,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           cat > internal/observation/coverage_failure_control_test.go <<'GO'
+          // SPDX-License-Identifier: MPL-2.0
+          // Copyright (c) 2026 Ervins Strauhmanis
           package observation
           import "testing"
           func TestCoverageEvidenceOrdinaryFailure(t *testing.T) { t.Fatal("deliberate hosted evidence retention control") }
@@ -39,7 +43,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: failed-coverage-evidence-${{ github.sha }}
+          name: failed-coverage-evidence-${{ env.SOURCE_SHA }}
           path: ${{ runner.temp }}/coverage-evidence
           if-no-files-found: error
           retention-days: 14

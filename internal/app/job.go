@@ -97,7 +97,10 @@ func (p *pipeline) compileOperands() error {
 	return nil
 }
 
-func (p *pipeline) loadPlanFile(ctx context.Context) error {
+func (p *pipeline) loadPlanFile(ctx context.Context) error { return p.loadPlanFileWith(ctx, openInput) }
+
+// The narrow opener seam lets the native replacement control test the registration/open boundary.
+func (p *pipeline) loadPlanFileWith(ctx context.Context, open func(context.Context, string) (*os.File, error)) error {
 	path, err := p.commandPath("--plan", p.command.PlanPath)
 	if err != nil {
 		return err
@@ -108,11 +111,18 @@ func (p *pipeline) loadPlanFile(ctx context.Context) error {
 		return p.stopWith(planFileProblem(path, err))
 	}
 
-	file, err := openInput(ctx, path)
+	file, err := open(ctx, path)
 	if err != nil {
 		return p.stopWith(planFileProblem(path, err))
 	}
 
+	identity, err := capture.IdentityOfFile(file)
+	if err == nil {
+		err = p.registry.ClaimCaptured(capture.RolePlan, path, identity)
+	}
+	if err != nil {
+		return p.stopWith(planFileProblem(path, errors.Join(err, file.Close())))
+	}
 	return p.decodePlanFile(ctx, path, file)
 }
 

@@ -95,9 +95,18 @@ func TestCaptureWaiterCancellationDoesNotOwnSharedCopy(t *testing.T) {
 	go func() { _, err := set.Capture(t.Context(), source); owner <- err }()
 	<-entered
 	waiter, cancel := context.WithCancel(t.Context())
+	waiting := &captureWaitContext{Context: waiter, entered: make(chan struct{})}
+	waiterDone := make(chan error, 1)
+	go func() { _, err := set.Capture(waiting, source); waiterDone <- err }()
+	<-waiting.entered // The existing path promise is being awaited while its owner is blocked.
 	cancel()
-	if _, err := set.Capture(waiter, alias); !errors.Is(err, context.Canceled) {
-		t.Fatalf("waiter cancellation: %v", err)
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waiter cancellation: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiter could not abandon shared work")
 	}
 	aliasDone := make(chan error, 1)
 	go func() { _, err := set.Capture(t.Context(), alias); aliasDone <- err }()
@@ -148,4 +157,15 @@ func TestCaptureCloseCancelsAndJoinsReservedOwner(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("failed owner left snapshot: %v/%v", entries, err)
 	}
+}
+
+type captureWaitContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *captureWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
 }

@@ -107,7 +107,7 @@ func (g *generated) items(tb testing.TB, choose chooser, depth int, base string,
 			items[index] = assembly.NewGroupItem(assembly.Origin{Ref: ref}, dir, nil)
 			nestedBase := base
 			if dir != "" {
-				nestedBase = base + "/" + dir
+				nestedBase = filepath.FromSlash(base + "/" + dir)
 			}
 			items[index].Items = g.items(tb, choose, depth+1, nestedBase, next)
 		case kind <= 2:
@@ -116,7 +116,7 @@ func (g *generated) items(tb testing.TB, choose chooser, depth int, base string,
 
 			info := fileGeometry(file)
 			for page := range info.Pages {
-				g.expansion = append(g.expansion, outputPage{file: base + "/" + fileName(file), page: page + 1})
+				g.expansion = append(g.expansion, outputPage{file: filepath.FromSlash(base + "/" + fileName(file)), page: page + 1})
 				g.inherit = append(g.inherit, false)
 			}
 		default:

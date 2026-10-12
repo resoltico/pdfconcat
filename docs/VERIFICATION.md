@@ -21,7 +21,7 @@ Each row names one file and diagnostic. Paths intentionally enter capture/public
 | File | Rule / diagnostic | Reason and retained property |
 | --- | --- | --- |
 | `internal/app/native_directory_link_windows_test.go` | `gosec`: G204: Subprocess launched with variable | This fixture invokes the fixed Windows mklink command solely to create a junction between owned temporary directories. It accepts no user command or filesystem argument. The independent native open and output oracles establish host traversal, and namespace cleanup belongs to the test. Retains: actual Windows junction controls without borrowing POSIX expectations. |
-| `cmd/pdfconcat/progress_owner_phase_unix_test.go` | `gosec`: G204: Subprocess launched with variable | The owned parent launches only its current test executable with an anchored selector, inherited coverage flags and a dedicated phase pipe. Operation/cleanup stalls are deliberate test controls and every process is reaped. Retains: native descriptor restoration and bounded instrumented helper lifetime. |
+| `cmd/pdfconcat/progress_helper_phase_unix_test.go` | `gosec`: G204: Subprocess launched with variable | The owned parent launches closed-stderr and sink-ownership controls only in its current test executable with an anchored selector, inherited coverage flags and a dedicated phase pipe. Operation/cleanup stalls are deliberate test controls and every process is reaped. Retains: native descriptor restoration and bounded instrumented helper lifetime. |
 | `cmd/pdfconcat/progress_subprocess_coverage_test.go` | `gosec`: G204: Subprocess launched with variable | A bounded child runs only the current covered test executable with an anchored private selector and the gate-owned coverage directory. Its joined PASS and successful coverage exit establish canonical metadata before concurrent native children use that directory; no shell or user executable is accepted. Retains: complete subprocess coverage without concurrent metadata loss or accepting an empty child record. |
 | `cmd/pdfconcat/progress_transport_pause_native_windows_test.go` | `gosec`: G115: integer overflow conversion int -> uint32 | The independent native console control refuses zero or more than 65535 UTF-16 units before converting the single WriteConsoleW count to its uint32 ABI. This does not cover any other numeric narrowing or production write path. Retains: one independent real native write uses a count proven within the Windows ABI range |
 | `cmd/pdfconcat/progress_transport_pause_fixture_windows_test.go` | `gosec`: G103: Use of unsafe calls should be audited | GetHandleInformation writes one pinned uint32 owned by this read-only caller identity fixture. Keep the value alive through the call, check API failure, and compare real handle flags after cancellation and writer completion. Retains: independent native observations prove caller handle flags survive console cancellation unchanged |
@@ -124,3 +124,14 @@ inventory; missing, skipped, cancelled and failed outcomes refuse success. Workf
 also reject omitted dependencies. Active main/tag rules must be read back separately and bound
 to the real PR check's observed GitHub App identity. Administrators can alter or disable these
 rules; they enforce ordinary repository operations rather than administrator immutability.
+
+
+Native helper operation/cleanup deadlines start after explicit readiness and use a separate finite
+process-exit watchdog. Shared coverage-metadata preparation occurs before these deadlines. Plain,
+race and instrumented phase traces are required; a printed PASS is not an exit receipt. The same
+protocol covers the borrowed-standard-descriptor controls exposed by Intel coverage.
+
+Mandatory CI checks out `SOURCE_SHA` (the PR head, or the triggering commit for other events).
+That exact source, its real PR check identity, and the hosted settings readback are distinct evidence.
+The failure control deliberately injects one test into that checkout and labels its dirty source
+state; it does not certify the unmodified candidate.

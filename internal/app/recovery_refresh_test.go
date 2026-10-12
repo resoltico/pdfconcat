@@ -63,8 +63,19 @@ func TestLateAliasRecoveryRecordsFailedPublicationAndQueriesWithoutUnsafeNext(t 
 	}
 
 	files, err := filepath.Glob(filepath.Join(dir, recoveryFilePattern))
-	if err != nil || len(files) != 1 || files[0] != path {
+	if err != nil || len(files) != 1 {
 		t.Fatalf("not exactly one useful recovery: %v %v", files, err)
+	}
+	actual, err := os.Stat(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(actual, expected) {
+		t.Fatalf("recovery reference points to another native object: %s", path)
 	}
 }
 

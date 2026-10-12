@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
 
@@ -83,7 +84,18 @@ func runCoverage(ctx context.Context, args []string) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	directory, err := filepath.Abs(*evidenceDir)
+	directory := *evidenceDir
+	if !filepath.IsAbs(directory) {
+		if filepath.Separator == '\\' && (filepath.VolumeName(directory) != "" || strings.HasPrefix(directory, `\`) || strings.HasPrefix(directory, "/")) {
+			return &os.PathError{Op: "validate coverage evidence", Path: directory, Err: os.ErrInvalid}
+		}
+		caller, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		directory = caller + string(filepath.Separator) + directory
+	}
+	directory, err = capture.NativeArtifactPath(directory)
 	if err != nil {
 		return err
 	}

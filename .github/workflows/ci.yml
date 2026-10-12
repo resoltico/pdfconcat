@@ -13,6 +13,7 @@ on:
   workflow_call:
 
 env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   PDFCONCAT_REQUIRE_QA_TOOLS: "1"
 
 permissions:
@@ -38,6 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -69,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -127,6 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -172,6 +176,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -201,6 +206,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
       - run: go build -trimpath ./...
@@ -213,6 +219,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
       - run: go mod verify
@@ -226,6 +233,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -245,6 +253,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -275,6 +284,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -309,7 +319,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
         with:
@@ -319,7 +329,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           go run ./tools/qualitygate fuzz -time 30s 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -337,6 +347,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: Require every mandatory dependency to succeed

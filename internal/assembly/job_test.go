@@ -6,6 +6,7 @@ package assembly_test
 import (
 	"errors"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -131,7 +132,7 @@ func TestItemsBase(t *testing.T) {
 	withDir := &assembly.Job{Base: "/b", Dir: assembly.Set("src", assembly.Origin{})}
 	withoutDir := &assembly.Job{Base: "/b"}
 
-	if withDir.ItemsBase() != "/b/src" || withoutDir.ItemsBase() != "/b" {
+	if withDir.ItemsBase() != filepath.FromSlash("/b/src") || withoutDir.ItemsBase() != filepath.FromSlash("/b") {
 		t.Errorf("ItemsBase() = %q, %q", withDir.ItemsBase(), withoutDir.ItemsBase())
 	}
 }

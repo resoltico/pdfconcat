@@ -5,6 +5,7 @@ package assembly_test
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -148,8 +149,8 @@ func TestJoinDir(t *testing.T) {
 		{"", "", ""},
 		{"a/b", "../c", "a/b/../c"},
 	} {
-		if got := assembly.JoinDir(row.dir, row.name); got != row.want {
-			t.Errorf("JoinDir(%q, %q) = %q; want %q", row.dir, row.name, got, row.want)
+		if got := assembly.JoinDir(row.dir, row.name); got != filepath.FromSlash(row.want) {
+			t.Errorf("JoinDir(%q, %q) = %q; want %q", row.dir, row.name, got, filepath.FromSlash(row.want))
 		}
 	}
 }

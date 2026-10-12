@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/assembly"
+	"github.com/resoltico/pdfconcat/internal/capture"
 	"github.com/resoltico/pdfconcat/internal/pdfengine"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 	"github.com/resoltico/pdfconcat/internal/plan"
@@ -35,7 +36,14 @@ func TestSourceFeatureProvenanceOnlyMaterializesReportedReferences(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := make(map[string]pdfengine.SourceInfo)
+	facts := make(map[capture.Identity]pdfengine.SourceInfo)
+	identityOf := func(path string) capture.Identity {
+		id, err := capture.IdentityOf(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
 	for name, document := range map[string]*pdffixture.Doc{"plain.pdf": pdffixture.Plain("plain"), "outline.pdf": pdffixture.Outlined("outline")} {
 		path := filepath.Join(dir, name)
 		if err := document.WriteFile(path); err != nil {
@@ -45,9 +53,9 @@ func TestSourceFeatureProvenanceOnlyMaterializesReportedReferences(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		facts[path] = info
+		facts[identityOf(path)] = info
 	}
-	if len(facts[filepath.Join(dir, "plain.pdf")].Features) != 0 || len(facts[filepath.Join(dir, "outline.pdf")].Features) != 1 {
+	if len(facts[identityOf(filepath.Join(dir, "plain.pdf"))].Features) != 0 || len(facts[identityOf(filepath.Join(dir, "outline.pdf"))].Features) != 1 {
 		t.Fatal("native fixtures do not isolate plain and outlined source facts")
 	}
 	for _, count := range []int{100, 1000, 10000} {
@@ -80,7 +88,7 @@ func TestSourceFeatureProvenanceOnlyMaterializesReportedReferences(t *testing.T)
 				flat.Source = measured
 				current := &pipeline{flat: flat, files: make([]sourceEvidence, len(flat.Files)), builder: report.NewBuilder("check")}
 				for index, file := range flat.Files {
-					info, found := facts[file.Path]
+					info, found := facts[identityOf(file.Path)]
 					if !found {
 						t.Fatalf("unknown native source %s", file.Path)
 					}

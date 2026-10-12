@@ -22,7 +22,7 @@ func TestRetireReportRejectsInvalidNativePathWithoutChangingClaims(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := registry.RetireReport("invalid\x00report"); err == nil {
+	if err := registry.RetireReport(filepath.Join(t.TempDir(), "invalid\x00report")); err == nil {
 		t.Fatal("unrepresentable native report path accepted")
 	}
 
@@ -45,7 +45,7 @@ func TestArtifactRejectsNativePathFailuresWithoutChangingClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, path := range []string{"invalid\x00artifact", filepath.Join(dir, strings.Repeat("x", 256))} {
+	for _, path := range []string{filepath.Join(dir, "invalid\x00artifact"), filepath.Join(dir, strings.Repeat("x", 256))} {
 		_, err := registry.Add(capture.RoleReport, path)
 
 		failure, isSource := errors.AsType[*capture.SourceError](err)

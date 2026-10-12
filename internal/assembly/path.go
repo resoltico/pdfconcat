@@ -6,7 +6,6 @@ package assembly
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"unicode/utf8"
@@ -61,18 +60,7 @@ func CheckPathText(path string) error {
 
 // JoinDir resolves name against the base directory dir lexically: an absolute name stands alone, an
 // empty name is dir itself, and otherwise the two are joined with "/". No filesystem is consulted.
-func JoinDir(dir, name string) string {
-	switch {
-	case dir == "":
-		return name
-	case name == "":
-		return dir
-	case filepath.IsAbs(name):
-		return name
-	default:
-		return dir + "/" + name
-	}
-}
+func JoinDir(dir, name string) string { return joinPath(HostPathStyle(), dir, name) }
 
 // HostPathStyle returns the style of the running operating system.
 func HostPathStyle() PathStyle {
@@ -169,9 +157,67 @@ func resolvePathAs(style PathStyle, base, what, name string) (Code, string, erro
 		return CodeInvalidJob, "", fmt.Errorf("base directory: %w", baseErr)
 	}
 
-	if !filepath.IsAbs(base) {
+	if ClassifyPath(style, base) != PathAbsolute {
 		return CodeBaseNotAbsolute, "", fmt.Errorf("%w: %q must be an absolute path to resolve %s %q", ErrBaseNotAbsolute, base, what, name)
 	}
 
-	return "", JoinDir(base, name), nil
+	if style == PathStyleWindows {
+		for _, expression := range []string{base, name} {
+			if err := checkWindowsNamespace(expression); err != nil {
+				return CodeInvalidJob, "", fmt.Errorf("%s: %w", what, err)
+			}
+		}
+	}
+	return "", joinPath(style, base, name), nil
+}
+
+// joinPath changes ordinary Windows separator spelling, never traversal or namespace semantics.
+func joinPath(style PathStyle, base, name string) string {
+	separator := "/"
+	if style == PathStyleWindows {
+		separator = `\`
+		if !strings.HasPrefix(base, `\\?\`) && !strings.HasPrefix(base, `\\.\`) {
+			base = strings.ReplaceAll(base, "/", separator)
+		}
+		if !strings.HasPrefix(name, `\\?\`) && !strings.HasPrefix(name, `\\.\`) {
+			name = strings.ReplaceAll(name, "/", separator)
+		}
+	}
+	if ClassifyPath(style, name) == PathAbsolute || base == "" {
+		return name
+	}
+	if name == "" {
+		return base
+	}
+	return base + separator + name
+}
+
+func checkWindowsNamespace(path string) error {
+	if !(strings.HasPrefix(path, `\\?\`) || strings.HasPrefix(path, `\\.\`) || strings.HasPrefix(path, "//?/") || strings.HasPrefix(path, "//./")) {
+		return nil
+	}
+	if strings.Contains(path, "/") {
+		return fmt.Errorf("%w: Windows namespace paths require backslash separators", ErrInvalidPath)
+	}
+	rest := path[4:]
+	if strings.HasPrefix(path, `\\?\`) {
+		if strings.HasPrefix(rest, `UNC\`) {
+			rest = rest[4:]
+			parts := strings.Split(rest, `\`)
+			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+				return fmt.Errorf("%w: verbatim UNC needs a server and share", ErrInvalidPath)
+			}
+		} else if len(rest) < 3 || !isASCIILetter(rest[0]) || rest[1] != ':' || rest[2] != '\\' {
+			return fmt.Errorf("%w: unsupported verbatim namespace", ErrInvalidPath)
+		}
+	}
+	for _, component := range strings.Split(rest, `\`) {
+		if component == "." || component == ".." {
+			return fmt.Errorf("%w: namespace traversal components are unsupported", ErrInvalidPath)
+		}
+	}
+	if rest == "" {
+		return fmt.Errorf("%w: empty Windows namespace", ErrInvalidPath)
+	}
+	return nil
 }

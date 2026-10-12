@@ -200,6 +200,7 @@ func TestFlattenProblemsAreAllReported(t *testing.T) {
 		pdfAt(1, "C:a.pdf"), pdfAt(2, `\b.pdf`), pdfAt(3, "ok.pdf"), badDir,
 		mustBlankItem(t, 6, &fontStyle, 1), mustBlankItem(t, 7, &fontStyle, 1), mustBlankItem(t, 8, &assembly.BlankStyle{}, 1),
 	)
+	job.Base = `C:\cwd`
 	job.Defaults = badDefaults
 
 	_, err := assembly.FlattenWithStyle(job, assembly.PathStyleWindows)

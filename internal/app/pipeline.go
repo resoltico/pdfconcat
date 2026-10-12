@@ -277,13 +277,21 @@ func (p *pipeline) cancelled(ctx context.Context, stage report.Stage) error {
 	return p.stop(stage, err)
 }
 
-// abs makes path absolute against the working directory.
-func (p *pipeline) abs(path string) string {
-	return absolutePath(p.env.WorkingDir, path)
+// bindPath checks the shared lexical contract before native parent observation.
+func bindPath(base, role, expression string) (string, error) {
+	path, err := assembly.ResolvePath(base, role, expression)
+	if err != nil {
+		return "", err
+	}
+	return capture.NativePath(base, path), nil
 }
 
-func absolutePath(base, path string) string {
-	return capture.NativePath(base, path)
+func (p *pipeline) commandPath(option, expression string) (string, error) {
+	path, err := bindPath(p.env.WorkingDir, option, expression)
+	if err != nil {
+		return "", p.stopWith(problem{diagnostic: report.Diagnostic{Stage: report.Stage(assembly.StagePath), Code: codePathInvalid, Path: expression, Message: err.Error(), Location: argumentLocation(p.env, option)}, status: report.StatusInvalid})
+	}
+	return path, nil
 }
 
 // jobCount is the number of inspection workers: --jobs, or min(4, GOMAXPROCS), never above the number of sources.

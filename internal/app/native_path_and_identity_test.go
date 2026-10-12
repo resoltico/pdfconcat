@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,9 +20,6 @@ import (
 )
 
 func TestNativeParentTraversalSelectsCapturedPDF(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("requires native junction fixture on Windows")
-	}
 	dir := workDir(t)
 	logical, physical := filepath.Join(dir, "logical"), filepath.Join(dir, "physical")
 	for _, path := range []string{logical, filepath.Join(physical, "child")} {
@@ -35,10 +31,15 @@ func TestNativeParentTraversalSelectsCapturedPDF(t *testing.T) {
 	writePDF(t, physical, "native.pdf")
 	native := readFile(t, filepath.Join(physical, "native.pdf"))
 	writeFile(t, filepath.Join(physical, "selected.pdf"), native)
-	if err := os.Symlink(filepath.Join(physical, "child"), filepath.Join(logical, "link")); err != nil {
+	if err := nativeDirectoryLink(t, filepath.Join(physical, "child"), filepath.Join(logical, "link")); err != nil {
 		t.Fatal(err)
 	}
 	expression := logical + "/link/../selected.pdf"
+	referenceBytes, readErr := os.ReadFile(expression)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	native = string(referenceBytes)
 	res := execute(t.Context(), t, appOf(newFake(t)), dir, "check", "--report", "proof.json", expression)
 	res.requireCode(t, 0, "")
 	f, err := os.Open(filepath.Join(dir, "proof.json"))
@@ -109,9 +110,6 @@ func TestPhysicalAliasesInspectOnce(t *testing.T) {
 }
 
 func TestNativeTraversalControlsPlanFontAndArtifactRoles(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("requires native Windows junction proof")
-	}
 	dir := workDir(t)
 	logical, physical := filepath.Join(dir, "logical"), filepath.Join(dir, "physical")
 	for _, path := range []string{logical, filepath.Join(physical, "child")} {
@@ -119,28 +117,43 @@ func TestNativeTraversalControlsPlanFontAndArtifactRoles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Symlink(filepath.Join(physical, "child"), filepath.Join(logical, "link")); err != nil {
+	if err := nativeDirectoryLink(t, filepath.Join(physical, "child"), filepath.Join(logical, "link")); err != nil {
 		t.Fatal(err)
 	}
 	expression := logical + "/link/../"
+	reference, err := os.Stat(expression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached, decoy := physical, logical
+	logicalInfo, err := os.Stat(logical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(reference, logicalInfo) {
+		reached, decoy = logical, physical
+	}
+	t.Logf("native traversal reaches %s; decoy is %s", reached, decoy)
+
 	writePDF(t, logical, "source.pdf")
 	writePDF(t, physical, "native.pdf")
 	writeFile(t, filepath.Join(physical, "source.pdf"), readFile(t, filepath.Join(physical, "native.pdf")))
+	writeFile(t, filepath.Join(reached, "source.pdf"), readFile(t, filepath.Join(physical, "native.pdf")))
 	// Plan selection and relative anchoring must both use the directory reached by native traversal.
-	writeFile(t, filepath.Join(logical, "plan.json"), `{"version":1,"items":["absent.pdf"]}`)
-	writeFile(t, filepath.Join(physical, "plan.json"), `{"version":1,"items":["source.pdf"]}`)
+	writeFile(t, filepath.Join(decoy, "plan.json"), `{"version":1,"items":["absent.pdf"]}`)
+	writeFile(t, filepath.Join(reached, "plan.json"), `{"version":1,"items":["source.pdf"]}`)
 	execute(t.Context(), t, appOf(newFake(t)), dir, "build", "--plan", expression+"plan.json", "-o", expression+"output.pdf", "--report", expression+"proof.json").requireCode(t, 0, "")
 	for _, name := range []string{"output.pdf", "proof.json"} {
-		if _, err := os.Stat(filepath.Join(physical, name)); err != nil {
+		if _, err := os.Stat(filepath.Join(reached, name)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(filepath.Join(logical, name)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(decoy, name)); !os.IsNotExist(err) {
 			t.Fatalf("lexical artifact %s exists: %v", name, err)
 		}
 	}
 	execute(t.Context(), t, appOf(newFake(t)), dir, "report", expression+"proof.json").requireCode(t, 0, "")
 	tools := pdforacle.RequireTools(t)
-	document, err := pdforacle.Load(tools, filepath.Join(physical, "output.pdf"))
+	document, err := pdforacle.Load(tools, filepath.Join(reached, "output.pdf"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,10 +166,10 @@ func TestNativeTraversalControlsPlanFontAndArtifactRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(physical, "font.ttf"), bytes, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(reached, "font.ttf"), bytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(logical, "font.ttf"), "not a font")
+	writeFile(t, filepath.Join(decoy, "font.ttf"), "not a font")
 	plan := fmt.Sprintf(`{"version":1,"items":[{"blank":{"size":"100x100","text":{"value":"hello","font":{"file":%q}}}}]}`, expression+"font.ttf")
 	execute(t.Context(), t, appOf(newFake(t)), dir, "check", "--plan-json", plan).requireCode(t, 0, "")
 }

@@ -43,7 +43,7 @@ func TestInvalidReportRequestsNeverOpenArtifacts(t *testing.T) {
 
 			var output bytes.Buffer
 
-			code := runQueryWith(t.Context(), &command, Env{Stdout: &output}, func(context.Context, string) (*os.File, error) {
+			code := runQueryWith(t.Context(), &command, Env{Stdout: &output, WorkingDir: t.TempDir()}, func(context.Context, string) (*os.File, error) {
 				opens++
 				return nil, os.ErrNotExist
 			})
@@ -68,7 +68,7 @@ func TestValidReportRequestStillOpensArtifact(t *testing.T) {
 
 	var output bytes.Buffer
 
-	code := runQueryWith(t.Context(), &command, Env{Stdout: &output}, func(context.Context, string) (*os.File, error) {
+	code := runQueryWith(t.Context(), &command, Env{Stdout: &output, WorkingDir: t.TempDir()}, func(context.Context, string) (*os.File, error) {
 		opens++
 		return nil, os.ErrNotExist
 	})

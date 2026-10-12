@@ -28,14 +28,32 @@ const (
 // resolveCommandPaths makes the --report and -o paths absolute. It is the first step so that a failure at
 // any later step can still be saved to the report, and can say which output it concerned.
 func (p *pipeline) resolveCommandPaths() error {
+	// A valid report may capture a subsequent invalid argument; an invalid report never names a destination.
+	var err error
 	if p.command.ReportPath != "" {
-		p.reportPath = p.abs(p.command.ReportPath)
+		p.reportPath, err = p.commandPath("--report", p.command.ReportPath)
+		if err != nil {
+			return err
+		}
 	}
-
 	if p.command.Output != "" {
-		p.output = p.abs(p.command.Output)
+		option := "--output"
+		if argumentLocation(p.env, "-o") != nil {
+			option = "-o"
+		}
+		p.output, err = p.commandPath(option, p.command.Output)
+		if err != nil {
+			return err
+		}
 	}
-
+	for _, field := range []struct{ option, expression string }{{"--plan", p.command.PlanPath}, {"--base-dir", p.command.BaseDir}} {
+		if field.expression != "" {
+			if _, err := assembly.ResolvePath(p.env.WorkingDir, field.option, field.expression); err != nil {
+				_, err = p.commandPath(field.option, field.expression)
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -80,9 +98,12 @@ func (p *pipeline) compileOperands() error {
 }
 
 func (p *pipeline) loadPlanFile(ctx context.Context) error {
-	path := p.abs(p.command.PlanPath)
+	path, err := p.commandPath("--plan", p.command.PlanPath)
+	if err != nil {
+		return err
+	}
 
-	_, err := p.registry.Add(capture.RolePlan, path)
+	_, err = p.registry.Add(capture.RolePlan, path)
 	if err != nil {
 		return p.stopWith(planFileProblem(path, err))
 	}
@@ -137,7 +158,10 @@ func (p *pipeline) baseDir() (string, error) {
 		return p.env.WorkingDir, nil
 	}
 
-	base := p.abs(p.command.BaseDir)
+	base, err := p.commandPath("--base-dir", p.command.BaseDir)
+	if err != nil {
+		return "", err
+	}
 
 	info, err := os.Stat(base)
 	if err == nil && !info.IsDir() {

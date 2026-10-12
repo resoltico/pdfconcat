@@ -8,6 +8,7 @@ package capture_test
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/capture"
@@ -17,7 +18,7 @@ import (
 
 const registryCWDHelper = "PDFCONCAT_REGISTRY_CWD_HELPER"
 
-func TestRegistryRelativePathsRejectInaccessibleWorkingDirectory(t *testing.T) {
+func TestRegistryAbsolutePathsIgnoreInaccessibleWorkingDirectory(t *testing.T) {
 	if os.Getenv(registryCWDHelper) != "" {
 		checkRegistryInaccessibleCWD(t)
 		return
@@ -30,7 +31,7 @@ func TestRegistryRelativePathsRejectInaccessibleWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command := exectest.Command(t.Context(), executable, "-test.run=^TestRegistryRelativePathsRejectInaccessibleWorkingDirectory$")
+	command := exectest.Command(t.Context(), executable, "-test.run=^TestRegistryAbsolutePathsIgnoreInaccessibleWorkingDirectory$")
 
 	command.Env = append(command.Env, registryCWDHelper+"=1")
 	if coverDir := os.Getenv(exectest.EnvCoverDir); coverDir != "" {
@@ -46,6 +47,7 @@ func TestRegistryRelativePathsRejectInaccessibleWorkingDirectory(t *testing.T) {
 func checkRegistryInaccessibleCWD(t *testing.T) {
 	t.Helper()
 	permissiontest.RequireEnforcement(t)
+	artifactDir := t.TempDir()
 	dir := t.TempDir()
 
 	info, statErr := os.Stat(dir)
@@ -70,21 +72,31 @@ func checkRegistryInaccessibleCWD(t *testing.T) {
 	}
 
 	registry := capture.NewRegistry()
+	output := filepath.Join(artifactDir, "output.pdf")
+	if err := registry.ProtectOutput(output); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Add(capture.RoleOutput, output); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RetireReport(filepath.Join(artifactDir, "report.json")); err != nil {
+		t.Fatal(err)
+	}
 	checkRelativeRegistrations(t, registry)
 }
 
 func checkRelativeRegistrations(t *testing.T, registry *capture.Registry) {
 	t.Helper()
 
-	if err := registry.ProtectOutput("relative.pdf"); !errors.Is(err, os.ErrPermission) {
-		t.Fatalf("protected relative artifact lost cwd failure: %v", err)
+	if err := registry.ProtectOutput("relative.pdf"); !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("protected relative artifact lost absolute-path rejection: %v", err)
 	}
 
-	if _, err := registry.Add(capture.RoleOutput, "relative.pdf"); !errors.Is(err, os.ErrPermission) {
-		t.Fatalf("relative artifact did not retain cwd failure: %v", err)
+	if _, err := registry.Add(capture.RoleOutput, "relative.pdf"); !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("relative artifact did not retain absolute-path rejection: %v", err)
 	}
 
-	if err := registry.RetireReport("relative.json"); !errors.Is(err, os.ErrPermission) {
-		t.Fatalf("relative retirement did not retain cwd failure: %v", err)
+	if err := registry.RetireReport("relative.json"); !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("relative retirement did not retain absolute-path rejection: %v", err)
 	}
 }

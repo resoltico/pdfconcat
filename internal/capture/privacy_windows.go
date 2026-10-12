@@ -43,6 +43,9 @@ func createWorkspaceDirectory(parent, pattern string) (string, error) {
 }
 
 func createPrivateWindowsDirectory(path string) error {
+	if err := validateBoundPath(path); err != nil {
+		return &os.PathError{Op: "validate private path", Path: path, Err: err}
+	}
 	attributes, err := privateSecurityAttributes("OICI")
 	if err != nil {
 		return err
@@ -67,6 +70,11 @@ func createPrivateWindowsDirectory(path string) error {
 
 // CreatePrivateTemp atomically creates an owner-only file from an owned terminal-wildcard prefix.
 func CreatePrivateTemp(dir, pattern string) (*os.File, error) {
+	if dir != "" {
+		if err := validateBoundPath(dir); err != nil {
+			return nil, &os.PathError{Op: "validate private parent", Path: dir, Err: err}
+		}
+	}
 	path, err := privateWindowsPath(dir, pattern)
 	if err != nil {
 		return nil, err
@@ -76,6 +84,9 @@ func CreatePrivateTemp(dir, pattern string) (*os.File, error) {
 }
 
 func createPrivateWindowsFile(path string) (*os.File, error) {
+	if err := validateBoundPath(path); err != nil {
+		return nil, &os.PathError{Op: "validate private path", Path: path, Err: err}
+	}
 	attributes, err := privateSecurityAttributes("")
 	if err != nil {
 		return nil, err

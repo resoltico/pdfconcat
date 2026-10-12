@@ -30,6 +30,11 @@ func createWorkspaceDirectory(parent, pattern string) (string, error) {
 
 // CreatePrivateTemp creates an exclusive owner-only temporary file before sensitive data is written.
 func CreatePrivateTemp(dir, pattern string) (*os.File, error) {
+	if dir != "" {
+		if err := validateBoundPath(dir); err != nil {
+			return nil, &os.PathError{Op: "validate private parent", Path: dir, Err: err}
+		}
+	}
 	prefix, err := privateTempPrefix(pattern)
 	if err != nil {
 		return nil, err

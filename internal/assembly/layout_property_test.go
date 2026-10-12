@@ -508,7 +508,7 @@ func checkPathStyle(t *testing.T, style assembly.PathStyle, name string) {
 		t.Fatalf("POSIX has no drives: %q", name)
 	}
 
-	code, got, err := assembly.ResolvePathWithStyle(style, hostPath(baseDirectory), "path", name)
+	code, got, err := assembly.ResolvePathWithStyle(style, pathBaseForStyle(style), "path", name)
 	checkResolutionIsDeterministic(t, style, name, code, got, err)
 
 	invalidText := !utf8.ValidString(name) || containsNUL(name)
@@ -520,7 +520,7 @@ func checkPathStyle(t *testing.T, style assembly.PathStyle, name string) {
 		checkUnrepresentablePathResult(t, code, got, err)
 	}
 
-	if err == nil && !filepath.IsAbs(got) {
+	if err == nil && assembly.ClassifyPath(style, got) != assembly.PathAbsolute {
 		t.Fatalf("%q resolved to the relative %q", name, got)
 	}
 }
@@ -536,7 +536,7 @@ func checkUnrepresentablePathResult(t *testing.T, code assembly.Code, got string
 func checkResolutionIsDeterministic(t *testing.T, style assembly.PathStyle, name string, code assembly.Code, got string, err error) {
 	t.Helper()
 
-	code2, got2, err2 := assembly.ResolvePathWithStyle(style, hostPath(baseDirectory), "path", name)
+	code2, got2, err2 := assembly.ResolvePathWithStyle(style, pathBaseForStyle(style), "path", name)
 	if code != code2 || got != got2 || (err == nil) != (err2 == nil) {
 		t.Fatal("not deterministic")
 	}
@@ -550,4 +550,11 @@ func containsNUL(text string) bool {
 	}
 
 	return false
+}
+
+func pathBaseForStyle(style assembly.PathStyle) string {
+	if style == assembly.PathStyleWindows {
+		return `C:\base`
+	}
+	return "/base"
 }

@@ -11,7 +11,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -20,13 +19,13 @@ import (
 func TestProtectedOutputRetainsNativeWindowsPathEncodingFailure(t *testing.T) {
 	t.Parallel()
 
-	path := "invalid\x00.pdf"
+	path := filepath.Join(t.TempDir(), "invalid\x00.pdf")
 	registry := NewRegistry()
 	err := registry.ProtectOutput(path)
 
 	var source *SourceError
-	if !errors.As(err, &source) || !errors.Is(err, syscall.EINVAL) || source.Path != path ||
-		source.Operation != "resolve protected output" || len(registry.artifactBindings) != 0 {
+	if !errors.As(err, &source) || !errors.Is(err, os.ErrInvalid) || source.Path != path ||
+		source.Operation != "validate protected output" || len(registry.artifactBindings) != 0 {
 		t.Fatalf("invalid native path changed protected claims: %v/%+v", err, registry.artifactBindings)
 	}
 }

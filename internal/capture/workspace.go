@@ -34,6 +34,9 @@ const (
 // output, so that staged files can be published by a same-filesystem rename. The directory must
 // already exist.
 func NewWorkspaceBeside(destination string) (*Workspace, error) {
+	if err := validateBoundPath(destination); err != nil {
+		return nil, &ScratchError{Dir: NativeParent(destination), Operation: "validate workspace destination", Err: err}
+	}
 	return newWorkspace(NativePath(".", NativeParent(destination)), besideOutputPattern)
 }
 

@@ -10,7 +10,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
@@ -124,7 +126,7 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Add records path under role. Inputs (plan, source, font) must exist and are resolved through
+// Add records a bound absolute path under role. Inputs (plan, source, font) must exist and are resolved through
 // symbolic links. Output and report paths may be new, but an existing one must be a regular file,
 // not a symbolic link. Adding a file already recorded under a different role returns an
 // *AliasError; repeating a role for the same file is allowed (sources are repeated by design).
@@ -132,8 +134,8 @@ func NewRegistry() *Registry {
 // registered artifact aliases and input identities remain protected.
 // It returns the file's Identity when it exists and the zero Identity for a new file.
 func (r *Registry) Add(role Role, path string) (Identity, error) {
-	if path == "" {
-		return Identity{}, &SourceError{Path: path, Operation: "register " + role.String(), Err: errEmptyPath}
+	if err := validateBoundPath(path); err != nil {
+		return Identity{}, &SourceError{Path: path, Operation: "validate " + role.String(), Err: err}
 	}
 
 	r.mu.Lock()
@@ -145,23 +147,23 @@ func (r *Registry) Add(role Role, path string) (Identity, error) {
 
 	absolute, err := artifactAbsolutePath(path)
 	if err != nil {
-		return Identity{}, &SourceError{Path: path, Operation: "resolve " + role.String(), Err: err}
+		return Identity{}, &SourceError{Path: path, Operation: "validate " + role.String(), Err: err}
 	}
 
 	return r.registerArtifact(artifactBinding{role: role, path: absolute}, inspectArtifact)
 }
 
-// ProtectOutput reserves the intended PDF path and its current identity against other roles.
+// ProtectOutput accepts a bound absolute path and reserves the intended PDF path and its current identity against other roles.
 // It checks aliases independently of output usability: a failed PDF target must not prevent
 // saving evidence to a distinct safe report. Publication still requires Add and destination checks.
 func (r *Registry) ProtectOutput(path string) error {
-	if path == "" {
-		return &SourceError{Path: path, Operation: "protect output", Err: errEmptyPath}
+	if err := validateBoundPath(path); err != nil {
+		return &SourceError{Path: path, Operation: "validate protected output", Err: err}
 	}
 
 	absolute, err := artifactAbsolutePath(path)
 	if err != nil {
-		return &SourceError{Path: path, Operation: "resolve protected output", Err: err}
+		return &SourceError{Path: path, Operation: "validate protected output", Err: err}
 	}
 
 	r.mu.Lock()
@@ -207,12 +209,12 @@ func artifactParentUnavailable(path string) bool {
 	return false
 }
 
-// RetireReport abandons one failed report destination before publishing a distinct recovery file.
+// RetireReport validates a bound absolute path before it abandons one failed report destination before publishing a distinct recovery file.
 // Inputs, other artifact paths and conservative name reservations remain protected.
 func (r *Registry) RetireReport(path string) error {
 	absolute, err := artifactAbsolutePath(path)
 	if err != nil {
-		return &SourceError{Path: path, Operation: "resolve retired report", Err: err}
+		return &SourceError{Path: path, Operation: "validate retired report", Err: err}
 	}
 
 	r.mu.Lock()
@@ -429,18 +431,25 @@ func (r *Registry) commitArtifactBindings(bindings map[artifactBinding]Identity,
 }
 
 func artifactAbsolutePath(path string) (string, error) {
-	base, err := os.Getwd()
-	if err != nil {
+	if err := validateBoundPath(path); err != nil {
 		return "", err
 	}
-	if filepath.IsAbs(path) {
-		return path, nil
+	return path, nil
+}
+
+// validateBoundPath rejects invalid contract inputs before lookup or mutation; it performs no I/O.
+func validateBoundPath(path string) error {
+	if path == "" || !utf8.ValidString(path) || strings.ContainsRune(path, 0) || !filepath.IsAbs(path) {
+		return fmt.Errorf("%w: require a nonempty absolute UTF-8 path without NUL", fs.ErrInvalid)
 	}
-	return base + string(os.PathSeparator) + path, nil
+	return nil
 }
 
 // ClaimCaptured reconciles role safety with the identity actually opened for capture.
 func (r *Registry) ClaimCaptured(role Role, path string, identity Identity) error {
+	if err := validateBoundPath(path); err != nil {
+		return &SourceError{Path: path, Operation: "validate captured " + role.String(), Err: err}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.claimIdentity(role, path, identity)

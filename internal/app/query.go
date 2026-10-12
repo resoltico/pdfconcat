@@ -30,7 +30,10 @@ func runQueryWith(ctx context.Context, command *cli.Command, env Env, open func(
 		return queryFailure(env, command, err)
 	}
 
-	path := absolutePath(env.WorkingDir, command.ReportFile)
+	path, err := bindPath(env.WorkingDir, "report operand", command.ReportFile)
+	if err != nil {
+		return emitError(env, command.Format, string(command.Name), report.StatusInvalid, report.Diagnostic{Stage: report.Stage("path"), Code: codePathInvalid, Path: command.ReportFile, Message: err.Error()})
+	}
 
 	file, err := open(ctx, path)
 	if err != nil {

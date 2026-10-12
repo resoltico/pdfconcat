@@ -6,6 +6,7 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Changed
 
+- Contributor coverage commands now require `-evidence DIRECTORY` naming a new attempt directory; replace the removed success-only profile argument. Raw data and complete/incomplete manifests survive failed runs and are uploaded by CI.
 - Embedded pdfcpu is updated to 0.16.2 with exact reconstructed local source. Mixed PDF 2.0 assemblies materialize required variable-widget appearances without changing occurrence resources; raw null-reference and stream-metadata rejection contracts remain enforced.
 - Every external path role uses one checked grammar. Ambiguous Windows drive-relative/root-only paths are rejected consistently; ordinary separators are represented as backslashes without collapsing traversal. Internal artifact registration now requires valid bound absolute paths, including report retirement.
 
@@ -25,7 +26,6 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Internal
 
-- Coverage requires `-evidence DIRECTORY` for a new caller-owned attempt directory. Raw collection data and explicit complete/incomplete manifests survive failed runs and are uploaded by CI; the former success-only profile argument is removed.
 - Capture uses job-owned path/identity promises without native I/O under the catalog mutex; closure joins producers before workspace removal. Native closed-stderr controls separate metadata setup, operation, cleanup and process exit deadlines and require reaping.
 - A fail-closed `Required CI` aggregate includes every mandatory workflow job. Hosted main/tag enforcement requires active settings and real check identity readback, separately from workflow source.
 

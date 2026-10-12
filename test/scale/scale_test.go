@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -506,19 +507,8 @@ func allocateHelper() int {
 		return helperExitWriteFailed
 	}
 
-	release := os.Getenv(envHelper + "_RELEASE")
-
-	for {
-		_, err = scale.FileSize(release)
-		if err == nil {
-			break
-		}
-
-		if !errors.Is(err, fs.ErrNotExist) {
-			return helperExitHoldFailed
-		}
-
-		time.Sleep(time.Millisecond)
+	if code := awaitScaleHelperRelease(os.Getenv(envHelper + "_RELEASE")); code != 0 {
+		return code
 	}
 
 	runtime.KeepAlive(block)
@@ -527,8 +517,32 @@ func allocateHelper() int {
 	return helperExitAllocated
 }
 
+func awaitScaleHelperRelease(release string) int {
+	var err error
+	for {
+		_, err = scale.FileSize(release)
+		if err == nil {
+			return 0
+		}
+
+		if !errors.Is(err, fs.ErrNotExist) {
+			return helperExitHoldFailed
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // openManyHelper holds real files and reports the specific descriptor-limit failure separately.
 func openManyHelper() int {
+	// Keep the initialized Go child alive until its observer has attached and
+	// sampled it. Descriptor exhaustion remains the operation under test.
+	if err := scale.WriteFile(os.Getenv(envHelper+"_READY"), nil); err != nil {
+		return helperExitWriteFailed
+	}
+	if code := awaitScaleHelperRelease(os.Getenv(envHelper + "_RELEASE")); code != 0 {
+		return code
+	}
 	files := make([]*os.File, 0, helperOpenAttempts)
 
 	for range helperOpenAttempts {
@@ -663,11 +677,26 @@ func TestMeasureEnforcesDescriptorLimit(t *testing.T) {
 	}
 
 	run := func(limit uint64) int {
-		measured, err := scale.Measure(t.Context(), scale.RunSpec{
-			Binary: os.Args[0], Dir: t.TempDir(), DescriptorLimit: limit, Env: append(os.Environ(), envHelper+"=open-many"),
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		dir := t.TempDir()
+		ready, release := filepath.Join(dir, "ready"), filepath.Join(dir, "release")
+		var once sync.Once
+		var releaseErr error
+		measured, err := scale.Measure(ctx, scale.RunSpec{
+			Binary: os.Args[0], Dir: dir, DescriptorLimit: limit,
+			Env: append(os.Environ(), envHelper+"=open-many", envHelper+"_READY="+ready, envHelper+"_RELEASE="+release),
+			OnSample: func() {
+				if _, readyErr := scale.FileSize(ready); readyErr == nil {
+					once.Do(func() { releaseErr = scale.WriteFile(release, nil) })
+				}
+			},
 		})
-		if err != nil {
-			t.Fatal(err)
+		if err != nil || releaseErr != nil || ctx.Err() != nil {
+			t.Fatalf("descriptor-limit child: %v, release: %v, context: %v", err, releaseErr, ctx.Err())
+		}
+		if measured.DescriptorSamples == 0 {
+			t.Fatal("descriptor-limit helper was never observed alive")
 		}
 
 		return measured.ExitCode

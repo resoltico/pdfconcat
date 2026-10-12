@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,23 +63,7 @@ func descriptorFactsHelper() int {
 
 	release := os.Getenv(envHelper + "_RELEASE")
 
-	return awaitDescriptorFixtureRelease(release)
-}
-
-func awaitDescriptorFixtureRelease(release string) int {
-	var err error
-	for {
-		_, err = scale.FileSize(release)
-		if err == nil {
-			return 0
-		}
-
-		if !errors.Is(err, fs.ErrNotExist) {
-			return helperExitHoldFailed
-		}
-
-		time.Sleep(time.Millisecond)
-	}
+	return awaitScaleHelperRelease(release)
 }
 
 func TestMeasuredGoChildRetainsVerifiedKernelDescriptorCeiling(t *testing.T) {

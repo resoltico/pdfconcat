@@ -59,7 +59,9 @@ func CheckPathText(path string) error {
 }
 
 // JoinDir resolves name against the base directory dir lexically: an absolute name stands alone, an
-// empty name is dir itself, and otherwise the two are joined with "/". No filesystem is consulted.
+// empty name is dir itself, and otherwise the host separator joins the expressions without cleaning
+// traversal components. Ordinary Windows separators are normalized; namespace spelling is retained.
+// No filesystem is consulted.
 func JoinDir(dir, name string) string { return joinPath(HostPathStyle(), dir, name) }
 
 // HostPathStyle returns the style of the running operating system.

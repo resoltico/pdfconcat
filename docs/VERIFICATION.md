@@ -124,7 +124,7 @@ rules; they enforce ordinary repository operations rather than administrator imm
 
 
 Native helper operation/cleanup deadlines start after explicit readiness and use a separate finite
-process-exit watchdog. Shared coverage-metadata preparation occurs before these deadlines. Plain,
+process-exit watchdog. Each child's coverage-directory preparation occurs before these deadlines. Plain,
 race and instrumented phase traces are required; a printed PASS is not an exit receipt. The same
 protocol covers the borrowed-standard-descriptor controls exposed by Intel coverage.
 

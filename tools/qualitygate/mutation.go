@@ -234,7 +234,7 @@ func mutationScope(ctx context.Context, dir, module string, only []string) (scop
 		return scopeOfMutation{}, err
 	}
 
-	ignored, err := buildTagExclusions(ctx, dir, resolved, runtimeList)
+	ignored, err := nonRuntimeSourceExclusions(ctx, dir, scope.hostFiles)
 	if err != nil {
 		return scopeOfMutation{}, err
 	}
@@ -286,35 +286,19 @@ func readMutationReport(file string) (*repopolicy.MutationReport, error) {
 	return parsed, nil
 }
 
-// buildTagExclusions derives the exact files not built on this host from Go's package discovery.
-func buildTagExclusions(ctx context.Context, dir, resolved string, runtimeList []string) ([]string, error) {
-	listing, err := goCommand(
-		dir,
-		append([]string{goListVerb, "-f", `{{.Dir}}|{{join .IgnoredGoFiles ","}}`, allPackages}, runtimeList...)...).output(ctx)
+// nonRuntimeSourceExclusions includes whole directories that Go omits because every file is
+// constrained out. Physical owned inventory and the compiled runtime inventory are authoritative.
+func nonRuntimeSourceExclusions(ctx context.Context, root string, hostFiles map[string]bool) ([]string, error) {
+	files, err := repopolicy.OwnedGoSources(ctx, root)
 	if err != nil {
-		return nil, fmt.Errorf("list build-tag exclusions: %w", err)
+		return nil, err
 	}
-
 	var excludes []string
-
-	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
-		directory, files, found := strings.Cut(line, "|")
-		if !found {
-			return nil, fmt.Errorf("%w: invalid build-tag discovery line %q", errGate, line)
-		}
-
-		relative, relErr := filepath.Rel(resolved, directory)
-		if relErr != nil {
-			return nil, fmt.Errorf("build-tag directory: %w", relErr)
-		}
-
-		for file := range strings.SplitSeq(files, ",") {
-			if file != "" {
-				excludes = append(excludes, "^"+regexp.QuoteMeta(filepath.ToSlash(filepath.Join(relative, file)))+"$")
-			}
+	for _, file := range files {
+		if !hostFiles[file] && !strings.HasSuffix(file, "_test.go") && !strings.Contains(file, "/testdata/") {
+			excludes = append(excludes, "^"+regexp.QuoteMeta(file)+"$")
 		}
 	}
-
 	return excludes, nil
 }
 

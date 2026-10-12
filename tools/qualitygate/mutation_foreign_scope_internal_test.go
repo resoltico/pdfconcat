@@ -58,3 +58,39 @@ func TestMutationScopeExcludesValidatedNestedForeignRootsOnly(t *testing.T) {
 		t.Fatalf("host source lost: %v", scope.hostFiles)
 	}
 }
+
+func TestMutationScopeCoversPhysicalSourcesOutsideCompiledRuntime(t *testing.T) {
+	t.Parallel()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err := modulePath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := mutationScope(t.Context(), root, module, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := repopolicy.OwnedGoSources(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patterns := make([]*regexp.Regexp, len(scope.excludes))
+	for index, expression := range scope.excludes {
+		patterns[index] = regexp.MustCompile(expression)
+	}
+	for _, file := range files {
+		excluded := false
+		for _, pattern := range patterns {
+			if pattern.MatchString(file) {
+				excluded = true
+				break
+			}
+		}
+		if scope.hostFiles[file] == excluded {
+			t.Fatalf("physical mutation selection is inconsistent for %s: runtime=%t excluded=%t", file, scope.hostFiles[file], excluded)
+		}
+	}
+}

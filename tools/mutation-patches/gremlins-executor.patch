@@ -2186,7 +2186,7 @@ index 0000000..57891d6
 +	}
 +}
 diff --git a/internal/engine/stubs_test.go b/internal/engine/stubs_test.go
-index efa93f5..e309b6b 100644
+index efa93f5..0d28349 100644
 --- a/internal/engine/stubs_test.go
 +++ b/internal/engine/stubs_test.go
 @@ -64,12 +64,12 @@ func loadFixture(fixture, fromPackage string) (fstest.MapFS, gomodule.GoModule,
@@ -2208,15 +2208,37 @@ index efa93f5..e309b6b 100644
  }
  
  func filenameFromFixture(fix string) string {
-@@ -93,7 +93,7 @@ func (d dealerStub) Get(idf string) (string, error) {
+@@ -77,14 +77,15 @@ func filenameFromFixture(fix string) string {
+ }
+ 
+ type dealerStub struct {
+-	t     *testing.T
+-	fnGet func(idf string) (string, error)
++	t       *testing.T
++	workDir string
++	fnGet   func(idf string) (string, error)
+ }
+ 
+ func newWdDealerStub(t *testing.T) *dealerStub {
+ 	t.Helper()
+ 
+-	return &dealerStub{t: t, fnGet: func(_ string) (string, error) {
++	return &dealerStub{t: t, workDir: t.TempDir(), fnGet: func(_ string) (string, error) {
+ 		return t.TempDir(), nil
+ 	}}
+ }
+@@ -93,9 +94,9 @@ func (d dealerStub) Get(idf string) (string, error) {
  	return d.fnGet(idf)
  }
  
 -func (dealerStub) Clean() {}
 +func (dealerStub) Clean() error { return nil }
  
- func (dealerStub) WorkDir() string { return "/tmp" }
+-func (dealerStub) WorkDir() string { return "/tmp" }
++func (d dealerStub) WorkDir() string { return d.workDir }
  
+ type executorDealerStub struct {
+ 	gotMutants []mutator.Mutator
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
 index 0000000..8c65530
@@ -2882,19 +2904,19 @@ index 0000000..1729d3f
 +}
 diff --git a/internal/engine/workdir/permission_windows_test.go b/internal/engine/workdir/permission_windows_test.go
 new file mode 100644
-index 0000000..be5142e
+index 0000000..c74d862
 --- /dev/null
 +++ b/internal/engine/workdir/permission_windows_test.go
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,69 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir_test
 +
 +import (
 +	"errors"
-+	"fmt"
 +	"golang.org/x/sys/windows"
 +	"os"
 +	"path/filepath"
++	"runtime"
 +	"testing"
 +)
 +
@@ -2916,19 +2938,26 @@ index 0000000..be5142e
 +	if kind == "write" {
 +		mask = 0x0004 | 0x0002 // FILE_ADD_SUBDIRECTORY and FILE_ADD_FILE in the Windows SDK
 +	}
-+	descriptor, err := windows.SecurityDescriptorFromString(fmt.Sprintf("D:P(D;;0x%x;;;%s)(A;;FA;;;%s)", mask, user.User.Sid.String(), user.User.Sid.String()))
-+	if err != nil {
-+		t.Fatal(err)
-+	}
-+	denied, _, err := descriptor.DACL()
++	var pin runtime.Pinner
++	pin.Pin(user.User.Sid)
++	defer pin.Unpin()
++	denied, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{AccessPermissions: windows.ACCESS_MASK(mask), AccessMode: windows.DENY_ACCESS, Inheritance: windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER, TrusteeValue: windows.TrusteeValueFromSID(user.User.Sid)}}}, acl)
 +	if err != nil {
 +		t.Fatal(err)
 +	}
 +	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, denied, nil); err != nil {
 +		t.Fatal(err)
 +	}
++	control, _, err := saved.Control()
++	if err != nil {
++		t.Fatal(err)
++	}
++	protection := windows.SECURITY_INFORMATION(windows.UNPROTECTED_DACL_SECURITY_INFORMATION)
++	if control&windows.SE_DACL_PROTECTED != 0 {
++		protection = windows.PROTECTED_DACL_SECURITY_INFORMATION
++	}
 +	restore := func() {
-+		if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
++		if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|protection, nil, nil, acl, nil); err != nil {
 +			t.Error(err)
 +		}
 +	}
@@ -3974,10 +4003,10 @@ index 0000000..8807047
 +}
 diff --git a/internal/execution/go_cache.go b/internal/execution/go_cache.go
 new file mode 100644
-index 0000000..f2168f0
+index 0000000..b2f4950
 --- /dev/null
 +++ b/internal/execution/go_cache.go
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,169 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -4025,6 +4054,9 @@ index 0000000..f2168f0
 +	return errors.Join(os.RemoveAll(c.Path), c.lease.Close())
 +}
 +func (c *GoCache) Verify() error {
++	if c.lease == nil || c.lease.Fd() == ^uintptr(0) {
++		return os.ErrClosed
++	}
 +	info, err := os.Lstat(c.Path)
 +	if err != nil {
 +		return err

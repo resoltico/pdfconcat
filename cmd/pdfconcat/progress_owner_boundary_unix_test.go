@@ -6,12 +6,10 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,21 +52,11 @@ func TestProgressOwnerRefusesUnsupportedJSONSinkTruthfully(t *testing.T) {
 
 func TestProgressOwnerReportsActualIdleDescriptorCloseFault(t *testing.T) {
 	t.Parallel()
-
-	executable, err := os.Executable()
-	requireProgressNoError(t, err)
-
-	args := progressHelperArgs("-test.run=^TestProgressIdleDescriptorCloseFaultHelper$")
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, executable, args...)
-
-	command.Env = append(os.Environ(), progressOwnedCloseFault+"=1")
-
-	output, runErr := command.CombinedOutput()
-	if runErr != nil {
-		t.Fatalf("isolated idle ownership-fault injection (watchdog=%v): %v\n%s", ctx.Err(), runErr, output)
+	trace, err := runProgressPhaseChild(t, "TestProgressIdleDescriptorCloseFaultHelper", []string{progressOwnedCloseFault + "=1"}, 3*time.Second, 10*time.Second)
+	if err != nil {
+		t.Fatalf("isolated idle ownership-fault injection: %v; %s", err, trace)
 	}
+	t.Log(trace)
 }
 
 func TestProgressOwnerDetectsClosedCallerStderr(t *testing.T) {
@@ -149,6 +137,10 @@ func TestProgressIdleDescriptorCloseFaultHelper(t *testing.T) {
 		return
 	}
 
+	control := progressPhaseControl(t)
+	if _, err := fmt.Fprintln(control, "ready"); err != nil {
+		t.Fatal(err)
+	}
 	reader, writer := progressPipe(t)
 	owner := &progressOwner{file: writer}
 	t.Cleanup(owner.release)
@@ -185,6 +177,9 @@ func TestProgressIdleDescriptorCloseFaultHelper(t *testing.T) {
 
 	if string(data) != progressEmptyRecord {
 		t.Fatal("ownership fault affected the caller's original pipe")
+	}
+	if _, err := fmt.Fprintln(control, "operation"); err != nil {
+		t.Fatal(err)
 	}
 }
 

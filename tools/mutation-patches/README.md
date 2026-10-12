@@ -37,3 +37,8 @@ operation; POSIX chmod assumptions and creator-owner placeholder ACEs are not a 
 Missing-command controls preserve the actual native lookup/start cause. A missing launch in a test
 is diagnosed before inspecting command fields. These changes require native Windows execution,
 separately from cross-compilation.
+
+The mutation controller derives exclusions from the complete physical owned-source inventory
+against Go's compiled runtime inventory. This includes an entire native test-support directory
+when Go omits it on the host, while every compiled runtime source remains selected. The native
+installer tests use owned portable temporary roots rather than a POSIX-only `/tmp` stub.

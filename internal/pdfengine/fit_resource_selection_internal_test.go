@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Ervins Strauhmanis
+
+package pdfengine
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+)
+
+func TestFitResourceLookupRejectsNilAndConsumesWork(t *testing.T) {
+	t.Parallel()
+	inspector := newFitProgramInspector(guardContext(t))
+	scope := types.Dict{keyXObject: types.Dict{"Nil": nil, "Present": types.Integer(1)}}
+	if _, err := inspector.resource(t.Context(), scope, keyXObject, "Nil"); !errors.Is(err, errFitUnsupported) {
+		t.Fatalf("nil resource accepted: %v", err)
+	}
+	inspector.work = fitResourceWorkLimit - 1
+	if _, err := inspector.resource(t.Context(), scope, keyXObject, "Present"); err != nil {
+		t.Fatalf("last permitted lookup refused: %v", err)
+	}
+	if _, err := inspector.resource(t.Context(), scope, keyXObject, "Present"); !errors.Is(err, errFitUnsupported) {
+		t.Fatalf("resource work exceeded the declared limit: %v", err)
+	}
+}
+
+func TestFitColorSpaceSelectionHandlesEmptyAndScalarResources(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []struct {
+		object  types.Object
+		pattern bool
+	}{
+		{types.Array{}, false},
+		{types.Name("DeviceRGB"), false},
+		{types.Array{types.Name(fitPattern)}, true},
+	} {
+		inspector := newFitProgramInspector(guardContext(t))
+		scope := types.Dict{fitColorSpace: types.Dict{"Selected": fixture.object}}
+		got, err := inspector.patternColorSpace(t.Context(), scope, "Selected")
+		if err != nil || got != fixture.pattern {
+			t.Fatalf("color space %v selected pattern=%t, want %t: %v", fixture.object, got, fixture.pattern, err)
+		}
+	}
+}
+
+func TestFitStrokeDoesNotPaintUnselectedFillPattern(t *testing.T) {
+	t.Parallel()
+	inspector := newFitProgramInspector(guardContext(t))
+	state := &fitGraphicsState{fillPattern: true}
+	if err := inspector.paintPatterns(t.Context(), state, fitPaintStroke); err != nil {
+		t.Fatalf("stroke consulted unused fill pattern: %v", err)
+	}
+	if err := inspector.paintPatterns(t.Context(), state, fitPaintFill); !errors.Is(err, errFitUnsupported) {
+		t.Fatalf("painted fill without selection accepted: %v", err)
+	}
+}

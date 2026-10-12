@@ -31,7 +31,8 @@ func (sink *progressPipeFailure) WriteRecord(_ context.Context, record []byte) e
 }
 
 func TestProgressPresentationJoinsAfterRealPipeFailure(t *testing.T) {
-	t.Parallel()
+	// Run before parallel subprocess tests: a concurrent fork may temporarily
+	// retain the pipe reader until exec closes inherited descriptors.
 
 	reader, writer, err := os.Pipe()
 	if err != nil {

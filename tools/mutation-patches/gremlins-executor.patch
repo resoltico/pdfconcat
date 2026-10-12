@@ -488,7 +488,7 @@ index 0000000..7928232
 +	}
 +}
 diff --git a/internal/coverage/coverage.go b/internal/coverage/coverage.go
-index d7be532..41b8312 100644
+index d7be532..25ae82c 100644
 --- a/internal/coverage/coverage.go
 +++ b/internal/coverage/coverage.go
 @@ -18,6 +18,8 @@
@@ -595,7 +595,7 @@ index d7be532..41b8312 100644
 +		return errors.Join(err, out.Close(), stderr.Close())
 +	}
 +	runErr, cleanupErr, _ := execution.RunGoCommand(c.callerContext(), cmd, out, stderr)
-+	return errors.Join(runErr, cleanupErr, c.cache.AfterCommand(c.callerContext(), cmd, artifactRoot, "download"), out.Close(), stderr.Close())
++	return errors.Join(runErr, cleanupErr, c.cache.AfterCommand(c.callerContext(), artifactRoot, "download"), out.Close(), stderr.Close())
  }
  
 -func (c *Coverage) executeCoverage() (time.Duration, error) {
@@ -637,7 +637,7 @@ index d7be532..41b8312 100644
 +	start := time.Now()
 +	runErr, processCleanupErr, _ := execution.RunGoCommand(c.callerContext(), cmd, stdout, stderr)
 +	elapsed := time.Since(start)
-+	processCleanupErr = errors.Join(processCleanupErr, c.cache.AfterCommand(c.callerContext(), cmd, artifactRoot, "baseline"))
++	processCleanupErr = errors.Join(processCleanupErr, c.cache.AfterCommand(c.callerContext(), artifactRoot, "baseline"))
 +	_, stderrSeekErr := stderr.Seek(0, 0)
 +	stderrErr := stderrSeekErr
 +	if stderrErr == nil && processCleanupErr == nil {
@@ -2241,7 +2241,7 @@ index efa93f5..0d28349 100644
  	gotMutants []mutator.Mutator
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
-index 0000000..8c65530
+index 0000000..e770065
 --- /dev/null
 +++ b/internal/engine/test_execution.go
 @@ -0,0 +1,142 @@
@@ -2289,7 +2289,7 @@ index 0000000..8c65530
 +	runErr, processCleanupErr, processStarted := execution.RunGoCommand(ctx, cmd, stdout, stderr)
 +	finished := time.Now()
 +	if m.cache != nil {
-+		processCleanupErr = errors.Join(processCleanupErr, m.cache.AfterCommand(ctx, cmd, m.executionLogDir, digest))
++		processCleanupErr = errors.Join(processCleanupErr, m.cache.AfterCommand(ctx, m.executionLogDir, digest))
 +	}
 +	_, stderrSeekErr := stderr.Seek(0, 0)
 +	stderrErr := stderrSeekErr
@@ -4150,10 +4150,10 @@ index 0000000..8807047
 +}
 diff --git a/internal/execution/go_cache.go b/internal/execution/go_cache.go
 new file mode 100644
-index 0000000..b2f4950
+index 0000000..a8c3da0
 --- /dev/null
 +++ b/internal/execution/go_cache.go
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,216 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -4167,6 +4167,7 @@ index 0000000..b2f4950
 +	"os"
 +	"os/exec"
 +	"path/filepath"
++	"sort"
 +	"time"
 +)
 +
@@ -4236,14 +4237,40 @@ index 0000000..b2f4950
 +	cmd.Env = append(cmd.Environ(), "GOCACHE="+c.Path, "GOCACHEPROG=")
 +	return nil
 +}
-+func (c *GoCache) logicalBytes() (int64, error) {
++
++type cacheEntry struct {
++	name string
++	info fs.FileInfo
++}
++
++func (c *GoCache) ownedRoot() (*os.Root, error) {
 +	if err := c.Verify(); err != nil {
-+		return 0, err
++		return nil, err
 +	}
++	root, err := os.OpenRoot(c.Path)
++	if err != nil {
++		return nil, err
++	}
++	original, leaseErr := c.lease.Stat()
++	actual, statErr := root.Stat(".")
++	if leaseErr != nil || statErr != nil {
++		return nil, errors.Join(leaseErr, statErr, root.Close())
++	}
++	if !os.SameFile(original, actual) {
++		return nil, errors.Join(errors.New("owned Go cache root was substituted"), root.Close())
++	}
++	return root, nil
++}
++
++func cacheInventory(ctx context.Context, root *os.Root) ([]cacheEntry, int64, error) {
++	var entries []cacheEntry
 +	var total int64
-+	err := filepath.WalkDir(c.Path, func(path string, entry fs.DirEntry, walkErr error) error {
++	err := fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 +		if walkErr != nil {
 +			return walkErr
++		}
++		if err := ctx.Err(); err != nil {
++			return err
 +		}
 +		if entry.Type()&os.ModeSymlink != 0 {
 +			return errors.New("symlink in owned Go cache")
@@ -4262,46 +4289,66 @@ index 0000000..b2f4950
 +			return errors.New("owned Go cache size overflow")
 +		}
 +		total += info.Size()
++		entries = append(entries, cacheEntry{name: name, info: info})
 +		return nil
 +	})
-+	return total, errors.Join(err, c.Verify())
++	return entries, total, err
 +}
-+func (c *GoCache) AfterCommand(ctx context.Context, original *exec.Cmd, logs, key string) error {
++
++// Go's disk cache tolerates missing entries. Trim only enough old files to restore
++// the private cache budget, retaining recent artifacts instead of rebuilding all dependencies.
++func trimCacheEntries(ctx context.Context, root *os.Root, entries []cacheEntry, total, budget int64) error {
++	sort.Slice(entries, func(i, j int) bool {
++		first, second := entries[i].info.ModTime(), entries[j].info.ModTime()
++		if first.Equal(second) {
++			return entries[i].name < entries[j].name
++		}
++		return first.Before(second)
++	})
++	for _, entry := range entries {
++		if total <= budget {
++			return nil
++		}
++		if err := ctx.Err(); err != nil {
++			return err
++		}
++		if err := root.Remove(filepath.FromSlash(entry.name)); err != nil {
++			return fmt.Errorf("remove old cache entry %s: %w", entry.name, err)
++		}
++		total -= entry.info.Size()
++	}
++	return nil
++}
++
++func (c *GoCache) AfterCommand(ctx context.Context, logs, key string) error {
++	// A test deadline must remain a test outcome rather than canceling its cache
++	// evidence. Keep the existing independent thirty-second maintenance budget.
++	maintenance, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
++	defer cancel()
 +	before := c.lastBytes
-+	after, inspectErr := c.logicalBytes()
++	var after int64
++	var entries []cacheEntry
++	root, inspectErr := c.ownedRoot()
++	if inspectErr == nil {
++		entries, after, inspectErr = cacheInventory(maintenance, root)
++	}
 +	var trimErr error
 +	trimmed := false
 +	final := after
-+	if inspectErr == nil && after > c.budget && ctx.Err() == nil {
++	if inspectErr == nil && after > c.budget {
 +		trimmed = true
-+		cleanCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-+		defer cancel()
-+		clean := exec.CommandContext(cleanCtx, original.Path, "clean", "-cache")
-+		clean.Dir = original.Dir
-+		clean.Env = original.Environ()
-+		if err := c.Configure(clean); err != nil {
-+			trimErr = err
-+		} else {
-+			out, err := os.OpenFile(filepath.Join(logs, key+".cache-clean.stdout.log"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
-+			if err != nil {
-+				trimErr = err
-+			} else {
-+				stderr, err := os.OpenFile(filepath.Join(logs, key+".cache-clean.stderr.log"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
-+				if err != nil {
-+					trimErr = errors.Join(err, out.Close())
-+				} else {
-+					runErr, cleanupErr, _ := RunGoCommand(cleanCtx, clean, out, stderr)
-+					trimErr = errors.Join(runErr, cleanupErr, out.Close(), stderr.Close())
-+				}
-+			}
-+		}
++		trimErr = trimCacheEntries(maintenance, root, entries, after, c.budget)
 +		var finalErr error
-+		final, finalErr = c.logicalBytes()
++		_, final, finalErr = cacheInventory(maintenance, root)
 +		trimErr = errors.Join(trimErr, finalErr)
 +		if trimErr == nil && final > c.budget {
-+			trimErr = errors.New("Go clean did not reduce owned cache below trigger")
++			trimErr = errors.New("owned cache trim did not restore its budget")
 +		}
 +	}
++	if root != nil {
++		trimErr = errors.Join(trimErr, root.Close(), c.Verify())
++	}
++
 +	receipt := struct {
 +		Cache                                                       string
 +		BudgetBytes, BeforeBytes, AfterCommandBytes, AfterTrimBytes int64
@@ -4325,10 +4372,10 @@ index 0000000..b2f4950
 +}
 diff --git a/internal/execution/go_cache_test.go b/internal/execution/go_cache_test.go
 new file mode 100644
-index 0000000..04b711c
+index 0000000..fba28bd
 --- /dev/null
 +++ b/internal/execution/go_cache_test.go
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,320 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -4341,6 +4388,7 @@ index 0000000..04b711c
 +	"path/filepath"
 +	"strings"
 +	"testing"
++	"time"
 +)
 +
 +func TestOwnedCacheTrimPreservesInheritedSharedCache(t *testing.T) {
@@ -4386,7 +4434,7 @@ index 0000000..04b711c
 +		t.Fatalf("owned cache env mismatch: %q", data)
 +	}
 +	logs := t.TempDir()
-+	if err := cache.AfterCommand(context.Background(), cmd, logs, "threshold"); err != nil {
++	if err := cache.AfterCommand(context.Background(), logs, "threshold"); err != nil {
 +		t.Fatal(err)
 +	}
 +	raw, err := os.ReadFile(filepath.Join(logs, "threshold.cache.json"))
@@ -4429,7 +4477,7 @@ index 0000000..04b711c
 +	if cache.Configure(cmd) == nil {
 +		t.Fatal("substituted cache admitted")
 +	}
-+	if err := cache.AfterCommand(context.Background(), cmd, t.TempDir(), "substitution"); err == nil {
++	if err := cache.AfterCommand(context.Background(), t.TempDir(), "substitution"); err == nil {
 +		t.Fatal("cache inspection loss accepted")
 +	}
 +	if _, err := os.Stat(sentinel); err != nil {
@@ -4446,23 +4494,206 @@ index 0000000..04b711c
 +		t.Fatalf("closed ownership lease: %v", err)
 +	}
 +}
-+func TestOwnedCacheCleanFailurePreservesCause(t *testing.T) {
++func TestOwnedCacheTrimPreservesRecentEntries(t *testing.T) {
++	cache, err := NewGoCache(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer cache.Close()
++	cache.budget = 1024
++	for index, name := range []string{"old", "recent", "current"} {
++		path := filepath.Join(cache.Path, name)
++		if err := os.WriteFile(path, []byte(strings.Repeat("x", 400)), 0o600); err != nil {
++			t.Fatal(err)
++		}
++		stamp := time.Unix(int64(index+1), 0)
++		if err := os.Chtimes(path, stamp, stamp); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if err := cache.AfterCommand(t.Context(), t.TempDir(), "selective"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := os.Stat(filepath.Join(cache.Path, "old")); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("old entry retained: %v", err)
++	}
++	for _, name := range []string{"recent", "current"} {
++		data, err := os.ReadFile(filepath.Join(cache.Path, name))
++		if err != nil || len(data) != 400 {
++			t.Fatalf("recent cache entry lost: %s %v", name, err)
++		}
++	}
++}
++
++func TestOwnedCacheTrimCancellationAndClosedRootRetainCause(t *testing.T) {
++	cache, err := NewGoCache(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer cache.Close()
++	path := filepath.Join(cache.Path, "data")
++	if err := os.WriteFile(path, []byte("preserve"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	root, err := cache.ownedRoot()
++	if err != nil {
++		t.Fatal(err)
++	}
++	entries, total, err := cacheInventory(t.Context(), root)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithCancel(t.Context())
++	cancel()
++	if err := trimCacheEntries(ctx, root, entries, total, 1); !errors.Is(err, context.Canceled) {
++		t.Fatalf("cancellation cause lost: %v", err)
++	}
++	if err := root.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if err := trimCacheEntries(t.Context(), root, entries, total, 1); !errors.Is(err, os.ErrClosed) {
++		t.Fatalf("closed root cause lost: %v", err)
++	}
++	if data, err := os.ReadFile(path); err != nil || string(data) != "preserve" {
++		t.Fatalf("failed trim changed entry: %v", err)
++	}
++}
++
++func TestOwnedCacheTrimRetainsRealGoBuildArtifacts(t *testing.T) {
++	cache, err := NewGoCache(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer cache.Close()
++	module := t.TempDir()
++	for name, data := range map[string]string{"go.mod": "module cachefixture\ngo 1.25.0\n", "value.go": "package cachefixture\nfunc Value() int { return 7 }\n"} {
++		if err := os.WriteFile(filepath.Join(module, name), []byte(data), 0o600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	build := func(verify bool) {
++		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
++		defer cancel()
++		cmd := exec.CommandContext(ctx, "go", "build", "./...")
++		cmd.Dir = module
++		if verify {
++			cmd.Env = append(os.Environ(), "GODEBUG=gocacheverify=1")
++		}
++		if err := cache.Configure(cmd); err != nil {
++			t.Fatal(err)
++		}
++		if output, err := cmd.CombinedOutput(); err != nil {
++			t.Fatalf("real Go build: %v\n%s", err, output)
++		}
++	}
++	build(false)
++	root, err := cache.ownedRoot()
++	if err != nil {
++		t.Fatal(err)
++	}
++	entries, total, scanErr := cacheInventory(t.Context(), root)
++	closeErr := root.Close()
++	if scanErr != nil || closeErr != nil || total == 0 || len(entries) == 0 {
++		t.Fatalf("real cache inventory: %d %v %v", total, scanErr, closeErr)
++	}
++	cache.budget = total
++	old := filepath.Join(cache.Path, "old-unused-artifact")
++	if err := os.WriteFile(old, make([]byte, 1<<20), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	stamp := time.Unix(1, 0)
++	if err := os.Chtimes(old, stamp, stamp); err != nil {
++		t.Fatal(err)
++	}
++	if err := cache.AfterCommand(t.Context(), t.TempDir(), "real-build"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("obsolete entry retained: %v", err)
++	}
++	for _, entry := range entries {
++		if _, err := os.Stat(filepath.Join(cache.Path, filepath.FromSlash(entry.name))); err != nil {
++			t.Fatalf("real build artifact lost: %s %v", entry.name, err)
++		}
++	}
++	build(true)
++}
++
++func TestOwnedCacheRootedTrimCannotDeleteSubstitutedDirectory(t *testing.T) {
++	cache, err := NewGoCache(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer cache.lease.Close()
++	if err := os.WriteFile(filepath.Join(cache.Path, "data"), []byte("owned"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	root, err := cache.ownedRoot()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer root.Close()
++	entries, total, err := cacheInventory(t.Context(), root)
++	if err != nil {
++		t.Fatal(err)
++	}
++	original := cache.Path + "-owned"
++	if err := os.Rename(cache.Path, original); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(cache.Path, 0o700); err != nil {
++		t.Fatal(err)
++	}
++	foreign := filepath.Join(cache.Path, "data")
++	if err := os.WriteFile(foreign, []byte("foreign"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if err := trimCacheEntries(t.Context(), root, entries, total, 0); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := os.Stat(filepath.Join(original, "data")); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("original owned entry was not trimmed: %v", err)
++	}
++	if data, err := os.ReadFile(foreign); err != nil || string(data) != "foreign" {
++		t.Fatalf("substituted directory was changed: %v", err)
++	}
++	if err := cache.Verify(); err == nil {
++		t.Fatal("substituted cache remained admissible")
++	}
++}
++
++func TestOwnedCacheRetainsEvidenceAfterExecutionCancellation(t *testing.T) {
 +	cache, err := NewGoCache(t.TempDir())
 +	if err != nil {
 +		t.Fatal(err)
 +	}
 +	defer cache.Close()
 +	cache.budget = 1
-+	if err := os.WriteFile(filepath.Join(cache.Path, "data"), []byte("exceeds"), 0o600); err != nil {
++	if err := os.WriteFile(filepath.Join(cache.Path, "unused"), []byte("data"), 0o600); err != nil {
 +		t.Fatal(err)
 +	}
-+	cmd := exec.Command(filepath.Join(t.TempDir(), "missing-go.exe"))
-+	err = cache.AfterCommand(context.Background(), cmd, t.TempDir(), "missing")
-+	if err == nil {
-+		t.Fatal("failed Go clean accepted")
++	ctx, cancel := context.WithCancel(t.Context())
++	cancel()
++	logs := t.TempDir()
++	if err := cache.AfterCommand(ctx, logs, "canceled-test"); err != nil {
++		t.Fatalf("canceled test lost cache evidence: %v", err)
 +	}
-+	if !errors.Is(err, os.ErrNotExist) {
-+		t.Fatalf("clean cause lost: %v", err)
++	if !errors.Is(ctx.Err(), context.Canceled) {
++		t.Fatal("test cancellation was changed")
++	}
++	raw, err := os.ReadFile(filepath.Join(logs, "canceled-test.cache.json"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	var receipt struct {
++		AfterTrimBytes             int64
++		InspectionError, TrimError string
++	}
++	if err := json.Unmarshal(raw, &receipt); err != nil {
++		t.Fatal(err)
++	}
++	if receipt.AfterTrimBytes > cache.budget || receipt.InspectionError != "" || receipt.TrimError != "" {
++		t.Fatalf("canceled test maintenance evidence: %+v", receipt)
 +	}
 +}
 diff --git a/internal/execution/go_process_output_unix_test.go b/internal/execution/go_process_output_unix_test.go

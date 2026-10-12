@@ -630,12 +630,6 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
 			return nil, err
 		}
 
-		if maxLen < 0 {
-			if limit := f.decodeLimit(maxLen); limit >= 0 && int64(b.Len()) > limit {
-				return nil, ErrDecodeLimitExceeded
-			}
-		}
-
 		if err == io.EOF {
 			break
 		}

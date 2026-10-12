@@ -6,10 +6,9 @@
 package main
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +18,6 @@ import (
 
 const (
 	progressPollLimitScenario = "PDFCONCAT_NATIVE_POLL_LIMIT"
-	progressPollLimitSelector = "-test.run=^TestProgressNativePollLimitHelper$"
 	progressPollLimitReceipt  = "native poll-limit complete: "
 	progressPollPipe          = "pipe"
 	progressPollTerminal      = "terminal"
@@ -28,22 +26,15 @@ const (
 func TestProgressNativePollResourceFailure(t *testing.T) {
 	t.Parallel()
 
-	executable, err := os.Executable()
-	requireProgressNoError(t, err)
-
 	for _, scenario := range []string{progressPollPipe, progressPollTerminal} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 
-			helperArguments := progressHelperArgs(progressPollLimitSelector, progressNativeVerbose)
-
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-
-			command := exec.CommandContext(ctx, executable, helperArguments...)
-
-			command.Env = append(os.Environ(), progressPollLimitScenario+"="+scenario)
-			assertProgressNativeChild(ctx, t, command, progressPollLimitReceipt+scenario, "TestProgressNativePollLimitHelper")
+			trace, err := runProgressPhaseChild(t, "TestProgressNativePollLimitHelper", []string{progressPollLimitScenario + "=" + scenario}, 3*time.Second, 10*time.Second)
+			if err != nil {
+				t.Fatalf("native resource lifetime: %v; %s", err, trace)
+			}
+			t.Log(trace)
 		})
 	}
 }
@@ -64,7 +55,14 @@ func TestProgressNativePollLimitHelper(t *testing.T) {
 		t.Fatal("native Darwin poll-limit control requires a nonroot process")
 	}
 
+	control := progressPhaseControl(t)
+	if _, err := fmt.Fprintln(control, "ready"); err != nil {
+		t.Fatal(err)
+	}
 	assertProgressPollLimit(t, scenario)
+	if _, err := fmt.Fprintln(control, "operation"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertProgressPollLimit(t *testing.T, scenario string) {

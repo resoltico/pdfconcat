@@ -6,10 +6,9 @@
 package main
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +26,6 @@ type progressDescriptorLimitCase struct {
 
 const (
 	progressDescriptorLimitScenario = "PDFCONCAT_NATIVE_DESCRIPTOR_LIMIT"
-	progressDescriptorLimitSelector = "-test.run=^TestProgressNativeDescriptorLimitHelper$"
 	progressDescriptorLimitReceipt  = "native descriptor-limit complete: "
 )
 
@@ -43,28 +41,15 @@ func progressDescriptorLimitCases() []progressDescriptorLimitCase {
 func TestProgressNativeDescriptorLimits(t *testing.T) {
 	t.Parallel()
 
-	executable, err := os.Executable()
-	requireProgressNoError(t, err)
-
 	for _, scenario := range progressDescriptorLimitCases() {
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Parallel()
 
-			helperArguments := progressHelperArgs(progressDescriptorLimitSelector, "-test.v")
-
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-
-			command := exec.CommandContext(ctx, executable, helperArguments...)
-
-			command.Env = append(os.Environ(), progressDescriptorLimitScenario+"="+scenario.name)
-			output, runErr := command.CombinedOutput()
-			t.Logf("private native descriptor limit %s: %s", scenario.name, output)
-
-			if ctx.Err() != nil || runErr != nil || !strings.Contains(string(output), progressDescriptorLimitReceipt+scenario.name) ||
-				!strings.Contains(string(output), "--- PASS: TestProgressNativeDescriptorLimitHelper") {
-				t.Fatalf("descriptor-limit scenario not proved (watchdog=%v): %v", ctx.Err(), runErr)
+			trace, err := runProgressPhaseChild(t, "TestProgressNativeDescriptorLimitHelper", []string{progressDescriptorLimitScenario + "=" + scenario.name}, 3*time.Second, 10*time.Second)
+			if err != nil {
+				t.Fatalf("native resource lifetime: %v; %s", err, trace)
 			}
+			t.Log(trace)
 		})
 	}
 }
@@ -82,7 +67,14 @@ func TestProgressNativeDescriptorLimitHelper(t *testing.T) {
 			continue
 		}
 
+		control := progressPhaseControl(t)
+		if _, err := fmt.Fprintln(control, "ready"); err != nil {
+			t.Fatal(err)
+		}
 		assertProgressDescriptorLimit(t, scenario)
+		if _, err := fmt.Fprintln(control, "operation"); err != nil {
+			t.Fatal(err)
+		}
 
 		return
 	}

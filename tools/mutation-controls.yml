@@ -52,8 +52,8 @@ controls:
   - id: decode-appends-predictor-output-beyond-limit
     package: github.com/pdfcpu/pdfcpu/pkg/filter
     file: third_party/pdfcpu/pdfcpu/pkg/filter/flateDecode.go
-    anchor: 'if limit := f.decodeLimit(maxLen); limit >= 0 && int64(len(row)) > limit-int64(b.Len()) {'
-    replacement: 'if limit := f.decodeLimit(maxLen); false && limit >= 0 && int64(len(row)) > limit-int64(b.Len()) {'
+    anchor: 'if maxLen < 0 && f.decodeLimit(-1) >= 0 && int64(len(row)) > f.decodeLimit(-1)-int64(b.Len()) {'
+    replacement: 'if false && maxLen < 0 && f.decodeLimit(-1) >= 0 && int64(len(row)) > f.decodeLimit(-1)-int64(b.Len()) {'
 
   # Complete isolated source objects must not discard material after the parsed object.
   - id: source-accepts-material-after-object-body

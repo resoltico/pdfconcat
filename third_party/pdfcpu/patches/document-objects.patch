@@ -739,7 +739,7 @@ index 0819abd..14bd646 100644
 +	return &b, f.contextError()
  }
 diff --git a/pkg/filter/flateDecode.go b/pkg/filter/flateDecode.go
-index eafed62..f1c8358 100644
+index eafed62..082e785 100644
 --- a/pkg/filter/flateDecode.go
 +++ b/pkg/filter/flateDecode.go
 @@ -20,6 +20,7 @@ import (
@@ -869,25 +869,31 @@ index eafed62..f1c8358 100644
  	// cr and pr are the bytes for the current and previous row.
  	cr := make([]byte, m)
  	pr := make([]byte, m)
-@@ -574,7 +616,17 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
+@@ -574,14 +616,18 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
  		if maxLen >= 0 {
  			remaining = maxLen - int64(b.Len())
  		}
 -		if err := process(&b, pr, cr, predictor, colors, bpc, columns, bytesPerPixel, remaining); err != nil {
+-			return nil, err
+-		}
+-
+-		if maxLen < 0 {
+-			if limit := f.decodeLimit(maxLen); limit >= 0 && int64(b.Len()) > limit {
 +		row, err := processRowWithContext(f.ctx, pr, cr, predictor, colors, bpc, columns, bytesPerPixel)
 +		if err == nil {
 +			if remaining >= 0 && int64(len(row)) > remaining {
 +				row = row[:remaining]
 +			}
 +			if maxLen < 0 && f.decodeLimit(-1) >= 0 && int64(len(row)) > f.decodeLimit(-1)-int64(b.Len()) {
-+				return nil, ErrDecodeLimitExceeded
-+			}
+ 				return nil, ErrDecodeLimitExceeded
+ 			}
 +			_, err = b.Write(row)
 +		}
 +		if err != nil {
- 			return nil, err
++			return nil, err
  		}
  
+ 		if err == io.EOF {
 diff --git a/pkg/filter/lzwDecode.go b/pkg/filter/lzwDecode.go
 index 9e9af10..64a3dcf 100644
 --- a/pkg/filter/lzwDecode.go

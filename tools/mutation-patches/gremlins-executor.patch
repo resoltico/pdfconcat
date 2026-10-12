@@ -1535,7 +1535,7 @@ index 3fb5ee4..4b1e982 100644
 +	return func(m MutantExecutorDealer) MutantExecutorDealer { m.ctx = ctx; return m }
  }
 diff --git a/internal/engine/executor_test.go b/internal/engine/executor_test.go
-index e5a1c67..e0d7c08 100644
+index e5a1c67..efc0911 100644
 --- a/internal/engine/executor_test.go
 +++ b/internal/engine/executor_test.go
 @@ -134,28 +134,28 @@ func TestMutatorTestExecution(t *testing.T) {
@@ -1574,7 +1574,17 @@ index e5a1c67..e0d7c08 100644
  			defer viperReset()
  			wdDealer := newWdDealerStub(t)
  			holder := &commandHolder{}
-@@ -251,7 +251,7 @@ func TestMutatorRun(t *testing.T) {
+@@ -200,6 +200,9 @@ func TestMutatorTestExecution(t *testing.T) {
+ 			}
+ 
+ 			if tc.mutantStatus != mutator.NotCovered {
++				if holder.cmd == nil {
++					t.Fatal("mutation command was not launched; inspect the execution result before environment assertions")
++				}
+ 				goTmpDirEnv := fmt.Sprintf("GOTMPDIR=%s", wdDealer.WorkDir())
+ 				actualGoTmpDir := ""
+ 				for _, v := range holder.cmd.Env {
+@@ -251,7 +254,7 @@ func TestMutatorRun(t *testing.T) {
  			pkg:      "example.com/my/package",
  			callDir:  "test/dir",
  			tags:     "tag1,t1g2",
@@ -1583,7 +1593,7 @@ index e5a1c67..e0d7c08 100644
  		},
  		{
  			name:               "it can override timeout coefficient",
-@@ -308,7 +308,7 @@ func TestMutatorRun(t *testing.T) {
+@@ -308,7 +311,7 @@ func TestMutatorRun(t *testing.T) {
  			if tc.timeoutCoefficient != 0 {
  				wantTimeout = 2*time.Second + expectedTimeout*time.Duration(tc.timeoutCoefficient)
  			}
@@ -2843,18 +2853,114 @@ index 0000000..22b28c8
 +		t.Fatalf("native low-limit copy control: %v\n%s", err, raw)
 +	}
 +}
+diff --git a/internal/engine/workdir/permission_unix_test.go b/internal/engine/workdir/permission_unix_test.go
+new file mode 100644
+index 0000000..1729d3f
+--- /dev/null
++++ b/internal/engine/workdir/permission_unix_test.go
+@@ -0,0 +1,21 @@
++//go:build !windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir_test
++
++import (
++	"os"
++	"testing"
++)
++
++func denyDirectoryAccess(t *testing.T, path, kind string) func() {
++	t.Helper()
++	if err := os.Chmod(path, 0); err != nil {
++		t.Fatal(err)
++	}
++	return func() {
++		if err := os.Chmod(path, 0o700); err != nil {
++			t.Error(err)
++		}
++	}
++}
+diff --git a/internal/engine/workdir/permission_windows_test.go b/internal/engine/workdir/permission_windows_test.go
+new file mode 100644
+index 0000000..be5142e
+--- /dev/null
++++ b/internal/engine/workdir/permission_windows_test.go
+@@ -0,0 +1,62 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir_test
++
++import (
++	"errors"
++	"fmt"
++	"golang.org/x/sys/windows"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func denyDirectoryAccess(t *testing.T, path, kind string) func() {
++	t.Helper()
++	saved, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
++	if err != nil {
++		t.Fatal(err)
++	}
++	acl, _, err := saved.DACL()
++	if err != nil {
++		t.Fatal(err)
++	}
++	user, err := windows.GetCurrentProcessToken().GetTokenUser()
++	if err != nil {
++		t.Fatal(err)
++	}
++	mask := uint32(windows.FILE_LIST_DIRECTORY)
++	if kind == "write" {
++		mask = 0x0004 | 0x0002 // FILE_ADD_SUBDIRECTORY and FILE_ADD_FILE in the Windows SDK
++	}
++	descriptor, err := windows.SecurityDescriptorFromString(fmt.Sprintf("D:P(D;;0x%x;;;%s)(A;;FA;;;%s)", mask, user.User.Sid.String(), user.User.Sid.String()))
++	if err != nil {
++		t.Fatal(err)
++	}
++	denied, _, err := descriptor.DACL()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, denied, nil); err != nil {
++		t.Fatal(err)
++	}
++	restore := func() {
++		if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
++			t.Error(err)
++		}
++	}
++	t.Cleanup(restore)
++	if kind == "read" {
++		if _, err := os.ReadDir(path); !errors.Is(err, os.ErrPermission) {
++			t.Fatalf("native read denial not established: %v", err)
++		}
++	} else {
++		probe := filepath.Join(path, "native-denial-control")
++		if err := os.Mkdir(probe, 0o700); !errors.Is(err, os.ErrPermission) {
++			if err == nil {
++				_ = os.Remove(probe)
++			}
++			t.Fatalf("native creation denial not established: %v", err)
++		}
++	}
++	return restore
++}
 diff --git a/internal/engine/workdir/scratch.go b/internal/engine/workdir/scratch.go
 new file mode 100644
-index 0000000..4d4cfeb
+index 0000000..cacd0d5
 --- /dev/null
 +++ b/internal/engine/workdir/scratch.go
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,139 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
 +import (
 +	"errors"
 +	"fmt"
++	"github.com/go-gremlins/gremlins/internal/execution"
 +	"io/fs"
 +	"os"
 +	"path/filepath"
@@ -2874,7 +2980,7 @@ index 0000000..4d4cfeb
 +	if err != nil {
 +		return nil, err
 +	}
-+	pin, err := os.Open(path)
++	pin, err := execution.OpenDirectoryLease(path)
 +	if err != nil {
 +		return nil, errors.Join(err, os.RemoveAll(path))
 +	}
@@ -2890,14 +2996,21 @@ index 0000000..4d4cfeb
 +	if err != nil || !os.SameFile(info, owned) {
 +		return nil, errors.Join(err, errors.New("new scratch identity changed"), root.Close(), pin.Close())
 +	}
-+	return &ScratchDirectory{path: path, root: root, pin: pin, identity: info}, nil
++	if err := root.Close(); err != nil {
++		return nil, errors.Join(err, pin.Close())
++	}
++	return &ScratchDirectory{path: path, pin: pin, identity: info}, nil
 +}
 +func (d *ScratchDirectory) Path() string { return d.path }
 +func (d *ScratchDirectory) Clean() (resultErr error) {
 +	closed := false
 +	defer func() {
 +		if !closed {
-+			resultErr = errors.Join(resultErr, d.root.Close(), d.pin.Close())
++			var rootErr error
++			if d.root != nil {
++				rootErr = d.root.Close()
++			}
++			resultErr = errors.Join(resultErr, rootErr, d.pin.Close())
 +		}
 +	}()
 +	parent, err := os.OpenRoot(filepath.Dir(d.path))
@@ -2926,6 +3039,16 @@ index 0000000..4d4cfeb
 +	// The retained descriptor can restore a root mode 000; path-based chmod cannot search it.
 +	if err = d.pin.Chmod(current.Mode().Perm() | 0o700); err != nil {
 +		return err
++	}
++	// Open the confining SDK root only after producers stop and the pinned object is verified.
++	// Windows SDK roots pin their namespace; retaining one during work prevents safe rename tests.
++	d.root, err = os.OpenRoot(d.path)
++	if err != nil {
++		return err
++	}
++	rooted, err := d.root.Lstat(".")
++	if err != nil || !os.SameFile(d.identity, rooted) {
++		return errors.Join(err, errors.New("scratch changed before rooted cleanup; unknown object preserved"))
 +	}
 +	walkErr := fs.WalkDir(d.root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 +		if walkErr != nil {
@@ -3240,6 +3363,78 @@ index 6f479c5..2f79767 100644
 +	_, copyErr := io.Copy(destination, source)
 +	return errors.Join(copyErr, destination.Close(), source.Close())
  }
+diff --git a/internal/engine/workdir/workdir_test.go b/internal/engine/workdir/workdir_test.go
+index 106fed3..797edc5 100644
+--- a/internal/engine/workdir/workdir_test.go
++++ b/internal/engine/workdir/workdir_test.go
+@@ -21,13 +21,11 @@ import (
+ 	"io/fs"
+ 	"os"
+ 	"path/filepath"
+-	"runtime"
+ 	"strconv"
+ 	"sync"
+ 	"testing"
+ 
+ 	"github.com/google/go-cmp/cmp"
+-	"github.com/hectane/go-acl"
+ 
+ 	"github.com/go-gremlins/gremlins/internal/engine/workdir"
+ )
+@@ -197,24 +195,14 @@ func TestErrors(t *testing.T) {
+ 
+ 	t.Run("srcDir is not readable", func(t *testing.T) {
+ 		srcDir := t.TempDir()
+-		err := os.Chmod(srcDir, 0000)
+-		clean := os.Chmod
+-		if runtime.GOOS == "windows" {
+-			err = acl.Chmod(srcDir, 0000)
+-			clean = acl.Chmod
+-		}
+-		if err != nil {
+-			t.Fatal(err)
+-		}
+-		defer func(d string) {
+-			_ = clean(d, 0700)
+-		}(srcDir)
++		restore := denyDirectoryAccess(t, srcDir, "read")
++		defer restore()
+ 
+ 		dstDir := t.TempDir()
+ 
+ 		mngr := workdir.NewCachedDealer(dstDir, srcDir)
+ 
+-		_, err = mngr.Get("test")
++		_, err := mngr.Get("test")
+ 		if err == nil {
+ 			t.Errorf("expected an error")
+ 		}
+@@ -223,22 +211,12 @@ func TestErrors(t *testing.T) {
+ 	t.Run("dstDir is not writeable", func(t *testing.T) {
+ 		srcDir := t.TempDir()
+ 		dstDir := t.TempDir()
+-		err := os.Chmod(dstDir, 0000)
+-		clean := os.Chmod
+-		if runtime.GOOS == "windows" {
+-			err = acl.Chmod(dstDir, 0000)
+-			clean = acl.Chmod
+-		}
+-		if err != nil {
+-			t.Fatal(err)
+-		}
+-		defer func(d string) {
+-			_ = clean(d, 0700)
+-		}(dstDir)
++		restore := denyDirectoryAccess(t, dstDir, "write")
++		defer restore()
+ 
+ 		dealer := workdir.NewCachedDealer(dstDir, srcDir)
+ 
+-		_, err = dealer.Get("test")
++		_, err := dealer.Get("test")
+ 		if err == nil {
+ 			t.Errorf("expected an error")
+ 		}
 diff --git a/internal/engine/worker_integrity_test.go b/internal/engine/worker_integrity_test.go
 new file mode 100644
 index 0000000..e464c72
@@ -3736,9 +3931,50 @@ index 0000000..47da238
 + foreign:=filepath.Join(t.TempDir(),"foreign.go");if err:=os.WriteFile(foreign,[]byte("package fixture\n"),0600);err!=nil{t.Fatal(err)}
 + if ownedCompilerDiagnostic(prefix+foreign+": "+foreign+":1:2: expected operand",root){t.Fatal("foreign source accepted")}
 +}
+diff --git a/internal/execution/directory_lease_unix.go b/internal/execution/directory_lease_unix.go
+new file mode 100644
+index 0000000..1da9560
+--- /dev/null
++++ b/internal/execution/directory_lease_unix.go
+@@ -0,0 +1,9 @@
++//go:build !windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import "os"
++
++// OpenDirectoryLease retains native object identity while allowing owned namespace cleanup.
++func OpenDirectoryLease(path string) (*os.File, error) { return os.Open(path) }
+diff --git a/internal/execution/directory_lease_windows.go b/internal/execution/directory_lease_windows.go
+new file mode 100644
+index 0000000..8807047
+--- /dev/null
++++ b/internal/execution/directory_lease_windows.go
+@@ -0,0 +1,20 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"golang.org/x/sys/windows"
++	"os"
++)
++
++// A retained identity lease must share deletion; Go's ordinary directory Open pins the name.
++func OpenDirectoryLease(path string) (*os.File, error) {
++	name, err := windows.UTF16PtrFromString(path)
++	if err != nil {
++		return nil, err
++	}
++	handle, err := windows.CreateFile(name, windows.GENERIC_READ|windows.FILE_WRITE_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
++	if err != nil {
++		return nil, &os.PathError{Op: "open directory lease", Path: path, Err: err}
++	}
++	return os.NewFile(uintptr(handle), path), nil
++}
 diff --git a/internal/execution/go_cache.go b/internal/execution/go_cache.go
 new file mode 100644
-index 0000000..a34a904
+index 0000000..f2168f0
 --- /dev/null
 +++ b/internal/execution/go_cache.go
 @@ -0,0 +1,166 @@
@@ -3773,7 +4009,7 @@ index 0000000..a34a904
 +	if err != nil {
 +		return nil, err
 +	}
-+	lease, err := os.Open(path)
++	lease, err := OpenDirectoryLease(path)
 +	if err != nil {
 +		return nil, err
 +	}
@@ -3910,7 +4146,7 @@ index 0000000..a34a904
 +}
 diff --git a/internal/execution/go_cache_test.go b/internal/execution/go_cache_test.go
 new file mode 100644
-index 0000000..9f29d3b
+index 0000000..04b711c
 --- /dev/null
 +++ b/internal/execution/go_cache_test.go
 @@ -0,0 +1,136 @@
@@ -4041,7 +4277,7 @@ index 0000000..9f29d3b
 +	if err := os.WriteFile(filepath.Join(cache.Path, "data"), []byte("exceeds"), 0o600); err != nil {
 +		t.Fatal(err)
 +	}
-+	cmd := exec.Command(filepath.Join(t.TempDir(), "missing-go"))
++	cmd := exec.Command(filepath.Join(t.TempDir(), "missing-go.exe"))
 +	err = cache.AfterCommand(context.Background(), cmd, t.TempDir(), "missing")
 +	if err == nil {
 +		t.Fatal("failed Go clean accepted")

@@ -141,20 +141,12 @@ linters:
         text: 'G204: Subprocess launched with variable'
       - linters:
           - gosec
-        path: ^cmd/pdfconcat/progress_transport_poll_darwin_test\.go$
-        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
-      - linters:
-          - gosec
         path: ^test/scale/descriptor_identity_darwin\.go$
         text: 'G115: integer overflow conversion int32 -> uint64'
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_transport_pty_darwin_test\.go$
         text: 'G103: Use of unsafe calls should be audited'
-      - linters:
-          - gosec
-        path: ^cmd/pdfconcat/progress_transport_limits_darwin_test\.go$
-        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_owner_boundary_unix_test\.go$

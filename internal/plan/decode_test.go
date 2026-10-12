@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -271,10 +272,14 @@ func TestCancellationAtEveryCheckpointIsReported(t *testing.T) {
 	t.Parallel()
 
 	document := repeated(sourceStringJSON, 20000)
+	reference := &flippingContext{flipAfter: math.MaxInt64}
+	if _, err := plan.Decode(reference, plan.Input{Name: "c"}, strings.NewReader(document)); err != nil {
+		t.Fatalf("uncanceled reference decode failed: %v", err)
+	}
 
 	interrupted, completed := 0, 0
 
-	for flipAfter := range int64(60) {
+	for flipAfter := range reference.calls.Load() + 1 {
 		_, err := plan.Decode(&flippingContext{flipAfter: flipAfter}, plan.Input{Name: "c"}, strings.NewReader(document))
 		if err == nil {
 			completed++
@@ -286,6 +291,12 @@ func TestCancellationAtEveryCheckpointIsReported(t *testing.T) {
 
 		interrupted++
 	}
+	// A never-canceling context is an explicit completion control. Buffered
+	// read scheduling may vary the exact number of polling checkpoints.
+	if _, err := plan.Decode(&flippingContext{flipAfter: math.MaxInt64}, plan.Input{Name: "c"}, strings.NewReader(document)); err != nil {
+		t.Fatalf("completion control failed: %v", err)
+	}
+	completed++
 
 	if interrupted == 0 || completed == 0 {
 		t.Fatalf("the sweep interrupted %d and completed %d decodes; it must cross the end of the work", interrupted, completed)

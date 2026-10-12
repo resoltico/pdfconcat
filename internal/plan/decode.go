@@ -85,7 +85,9 @@ const (
 // Decode reads exactly one plan object from reader in a single pass over the jsontext token stream. reader
 // may block (standard input); ctx cancels the read. Errors are *Error values; decoding stops at the first fault.
 func Decode(ctx context.Context, input Input, reader io.Reader) (*assembly.Job, error) {
-	stop := cancellationOf(ctx)
+	readContext, finishRead := context.WithCancel(ctx)
+	defer finishRead()
+	stop := cancellation{done: readContext.Done(), err: ctx.Err}
 	source := newLimitedSource(stop, input.Name, reader)
 
 	reading := &parser{

@@ -80,26 +80,51 @@ func newChunkReader(stop cancellation, source io.Reader) *chunkReader {
 // Read copies pumped bytes, or reports the context's error once it is done.
 func (r *chunkReader) Read(destination []byte) (int, error) {
 	r.startOnce.Do(func() { go r.pump() })
+	copied := 0
 
 	for {
 		err := r.stop.err()
 		if err != nil {
-			return 0, err
+			return copied, err
 		}
 
 		if len(r.remaining) > 0 {
-			copied := copy(destination, r.remaining)
+			length := copy(destination[copied:], r.remaining)
+			copied += length
 
-			r.remaining = r.remaining[copied:]
+			r.remaining = r.remaining[length:]
 			if len(r.remaining) == 0 {
 				r.free <- r.buffer
 			}
 
-			return copied, nil
+			if copied == len(destination) {
+				return copied, nil
+			}
+			continue
 		}
 
 		if r.err != nil {
+			if copied > 0 {
+				return copied, nil
+			}
 			return 0, r.err
+		}
+
+		if copied > 0 {
+			// Drain only chunks already available. Never wait for another source
+			// read after returning data could let the decoder make progress.
+			select {
+			case received := <-r.full:
+				r.buffer, r.remaining, r.err = received.buffer, received.buffer[:received.length], received.err
+				if received.length == 0 {
+					r.free <- received.buffer
+				}
+			case <-r.stop.done:
+				return copied, r.stop.err()
+			default:
+				return copied, nil
+			}
+			continue
 		}
 
 		select {

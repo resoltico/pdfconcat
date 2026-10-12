@@ -95,7 +95,7 @@ func TestCanceledChunkReaderStopsReadingAheadEvenWhenItsOutputIsFull(t *testing.
 		waitForSourceRead(t, source, want)
 	}
 
-	rest := make([]byte, 16)
+	rest := make([]byte, len("irst"))
 
 	got, err = reader.Read(rest)
 	if string(rest[:got]) != "irst" || err != nil {

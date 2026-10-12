@@ -26,19 +26,20 @@ type (
 	// CancelSynchronousIo targets that thread rather than an arbitrary [io.Writer].
 	// The thread is joined before its handles are closed or reused.
 	progressTransport struct {
-		closeErr     error
-		closed       chan struct{}
-		cancellation *windows.LazyProc
-		requests     chan progressWrite
-		stopped      chan struct{}
-		admission    chan struct{}
-		handle       windows.Handle
-		thread       windows.Handle
-		threadID     uint32
-		closedOnce   sync.Once
-		closeOnce    sync.Once
-		failed       atomic.Bool
-		console      bool
+		writeAdmitted func()
+		closeErr      error
+		closed        chan struct{}
+		cancellation  *windows.LazyProc
+		requests      chan progressWrite
+		stopped       chan struct{}
+		admission     chan struct{}
+		handle        windows.Handle
+		thread        windows.Handle
+		threadID      uint32
+		closedOnce    sync.Once
+		closeOnce     sync.Once
+		failed        atomic.Bool
+		console       bool
 	}
 	progressWrite struct {
 		aborted <-chan struct{}
@@ -180,6 +181,9 @@ func (transport *progressTransport) run(ready chan<- error) {
 	ready <- nil
 
 	for request := range transport.requests {
+		if transport.writeAdmitted != nil {
+			transport.writeAdmitted()
+		}
 		request.result <- transport.writeWindowsRecord(request.aborted, request.record)
 	}
 }

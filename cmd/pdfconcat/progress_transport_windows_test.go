@@ -91,11 +91,20 @@ func assertProgressWindowsStoppedWrite(t *testing.T, transport *progressTranspor
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	start := time.Now()
 	result := make(chan error, 1)
 	observer := observeProgressNativeThread(t, transport.threadID)
+	admitted := make(chan struct{})
+	transport.writeAdmitted = func() { close(admitted) }
 
+	start := time.Now()
 	go func() { result <- transport.WriteRecord(ctx, record) }()
+	select {
+	case <-admitted:
+	case err := <-result:
+		t.Fatalf("write completed before native worker admission: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("native worker did not admit the write")
+	}
 
 	// A real undrained pipe write must be pending before caller cancellation.
 	assertProgressNativePending(t, observer, result)

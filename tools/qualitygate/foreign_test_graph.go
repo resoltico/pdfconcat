@@ -57,7 +57,9 @@ func nativeForeignGraph(
 func decodeForeignCompilerGraph(root, output string, stage *foreignTestStage, modfile string) (foreignCompilerGraph, []string, error) {
 	graph := foreignCompilerGraph{}
 	foreign := map[string]bool{}
-	decoder := json.NewDecoder(strings.NewReader(output))
+	// The command output is already complete. A bytes.Buffer lets the JSON
+	// decoder use it directly instead of repeatedly fetching and moving prefixes.
+	decoder := json.NewDecoder(bytes.NewBufferString(output))
 
 	for {
 		var descriptor map[string]any

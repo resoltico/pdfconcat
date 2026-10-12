@@ -73,13 +73,14 @@ jobs:
 
   # Mutation testing runs in a snapshot copied out of this clean checkout, never over the working tree.
   mutation:
-    name: Mutation testing (${{ matrix.os }})
+    name: Mutation testing (${{ matrix.os }}, ${{ matrix.partition }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        partition: [0/3, 1/3, 2/3]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 150
+    timeout-minutes: 360
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
@@ -104,16 +105,17 @@ jobs:
       - uses: ./.github/actions/qa-tools
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}-${{ github.sha }}
           path: ${{ runner.temp }}/campaign-source.txt
           if-no-files-found: error
-      - run: go run ./tools/qualitygate mutation -max-duration=2h -workers=2 -report "${{ runner.temp }}/mutation-report.json"
+      - run: go run ./tools/qualitygate mutation -partition=${{ matrix.partition }} -max-duration=5h30m -workers=2 -report "${{ runner.temp }}/mutation-report.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: mutation-report-${{ matrix.os }}
+          name: mutation-report-${{ matrix.os }}-${{ strategy.job-index }}
           path: |
             ${{ runner.temp }}/mutation-report.json
+            ${{ runner.temp }}/mutation-report.json.scope.json
             ${{ runner.temp }}/mutation-report.json.discovery.json
             ${{ runner.temp }}/mutation-report.json.executions/**
             ${{ runner.temp }}/mutation-report.json.discovery.json.executions/**

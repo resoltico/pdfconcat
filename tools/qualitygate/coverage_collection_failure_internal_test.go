@@ -74,12 +74,19 @@ import ("os"; "testing"; "time")
 func TestValue(t *testing.T) {
  if Value()!=1 { t.Fatal("value") }
  if err:=os.WriteFile("collection-started",[]byte("ready"),0600);err!=nil { t.Fatal(err) }
- // Finite private work ensures the fixture itself cannot leave an unbounded child.
- time.Sleep(500*time.Millisecond)
+ // The parent cancels only after the event stream is retained, then releases this private work.
+ deadline:=time.Now().Add(time.Minute)
+ for { if _,err:=os.Stat("collection-release");err==nil {return}; if time.Now().After(deadline){t.Fatal("parent did not release fixture")};time.Sleep(5*time.Millisecond) }
 }
 `)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	release := func() {
+		if err := os.WriteFile(filepath.Join(root, "collection-release"), []byte("release"), fileMode); err != nil {
+			t.Error(err)
+		}
+	}
+	defer release()
 	done := make(chan error, 1)
 	go func() {
 		_, err := collectBaselineCoverage(ctx, root, directory, []string{"coverage.attempt.fixture"}, attempt)
@@ -87,17 +94,20 @@ func TestValue(t *testing.T) {
 	}()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if _, err := os.Stat(filepath.Join(root, "collection-started")); err == nil {
+		data, readErr := readInRoot(directory, "unit.events.json")
+		if _, err := os.Stat(filepath.Join(root, "collection-started")); err == nil && readErr == nil && strings.Contains(string(data), "TestValue") {
 			break
 		}
 		if time.Now().After(deadline) {
 			cancel()
+			release()
 			<-done
 			t.Fatal("collection fixture did not begin")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
+	release()
 	err := <-done
 	if err == nil {
 		t.Fatal("cancelled collection passed")

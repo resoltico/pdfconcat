@@ -78,6 +78,7 @@ func TestProgressBlockedPresentationDoesNotBlockCallbacksOrLoseFinalPhases(t *te
 		t.Fatal("presenter did not enter the deliberately blocked sink")
 	}
 	callbackDone := make(chan struct{})
+	firstCallbackDone := make(chan struct{})
 	finished = callbackDone
 
 	go func() {
@@ -91,6 +92,9 @@ func TestProgressBlockedPresentationDoesNotBlockCallbacksOrLoseFinalPhases(t *te
 					TotalKnown: true,
 				},
 			)
+			if value == 0 {
+				close(firstCallbackDone)
+			}
 		}
 
 		session.Observe(
@@ -107,9 +111,16 @@ func TestProgressBlockedPresentationDoesNotBlockCallbacksOrLoseFinalPhases(t *te
 	}()
 
 	select {
-	case <-finished:
+	case <-firstCallbackDone:
 	case <-time.After(time.Second):
 		t.Fatal("worker callback waited on blocked sink")
+	}
+	// The blocked sink must also permit the entire coalescing workload to finish. Its watchdog
+	// bounds a 100,000-update race-instrumented stress run, rather than defining product throughput.
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("coalescing workload waited on blocked sink")
 	}
 
 	release()

@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/cli"
@@ -57,5 +58,26 @@ func TestQueryInvalidPathNeverOpensAnAlternativeFile(t *testing.T) {
 	code := runQueryWith(t.Context(), command, Env{WorkingDir: t.TempDir(), Stdout: &output}, func(context.Context, string) (*os.File, error) { opens++; return nil, os.ErrNotExist })
 	if code != 2 || opens != 0 {
 		t.Fatalf("invalid query accessed an inferred path: code=%d opens=%d response=%s", code, opens, &output)
+	}
+}
+
+func TestInvalidOutputRetainsAuthoredOptionAndArgumentPosition(t *testing.T) {
+	t.Parallel()
+	for _, option := range []string{"-o", "--output"} {
+		for _, joined := range []bool{false, true} {
+			expression := "bad\x00output.pdf"
+			args := []string{"check", option, expression}
+			if joined {
+				args = []string{"check", option + "=" + expression}
+			}
+			current := &pipeline{command: &cli.Command{Name: cli.NameCheck, Output: expression}, env: Env{WorkingDir: t.TempDir(), Arguments: args}, builder: report.NewBuilder("check")}
+			if err := current.resolveCommandPaths(); err == nil {
+				t.Fatal("invalid output accepted")
+			}
+			diagnostics := current.builder.Build(current.status).Diagnostics
+			if len(diagnostics) != 1 || diagnostics[0].Path != expression || diagnostics[0].Location == nil || diagnostics[0].Location.ArgvIndex == nil || *diagnostics[0].Location.ArgvIndex != 1 || !strings.Contains(diagnostics[0].Message, option+":") {
+				t.Fatalf("%s joined=%t lost authored output origin: %+v", option, joined, diagnostics)
+			}
+		}
 	}
 }

@@ -2875,6 +2875,124 @@ index 0000000..22b28c8
 +		t.Fatalf("native low-limit copy control: %v\n%s", err, raw)
 +	}
 +}
+diff --git a/internal/engine/workdir/permission_token_windows_test.go b/internal/engine/workdir/permission_token_windows_test.go
+new file mode 100644
+index 0000000..45f4ab6
+--- /dev/null
++++ b/internal/engine/workdir/permission_token_windows_test.go
+@@ -0,0 +1,112 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir_test
++
++import (
++	"errors"
++	"golang.org/x/sys/windows"
++	"runtime"
++	"slices"
++	"testing"
++	"unsafe"
++)
++
++// A runner may enable backup/restore privileges that override a valid directory DACL.
++// Restrict only this locked test thread, preserving the process token and any previous impersonation.
++func withoutDirectoryPrivilegeBypass(t *testing.T) {
++	t.Helper()
++	runtime.LockOSThread()
++	var previous, restricted windows.Token
++	active := false
++	t.Cleanup(func() {
++		if active {
++			var err error
++			if previous != 0 {
++				err = windows.SetThreadToken(nil, previous)
++			} else {
++				err = windows.RevertToSelf()
++			}
++			if err != nil {
++				t.Error(err)
++				return
++			} // Do not release an unrestored thread to unrelated work.
++		}
++		if restricted != 0 {
++			if err := restricted.Close(); err != nil {
++				t.Error(err)
++			}
++		}
++		if previous != 0 {
++			if err := previous.Close(); err != nil {
++				t.Error(err)
++			}
++		}
++		runtime.UnlockOSThread()
++	})
++	thread, err := windows.GetCurrentThread()
++	if err != nil {
++		t.Fatal(err)
++	}
++	err = windows.OpenThreadToken(thread, windows.TOKEN_QUERY|windows.TOKEN_IMPERSONATE|windows.TOKEN_DUPLICATE, true, &previous)
++	if err != nil && !errors.Is(err, windows.ERROR_NO_TOKEN) {
++		t.Fatal(err)
++	}
++	source := windows.GetCurrentProcessToken()
++	if previous != 0 {
++		source = previous
++	}
++	privileges, err := directoryTokenPrivileges(source)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Logf("original directory token privileges: %+v", privileges)
++	if err := windows.DuplicateTokenEx(source, windows.TOKEN_QUERY|windows.TOKEN_IMPERSONATE|windows.TOKEN_ADJUST_PRIVILEGES, nil, windows.SecurityImpersonation, windows.TokenImpersonation, &restricted); err != nil {
++		t.Fatal(err)
++	}
++	if err := windows.AdjustTokenPrivileges(restricted, true, nil, 0, nil, nil); err != nil {
++		t.Fatal(err)
++	}
++	privileges, err = directoryTokenPrivileges(restricted)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, privilege := range privileges {
++		if privilege.Attributes&windows.SE_PRIVILEGE_ENABLED != 0 {
++			t.Fatal("restricted thread retains an enabled privilege")
++		}
++	}
++	if err := windows.SetThreadToken(nil, restricted); err != nil {
++		t.Fatal(err)
++	}
++	active = true
++}
++
++func directoryTokenPrivileges(token windows.Token) ([]windows.LUIDAndAttributes, error) {
++	var size uint32
++	err := windows.GetTokenInformation(token, windows.TokenPrivileges, nil, 0, &size)
++	if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
++		if err == nil {
++			err = windows.ERROR_INVALID_DATA
++		}
++		return nil, err
++	}
++	if size < 4 {
++		return nil, windows.ERROR_INVALID_DATA
++	}
++	data := make([]byte, size)
++	var pin runtime.Pinner
++	pin.Pin(&data[0])
++	defer pin.Unpin()
++	if err := windows.GetTokenInformation(token, windows.TokenPrivileges, &data[0], size, &size); err != nil {
++		return nil, err
++	}
++	if len(data) < 4 {
++		return nil, windows.ERROR_INVALID_DATA
++	}
++	value := (*windows.Tokenprivileges)(unsafe.Pointer(&data[0]))
++	if uint64(value.PrivilegeCount)*uint64(unsafe.Sizeof(windows.LUIDAndAttributes{}))+4 > uint64(len(data)) {
++		return nil, windows.ERROR_INVALID_DATA
++	}
++	copied := slices.Clone(value.AllPrivileges())
++	runtime.KeepAlive(data)
++	return copied, nil
++}
 diff --git a/internal/engine/workdir/permission_unix_test.go b/internal/engine/workdir/permission_unix_test.go
 new file mode 100644
 index 0000000..1729d3f
@@ -2904,10 +3022,10 @@ index 0000000..1729d3f
 +}
 diff --git a/internal/engine/workdir/permission_windows_test.go b/internal/engine/workdir/permission_windows_test.go
 new file mode 100644
-index 0000000..baf9999
+index 0000000..1922887
 --- /dev/null
 +++ b/internal/engine/workdir/permission_windows_test.go
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,81 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir_test
 +
@@ -2922,6 +3040,7 @@ index 0000000..baf9999
 +
 +func denyDirectoryAccess(t *testing.T, path, kind string) func() {
 +	t.Helper()
++	withoutDirectoryPrivilegeBypass(t)
 +	saved, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 +	if err != nil {
 +		t.Fatal(err)
@@ -2930,7 +3049,7 @@ index 0000000..baf9999
 +	if err != nil {
 +		t.Fatal(err)
 +	}
-+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
++	user, err := windows.GetCurrentThreadToken().GetTokenUser()
 +	if err != nil {
 +		t.Fatal(err)
 +	}

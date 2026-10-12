@@ -16,6 +16,7 @@ import (
 // mutationOptions are the flags of the mutation command.
 type mutationOptions struct {
 	root, snapshot, report, only string
+	partition                    mutationPartition
 	maxDuration                  time.Duration
 	workers, coefficient         int
 	integration, keep            bool
@@ -32,6 +33,7 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 	reportOut := set.String("report", "", "keep the gremlins JSON report at this path")
 	keep := set.Bool("keep", false, "keep the snapshot directory")
 	only := set.String("only", "", "comma-separated package directories (such as internal/plan) to mutate; default: every runtime package")
+	partition := set.String("partition", "0/1", "zero-based INDEX/COUNT partition of sorted host runtime files; every partition is required for a complete campaign")
 
 	if parseErr := set.Parse(args); parseErr != nil {
 		return mutationOptions{}, fmt.Errorf(parseFlagsError, parseErr)
@@ -47,6 +49,10 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 
 	if *duration < 0 || (*duration > 0 && *duration <= mutationCleanupReserve) {
 		return mutationOptions{}, fmt.Errorf("%w: max-duration must be zero or greater than %s", errGate, mutationCleanupReserve)
+	}
+	selectedPartition, err := parseMutationPartition(*partition)
+	if err != nil {
+		return mutationOptions{}, err
 	}
 
 	// The executor changes directory to the source snapshot; retained evidence belongs to the caller.
@@ -70,7 +76,8 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 	}
 
 	return mutationOptions{
-		report: *reportOut, only: *only, workers: *workers, coefficient: *coefficient,
+		partition: selectedPartition,
+		report:    *reportOut, only: *only, workers: *workers, coefficient: *coefficient,
 		integration: *integration, keep: *keep, maxDuration: *duration,
 	}, nil
 }

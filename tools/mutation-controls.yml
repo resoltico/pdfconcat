@@ -6,6 +6,13 @@
 # update it to the current code (keep the property, change the anchor) when the code it targets moves.
 version: 1
 controls:
+  # Invalid output diagnostics preserve the exact authored option and argv position.
+  - id: invalid-output-loses-argument-origin
+    package: ./internal/app
+    file: internal/app/job.go
+    anchor: 'if argumentLocation(p.env, "-o") != nil {'
+    replacement: 'if argumentLocation(p.env, "-o") == nil {'
+
   # Strict plan decoding rejects data after the top-level value.
   - id: plan-accepts-trailing-data
     package: ./internal/plan

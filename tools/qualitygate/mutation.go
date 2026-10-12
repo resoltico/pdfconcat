@@ -130,6 +130,10 @@ func mutateSnapshot(ctx context.Context, options *mutationOptions, registry *rep
 	if reportFile == "" {
 		reportFile = filepath.Join(snapshot, "mutation-report.json")
 	}
+	scope, err = partitionMutationScope(ctx, scope, options, reportFile)
+	if err != nil {
+		return nil, err
+	}
 
 	log.Printf("mutation: gremlins in a snapshot of %d runtime packages (%d source files)", scope.packages, len(scope.hostFiles))
 

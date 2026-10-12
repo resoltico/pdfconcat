@@ -52,6 +52,8 @@ Workflow checks run from the checkout root and require ShellCheck on `PATH`; `--
 
 Each gate runs independently. For a quick local build, run `go run ./tools/qualitygate lint` followed by `go build -o ./bin/ ./cmd/pdfconcat`; this does not start fuzzing or mutation testing. Add `lint-config` when checking the correctness profile and compiled negative controls. A local build with selected checks does not establish full verification or change the required CI and release checks.
 
+Hosted mutation campaigns partition the complete sorted native runtime-file inventory across three disjoint jobs per host. Each job retains full integration judging, has a measured five-and-a-half-hour work budget plus setup/upload margin within the six-hour runner limit, and uploads the full source-hash inventory and selected partition. Every partition must pass; a partial matrix cannot certify the corpus. Local `mutation` defaults to the whole inventory (`-partition=0/1`); use all `INDEX/COUNT` values when distributing a campaign.
+
 The test gate streams complete JSON events and separate process stderr to external temporary files. Failed runs retain both paths; successful runs remove temporary evidence. Use `test -events /outside/checkout/events.jsonl` to retain every run explicitly (the path must be new); stderr is saved at the same path with `.stderr` appended. Parsing failures still drain the child output, preserving diagnostic bytes without holding the complete log in memory.
 
 What each proves, and how it can fail without a code defect:

@@ -15,9 +15,11 @@ import (
 
 func coverageEvidenceFixture(t *testing.T) (string, *coverageAttempt) {
 	t.Helper()
-	root, err := repoRoot()
-	if err != nil {
-		t.Fatal(err)
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Coverage fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "Coverage evidence fixture"}} {
+		if _, err := (&command{dir: root, name: gitTool, args: args}).output(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	directory := filepath.Join(t.TempDir(), "attempt")
 	attempt, err := startCoverageEvidence(t.Context(), root, directory)

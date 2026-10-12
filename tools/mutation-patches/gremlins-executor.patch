@@ -2904,10 +2904,10 @@ index 0000000..1729d3f
 +}
 diff --git a/internal/engine/workdir/permission_windows_test.go b/internal/engine/workdir/permission_windows_test.go
 new file mode 100644
-index 0000000..c74d862
+index 0000000..baf9999
 --- /dev/null
 +++ b/internal/engine/workdir/permission_windows_test.go
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,80 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir_test
 +
@@ -2941,7 +2941,13 @@ index 0000000..c74d862
 +	var pin runtime.Pinner
 +	pin.Pin(user.User.Sid)
 +	defer pin.Unpin()
-+	denied, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{AccessPermissions: windows.ACCESS_MASK(mask), AccessMode: windows.DENY_ACCESS, Inheritance: windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER, TrusteeValue: windows.TrusteeValueFromSID(user.User.Sid)}}}, acl)
++	// The fixture changes this directory only. Build an effective-only DACL rather than
++	// merging inheritable entries and creator-owner placeholders from the runner's temp root.
++	trustee := windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER, TrusteeValue: windows.TrusteeValueFromSID(user.User.Sid)}
++	denied, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{
++		{AccessPermissions: windows.ACCESS_MASK(mask), AccessMode: windows.DENY_ACCESS, Inheritance: windows.NO_INHERITANCE, Trustee: trustee},
++		{AccessPermissions: windows.ACCESS_MASK(0x001f01ff), AccessMode: windows.GRANT_ACCESS, Inheritance: windows.NO_INHERITANCE, Trustee: trustee},
++	}, nil)
 +	if err != nil {
 +		t.Fatal(err)
 +	}
@@ -2962,6 +2968,11 @@ index 0000000..c74d862
 +		}
 +	}
 +	t.Cleanup(restore)
++	observed, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Logf("directory denial: kind=%s user=%s original=%s applied=%s", kind, user.User.Sid.String(), saved.String(), observed.String())
 +	if kind == "read" {
 +		if _, err := os.ReadDir(path); !errors.Is(err, os.ErrPermission) {
 +			t.Fatalf("native read denial not established: %v", err)

@@ -32,8 +32,9 @@ The hosted workflow's two-hour/two-worker budget is a configured limit, not evid
 Windows directory identity leases explicitly share deletion so verification does not prevent owned
 cleanup or native substitution controls. The SDK root is opened and identity-checked at cleanup,
 after producer joining, rather than pinning the worker namespace throughout execution. Windows
-permission rejection tests use an explicit current-user deny ACL and independently prove the denied
-operation; POSIX chmod assumptions and creator-owner placeholder ACEs are not a Windows oracle.
+permission rejection tests install an effective-only, protected current-user deny/allow DACL
+on each owned directory and independently prove the denied operation. They restore the original DACL
+and inheritance state; inherited runner permissions are not merged into the denial fixture; POSIX chmod assumptions and creator-owner placeholder ACEs are not a Windows oracle.
 Missing-command controls preserve the actual native lookup/start cause. A missing launch in a test
 is diagnosed before inspecting command fields. These changes require native Windows execution,
 separately from cross-compilation.

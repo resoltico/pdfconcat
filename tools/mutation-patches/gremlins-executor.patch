@@ -4370,12 +4370,42 @@ index 0000000..a8c3da0
 +	}
 +	return fmt.Sprint(err)
 +}
+diff --git a/internal/execution/go_cache_root_other_test.go b/internal/execution/go_cache_root_other_test.go
+new file mode 100644
+index 0000000..d4193c2
+--- /dev/null
++++ b/internal/execution/go_cache_root_other_test.go
+@@ -0,0 +1,6 @@
++//go:build !windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++func cacheRootRenameBlocked(error) bool { return false }
+diff --git a/internal/execution/go_cache_root_windows_test.go b/internal/execution/go_cache_root_windows_test.go
+new file mode 100644
+index 0000000..0b11018
+--- /dev/null
++++ b/internal/execution/go_cache_root_windows_test.go
+@@ -0,0 +1,12 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"errors"
++
++	"golang.org/x/sys/windows"
++)
++
++func cacheRootRenameBlocked(err error) bool {
++	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
++}
 diff --git a/internal/execution/go_cache_test.go b/internal/execution/go_cache_test.go
 new file mode 100644
-index 0000000..fba28bd
+index 0000000..41dea2e
 --- /dev/null
 +++ b/internal/execution/go_cache_test.go
-@@ -0,0 +1,320 @@
+@@ -0,0 +1,340 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -4619,7 +4649,7 @@ index 0000000..fba28bd
 +	build(true)
 +}
 +
-+func TestOwnedCacheRootedTrimCannotDeleteSubstitutedDirectory(t *testing.T) {
++func TestOwnedCacheRootPreventsTrimRedirection(t *testing.T) {
 +	cache, err := NewGoCache(t.TempDir())
 +	if err != nil {
 +		t.Fatal(err)
@@ -4639,7 +4669,27 @@ index 0000000..fba28bd
 +	}
 +	original := cache.Path + "-owned"
 +	if err := os.Rename(cache.Path, original); err != nil {
-+		t.Fatal(err)
++		// Windows os.Root holds the directory against renaming. That native
++		// rejection protects identity before a substitute can be installed.
++		if !cacheRootRenameBlocked(err) {
++			t.Fatal(err)
++		}
++		if data, err := os.ReadFile(filepath.Join(cache.Path, "data")); err != nil || string(data) != "owned" {
++			t.Fatalf("blocked redirection changed owned data: %v", err)
++		}
++		if _, err := os.Stat(original); !errors.Is(err, os.ErrNotExist) {
++			t.Fatalf("blocked rename installed another directory: %v", err)
++		}
++		if err := cache.Verify(); err != nil {
++			t.Fatalf("native rename guard lost cache identity: %v", err)
++		}
++		if err := trimCacheEntries(t.Context(), root, entries, total, 0); err != nil {
++			t.Fatal(err)
++		}
++		if _, err := os.Stat(filepath.Join(cache.Path, "data")); !errors.Is(err, os.ErrNotExist) {
++			t.Fatalf("protected cache could not trim its own entry: %v", err)
++		}
++		return
 +	}
 +	if err := os.Mkdir(cache.Path, 0o700); err != nil {
 +		t.Fatal(err)

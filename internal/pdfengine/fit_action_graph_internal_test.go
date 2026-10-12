@@ -142,8 +142,15 @@ func TestFitActionGraphRejectsCyclesDepthAndRepeatedExpansionLimits(t *testing.T
 func assertFitGraphRefused(t *testing.T, pdf *model.Context, reason string) {
 	t.Helper()
 
-	_, err := inspectPageFits(t.Context(), pdf, PageSize{612, 1008})
-	if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), reason) {
+	ctx := t.Context()
+	if reason == "cyclic" {
+		// Bound this deliberately cyclic input independently of the graph guards
+		// under test. A missing guard must fail the refusal assertion, not grow
+		// an unbounded recursive error chain during a mutation campaign.
+		ctx = CheckpointContext(ctx, t, 4096)
+	}
+	_, err := inspectPageFits(ctx, pdf, PageSize{612, 1008})
+	if !errors.Is(err, errFitUnsupported) || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), reason) {
 		t.Fatalf("graph guard did not reject %s: %v", reason, err)
 	}
 }

@@ -4,6 +4,7 @@
 package pdfengine
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -120,7 +121,8 @@ func TestFitDestinationRefusesStructureAlternatesAndCycles(t *testing.T) {
 			t.Fatal("unknown structure/cycle control")
 		}
 
-		if _, err := inspectPageFits(t.Context(), pdf, PageSize{612, 1008}); !errors.Is(err, errFitUnsupported) {
+		ctx := CheckpointContext(t.Context(), t, 4096)
+		if _, err := inspectPageFits(ctx, pdf, PageSize{612, 1008}); !errors.Is(err, errFitUnsupported) || errors.Is(err, context.Canceled) {
 			t.Fatalf("structure alternate/cycle %s passed: %v", mode, err)
 		}
 	}

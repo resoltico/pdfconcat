@@ -35,10 +35,12 @@ func TestProgressNativePollResourceFailure(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 
+			helperArguments := progressHelperArgs(progressPollLimitSelector, progressNativeVerbose)
+
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 
-			command := exec.CommandContext(ctx, executable, progressHelperArgs(progressPollLimitSelector, progressNativeVerbose)...)
+			command := exec.CommandContext(ctx, executable, helperArguments...)
 
 			command.Env = append(os.Environ(), progressPollLimitScenario+"="+scenario)
 			assertProgressNativeChild(ctx, t, command, progressPollLimitReceipt+scenario, "TestProgressNativePollLimitHelper")

@@ -165,7 +165,7 @@ Part: C        page  9
 
 `internal/pdfengine` is documented in full in its package comment; this section states what a user can rely on. The contract below requires tests at the independent PDF boundary, including qpdf object inspection, Poppler rendering and ordinary form refilling. Syntax/page counts alone cannot establish appearance or editability.
 
-**Method.** Every document is merged into one pool with pdfcpu's exported merge primitive, then the pool's page tree is replaced by one flat node holding the final order. Page objects keep their identity, so links, destinations and `/P` back-references stay consistent, while fonts, images and content streams stay shared. pdfcpu's `Collect` was evaluated and rejected: it leaves destinations of repeated linked pages pointing at orphan page copies. The pool and the written file are held in memory; there is no streaming mode, and memory grows with the size of the imported documents and about a page dictionary per output page. The engine benchmarks (`go test -bench` in `internal/pdfengine`) and `test/scale` measure wall time, peak memory and descriptors; the numbers are measurements, not guaranteed bounds.
+**Method.** Every document is merged into one pool with pdfcpu's exported merge primitive, then the pool's page tree is replaced by one flat node holding the final order. Page objects keep their identity, so links, destinations and `/P` back-references stay consistent, while fonts, images and content streams stay shared. pdfcpu's `Collect` was evaluated and rejected: it leaves destinations of repeated linked pages pointing at orphan page copies. The object pool is held in memory. Memory grows with unique imported object graphs, per-occurrence rich-object clones, output page/order structures, decoded streams and backend working sets. Output bytes stream to a staged file, but assembly is not constant-space streaming. The engine benchmarks (`go test -bench` in `internal/pdfengine`) and `test/scale` measure wall time, peak memory and descriptors; the numbers are measurements, not guaranteed bounds.
 
 **Page-local objects and repeats.** A source with annotations, page actions, article beads, a form or destinations is imported again for every use, so each occurrence owns its annotations, widgets and destinations. Such a source must be used whole each time; a partial page range of it is rejected, because links, fields or destinations would point at dropped pages. At most one source occurrence with a legacy catalog `/Dests` dictionary is supported per output, including occurrences of different files with distinct keys. This conservative policy avoids merging dictionaries whose keys can overwrite references; both `check` and `build` reject the second occurrence. Other sources are imported once and repeated pages share all objects but the page dictionary.
 
@@ -233,7 +233,7 @@ Only source capture and inspection are concurrent: at most `--jobs` workers (def
 Declared bounds, not guarantees: plans are limited in size, nesting, structural nodes, flattened contributions and generated pages (see [`PLAN.md`](PLAN.md#limits)). No fixed-memory or fixed-time claim is made. Three things set the cost of a job:
 
 - **Disk.** A job needs scratch space for a copy of every distinct source and font file. A build puts its workspace beside the destination; `check` uses the system temporary directory. The workspace is removed on every exit path.
-- **Memory.** The pool and the written file are held in memory, so memory grows with the size of the imported documents and with the page count, and there is no streaming mode.
+- **Memory.** Memory grows with unique imported graphs, rich occurrence clones, output pages/order, decoded streams and backend working sets. Output bytes stream to a staged file; the assembly algorithm is not constant-space streaming.
 - **Generated text.** A build shapes one distinct page and immediately writes it into the private shared resource document. Only bounds/findings remain after that page; fonts and used-glyph bitsets are job-wide. A check also drops shaped lines after each page. Ordinary supported text is shaped once; a missing nominal glyph requires an early shaping probe because font composition can supply it. Source PDF pooling still grows with imported document bytes.
 
 The measurement method for wall time, peak memory, descriptors and scratch disk is in one place: [`DESIGN.md`](DESIGN.md#measured-results).
@@ -264,3 +264,19 @@ owned files regardless of tags.
 The assembly layer retains anchored literal path expressions. The filesystem boundary resolves native parents without collapsing unresolved symbolic-link/parent traversal and leaves artifact leaves available for symlink refusal. Physical capture single-flight uses checked open-handle identity and reconciles it with role protection. The job shares immutable capture, inspection and parsed-font results while keeping logical declarations and occurrence-local PDF imports separate.
 
 Complete capture and successful inspection are independent states. Reports derive digest/bytes from capture and pages/geometry from successful inspection. Font declarations use an ordered reverse consumer index; owned registration and saved-report validation traversals check cancellation. Prospective success serialization changes a detached report; native publication alone changes the live committed outcome.
+
+
+External path expressions are checked by the same pure assembly grammar before native access. CLI
+PDFs, plans, bases, fonts, output/report options and saved-report queries share that grammar.
+Ordinary Windows separators are represented as backslashes without collapsing traversal; drive-relative
+and rooted-without-drive expressions are rejected. Verbatim namespaces are validated before separator
+conversion. Authored provenance, bound access expressions and opened physical identities are separate facts.
+Capture's artifact registry requires absolute valid UTF-8 paths without NUL, validates before no-op
+retirement, and never reads ambient cwd. Lexical failures wrap `fs.ErrInvalid`; real native failures
+retain their actual cause and boundary path. A separately valid, safely admitted report destination
+can still record a failed attempt under the existing no-clobber/inventory safeguards.
+
+Job capture elects one path owner and then one physical-resource owner. Native open, identity,
+copy, close and waiting occur outside the promise-map lock. A waiter cannot cancel shared work;
+the job owns its context. Admission closes and all producers join before workspace removal.
+These rules do not make an arbitrary blocked native filesystem operation interruptible.

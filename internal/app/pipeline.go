@@ -277,13 +277,9 @@ func (p *pipeline) cancelled(ctx context.Context, stage report.Stage) error {
 	return p.stop(stage, err)
 }
 
-// bindPath checks the shared lexical contract before native parent observation.
+// bindPath preserves the shared checked access expression; capture owns native observation.
 func bindPath(base, role, expression string) (string, error) {
-	path, err := assembly.ResolvePath(base, role, expression)
-	if err != nil {
-		return "", err
-	}
-	return capture.NativePath(base, path), nil
+	return assembly.ResolvePath(base, role, expression)
 }
 
 func (p *pipeline) commandPath(option, expression string) (string, error) {

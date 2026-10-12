@@ -42,9 +42,10 @@ func verifyProgressSinkOwnership(t *testing.T, operation string) {
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
+			helperArguments := progressHelperArgs("-test.run=^TestProgressSinkOwnershipHelper$", "-test.v")
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, executable, progressHelperArgs("-test.run=^TestProgressSinkOwnershipHelper$", "-test.v")...)
+			command := exec.CommandContext(ctx, executable, helperArguments...)
 			command.Env = append(os.Environ(), progressSinkOwnershipScenario+"="+scenario, progressSinkOwnershipOperation+"="+operation)
 			output, runErr := command.CombinedOutput()
 			if ctx.Err() != nil || runErr != nil || !strings.Contains(string(output), "--- PASS: TestProgressSinkOwnershipHelper") {

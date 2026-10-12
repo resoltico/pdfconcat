@@ -168,6 +168,11 @@ func resolvePathAs(style PathStyle, base, what, name string) (Code, string, erro
 			}
 		}
 	}
+	if style == PathStyleWindows && ClassifyPath(style, name) == PathRelative && (strings.HasPrefix(base, `\\?\`) || strings.HasPrefix(base, `\\.\`)) {
+		if err := checkWindowsNamespace(base + `\` + name); err != nil {
+			return CodeInvalidJob, "", fmt.Errorf("%s: %w", what, err)
+		}
+	}
 	return "", joinPath(style, base, name), nil
 }
 
@@ -189,11 +194,14 @@ func joinPath(style PathStyle, base, name string) string {
 	if name == "" {
 		return base
 	}
+	if strings.HasSuffix(base, separator) {
+		return base + name
+	}
 	return base + separator + name
 }
 
 func checkWindowsNamespace(path string) error {
-	if !(strings.HasPrefix(path, `\\?\`) || strings.HasPrefix(path, `\\.\`) || strings.HasPrefix(path, "//?/") || strings.HasPrefix(path, "//./")) {
+	if !strings.HasPrefix(path, `\\?\`) && !strings.HasPrefix(path, `\\.\`) && !strings.HasPrefix(path, "//?/") && !strings.HasPrefix(path, "//./") {
 		return nil
 	}
 	if strings.Contains(path, "/") {

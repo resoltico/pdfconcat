@@ -30,13 +30,15 @@ func TestProgressLinuxAcquisitionAndWaitFailures(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 
+			helperArguments := progressHelperArgs(progressLinuxFailureSelector, progressVerboseHelperArgument)
+
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 
 			command := exec.CommandContext(
 				ctx,
 				executable,
-				progressHelperArgs(progressLinuxFailureSelector, progressVerboseHelperArgument)...)
+				helperArguments...)
 
 			command.Env = append(os.Environ(), progressLinuxFailureScenario+"="+scenario)
 			output, runErr := command.CombinedOutput()

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -512,6 +513,13 @@ func checkPathStyle(t *testing.T, style assembly.PathStyle, name string) {
 	checkResolutionIsDeterministic(t, style, name, code, got, err)
 
 	invalidText := !utf8.ValidString(name) || containsNUL(name)
+	// Anchoring classification is not a verbatim namespace grammar. Independent namespace
+	// tables establish valid/rejected forms; fuzzing still checks ordinary paths and typed refusal.
+	namespace := style == assembly.PathStyleWindows && (strings.HasPrefix(name, `\\?\`) || strings.HasPrefix(name, `\\.\`) || strings.HasPrefix(name, "//?/") || strings.HasPrefix(name, "//./"))
+	if err != nil && namespace && !ambiguous && !invalidText {
+		checkUnrepresentablePathResult(t, code, got, err)
+		return
+	}
 	if (err != nil) != (ambiguous || invalidText) {
 		t.Fatalf("%q under style %d: class %d err %v", name, style, class, err)
 	}

@@ -69,8 +69,16 @@ func TestTemporaryWorkspaceLivesInTemporaryDirectory(t *testing.T) {
 
 	defer closeWorkspace(t, workspace)
 
-	if filepath.Dir(workspace.Dir()) != filepath.Clean(temporary) {
-		t.Fatalf("workspace %q is outside %q", workspace.Dir(), temporary)
+	actualParent, err := os.Stat(filepath.Dir(workspace.Dir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedParent, err := os.Stat(temporary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(actualParent, expectedParent) {
+		t.Fatalf("workspace %q is outside the native directory %q", workspace.Dir(), temporary)
 	}
 }
 
@@ -153,7 +161,7 @@ func TestScratchAdviceByFailureKind(t *testing.T) {
 		t.Fatalf("disk-full error = %v", full)
 	}
 
-	other := &ScratchError{Dir: "d", Operation: "copy", Err: errEmptyPath}
+	other := &ScratchError{Dir: "d", Operation: "copy", Err: os.ErrInvalid}
 	if !strings.Contains(other.Error(), "healthy") || IsDiskFull(other) {
 		t.Fatalf("generic error = %v", other)
 	}
@@ -165,14 +173,14 @@ func TestErrorMessagesNameThePath(t *testing.T) {
 	for _, err := range []error{
 		&NotRegularFileError{Path: namedPath, Kind: kindDirectory},
 		&SourceChangedError{Path: namedPath},
-		&SourceError{Path: namedPath, Operation: "open", Err: errEmptyPath},
+		&SourceError{Path: namedPath, Operation: "open", Err: os.ErrInvalid},
 	} {
 		if !strings.Contains(err.Error(), namedPath) {
 			t.Errorf("%T message %q lacks the path", err, err)
 		}
 	}
 
-	if !errors.Is(&SourceError{Err: errEmptyPath}, errEmptyPath) {
+	if !errors.Is(&SourceError{Err: os.ErrInvalid}, os.ErrInvalid) {
 		t.Error("SourceError does not unwrap")
 	}
 }

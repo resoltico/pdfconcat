@@ -42,10 +42,12 @@ func TestProgressConstructorPreservesNativeRelocationCloseFailure(t *testing.T) 
 	executable, err := os.Executable()
 	requireProgressNoError(t, err)
 
+	helperArguments := progressHelperArgs(progressClosePolicySelector, progressVerboseHelperArgument)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, executable, progressHelperArgs(progressClosePolicySelector, progressVerboseHelperArgument)...)
+	command := exec.CommandContext(ctx, executable, helperArguments...)
 
 	command.Env = append(os.Environ(), progressClosePolicyScenario+"=close-zero")
 

@@ -72,76 +72,51 @@ func testPackages(ctx context.Context, root string) ([]string, error) {
 // executable run as a subprocess by those tests and reports their merged raw profile.
 func runCoverage(ctx context.Context, args []string) (resultErr error) {
 	set := newFlags(coverageCommand)
-	profileOut := set.String("profile", "", "also write the merged profile (and its per-function report, with .func.txt appended) here")
-
-	err := set.Parse(args)
-	if err != nil {
+	evidenceDir := set.String("evidence", "", "new caller-owned directory for manifests, raw inputs and validated merged output")
+	if err := set.Parse(args); err != nil {
 		return fmt.Errorf(parseFlagsError, err)
 	}
-
+	if *evidenceDir == "" {
+		return fmt.Errorf("%w: coverage requires -evidence DIRECTORY", errGate)
+	}
 	root, err := repoRoot()
 	if err != nil {
 		return err
 	}
-
+	directory, err := filepath.Abs(*evidenceDir)
+	if err != nil {
+		return err
+	}
+	attempt, err := startCoverageEvidence(ctx, root, directory)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = finishCoverageEvidence(directory, attempt, resultErr) }()
 	module, err := modulePath(root)
 	if err != nil {
 		return err
 	}
-
 	runtimeList, err := runtimePackages(ctx, root, module)
 	if err != nil {
 		return err
 	}
-
-	scratch, err := os.MkdirTemp("", "qualitygate-coverage-")
-	if err != nil {
-		return fmt.Errorf("create scratch directory: %w", err)
-	}
-
-	var merged *repopolicy.CoverageProfile
-
-	defer func() {
-		resultErr = finishCoverageEvidence(ctx, root, scratch, merged, resultErr)
-	}()
-
-	merged, err = collectCoverage(ctx, root, scratch, runtimeList)
+	attempt.Stages["discovery"] = "complete"
+	merged, err := collectCoverage(ctx, root, directory, runtimeList, attempt)
 	if err != nil {
 		return err
 	}
-
-	if *profileOut != "" {
-		err = writeProfileFiles(ctx, root, *profileOut, merged)
-		if err != nil {
-			return err
-		}
+	attempt.Stages["collection"] = "complete"
+	if err := writeProfileFiles(ctx, root, filepath.Join(directory, "merged.out"), merged); err != nil {
+		return err
 	}
-
-	result := repopolicy.EvaluateCoverage(repopolicy.CoverageInput{
-		Profile: merged, Module: module,
-	})
+	attempt.Stages["merged_profile"] = "complete"
+	result := repopolicy.EvaluateCoverage(repopolicy.CoverageInput{Profile: merged, Module: module})
 	log.Printf("coverage: raw %.2f%% (%d/%d statements); no excluded statements or global percentage gate", result.Raw.Percent(), result.Raw.Covered, result.Raw.Total)
 	return report(coverageCommand, result.Problems, "raw unit and executable coverage collected")
 }
 
-// finishCoverageEvidence retains failed runs, including partial native and executable data.
-func finishCoverageEvidence(ctx context.Context, root, scratch string, merged *repopolicy.CoverageProfile, result error) error {
-	if result == nil {
-		removeAll(scratch)
-		return nil
-	}
-
-	log.Printf("coverage: failed run evidence retained in %s", scratch)
-
-	if merged == nil {
-		return result
-	}
-
-	return errors.Join(result, writeProfileFiles(ctx, root, filepath.Join(scratch, "merged.out"), merged))
-}
-
 // collectBaselineCoverage measures CGO0 unit and executable coverage.
-func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeList []string) (*repopolicy.CoverageProfile, error) {
+func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeList []string, attempt *coverageAttempt) (*repopolicy.CoverageProfile, error) {
 	coverDir := filepath.Join(scratch, "covdata")
 
 	err := os.MkdirAll(coverDir, dirMode)
@@ -157,28 +132,37 @@ func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeL
 	coverPkg := strings.Join(runtimeList, ",")
 	unitProfile := filepath.Join(scratch, "unit.out")
 
-	err = (&command{
-		dir: root, name: goTool, stdout: log.Writer(), stderr: log.Writer(),
-		env: []string{baselineCGOEnv, readonlyGoFlags, envCoverDir + "=" + coverDir, envCoverPkg + "=" + coverPkg},
-		args: append([]string{testVerb, countOnce, atomicCoverageFlag, "-coverpkg=" + coverPkg, "-coverprofile=" + unitProfile},
-			packages...),
-	}).run(ctx)
+	evidence, err := openTestEvidence(filepath.Join(scratch, "unit.events.json"))
 	if err != nil {
-		return nil, fmt.Errorf("unit tests failed: %w", err)
+		return nil, err
+	}
+	run := &command{dir: root, name: goTool, env: []string{baselineCGOEnv, readonlyGoFlags, envCoverDir + "=" + coverDir, envCoverPkg + "=" + coverPkg}, args: append([]string{testVerb, jsonFlag, countOnce, atomicCoverageFlag, "-coverpkg=" + coverPkg, "-coverprofile=" + unitProfile}, packages...)}
+	outcome, runErr := collectTestEvents(ctx, run, evidence)
+	closeErr := evidence.closeFiles()
+	withTests, discoveryErr := packagesWithTests(ctx, root, packages)
+	if err := errors.Join(judgeTests(outcome, withTests, testOptions{}, runErr), closeErr, discoveryErr); err != nil {
+		return nil, fmt.Errorf("unit collection failed: %w", err)
 	}
 
+	attempt.Stages["unit"] = "complete"
 	inputs, err := executableCoverageInputs(coverDir)
 	if err != nil {
 		return nil, err
 	}
 
+	attempt.Stages["executable_data"] = "complete"
 	subprocessProfile := filepath.Join(scratch, "subprocess.out")
 
-	err = goCommand(root, goToolVerb, covdataVerb, "textfmt", "-i="+strings.Join(inputs, ","), "-o="+subprocessProfile).run(ctx)
-	if err != nil {
+	conversion, conversionErr := goCommand(root, goToolVerb, covdataVerb, "textfmt", "-i="+strings.Join(inputs, ","), "-o="+subprocessProfile).output(ctx)
+	if conversionErr != nil {
+		conversion += conversionErr.Error()
+	}
+	logErr := os.WriteFile(filepath.Join(scratch, "covdata-conversion.log"), []byte(conversion), fileMode)
+	if err := errors.Join(conversionErr, logErr); err != nil {
 		return nil, fmt.Errorf("convert executable coverage: %w", err)
 	}
 
+	attempt.Stages["conversion"] = "complete"
 	unit, err := readProfile(unitProfile)
 	if err != nil {
 		return nil, err
@@ -196,6 +180,7 @@ func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeL
 		return nil, fmt.Errorf("merge profiles: %w", err)
 	}
 
+	attempt.Stages["baseline_merge"] = "complete"
 	return merged, nil
 }
 

@@ -62,9 +62,9 @@ func runProgressTransportChild(t *testing.T, budget time.Duration, extraFiles ..
 	requireProgressNoError(t, err)
 	directory := t.TempDir()
 	receipt := filepath.Join(directory, "cleanup")
+	args := progressHelperArgs("-test.run=^"+regexp.QuoteMeta(t.Name())+"$", progressVerboseHelperArgument, "-test.timeout="+(budget+time.Second).String())
 	ctx, cancel := context.WithTimeout(t.Context(), budget)
 	defer cancel()
-	args := progressHelperArgs("-test.run=^"+regexp.QuoteMeta(t.Name())+"$", progressVerboseHelperArgument, "-test.timeout="+(budget+time.Second).String())
 	command := exec.CommandContext(ctx, executable, args...)
 	command.ExtraFiles = extraFiles
 	// Preserve the outer command's group; no detached private group or registry.

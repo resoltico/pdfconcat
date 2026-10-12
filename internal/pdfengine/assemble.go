@@ -43,9 +43,9 @@ var errOutputPageCount = errors.New("the output page count differs from the requ
 //  4. optimize (merging duplicate fonts and images) and write the file once;
 //  5. validate the written file and compare its page count with req.ExpectedPages.
 //
-// The pool holds every imported object graph in memory until the single write, so memory grows with
-// the total size of the imported documents, not with the number of output pages; there is no bounded
-// or streaming mode. The growing output is never rewritten.
+// Memory grows with unique imported object graphs, rich per-occurrence clones, output page/order
+// structures, decoded streams and backend working sets. Output bytes stream to a staged file;
+// assembly is not constant-space streaming and has no hard RAM guarantee. The output is written once.
 //
 // The context is checked between imports, while repeated pages are compiled, and before the write.
 // Failures are *Error values with stable codes naming the source where one is responsible.

@@ -52,7 +52,7 @@ linters:
         text: 'G703: Path traversal via taint analysis'
       - linters: [gosec]
         path: ^cmd/pdfconcat/progress_sink_ownership_unix_test\.go$
-        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
       - linters: [gosec]
         path: ^tools/qualitygate/mutation_cleanup_unix_test\.go$
         text: 'G302: Expect file permissions to be 0600 or less'
@@ -86,11 +86,11 @@ linters:
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_linux_failure_test\.go$
-        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_transport_phase_darwin_test\.go$
-        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_relocation_boundary_unix_test\.go$
@@ -142,7 +142,7 @@ linters:
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_transport_poll_darwin_test\.go$
-        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
       - linters:
           - gosec
         path: ^test/scale/descriptor_identity_darwin\.go$
@@ -154,7 +154,7 @@ linters:
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_transport_limits_darwin_test\.go$
-        text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+        text: 'G204: Subprocess launched with (variable|a potential tainted input or cmd arguments)'
       - linters:
           - gosec
         path: ^cmd/pdfconcat/progress_owner_boundary_unix_test\.go$
@@ -187,6 +187,14 @@ linters:
           - gosec
         path: ^cmd/pdfconcat/progress_transport_pause_native_windows_test\.go$
         text: 'G103: Use of unsafe calls should be audited'
+      - linters:
+          - gosec
+        path: ^internal/app/native_directory_link_windows_test\.go$
+        text: 'G204: Subprocess launched with variable'
+      - linters:
+          - gosec
+        path: ^cmd/pdfconcat/progress_owner_phase_unix_test\.go$
+        text: 'G204: Subprocess launched with variable'
       - linters:
           - gosec
         path: ^tools/qualitygate/process\.go$

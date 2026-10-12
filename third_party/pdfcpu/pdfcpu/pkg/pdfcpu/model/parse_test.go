@@ -128,19 +128,19 @@ func TestParseObjectAttributesWhitespace(t *testing.T) {
 func TestParseFloatRejectsNonPDFNumbers(t *testing.T) {
 	for _, input := range []string{
 		"NaN", "nan", "NAN", "Inf", "+Inf", "-Inf", "Infinity", "-Infinity", "iNfInItY",
-		"1e5", "-1E-5", "0x1p2", "0X1.FP+3", "1_000.0", "1.2.3", "1,2,3", "1.-2.-3",
+		"1,5", "-2,75", ".-5", "1.-5", "1,-5", "0." + strings.Repeat("0", 400) + "1", "1e5", "-1E-5", "0x1p2", "0X1.FP+3", "1_000.0", "1.2.3", "1,2,3", "1.-2.-3",
 		"", ".", "+.", "-", "+", "1a", "١.٥", strings.Repeat("9", 400) + ".0",
 	} {
 		t.Run(input, func(t *testing.T) {
 			got, err := parseFloat(input)
-			if err != nil || got != nil {
-				t.Fatalf("parseFloat = %v, %v; want skipped token", got, err)
+			if !errors.Is(err, errNumericObject) || got != nil {
+				t.Fatalf("parseFloat = %v, %v; want a typed numeric rejection", got, err)
 			}
 		})
 	}
 }
 
-// TestParseFloatDecimals preserves valid decimal syntax and existing tolerated spellings.
+// TestParseFloatDecimals preserves valid representable PDF decimal syntax.
 func TestParseFloatDecimals(t *testing.T) {
 	for _, tc := range []struct {
 		input string
@@ -148,8 +148,6 @@ func TestParseFloatDecimals(t *testing.T) {
 	}{
 		{"0", 0}, {"+17", 17}, {"-98", -98}, {"34.5", 34.5}, {"-3.62", -3.62},
 		{"+123.6", 123.6}, {"4.", 4}, {"-.002", -.002}, {".5", .5}, {"00.50", .5},
-		{"1,5", 1.5}, {"-2,75", -2.75}, {".-5", .5}, {"1.-5", 1.5}, {"1,-5", 1.5},
-		{"0." + strings.Repeat("0", 400) + "1", 0},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			got, err := parseFloat(tc.input)

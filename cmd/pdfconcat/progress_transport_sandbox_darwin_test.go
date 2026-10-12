@@ -30,11 +30,12 @@ func TestProgressNativeTerminalPathPolicyFailure(t *testing.T) {
 
 	executable, err := os.Executable()
 	requireProgressNoError(t, err)
+	helperArguments := progressHelperArgs(progressSandboxSelector, progressNativeVerbose)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 
 	defer cancel()
 
-	command := exec.CommandContext(ctx, executable, progressHelperArgs(progressSandboxSelector, progressNativeVerbose)...)
+	command := exec.CommandContext(ctx, executable, helperArguments...)
 
 	command.Env = append(os.Environ(), progressSandboxScenario+"=1")
 	assertProgressNativeChild(ctx, t, command, progressSandboxReceipt, "TestProgressNativeSandboxHelper")

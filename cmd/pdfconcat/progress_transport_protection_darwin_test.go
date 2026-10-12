@@ -43,10 +43,12 @@ func TestProgressNativeCancellationProtectionFinalizationFailure(t *testing.T) {
 	executable, err := os.Executable()
 	requireProgressNoError(t, err)
 
+	helperArguments := progressHelperArgs(progressProtectionSelector, progressVerboseHelperArgument)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, executable, progressHelperArgs(progressProtectionSelector, progressVerboseHelperArgument)...)
+	command := exec.CommandContext(ctx, executable, helperArguments...)
 
 	command.Env = append(os.Environ(), progressProtectionScenario+"=1")
 	assertProgressNativeChild(ctx, t, command, progressProtectionReceipt, "TestProgressNativeProtectionHelper")

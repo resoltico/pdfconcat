@@ -1801,7 +1801,7 @@ func TestResolveObjectStreamErrorsReturnNil(t *testing.T) {
 	}
 }
 
-// TestReadMalformedStreamPolicy checks relaxed skipping, strict errors, and valid stream loading.
+// The maintained reader rejects malformed stream metadata in both policies before it can discard page content.
 func TestReadMalformedStreamPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -1817,7 +1817,7 @@ func TestReadMalformedStreamPolicy(t *testing.T) {
 				conf := model.NewStatelessConfiguration()
 				conf.ValidationMode = mode
 				ctx, err := Read(t.Context(), bytes.NewReader(selfReferencingStreamPDF(tc.entry)), conf)
-				if tc.wantErr != nil && mode == model.ValidationStrict {
+				if tc.wantErr != nil {
 					if !errors.Is(err, tc.wantErr) {
 						t.Fatalf("got %v, want %v", err, tc.wantErr)
 					}
@@ -1830,12 +1830,7 @@ func TestReadMalformedStreamPolicy(t *testing.T) {
 				if entry == nil {
 					t.Fatal("missing stream xref entry")
 				}
-				if tc.wantErr != nil {
-					if entry.Object != nil {
-						t.Fatalf("skipped stream retained object %T", entry.Object)
-					}
-					return
-				}
+
 				sd, ok := entry.Object.(types.StreamDict)
 				if !ok || sd.Dict == nil || string(sd.Raw) != "x" {
 					t.Fatalf("valid stream not loaded: %T %v", entry.Object, entry.Object)

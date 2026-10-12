@@ -385,7 +385,15 @@ func TestStageContentAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	beside := filepath.Dir(staged.Path()) == dir && staged.Target() == destination
+	actualParent, err := os.Stat(filepath.Dir(staged.Path()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedParent, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beside := os.SameFile(actualParent, expectedParent) && staged.Target() == destination
 	if !beside || staged.Size() != 5 || get(t, staged.Path()) != "12345" {
 		t.Fatalf("staged %+v, mode %v", staged, info.Mode())
 	}

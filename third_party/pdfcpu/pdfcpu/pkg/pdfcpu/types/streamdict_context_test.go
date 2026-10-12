@@ -87,11 +87,15 @@ func TestContextFullDecodeCancelsBufferedFlateWithoutPublishingContent(t *testin
 	}
 }
 
-func TestContextPartialPrefixSemanticsRemainDistinctFromFullCap(t *testing.T) {
+func TestContextPartialPrefixCannotExceedConfiguredCap(t *testing.T) {
 	sd := StreamDict{Raw: []byte("123456")}
-	data, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 2)
+	_, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 2)
+	if !errors.Is(err, filter.ErrDecodeLimitExceeded) || sd.Content != nil {
+		t.Fatalf("partial prefix bypassed configured cap: %v", err)
+	}
+	data, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 5)
 	if err != nil || string(data) != "12345" {
-		t.Fatalf("partial prefix limit precedence changed: %q %v", data, err)
+		t.Fatalf("valid prefix rejected: %q/%v", data, err)
 	}
 	if err = sd.DecodeWithContextAndLimit(t.Context(), 2); !errors.Is(err, filter.ErrDecodeLimitExceeded) {
 		t.Fatalf("cached partial decode bypassed later full cap: %v", err)

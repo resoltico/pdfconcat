@@ -9,24 +9,33 @@ import (
 	"strings"
 )
 
-// NativePath anchors a literal expression and resolves its parent using the host filesystem.
-// The leaf remains unresolved so artifact policy can refuse symbolic links. When the parent
-// cannot be resolved, the literal expression is retained for the normal actionable path error.
-// In particular, unresolved parent traversal is never collapsed by lexical cleanup.
-func NativePath(base, expression string) string {
-	path := expression
-	if !filepath.IsAbs(path) {
-		path = base + string(os.PathSeparator) + path
+// NativeArtifactPath resolves an already-bound artifact's parent before a creation API joins
+// a new filename. Native selection precedes lexical joining; the artifact leaf remains unresolved.
+func NativeArtifactPath(path string) (string, error) {
+	if err := validateBoundPath(path); err != nil {
+		return "", &os.PathError{Op: "validate artifact path", Path: path, Err: err}
 	}
 	parent, leaf := filepath.Split(path)
-	if parent == "" {
-		return path
-	}
-	resolved, err := filepath.EvalSymlinks(parent)
+	resolved, err := resolvePrivateParent(parent)
 	if err != nil {
-		return path
+		return "", err
 	}
-	return filepath.Join(resolved, leaf)
+	return filepath.Join(resolved, leaf), nil
+}
+
+// resolvePrivateParent observes the directory used by a native creation, with no ambient cwd base.
+func resolvePrivateParent(parent string) (string, error) {
+	if parent == "" {
+		parent = os.TempDir()
+	}
+	if err := validateBoundPath(parent); err != nil {
+		return "", &os.PathError{Op: "validate private parent", Path: parent, Err: err}
+	}
+	resolved, err := nativeParentPath(parent)
+	if err != nil {
+		return "", &os.PathError{Op: "resolve private parent", Path: parent, Err: err}
+	}
+	return resolved, nil
 }
 
 // NativeParent returns the supplied parent without collapsing unresolved components.

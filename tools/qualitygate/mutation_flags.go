@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/resoltico/pdfconcat/internal/assembly"
 	"github.com/resoltico/pdfconcat/internal/capture"
 )
 
@@ -53,7 +54,14 @@ func parseMutationFlags(args []string) (mutationOptions, error) {
 		if err != nil {
 			return mutationOptions{}, fmt.Errorf("resolve mutation report path: %w", err)
 		}
-		*reportOut = capture.NativePath(caller, *reportOut)
+		bound, err := assembly.ResolvePath(caller, "mutation report", *reportOut)
+		if err != nil {
+			return mutationOptions{}, err
+		}
+		*reportOut, err = capture.NativeArtifactPath(bound)
+		if err != nil {
+			return mutationOptions{}, err
+		}
 	}
 
 	return mutationOptions{

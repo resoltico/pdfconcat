@@ -8,10 +8,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,10 +58,10 @@ func TestProgressOwnerReportsActualIdleDescriptorCloseFault(t *testing.T) {
 	executable, err := os.Executable()
 	requireProgressNoError(t, err)
 
+	args := progressHelperArgs("-test.run=^TestProgressIdleDescriptorCloseFaultHelper$")
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-
-	command := exec.CommandContext(ctx, executable, progressHelperArgs("-test.run=^TestProgressIdleDescriptorCloseFaultHelper$")...)
+	command := exec.CommandContext(ctx, executable, args...)
 
 	command.Env = append(os.Environ(), progressOwnedCloseFault+"=1")
 
@@ -71,20 +73,20 @@ func TestProgressOwnerReportsActualIdleDescriptorCloseFault(t *testing.T) {
 
 func TestProgressOwnerDetectsClosedCallerStderr(t *testing.T) {
 	t.Parallel()
+	trace, err := runClosedStderrChild(t, "", 3*time.Second, 10*time.Second)
+	if err != nil {
+		t.Fatalf("isolated closed stderr: %v; %s", err, trace)
+	}
+	t.Log(trace)
+}
 
-	executable, err := os.Executable()
-	requireProgressNoError(t, err)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-
-	command := exec.CommandContext(ctx, executable, progressHelperArgs("-test.run=^TestProgressClosedCallerStderrHelper$")...)
-
-	command.Env = append(os.Environ(), progressOwnedCloseFault+"=1")
-
-	output, runErr := command.CombinedOutput()
-	if runErr != nil {
-		t.Fatalf("isolated closed caller stderr (watchdog=%v): %v\n%s", ctx.Err(), runErr, output)
+func TestProgressClosedStderrProtocolRejectsOperationAndCleanupStalls(t *testing.T) {
+	t.Parallel()
+	for _, phase := range []string{"operation", "cleanup"} {
+		trace, err := runClosedStderrChild(t, phase, 100*time.Millisecond, 10*time.Second)
+		if err == nil || !strings.Contains(trace, "last_phase="+map[string]string{"operation": "ready", "cleanup": "operation"}[phase]) {
+			t.Fatalf("%s stall escaped phase deadline: %v; %s", phase, err, trace)
+		}
 	}
 }
 
@@ -95,6 +97,25 @@ func TestProgressClosedCallerStderrHelper(t *testing.T) {
 		return
 	}
 
+	control := os.NewFile(3, "closed-stderr-control")
+	if control == nil {
+		t.Fatal("missing control channel")
+	}
+	t.Cleanup(func() {
+		if os.Getenv("PDFCONCAT_CLOSED_STDERR_STALL") == "cleanup" {
+			time.Sleep(time.Hour)
+		}
+		if _, err := fmt.Fprintln(control, "cleanup"); err != nil {
+			t.Error(err)
+		}
+		closeProgressResource(t, control)
+	})
+	if _, err := fmt.Fprintln(control, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("PDFCONCAT_CLOSED_STDERR_STALL") == "operation" {
+		time.Sleep(time.Hour)
+	}
 	restore, err := unix.FcntlInt(uintptr(unix.Stderr), unix.F_DUPFD_CLOEXEC, progressMinimumOwnedDescriptor)
 	requireProgressNoError(t, err)
 	t.Cleanup(func() {
@@ -116,6 +137,9 @@ func TestProgressClosedCallerStderrHelper(t *testing.T) {
 	}
 
 	owner.release()
+	if _, err := fmt.Fprintln(control, "operation"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestProgressIdleDescriptorCloseFaultHelper(t *testing.T) {

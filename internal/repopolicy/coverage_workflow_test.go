@@ -23,7 +23,7 @@ type (
 	}
 )
 
-func TestCoverageFailureRetainsDiagnosticProfile(t *testing.T) {
+func TestCoverageFailureUploadsCallerOwnedAttempt(t *testing.T) {
 	t.Parallel()
 
 	var workflow coverageArtifactWorkflow
@@ -34,18 +34,18 @@ func TestCoverageFailureRetainsDiagnosticProfile(t *testing.T) {
 	uploads := 0
 
 	for _, step := range workflow.Jobs["coverage"].Steps {
-		if !strings.HasPrefix(step.Uses, "actions/upload-artifact@") || !strings.Contains(step.With["path"], "coverage.out") {
+		if !strings.HasPrefix(step.Uses, "actions/upload-artifact@") || !strings.Contains(step.With["path"], "coverage-evidence") {
 			continue
 		}
 
 		uploads++
 		// GitHub otherwise skips this step after a failed threshold, erasing the blocks needed for diagnosis.
 		if step.If != "always()" {
-			t.Fatalf("coverage profile upload must run after failure, got condition %q", step.If)
+			t.Fatalf("coverage attempt upload must run after failure, got condition %q", step.If)
 		}
 	}
 
 	if uploads != 1 {
-		t.Fatalf("expected one diagnostic profile upload, discovered %d", uploads)
+		t.Fatalf("expected one diagnostic attempt upload, discovered %d", uploads)
 	}
 }

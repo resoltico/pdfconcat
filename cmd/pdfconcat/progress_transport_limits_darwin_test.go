@@ -50,10 +50,12 @@ func TestProgressNativeDescriptorLimits(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Parallel()
 
+			helperArguments := progressHelperArgs(progressDescriptorLimitSelector, "-test.v")
+
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 
-			command := exec.CommandContext(ctx, executable, progressHelperArgs(progressDescriptorLimitSelector, "-test.v")...)
+			command := exec.CommandContext(ctx, executable, helperArguments...)
 
 			command.Env = append(os.Environ(), progressDescriptorLimitScenario+"="+scenario.name)
 			output, runErr := command.CombinedOutput()

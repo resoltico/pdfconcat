@@ -40,7 +40,7 @@
     "module_sum": "h1:x6Y+jOn4Ieu3TZ+B3eNgjS9aLsybm3azz6pEMiZfE2Q=",
     "go_mod_sum": "h1:QcoG3vO7d8MllF6JHsXvMUTYKlLTxAmuc12GFABoqPA=",
     "patch": "third_party/pdfcpu/patches/document-objects.patch",
-    "patch_sha256": "a78bb7c1e1fa2c32f0d44edad1588fcc59ad10fc285b3974712c8fa0c4f55c8c",
+    "patch_sha256": "d35365ed681a785d217070f5aecfdc973a42273bc48b1622182e9481e52c2f77",
     "license": "third_party/pdfcpu/pdfcpu/LICENSE.txt",
     "completeness": "Go module ZIP plus exact local patch; not a full Git tree claim",
     "test_inputs": {

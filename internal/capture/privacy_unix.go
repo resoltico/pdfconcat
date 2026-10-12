@@ -17,7 +17,11 @@ func createWorkspaceDirectory(parent, pattern string) (string, error) {
 		return "", err
 	}
 
-	path, err := os.MkdirTemp(parent, prefix+"*")
+	resolved, err := resolvePrivateParent(parent)
+	if err != nil {
+		return "", err
+	}
+	path, err := os.MkdirTemp(resolved, prefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("create private workspace: %w", err)
 	}
@@ -40,7 +44,11 @@ func CreatePrivateTemp(dir, pattern string) (*os.File, error) {
 		return nil, err
 	}
 
-	file, err := os.CreateTemp(dir, prefix+"*")
+	resolved, err := resolvePrivateParent(dir)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.CreateTemp(resolved, prefix+"*")
 	if err != nil {
 		return nil, fmt.Errorf("create private temporary file: %w", err)
 	}

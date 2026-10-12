@@ -92,6 +92,9 @@ func (s *Set) captureOwner(path string, limit int64) (Captured, error) {
 	if err != nil {
 		return Captured{}, &SourceError{Path: path, Operation: "open source", Err: err}
 	}
+	if err := s.ctx.Err(); err != nil {
+		return Captured{}, errors.Join(&SourceError{Path: path, Operation: "capture source", Err: err}, closeSource(source, path))
+	}
 	identity, err := s.identify(source)
 	if err != nil {
 		return Captured{}, errors.Join(&SourceError{Path: path, Operation: "identify source", Err: err}, closeSource(source, path))

@@ -6,6 +6,9 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Changed
 
+- Embedded pdfcpu is updated to 0.16.2 with exact reconstructed local source. Mixed PDF 2.0 assemblies materialize required variable-widget appearances without changing occurrence resources; raw null-reference and stream-metadata rejection contracts remain enforced.
+- Every external path role uses one checked grammar. Ambiguous Windows drive-relative/root-only paths are rejected consistently; ordinary separators are represented as backslashes without collapsing traversal. Internal artifact registration now requires valid bound absolute paths, including report retirement.
+
 - Literal file paths now follow native filesystem traversal through symbolic-link parents. A path such as `link/../document.pdf` can select a different file than earlier lexical cleanup; review plans that depended on that cleanup. Relative entries in a symlinked plan remain anchored at its supplied location.
 - Published PDFs are private by default, including replacements of existing shared files. Reports and recovery files use the same policy; macOS inherited access ACLs are cleared before sensitive bytes are written. Deliberate sharing requires a separate permission change.
 
@@ -21,6 +24,10 @@ Notable changes to this project are documented in this file. The format is based
 - Runtime dependency notices contain one row per component/version and reject duplicate identities.
 
 ### Internal
+
+- Coverage requires `-evidence DIRECTORY` for a new caller-owned attempt directory. Raw collection data and explicit complete/incomplete manifests survive failed runs and are uploaded by CI; the former success-only profile argument is removed.
+- Capture uses job-owned path/identity promises without native I/O under the catalog mutex; closure joins producers before workspace removal. Native closed-stderr controls separate metadata setup, operation, cleanup and process exit deadlines and require reaping.
+- A fail-closed `Required CI` aggregate includes every mandatory workflow job. Hosted main/tag enforcement requires active settings and real check identity readback, separately from workflow source.
 
 - Contributor verification uses the pinned stock correctness linter profile and one formatter. Physical source guards and compiled import/error/security controls replace the linter variant and source-regex registry. Coverage reports all measured statements without exclusions or a global percentage gate; required invariant and campaign proof remains mandatory. See [Verification](docs/VERIFICATION.md).
 - Mutation judgments retain complete compiler/coverage diagnostics with owned-source attribution and matching baseline/worker instrumentation. Missing test evidence, process/resource failures and snapshot cleanup failures remain errors. Fuzz discovery joins package-initialization processes and verifies the complete compiler-recognized target inventory with package attribution. Mutation evidence paths preserve caller-side native traversal. Required native controls verify inactive/healthy progress and later transport failures.

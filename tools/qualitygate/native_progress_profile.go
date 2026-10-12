@@ -95,9 +95,9 @@ func supplementNativeProgress(
 
 // collectCoverage retains the standalone baseline and qualifies altered native fault counts only
 // after source identity is checked across the entire baseline and supplement interval.
-func collectCoverage(ctx context.Context, root, scratch string, packages []string) (*repopolicy.CoverageProfile, error) {
+func collectCoverage(ctx context.Context, root, scratch string, packages []string, attempt *coverageAttempt) (*repopolicy.CoverageProfile, error) {
 	if runtime.GOOS != nativeProgressOS {
-		return collectBaselineCoverage(ctx, root, scratch, packages)
+		return collectBaselineCoverage(ctx, root, scratch, packages, attempt)
 	}
 
 	sources, err := nativeProductionSources(ctx, root)
@@ -105,7 +105,7 @@ func collectCoverage(ctx context.Context, root, scratch string, packages []strin
 		return nil, err
 	}
 
-	baseline, err := collectBaselineCoverage(ctx, root, scratch, packages)
+	baseline, err := collectBaselineCoverage(ctx, root, scratch, packages, attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +115,11 @@ func collectCoverage(ctx context.Context, root, scratch string, packages []strin
 		return nil, err
 	}
 
+	attempt.Stages["native"] = "complete"
 	if sourceErr := checkNativeSources(ctx, root, sources); sourceErr != nil {
 		return nil, sourceErr
 	}
 
+	attempt.Stages["source_inventory"] = "complete"
 	return native, nil
 }

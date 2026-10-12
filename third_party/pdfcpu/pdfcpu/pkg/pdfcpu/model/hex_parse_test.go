@@ -24,7 +24,7 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
-func TestHexStringRetainsCharacterAndGroupSemantics(t *testing.T) {
+func TestHexStringIgnoresPDFWhitespaceBetweenNibbles(t *testing.T) {
 	for _, test := range []struct {
 		input, expected string
 		valid           bool
@@ -33,11 +33,11 @@ func TestHexStringRetainsCharacterAndGroupSemantics(t *testing.T) {
 		{"abcdef0123456789", "ABCDEF0123456789", true},
 		{"ABCDEF0123456789", "ABCDEF0123456789", true},
 		{"ab cd ef", "ABCDEF", true},
-		{"a b c", "A0B0C0", true},
-		{"a\tb\nc\rd\fe f", "A0B0C0D0E0F0", true},
+		{"a b c", "ABC0", true},
+		{"a\tb\nc\rd\fe f", "ABCDEF", true},
 		{" \t\n\f\r ", "", true},
 		{"123", "1230", true},
-		{"A\x00B", "", false},
+		{"A\x00B", "AB", true},
 		{"A\vB", "", false},
 		{"A\u00a0B", "", false},
 		{"ＡＢ", "", false},
@@ -62,7 +62,7 @@ func TestHexLiteralRetainsCallerRemainderAndInvalidSkip(t *testing.T) {
 		skip                    bool
 	}{
 		{"<>tail", "", "tail", false},
-		{"<a b> next", "A0B0", " next", false},
+		{"<a b> next", "AB", " next", false},
 		{"<A> >tail", "A0", " >tail", false},
 		{"<\vA\v>tail", "A0", "tail", false},
 		{"<\u00a0ab\u00a0>tail", "AB", "tail", false},

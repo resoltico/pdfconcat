@@ -217,7 +217,7 @@ func (p *pipeline) resolveOutput() error {
 			})
 		}
 
-		p.output = capture.NativePath(p.job.Base, path)
+		p.output = path
 	case p.isBuild():
 		return p.stopWith(problem{
 			diagnostic: report.Diagnostic{

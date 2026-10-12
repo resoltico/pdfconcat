@@ -41,10 +41,12 @@ func TestProgressNativePipeCompletionAfterCancellation(t *testing.T) {
 	executable, err := os.Executable()
 	requireProgressNoError(t, err)
 
+	helperArguments := progressHelperArgs(progressJoinSelector, progressNativeVerbose)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, executable, progressHelperArgs(progressJoinSelector, progressNativeVerbose)...)
+	command := exec.CommandContext(ctx, executable, helperArguments...)
 
 	command.Env = append(os.Environ(), progressJoinScenario+"=1")
 	assertProgressNativeChild(ctx, t, command, progressJoinReceipt, "TestProgressNativePipeJoinHelper")

@@ -52,6 +52,7 @@ commands:
   format        verify formatting of every owned Go source directory
   lint-config   verify explicit correctness profile and pinned stock golangci-lint
   test          run go test with discovery checks (flags: -race -run -require -timeout)
+  ci-required   reject omitted, failed, cancelled or skipped mandatory CI dependencies
   coverage      run unit and executable-subprocess coverage, merge, report raw statement coverage
   fuzz          run every fuzz target on macOS/Linux (-time duration|Nx)
   mutation      run mutation testing in a clean snapshot and judge it against the registry
@@ -147,6 +148,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return dispatchLint(ctx, command, rest)
 	case testVerb:
 		return runTests(ctx, rest)
+	case "ci-required":
+		return runCIRequired(ctx, rest)
 	case coverageCommand:
 		return runCoverage(ctx, rest)
 	case fuzzCommand:

@@ -86,6 +86,9 @@ func TestCaptureWaiterCancellationDoesNotOwnSharedCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseOwner := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseOwner()
 	var copies atomic.Int64
 	workspace.afterChunk = func(int64) { copies.Add(1); close(entered); <-release }
 	owner := make(chan error, 1)
@@ -98,7 +101,7 @@ func TestCaptureWaiterCancellationDoesNotOwnSharedCopy(t *testing.T) {
 	}
 	aliasDone := make(chan error, 1)
 	go func() { _, err := set.Capture(t.Context(), alias); aliasDone <- err }()
-	close(release)
+	releaseOwner()
 	captureResult(t, owner)
 	captureResult(t, aliasDone)
 	first, err := set.Capture(t.Context(), source)

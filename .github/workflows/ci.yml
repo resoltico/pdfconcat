@@ -259,14 +259,13 @@ jobs:
           go version
           printf '%s\n' "$ImageOS" "$ImageVersion"
       - uses: ./.github/actions/qa-tools
-      - run: go run ./tools/qualitygate coverage -profile "${{ runner.temp }}/coverage.out"
+      - run: go run ./tools/qualitygate coverage -evidence "${{ runner.temp }}/coverage-evidence"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: coverage-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/coverage.out
-            ${{ runner.temp }}/coverage.out.func.txt
+          path: ${{ runner.temp }}/coverage-evidence
+          retention-days: 14
           if-no-files-found: error
 
   workflows:
@@ -328,3 +327,19 @@ jobs:
           name: pr-fuzz-${{ github.sha }}
           path: ${{ runner.temp }}/fuzz.log
           if-no-files-found: error
+
+  required:
+    name: Required CI
+    if: always()
+    needs: [secrets, policy, test, race, lint, cross-build, modules, vulnerability, coverage, workflows, release-config, fuzz]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+      - name: Require every mandatory dependency to succeed
+        env:
+          PDFCONCAT_CI_NEEDS: ${{ toJSON(needs) }}
+        run: go run ./tools/qualitygate ci-required

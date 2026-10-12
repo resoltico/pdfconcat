@@ -8,6 +8,8 @@ pdfconcat build -o Annex.pdf 01.pdf 02.pdf --blank 03.pdf 04.pdf
 
 produces `01.pdf`, `02.pdf`, a generated blank page, `03.pdf`, `04.pdf`. The place where `--blank` appears is the place where the blank appears.
 
+The workflow captures input bytes, checks declared policies, records source and occurrence provenance, verifies a private candidate, and publishes it with a queryable attempt report. These responsibilities are the product boundary.
+
 Agents are the primary audience. Every command prints compact JSON on standard output by default (`--format text` renders it for people), default build/check/report summaries and command failures are bounded to 2 KiB, and `--report FILE` saves the complete result for queries without reopening any PDF.
 
 ## Install
@@ -21,7 +23,7 @@ go build -o ./bin/ ./cmd/pdfconcat
 ./bin/pdfconcat version
 ```
 
-Contributor verification builds the patched development linter and mutation tool from verified upstream source; setup requires Go, Git and a C compiler on platforms with Go race-detector support. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the installer and Windows/arm64 ordinary-test requirement. The PDFConcat runtime remains one self-contained offline executable.
+Contributor verification installs the pinned stock linter and builds the maintained mutation tool from verified upstream source; setup requires Go, Git and a C compiler on platforms with Go race-detector support. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the installer and Windows/arm64 ordinary-test requirement. The PDFConcat runtime remains one self-contained offline executable.
 
 The build creates `bin/` when needed. On Windows, use `.\bin\pdfconcat.exe version` to run it. The examples below use the installed command name `pdfconcat`; for a source build, substitute `./bin/pdfconcat` on macOS/Linux or `.\bin\pdfconcat.exe` on Windows. No PATH change is needed.
 
@@ -103,7 +105,7 @@ PDFConcat never modifies source PDFs, fonts, or plan files. It copies each disti
 - The output is a newly assembled PDF. Supported page order, ordinary links, static-form appearance and ordinary editing, and generated appearance are the contract. Signature-bearing inputs are refused: use unsigned sources and sign the final PDF externally. Catalog bookmarks/tagged structure and non-destination name trees are removed; page-local attachments and actions can remain. This is not a sanitizer. The table in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#pdf-backend-behavior) lists each feature.
 - Verification means the embedded pdfcpu validator accepts the result and the page count matches. It is not a second implementation's conformance check.
 - An input the embedded engine rejects fails with an error; nothing is repaired or rewritten with another tool. Encrypted PDFs are rejected, including those that open with an empty password.
-- Plans have declared bounds (64 MiB, 100,000 contributions, 1,000,000 generated pages; see [`docs/PLAN.md`](docs/PLAN.md#limits)). Memory grows with the size of the documents, because the result is built in memory. The measurement method for large jobs is in [`docs/DESIGN.md`](docs/DESIGN.md#measured-results); results require an identified executable and native host, and are not guarantees.
+- Plans have declared bounds (64 MiB, 100,000 contributions, 1,000,000 generated pages; see [`docs/PLAN.md`](docs/PLAN.md#limits)). Memory grows with unique imported object graphs, per-occurrence rich-object clones, output page/order structures, decoded streams and backend working sets. Output bytes are written to a staged file; assembly is not constant-space streaming. The measurement method for large jobs is in [`docs/DESIGN.md`](docs/DESIGN.md#measured-results); results require an identified executable and native host, and are not guarantees.
 - Generated-page text uses an embedded Unicode font (Noto Sans) or a TrueType file you supply. Only left-to-right Latin, Greek, and Cyrillic text is accepted; other scripts are rejected rather than set incorrectly ([details](docs/BLANK_PAGES.md#fonts-and-characters)).
 - PDFConcat is not a PDF repair tool, optimizer, OCR tool, converter, or general pdfcpu front end.
 

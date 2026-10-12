@@ -22,8 +22,9 @@ func privateWindowsPath(parent, pattern string) (string, error) {
 		return "", err
 	}
 
-	if parent == "" {
-		parent = os.TempDir()
+	parent, err = resolvePrivateParent(parent)
+	if err != nil {
+		return "", err
 	}
 
 	return filepath.Join(parent, prefix+rand.Text()), nil

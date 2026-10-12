@@ -83,9 +83,6 @@ const (
 	RoleReport
 )
 
-// errEmptyPath is returned when a resource has no path.
-var errEmptyPath = errors.New("path is empty")
-
 // String names the role for messages.
 func (r Role) String() string {
 	switch r {
@@ -145,12 +142,7 @@ func (r *Registry) Add(role Role, path string) (Identity, error) {
 		return r.addInput(role, path)
 	}
 
-	absolute, err := artifactAbsolutePath(path)
-	if err != nil {
-		return Identity{}, &SourceError{Path: path, Operation: "validate " + role.String(), Err: err}
-	}
-
-	return r.registerArtifact(artifactBinding{role: role, path: absolute}, inspectArtifact)
+	return r.registerArtifact(artifactBinding{role: role, path: path}, inspectArtifact)
 }
 
 // ProtectOutput accepts a bound absolute path and reserves the intended PDF path and its current identity against other roles.
@@ -161,21 +153,16 @@ func (r *Registry) ProtectOutput(path string) error {
 		return &SourceError{Path: path, Operation: "validate protected output", Err: err}
 	}
 
-	absolute, err := artifactAbsolutePath(path)
-	if err != nil {
-		return &SourceError{Path: path, Operation: "validate protected output", Err: err}
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// An absent or non-directory parent proves there is no output object to alias yet.
 	// Keep its planned name; a later verification repeats identity/name checks if the parent appears.
-	if artifactParentUnavailable(absolute) {
-		r.artifactBindings[artifactBinding{role: RoleOutput, path: absolute}] = Identity{}
+	if artifactParentUnavailable(path) {
+		r.artifactBindings[artifactBinding{role: RoleOutput, path: path}] = Identity{}
 		return nil
 	}
 
-	_, err = r.registerArtifact(artifactBinding{role: RoleOutput, path: absolute}, inspectArtifactIdentity)
+	_, err := r.registerArtifact(artifactBinding{role: RoleOutput, path: path}, inspectArtifactIdentity)
 
 	return err
 }
@@ -212,7 +199,7 @@ func artifactParentUnavailable(path string) bool {
 // RetireReport validates a bound absolute path before it abandons one failed report destination before publishing a distinct recovery file.
 // Inputs, other artifact paths and conservative name reservations remain protected.
 func (r *Registry) RetireReport(path string) error {
-	absolute, err := artifactAbsolutePath(path)
+	err := validateBoundPath(path)
 	if err != nil {
 		return &SourceError{Path: path, Operation: "validate retired report", Err: err}
 	}
@@ -220,7 +207,7 @@ func (r *Registry) RetireReport(path string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	binding := artifactBinding{role: RoleReport, path: absolute}
+	binding := artifactBinding{role: RoleReport, path: path}
 	next := maps.Clone(r.artifactBindings)
 	delete(next, binding)
 
@@ -428,13 +415,6 @@ func (r *Registry) commitArtifactBindings(bindings map[artifactBinding]Identity,
 	maps.Copy(r.byIdentity, claims)
 
 	r.artifactBindings = bindings
-}
-
-func artifactAbsolutePath(path string) (string, error) {
-	if err := validateBoundPath(path); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 // validateBoundPath rejects invalid contract inputs before lookup or mutation; it performs no I/O.

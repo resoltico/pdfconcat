@@ -1721,7 +1721,7 @@ index 0000000..e5333a5
 +}
 diff --git a/pkg/pdfcpu/model/hex_parse_test.go b/pkg/pdfcpu/model/hex_parse_test.go
 new file mode 100644
-index 0000000..41f5faa
+index 0000000..7e18c6e
 --- /dev/null
 +++ b/pkg/pdfcpu/model/hex_parse_test.go
 @@ -0,0 +1,102 @@
@@ -1751,7 +1751,7 @@ index 0000000..41f5faa
 +	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 +)
 +
-+func TestHexStringRetainsCharacterAndGroupSemantics(t *testing.T) {
++func TestHexStringIgnoresPDFWhitespaceBetweenNibbles(t *testing.T) {
 +	for _, test := range []struct {
 +		input, expected string
 +		valid           bool
@@ -1760,11 +1760,11 @@ index 0000000..41f5faa
 +		{"abcdef0123456789", "ABCDEF0123456789", true},
 +		{"ABCDEF0123456789", "ABCDEF0123456789", true},
 +		{"ab cd ef", "ABCDEF", true},
-+		{"a b c", "A0B0C0", true},
-+		{"a\tb\nc\rd\fe f", "A0B0C0D0E0F0", true},
++		{"a b c", "ABC0", true},
++		{"a\tb\nc\rd\fe f", "ABCDEF", true},
 +		{" \t\n\f\r ", "", true},
 +		{"123", "1230", true},
-+		{"A\x00B", "", false},
++		{"A\x00B", "AB", true},
 +		{"A\vB", "", false},
 +		{"A\u00a0B", "", false},
 +		{"ＡＢ", "", false},
@@ -1789,7 +1789,7 @@ index 0000000..41f5faa
 +		skip                    bool
 +	}{
 +		{"<>tail", "", "tail", false},
-+		{"<a b> next", "A0B0", " next", false},
++		{"<a b> next", "AB", " next", false},
 +		{"<A> >tail", "A0", " >tail", false},
 +		{"<\vA\v>tail", "A0", "tail", false},
 +		{"<\u00a0ab\u00a0>tail", "AB", "tail", false},
@@ -2271,10 +2271,43 @@ index 0000000..99ac05b
 +	}
 +}
 diff --git a/pkg/pdfcpu/model/parse_test.go b/pkg/pdfcpu/model/parse_test.go
-index b9e1291..5e98963 100644
+index b9e1291..fd824e2 100644
 --- a/pkg/pdfcpu/model/parse_test.go
 +++ b/pkg/pdfcpu/model/parse_test.go
-@@ -166,19 +166,14 @@ func TestParseFloatDecimals(t *testing.T) {
+@@ -128,19 +128,19 @@ func TestParseObjectAttributesWhitespace(t *testing.T) {
+ func TestParseFloatRejectsNonPDFNumbers(t *testing.T) {
+ 	for _, input := range []string{
+ 		"NaN", "nan", "NAN", "Inf", "+Inf", "-Inf", "Infinity", "-Infinity", "iNfInItY",
+-		"1e5", "-1E-5", "0x1p2", "0X1.FP+3", "1_000.0", "1.2.3", "1,2,3", "1.-2.-3",
++		"1,5", "-2,75", ".-5", "1.-5", "1,-5", "0." + strings.Repeat("0", 400) + "1", "1e5", "-1E-5", "0x1p2", "0X1.FP+3", "1_000.0", "1.2.3", "1,2,3", "1.-2.-3",
+ 		"", ".", "+.", "-", "+", "1a", "١.٥", strings.Repeat("9", 400) + ".0",
+ 	} {
+ 		t.Run(input, func(t *testing.T) {
+ 			got, err := parseFloat(input)
+-			if err != nil || got != nil {
+-				t.Fatalf("parseFloat = %v, %v; want skipped token", got, err)
++			if !errors.Is(err, errNumericObject) || got != nil {
++				t.Fatalf("parseFloat = %v, %v; want a typed numeric rejection", got, err)
+ 			}
+ 		})
+ 	}
+ }
+ 
+-// TestParseFloatDecimals preserves valid decimal syntax and existing tolerated spellings.
++// TestParseFloatDecimals preserves valid representable PDF decimal syntax.
+ func TestParseFloatDecimals(t *testing.T) {
+ 	for _, tc := range []struct {
+ 		input string
+@@ -148,8 +148,6 @@ func TestParseFloatDecimals(t *testing.T) {
+ 	}{
+ 		{"0", 0}, {"+17", 17}, {"-98", -98}, {"34.5", 34.5}, {"-3.62", -3.62},
+ 		{"+123.6", 123.6}, {"4.", 4}, {"-.002", -.002}, {".5", .5}, {"00.50", .5},
+-		{"1,5", 1.5}, {"-2,75", -2.75}, {".-5", .5}, {"1.-5", 1.5}, {"1,-5", 1.5},
+-		{"0." + strings.Repeat("0", 400) + "1", 0},
+ 	} {
+ 		t.Run(tc.input, func(t *testing.T) {
+ 			got, err := parseFloat(tc.input)
+@@ -166,19 +164,14 @@ func TestParseFloatDecimals(t *testing.T) {
  	}
  }
  
@@ -2298,7 +2331,7 @@ index b9e1291..5e98963 100644
  			}
  		})
  	}
-@@ -251,9 +246,9 @@ func TestParseObjectRejectsRecursionDepth(t *testing.T) {
+@@ -251,9 +244,9 @@ func TestParseObjectRejectsRecursionDepth(t *testing.T) {
  	}
  }
  
@@ -4054,7 +4087,7 @@ index 0000000..8e5981a
 +	}
 +}
 diff --git a/pkg/pdfcpu/read_test.go b/pkg/pdfcpu/read_test.go
-index 2164313..90c0c1f 100644
+index 2164313..27371f1 100644
 --- a/pkg/pdfcpu/read_test.go
 +++ b/pkg/pdfcpu/read_test.go
 @@ -241,7 +241,7 @@ func TestProcessObjectSkipsBoundedMalformedObjectRelaxed(t *testing.T) {
@@ -4172,6 +4205,38 @@ index 2164313..90c0c1f 100644
  	}
  }
  
+@@ -1774,7 +1801,7 @@ func TestResolveObjectStreamErrorsReturnNil(t *testing.T) {
+ 	}
+ }
+ 
+-// TestReadMalformedStreamPolicy checks relaxed skipping, strict errors, and valid stream loading.
++// The maintained reader rejects malformed stream metadata in both policies before it can discard page content.
+ func TestReadMalformedStreamPolicy(t *testing.T) {
+ 	for _, tc := range []struct {
+ 		name    string
+@@ -1790,7 +1817,7 @@ func TestReadMalformedStreamPolicy(t *testing.T) {
+ 				conf := model.NewStatelessConfiguration()
+ 				conf.ValidationMode = mode
+ 				ctx, err := Read(t.Context(), bytes.NewReader(selfReferencingStreamPDF(tc.entry)), conf)
+-				if tc.wantErr != nil && mode == model.ValidationStrict {
++				if tc.wantErr != nil {
+ 					if !errors.Is(err, tc.wantErr) {
+ 						t.Fatalf("got %v, want %v", err, tc.wantErr)
+ 					}
+@@ -1803,12 +1830,7 @@ func TestReadMalformedStreamPolicy(t *testing.T) {
+ 				if entry == nil {
+ 					t.Fatal("missing stream xref entry")
+ 				}
+-				if tc.wantErr != nil {
+-					if entry.Object != nil {
+-						t.Fatalf("skipped stream retained object %T", entry.Object)
+-					}
+-					return
+-				}
++
+ 				sd, ok := entry.Object.(types.StreamDict)
+ 				if !ok || sd.Dict == nil || string(sd.Raw) != "x" {
+ 					t.Fatalf("valid stream not loaded: %T %v", entry.Object, entry.Object)
 diff --git a/pkg/pdfcpu/sign/ocsp_fixture_test.go b/pkg/pdfcpu/sign/ocsp_fixture_test.go
 new file mode 100644
 index 0000000..5ea8bd4
@@ -4605,7 +4670,7 @@ index 900efb7..2d09e19 100644
  	}
  }
 diff --git a/pkg/pdfcpu/types/streamdict.go b/pkg/pdfcpu/types/streamdict.go
-index ad86c5b..1464fde 100644
+index ad86c5b..cc820e0 100644
 --- a/pkg/pdfcpu/types/streamdict.go
 +++ b/pkg/pdfcpu/types/streamdict.go
 @@ -22,6 +22,7 @@ import (
@@ -4844,7 +4909,7 @@ index ad86c5b..1464fde 100644
  }
  
 -// DecodeLengthWithLimit decodes sd with a maximum output length and resource limits.
-+// DecodeLengthWithLimit retains partial-prefix limit precedence; use the full method for a hard cap.
++// DecodeLengthWithLimit bounds the requested prefix by the configured decoded-byte limit.
  func (sd *StreamDict) DecodeLengthWithLimit(maxLen, maxDecodeBytes int64) ([]byte, error) {
 -	limit := maxDecodeBytes
 -	if limit == 0 {
@@ -4919,10 +4984,10 @@ index ad86c5b..1464fde 100644
  // IndexedObject returns the object at given index from a ObjectStreamDict.
 diff --git a/pkg/pdfcpu/types/streamdict_context_test.go b/pkg/pdfcpu/types/streamdict_context_test.go
 new file mode 100644
-index 0000000..49c3024
+index 0000000..e043e13
 --- /dev/null
 +++ b/pkg/pdfcpu/types/streamdict_context_test.go
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,108 @@
 +/*
 +Copyright 2026 The pdfcpu Authors.
 +Licensed under the Apache License, Version 2.0.
@@ -5012,11 +5077,15 @@ index 0000000..49c3024
 +	}
 +}
 +
-+func TestContextPartialPrefixSemanticsRemainDistinctFromFullCap(t *testing.T) {
++func TestContextPartialPrefixCannotExceedConfiguredCap(t *testing.T) {
 +	sd := StreamDict{Raw: []byte("123456")}
-+	data, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 2)
++	_, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 2)
++	if !errors.Is(err, filter.ErrDecodeLimitExceeded) || sd.Content != nil {
++		t.Fatalf("partial prefix bypassed configured cap: %v", err)
++	}
++	data, err := sd.DecodeLengthWithContextAndLimit(t.Context(), 5, 5)
 +	if err != nil || string(data) != "12345" {
-+		t.Fatalf("partial prefix limit precedence changed: %q %v", data, err)
++		t.Fatalf("valid prefix rejected: %q/%v", data, err)
 +	}
 +	if err = sd.DecodeWithContextAndLimit(t.Context(), 2); !errors.Is(err, filter.ErrDecodeLimitExceeded) {
 +		t.Fatalf("cached partial decode bypassed later full cap: %v", err)

@@ -37,7 +37,7 @@ func NewWorkspaceBeside(destination string) (*Workspace, error) {
 	if err := validateBoundPath(destination); err != nil {
 		return nil, &ScratchError{Dir: NativeParent(destination), Operation: "validate workspace destination", Err: err}
 	}
-	return newWorkspace(NativePath(".", NativeParent(destination)), besideOutputPattern)
+	return newWorkspace(NativeParent(destination), besideOutputPattern)
 }
 
 // NewTemporaryWorkspace creates the workspace in the operating system's temporary directory, for

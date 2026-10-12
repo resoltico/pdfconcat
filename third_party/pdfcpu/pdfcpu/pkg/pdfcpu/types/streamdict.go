@@ -482,7 +482,7 @@ func (sd *StreamDict) DecodeLength(maxLen int64) ([]byte, error) {
 	return sd.DecodeLengthWithLimit(maxLen, filter.DefaultMaxDecodeBytes)
 }
 
-// DecodeLengthWithLimit retains partial-prefix limit precedence; use the full method for a hard cap.
+// DecodeLengthWithLimit bounds the requested prefix by the configured decoded-byte limit.
 func (sd *StreamDict) DecodeLengthWithLimit(maxLen, maxDecodeBytes int64) ([]byte, error) {
 	return sd.DecodeLengthWithContextAndLimit(context.Background(), maxLen, maxDecodeBytes)
 }

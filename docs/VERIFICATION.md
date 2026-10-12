@@ -139,3 +139,10 @@ protocol controls retain partial instrumentation and their phase/exit evidence u
 `native-helper-controls` in the caller's attempt; those partial counts are not presented as
 completed child profiles. Instrumentation remains enabled. Unexpected empty completed-child
 directories still fail collection. The former shared metadata warm-up process is removed.
+
+Covered executables built by `internal/exectest` also own one directory per invocation. SDK metadata
+emission precedes `main`; a shared-directory rename failure can therefore write to closed stderr
+before the command installs its SIGPIPE policy. Directory preparation failures prevent launch.
+Conversion uses relative input names under the inspected coverage root, preserving comma-bearing
+parent paths and avoiding long absolute argument lists on Windows. Native cancellation controls
+inject cancellation at accepted write work rather than relying on timer scheduling under coverage.

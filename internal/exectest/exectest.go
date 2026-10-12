@@ -6,7 +6,8 @@
 //
 // When the environment variable PDFCONCAT_COVERDIR names a directory, Build compiles with
 // `go build -cover` (instrumenting the packages listed in PDFCONCAT_COVERPKG, default every package
-// of the module) and Command points the child's GOCOVERDIR at that directory. Otherwise the
+// of the module) and CoveredCommand gives each built executable invocation its own GOCOVERDIR beneath
+// that directory. Otherwise the
 // executable is a plain build and nothing changes.
 package exectest
 
@@ -125,16 +126,47 @@ func Cleanup() {
 	cache.built = map[string]string{}
 }
 
-// Command returns a command that runs the executable at path. Under the coverage gate the child's
-// coverage data goes to EnvCoverDir.
+// Command prepares a native tool or self-test child, preserving the caller's coverage environment.
+// Built covered executables use CoveredCommand so each invocation owns its metadata namespace.
 func Command(ctx context.Context, path string, args ...string) *exec.Cmd {
 	command := exec.CommandContext(ctx, path, args...)
 	command.Env = os.Environ()
-
-	if dir := os.Getenv(EnvCoverDir); dir != "" {
-		command.Env = append(command.Env, "GOCOVERDIR="+dir)
+	if root := os.Getenv(EnvCoverDir); root != "" {
+		command.Env = append(command.Env, "GOCOVERDIR="+root)
 	}
+	return command
+}
 
+// CoveredCommand prepares an executable built by Build, including a wrapper that execs it.
+// Each invocation owns one metadata directory. The caller's test lifetime removes only an empty
+// reservation that was never launched; launched children remain mandatory coverage inputs.
+func CoveredCommand(tb testing.TB, ctx context.Context, path string, args ...string) *exec.Cmd {
+	tb.Helper()
+	command := Command(ctx, path, args...)
+	root := os.Getenv(EnvCoverDir)
+	if root == "" || ctx.Err() != nil {
+		return command
+	}
+	owned, err := os.MkdirTemp(root, "executable-child-")
+	if err != nil {
+		command.Err = errors.Join(command.Err, fmt.Errorf("prepare executable coverage directory: %w", err))
+		return command
+	}
+	command.Env = append(command.Env, "GOCOVERDIR="+owned)
+	tb.Cleanup(func() {
+		if command.Process == nil {
+			parent, err := os.OpenRoot(root)
+			if err != nil {
+				tb.Errorf("open executable coverage root: %v", err)
+				return
+			}
+			if err := errors.Join(parent.Remove(filepath.Base(owned)), parent.Close()); err != nil {
+				tb.Errorf("remove unstarted executable coverage directory: %v", err)
+			}
+		} else if entries, err := os.ReadDir(owned); err == nil && len(entries) == 0 {
+			tb.Logf("covered child left no data: directory=%s argv=%v state=%v", owned, command.Args, command.ProcessState)
+		}
+	})
 	return command
 }
 

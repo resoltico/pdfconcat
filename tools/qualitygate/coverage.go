@@ -164,8 +164,16 @@ func collectBaselineCoverage(ctx context.Context, root, scratch string, runtimeL
 
 	attempt.Stages["executable_data"] = "complete"
 	subprocessProfile := filepath.Join(scratch, "subprocess.out")
+	// Relative inputs preserve a caller root containing commas and keep hundreds of exclusive
+	// child directories within native command-line limits. Their owned root was already inspected.
+	for index, input := range inputs {
+		inputs[index], err = filepath.Rel(coverDir, input)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-	conversion, conversionErr := goCommand(root, goToolVerb, covdataVerb, "textfmt", "-i="+strings.Join(inputs, ","), "-o="+subprocessProfile).output(ctx)
+	conversion, conversionErr := goCommand(coverDir, goToolVerb, covdataVerb, "textfmt", "-i="+strings.Join(inputs, ","), "-o="+subprocessProfile).output(ctx)
 	if conversionErr != nil {
 		conversion += conversionErr.Error()
 	}

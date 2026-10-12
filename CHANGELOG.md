@@ -27,6 +27,7 @@ Notable changes to this project are documented in this file. The format is based
 ### Internal
 
 - Full mutation verification partitions the complete native runtime-source inventory across three jobs per host, retains whole-suite integration judging and source-selection receipts, and requires every partition to pass. Native Windows denial fixtures isolate privilege bypass on a locked test thread; collector cancellation controls synchronize on retained events.
+- Covered executable invocations own separate metadata directories, with test-owned cleanup for commands that never launch. This prevents SDK metadata failures before main handles broken standard streams. Native cancellation tests synchronize on admitted writes; Windows denial fixtures use owned token handles and verify access before denial and after restoration.
 - Capture uses job-owned path/identity promises without native I/O under the catalog mutex; closure joins producers before workspace removal. Native closed-stderr controls separate metadata setup, operation, cleanup and process exit deadlines and require reaping.
 - A fail-closed `Required CI` aggregate includes every mandatory workflow job. Hosted main/tag enforcement requires active settings and real check identity readback, separately from workflow source.
 

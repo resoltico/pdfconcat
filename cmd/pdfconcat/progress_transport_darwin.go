@@ -160,6 +160,9 @@ func (transport *progressTransport) run() {
 	defer close(transport.stopped)
 
 	for request := range transport.requests {
+		if transport.writeAdmitted != nil {
+			transport.writeAdmitted()
+		}
 		request.result <- writeProgressPipeRecord(transport.fd, transport.pollDescriptor, request.record)
 	}
 }

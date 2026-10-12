@@ -180,7 +180,7 @@ func executeContinuation(tb testing.TB, cwd string, args []string) result {
 	ctx, cancel := context.WithTimeout(tb.Context(), commandTimeout)
 	defer cancel()
 
-	command := exectest.Command(ctx, args[0], args[1:]...)
+	command := exectest.CoveredCommand(tb, ctx, args[0], args[1:]...)
 	command.Dir = cwd
 
 	return finish(tb, command)

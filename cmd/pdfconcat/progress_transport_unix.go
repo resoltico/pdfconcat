@@ -23,6 +23,9 @@ type (
 	// progressTransport never changes status flags on the caller's open-file
 	// description. All writes and descriptor shutdown belong to this transport.
 	progressTransportState struct {
+		// writeAdmitted is a private test seam for cancellation after real native work is admitted.
+		// Product transports leave it nil; timers cannot establish this ordering under instrumentation.
+		writeAdmitted     func()
 		closeErr          error
 		admission         chan struct{}
 		stopped           chan struct{}
@@ -196,6 +199,9 @@ func (transport *progressTransport) writeNonblocking(ctx context.Context, record
 
 		attempted = true
 		pending, writeErr := writeProgressChunk(transport.fd, remaining)
+		if transport.writeAdmitted != nil {
+			transport.writeAdmitted()
+		}
 		remaining = pending
 
 		if writeErr == nil {

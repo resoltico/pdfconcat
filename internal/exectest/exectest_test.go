@@ -26,7 +26,7 @@ func runExecutable(t *testing.T) {
 
 	path := exectest.Build(t, commandPackage)
 
-	err := exectest.Command(t.Context(), path).Run()
+	err := exectest.CoveredCommand(t, t.Context(), path).Run()
 	if err == nil {
 		return
 	}
@@ -59,7 +59,7 @@ func TestCoverageDataFromExecutable(t *testing.T) {
 
 	runExecutable(t)
 
-	files, err := filepath.Glob(filepath.Join(dir, "cov*"))
+	files, err := filepath.Glob(filepath.Join(dir, "executable-child-*", "cov*"))
 
 	const wantFiles = 2 // One covmeta and one covcounters file.
 	if err != nil || len(files) < wantFiles {

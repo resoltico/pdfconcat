@@ -56,12 +56,12 @@ func TestProgressTransportNativeStoppedPipe(t *testing.T) {
 	t.Parallel()
 
 	scenarios := []struct {
-		want        error
-		name        string
-		cancelAfter time.Duration
+		want   error
+		name   string
+		cancel bool
 	}{
-		{name: "deadline", cancelAfter: 0, want: context.DeadlineExceeded},
-		{name: "cancellation", cancelAfter: 10 * time.Millisecond, want: context.Canceled},
+		{name: "deadline", cancel: false, want: context.DeadlineExceeded},
+		{name: "cancellation", cancel: true, want: context.Canceled},
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -72,8 +72,8 @@ func TestProgressTransportNativeStoppedPipe(t *testing.T) {
 			transport := progressNativeTransport(t, writer)
 
 			ctx, cancel := context.WithCancel(context.Background())
-			if scenario.cancelAfter > 0 {
-				time.AfterFunc(scenario.cancelAfter, cancel)
+			if scenario.cancel {
+				transport.writeAdmitted = cancel
 			}
 
 			start := time.Now()

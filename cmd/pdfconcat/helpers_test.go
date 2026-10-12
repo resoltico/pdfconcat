@@ -110,7 +110,7 @@ func start(tb testing.TB, dir string, args ...string) *exec.Cmd {
 func prepareCommand(ctx context.Context, tb testing.TB, dir, path string, args ...string) *exec.Cmd {
 	tb.Helper()
 
-	command := exectest.Command(ctx, path, args...)
+	command := exectest.CoveredCommand(tb, ctx, path, args...)
 	command.Dir = dir
 
 	tmp := tb.TempDir()

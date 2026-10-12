@@ -54,7 +54,7 @@ func runWithoutDirectorySearch(t *testing.T, shell, dir string, args ...string) 
 	defer cancel()
 
 	shellArgs := append([]string{"-c", denyWorkingDirectorySearch, binary(t), dir}, args...)
-	command := exectest.Command(ctx, shell, shellArgs...)
+	command := exectest.CoveredCommand(t, ctx, shell, shellArgs...)
 	command.Dir = dir
 
 	return finish(t, command)

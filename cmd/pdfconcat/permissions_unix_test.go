@@ -104,7 +104,7 @@ func TestADeletedWorkingDirectoryIsReported(t *testing.T) {
 
 	dir := tempDir(t)
 
-	command := exectest.Command(t.Context(), shell, "-c", deleteWorkingDirectory, binary(t), commandCheck, fileA)
+	command := exectest.CoveredCommand(t, t.Context(), shell, "-c", deleteWorkingDirectory, binary(t), commandCheck, fileA)
 	command.Dir = dir
 
 	res := finish(t, command)
@@ -118,7 +118,7 @@ func TestADeletedWorkingDirectoryIsReported(t *testing.T) {
 	}
 
 	// Commands that need no directory still work there.
-	command = exectest.Command(t.Context(), shell, "-c", deleteWorkingDirectory, binary(t), commandVersion)
+	command = exectest.CoveredCommand(t, t.Context(), shell, "-c", deleteWorkingDirectory, binary(t), commandVersion)
 	command.Dir = dir
 	requireExit(t, finish(t, command), 0)
 }
@@ -142,7 +142,7 @@ func TestProgressAppearsOnlyOnARealTerminal(t *testing.T) {
 		args = []string{"-qec", binary(t) + " build -o out.pdf a.pdf b.pdf", "/dev/null"}
 	}
 
-	command := exectest.Command(t.Context(), script, args...)
+	command := exectest.CoveredCommand(t, t.Context(), script, args...)
 	command.Dir = dir
 	command.Env = append(command.Env, "TMPDIR="+t.TempDir())
 

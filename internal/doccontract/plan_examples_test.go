@@ -193,7 +193,7 @@ func runExampleBuild(t *testing.T, executable, dir, named string) exampleSummary
 	ctx, cancel := context.WithTimeout(t.Context(), exampleTimeout)
 	defer cancel()
 
-	command := exectest.Command(ctx, executable, "build", "--plan", named)
+	command := exectest.CoveredCommand(t, ctx, executable, "build", "--plan", named)
 	command.Dir = dir
 
 	var stdout bytes.Buffer

@@ -111,6 +111,11 @@ func startOwnedCollectorProcess(t *testing.T, command *exec.Cmd) (*collectorProc
 	if err != nil {
 		return nil, err
 	}
+	return startPreparedCollectorProcess(t, command, sampler)
+}
+
+func startPreparedCollectorProcess(t *testing.T, command *exec.Cmd, sampler *processSampler) (*collectorProcessFixture, error) {
+	t.Helper()
 
 	fixture := &collectorProcessFixture{command: command, sampler: sampler}
 	// Register sampler ownership before any child launch can fail.

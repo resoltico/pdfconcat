@@ -26,11 +26,23 @@ var descriptorZeroChildSource string
 func TestNativeDescriptorCollectorAcceptsLiveStoppedZeroDescriptorChild(t *testing.T) {
 	t.Parallel()
 
+	preparation, finishPreparation := context.WithTimeout(t.Context(), descriptorCompileTimeout)
+	defer finishPreparation()
+	binary := compileZeroDescriptorChild(preparation, t)
+	finishPreparation()
+	sampler, err := prepareProcessSampler(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Compiler discovery, both native builds and collector readiness precede the
+	// unchanged five-second live-process operation watchdog.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-
-	binary := compileZeroDescriptorChild(ctx, t)
-	fixture := ownCollectorProcess(t, exec.CommandContext(ctx, binary))
+	fixture, err := startPreparedCollectorProcess(t, exec.CommandContext(ctx, binary), sampler)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	requireStoppedZeroDescriptorChild(ctx, t, fixture)
 

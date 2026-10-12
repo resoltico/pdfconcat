@@ -15,7 +15,7 @@ func TestDictionaryDecodedKeyUniquenessBeforeNullOmission(t *testing.T) {
 	} {
 		for _, relaxed := range []bool{false, true} {
 			remaining := input
-			if _, err := parseObject(t.Context(), &remaining, 0, DefaultResourceLimits().MaxRecursionDepth, relaxed); !errors.Is(err, errDictionaryDuplicateKey) {
+			if _, err := parseObject(t.Context(), &remaining, 0, DefaultResourceLimits().MaxRecursionDepth, ValidationRelaxed, relaxed); !errors.Is(err, errDictionaryDuplicateKey) {
 				t.Fatalf("input=%q relaxed=%v: %v", input, relaxed, err)
 			}
 		}

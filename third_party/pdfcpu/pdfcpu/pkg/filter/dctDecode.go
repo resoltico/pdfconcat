@@ -42,6 +42,9 @@ func (f dctDecode) Decode(r io.Reader) (io.Reader, error) {
 
 // DecodeLength implements decoding for a DCTDecode filter with a maximum output length.
 func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+	if err := f.checkDecodeLength(maxLen); err != nil {
+		return nil, err
+	}
 	bb, err := f.readerBytes(r)
 	if err != nil {
 		return nil, err
@@ -60,7 +63,7 @@ func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	if limit := f.decodeLimit(maxLen); limit >= 0 && int64(imageBytes) > limit {
+	if limit := f.decodeLimit(-1); limit >= 0 && int64(imageBytes) > limit {
 		return nil, ErrDecodeLimitExceeded
 	}
 
@@ -74,7 +77,7 @@ func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
 	if err := f.contextError(); err != nil {
 		return nil, err
 	}
-	enc := gob.NewEncoder(&decodeContextWriter{writer: &b, filter: f.baseFilter, remaining: f.decodeLimit(maxLen)})
+	enc := gob.NewEncoder(&decodeContextWriter{writer: &b, filter: f.baseFilter, remaining: f.decodeLimit(-1)})
 
 	if err := enc.Encode(im); err != nil {
 		return nil, err

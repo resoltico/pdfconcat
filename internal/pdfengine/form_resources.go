@@ -276,3 +276,36 @@ func mergeFormProcSet(ctx context.Context, pdf *model.Context, resources types.D
 
 	return nil
 }
+
+// ensureOutputFormAppearances materializes missing variable appearances when mixed sources raise
+// the output to PDF 2.0. It runs after occurrence resources and inherited defaults are bound.
+func ensureOutputFormAppearances(ctx context.Context, pdf *model.Context) error {
+	if !pdf.PDF20() {
+		return nil
+	}
+	state, err := analyzeForm(ctx, pdf)
+	if err != nil {
+		return err
+	}
+	for index := range state.defaults {
+		field := &state.defaults[index]
+		if !field.widget || (field.defaults.kind != "Tx" && field.defaults.kind != "Ch") {
+			continue
+		}
+		appearance, err := pdf.DereferenceDictContext(ctx, field.dict["AP"])
+		if err != nil {
+			return err
+		}
+		if appearance != nil {
+			continue
+		}
+		field.variable, err = compileVariableAppearance(ctx, pdf, field.dict, field.defaults, state.resources)
+		if err != nil {
+			return err
+		}
+		if err := field.applyVariableAppearance(ctx, pdf); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -260,7 +260,10 @@ func (p *pool) write(ctx context.Context, path string) (outputDigest string, fai
 		}
 	}()
 	digest := sha256.New()
-	writeErr := api.WriteContext(ctx, p.pdf, io.MultiWriter(file, digest))
+	writeErr := ensureOutputFormAppearances(ctx, p.pdf)
+	if writeErr == nil {
+		writeErr = api.WriteContext(ctx, p.pdf, io.MultiWriter(file, digest))
+	}
 	closeErr := file.Close()
 
 	if finishErr := errors.Join(writeErr, closeErr); finishErr != nil {

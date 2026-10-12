@@ -91,7 +91,7 @@ func TestContextCopyNChecksCancellationAtExactReadBoundary(t *testing.T) {
 func TestContextPredictorReadFullChecksExactBoundaryCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	reader := &cancelDecodedRead{reader: bytes.NewReader([]byte{0, 1, 2, 3}), cancel: cancel}
-	_, err := (flate{baseFilter{ctx: ctx, maxDecodeBytes: 3}}).decodePostProcessRows(reader, -1, 4, PredictorNone, 1, 1)
+	_, err := (flate{baseFilter{ctx: ctx, maxDecodeBytes: 3}}).decodePostProcessRows(reader, -1, 4, PredictorNone, 1, 8, 3, 1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ReadFull suppressed terminal cancellation: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestContextTIFFChecksLargeInnerColorLoops(t *testing.T) {
 	ctx := &decodeCheckpointContext{Context: t.Context()}
 	ctx.remaining.Store(4)
 	colors := 1 << 18
-	_, err := applyHorDiffWithContext(ctx, make([]byte, colors*2), colors)
+	_, err := applyHorDiffWithContext(ctx, make([]byte, colors*2), colors, 8, 2)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("TIFF inner loop ignored active cancellation: %v", err)
 	}
@@ -153,11 +153,11 @@ func TestContextPaethWorkCounterChecksStridedInnerLoop(t *testing.T) {
 
 func TestPredictorExactOutputCapExcludesPNGPrefixAndRejectsNextRowBeforeAppend(t *testing.T) {
 	f := flate{baseFilter{ctx: t.Context(), maxDecodeBytes: 3}}
-	buffer, err := f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3}), -1, 4, PredictorNone, 1, 1)
+	buffer, err := f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3}), -1, 4, PredictorNone, 1, 8, 3, 1)
 	if err != nil || !bytes.Equal(buffer.Bytes(), []byte{1, 2, 3}) {
 		t.Fatalf("exact output cap wrongly charged row prefix/EOF: %v %v", buffer, err)
 	}
-	_, err = f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3, 0, 4, 5, 6}), -1, 4, PredictorNone, 1, 1)
+	_, err = f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3, 0, 4, 5, 6}), -1, 4, PredictorNone, 1, 8, 3, 1)
 	if !errors.Is(err, ErrDecodeLimitExceeded) {
 		t.Fatalf("next row exceeded remaining output cap: %v", err)
 	}

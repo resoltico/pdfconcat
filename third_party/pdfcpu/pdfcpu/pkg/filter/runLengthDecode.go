@@ -167,6 +167,9 @@ func (f runLengthDecode) Decode(r io.Reader) (io.Reader, error) {
 
 // DecodeLength implements decoding for a RunLengthDecode filter with a maximum output length.
 func (f runLengthDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+	if err := f.checkDecodeLength(maxLen); err != nil {
+		return nil, err
+	}
 
 	b1, err := f.readerBytes(r)
 	if err != nil {

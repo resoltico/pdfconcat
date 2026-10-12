@@ -32,20 +32,20 @@
   {
     "root": "third_party/pdfcpu/pdfcpu",
     "module": "github.com/pdfcpu/pdfcpu",
-    "version": "v0.16.1",
+    "version": "v0.16.2",
     "repository": "https://github.com/pdfcpu/pdfcpu",
-    "revision": "2f7a89a0a69c117a5252601907ff9f31ac4c70f2",
-    "source_artifact": "third_party/pdfcpu/base/pdfcpu-v0.16.1.zip",
-    "source_sha256": "600785665197234b475e74f96fd387b9814fa64365c766e7d474e82fc748991f",
-    "module_sum": "h1:Sh6XZwaaCQaEN17eQItF0uQY8E4xFU+5BTHuDnhVTYI=",
-    "go_mod_sum": "h1:tnZgbllgsd8cGfbwRgOVUdlSS/mpsWjQMWSAI1vfltA=",
+    "revision": "b41a41d5323f6119ff6a183ad3f287eb4a20a617",
+    "source_artifact": "third_party/pdfcpu/base/pdfcpu-v0.16.2.zip",
+    "source_sha256": "09911fc46325c8c9a27cc83d2a7c87ca00be3c266be6fc58fac77489cae0730d",
+    "module_sum": "h1:x6Y+jOn4Ieu3TZ+B3eNgjS9aLsybm3azz6pEMiZfE2Q=",
+    "go_mod_sum": "h1:QcoG3vO7d8MllF6JHsXvMUTYKlLTxAmuc12GFABoqPA=",
     "patch": "third_party/pdfcpu/patches/document-objects.patch",
-    "patch_sha256": "2088541352d046b691b06acc254683c1b42d1e026e03dcb79ca04108372985cd",
+    "patch_sha256": "a78bb7c1e1fa2c32f0d44edad1588fcc59ad10fc285b3974712c8fa0c4f55c8c",
     "license": "third_party/pdfcpu/pdfcpu/LICENSE.txt",
     "completeness": "Go module ZIP plus exact local patch; not a full Git tree claim",
     "test_inputs": {
-      "url": "https://codeload.github.com/pdfcpu/pdfcpu/tar.gz/2f7a89a0a69c117a5252601907ff9f31ac4c70f2",
-      "sha256": "b5abb1e0d16393c75e899ce5bb43460797cae82b52aa3128bfb3f774055b68ab"
+      "url": "https://codeload.github.com/pdfcpu/pdfcpu/tar.gz/b41a41d5323f6119ff6a183ad3f287eb4a20a617",
+      "sha256": "9f7bb022e0239c3528140a954cf275d5fce44c18d489521c98d5c3c7499c4ce8"
     }
   }
 ]

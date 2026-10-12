@@ -7,7 +7,7 @@ This inventory lists the modules linked into application executables for macOS, 
 | Component | Version | License | Purpose / relationship | License copy |
 | --- | --- | --- | --- | --- |
 | Go standard library | Go 1.27.2 toolchain | BSD 3-Clause | Runtime and standard-library code linked by the Go toolchain | `third_party/licenses/go-and-x-BSD-3-Clause.txt` |
-| `github.com/pdfcpu/pdfcpu` | v0.16.1 | Apache-2.0 | PDF parsing, validation, merging, and writing of the assembled output (the text of generated pages is shaped with go-text/typesetting and written by PDFConcat's own page writer) | `third_party/licenses/Apache-2.0.txt` |
+| `github.com/pdfcpu/pdfcpu` | v0.16.2 | Apache-2.0 | PDF parsing, validation, merging, and writing of the assembled output (the text of generated pages is shaped with go-text/typesetting and written by PDFConcat's own page writer) | `third_party/licenses/Apache-2.0.txt` |
 | `github.com/benoitkugler/pdf` | v0.0.15 | MIT | Predefined PDF encodings/glyph mappings and bounded incremental fitting-content parsing; maintained limits/cancellation patch under `third_party/benoitkugler` | `third_party/licenses/benoitkugler-pdf-MIT.txt` |
 | `github.com/benoitkugler/pstokenizer` | v1.0.1 | MIT | Bounded PDF content tokenization; maintained byte/token/cancellation patch in `third_party/pdf-sources.json` | `third_party/licenses/benoitkugler-pstokenizer-MIT.txt` |
 | `github.com/clipperhouse/uax29/v2` | v2.7.0 | MIT | pdfcpu dependency graph | `third_party/licenses/clipperhouse-uax29-MIT.txt` |
@@ -25,6 +25,7 @@ This inventory lists the modules linked into application executables for macOS, 
 The Apache-2.0 text is shared by the Apache-licensed components above. go-yaml contains both MIT-covered and Apache-covered source files, so its upstream combined LICENSE and NOTICE are reproduced separately in addition to the shared Apache-2.0 text. The Go standard library and listed `golang.org/x/*` modules use the same Go Authors BSD 3-Clause license text represented by the shared copy above. Components with project-specific MIT or BSD notices retain those notices in separate files.
 
 Dependency versions and this notice inventory must be reconciled before each release whenever `go.mod` or `go.sum` changes. The two local benoitkugler replacements retain their complete Go module ZIP sources, immutable base archives, exact patches, module graphs and MIT notices under `third_party/benoitkugler`; the source record binds their identities. PDFConcat uses that content parser, not the library’s document reader or writer. Module ZIP completeness is not a full Git-tree claim. The tokenizer and pdf modules have identical upstream MIT texts, reproduced by the shared copy above.
+| `github.com/xdg-go/stringprep` | v1.0.4 | Apache-2.0 | pdfcpu password string preparation | `third_party/licenses/stringprep-Apache-2.0.txt` |
 
 ## Embedded font
 

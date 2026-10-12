@@ -233,19 +233,19 @@ index 8d51e5a..10b6931 100644
  	b2, err := f.copyDecoded(decoder, maxLen)
  	if err != nil {
 diff --git a/pkg/filter/asciiHexDecode.go b/pkg/filter/asciiHexDecode.go
-index 84234a5..9926588 100644
+index cf250cb..cbaf5c7 100644
 --- a/pkg/filter/asciiHexDecode.go
 +++ b/pkg/filter/asciiHexDecode.go
-@@ -56,7 +56,7 @@ func (f asciiHexDecode) Decode(r io.Reader) (io.Reader, error) {
- 
- // DecodeLength implements decoding for an ASCIIHexDecode filter with a maximum output length.
- func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+@@ -59,7 +59,7 @@ func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, erro
+ 	if err := f.checkDecodeLength(maxLen); err != nil {
+ 		return nil, err
+ 	}
 -	bb, err := getReaderBytes(r)
 +	bb, err := f.readerBytes(r)
  	if err != nil {
  		return nil, err
  	}
-@@ -65,6 +65,11 @@ func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, erro
+@@ -68,6 +68,11 @@ func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, erro
  
  	// Remove any white space and cut off on eod
  	for i := range bb {
@@ -257,7 +257,7 @@ index 84234a5..9926588 100644
  		if bb[i] == eodHexDecode {
  			break
  		}
-@@ -93,7 +98,17 @@ func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, erro
+@@ -96,7 +101,17 @@ func (f asciiHexDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, erro
  	}
  	dst := make([]byte, maxLen)
  
@@ -277,10 +277,10 @@ index 84234a5..9926588 100644
  	}
  
 diff --git a/pkg/filter/ccittDecode.go b/pkg/filter/ccittDecode.go
-index 3ba16fc..210a45c 100644
+index fffd468..9b9292f 100644
 --- a/pkg/filter/ccittDecode.go
 +++ b/pkg/filter/ccittDecode.go
-@@ -85,7 +85,7 @@ func (f ccittDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error)
+@@ -90,7 +90,7 @@ func (f ccittDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error)
  	if k < 0 {
  		mode = ccitt.Group4
  	}
@@ -400,7 +400,7 @@ index 0000000..60a64d3
 +}
 diff --git a/pkg/filter/context_decode_test.go b/pkg/filter/context_decode_test.go
 new file mode 100644
-index 0000000..861c009
+index 0000000..fab645e
 --- /dev/null
 +++ b/pkg/filter/context_decode_test.go
 @@ -0,0 +1,164 @@
@@ -497,7 +497,7 @@ index 0000000..861c009
 +func TestContextPredictorReadFullChecksExactBoundaryCancellation(t *testing.T) {
 +	ctx, cancel := context.WithCancel(t.Context())
 +	reader := &cancelDecodedRead{reader: bytes.NewReader([]byte{0, 1, 2, 3}), cancel: cancel}
-+	_, err := (flate{baseFilter{ctx: ctx, maxDecodeBytes: 3}}).decodePostProcessRows(reader, -1, 4, PredictorNone, 1, 1)
++	_, err := (flate{baseFilter{ctx: ctx, maxDecodeBytes: 3}}).decodePostProcessRows(reader, -1, 4, PredictorNone, 1, 8, 3, 1)
 +	if !errors.Is(err, context.Canceled) {
 +		t.Fatalf("ReadFull suppressed terminal cancellation: %v", err)
 +	}
@@ -529,7 +529,7 @@ index 0000000..861c009
 +	ctx := &decodeCheckpointContext{Context: t.Context()}
 +	ctx.remaining.Store(4)
 +	colors := 1 << 18
-+	_, err := applyHorDiffWithContext(ctx, make([]byte, colors*2), colors)
++	_, err := applyHorDiffWithContext(ctx, make([]byte, colors*2), colors, 8, 2)
 +	if !errors.Is(err, context.Canceled) {
 +		t.Fatalf("TIFF inner loop ignored active cancellation: %v", err)
 +	}
@@ -559,23 +559,23 @@ index 0000000..861c009
 +
 +func TestPredictorExactOutputCapExcludesPNGPrefixAndRejectsNextRowBeforeAppend(t *testing.T) {
 +	f := flate{baseFilter{ctx: t.Context(), maxDecodeBytes: 3}}
-+	buffer, err := f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3}), -1, 4, PredictorNone, 1, 1)
++	buffer, err := f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3}), -1, 4, PredictorNone, 1, 8, 3, 1)
 +	if err != nil || !bytes.Equal(buffer.Bytes(), []byte{1, 2, 3}) {
 +		t.Fatalf("exact output cap wrongly charged row prefix/EOF: %v %v", buffer, err)
 +	}
-+	_, err = f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3, 0, 4, 5, 6}), -1, 4, PredictorNone, 1, 1)
++	_, err = f.decodePostProcessRows(bytes.NewReader([]byte{0, 1, 2, 3, 0, 4, 5, 6}), -1, 4, PredictorNone, 1, 8, 3, 1)
 +	if !errors.Is(err, ErrDecodeLimitExceeded) {
 +		t.Fatalf("next row exceeded remaining output cap: %v", err)
 +	}
 +}
 diff --git a/pkg/filter/dctDecode.go b/pkg/filter/dctDecode.go
-index ff6b358..1b576b9 100644
+index 734f4a7..c67383d 100644
 --- a/pkg/filter/dctDecode.go
 +++ b/pkg/filter/dctDecode.go
-@@ -42,12 +42,12 @@ func (f dctDecode) Decode(r io.Reader) (io.Reader, error) {
- 
- // DecodeLength implements decoding for a DCTDecode filter with a maximum output length.
- func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+@@ -45,12 +45,12 @@ func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+ 	if err := f.checkDecodeLength(maxLen); err != nil {
+ 		return nil, err
+ 	}
 -	bb, err := getReaderBytes(r)
 +	bb, err := f.readerBytes(r)
  	if err != nil {
@@ -587,7 +587,7 @@ index ff6b358..1b576b9 100644
  	if err != nil {
  		return nil, err
  	}
-@@ -64,18 +64,21 @@ func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+@@ -67,18 +67,21 @@ func (f dctDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
  		return nil, ErrDecodeLimitExceeded
  	}
  
@@ -603,7 +603,7 @@ index ff6b358..1b576b9 100644
 +	if err := f.contextError(); err != nil {
 +		return nil, err
 +	}
-+	enc := gob.NewEncoder(&decodeContextWriter{writer: &b, filter: f.baseFilter, remaining: f.decodeLimit(maxLen)})
++	enc := gob.NewEncoder(&decodeContextWriter{writer: &b, filter: f.baseFilter, remaining: f.decodeLimit(-1)})
  
  	if err := enc.Encode(im); err != nil {
  		return nil, err
@@ -613,7 +613,7 @@ index ff6b358..1b576b9 100644
 +	return &b, f.contextError()
  }
 diff --git a/pkg/filter/filter.go b/pkg/filter/filter.go
-index 8ad65ad..8ea9953 100644
+index 0819abd..14bd646 100644
 --- a/pkg/filter/filter.go
 +++ b/pkg/filter/filter.go
 @@ -19,6 +19,7 @@ package filter
@@ -684,7 +684,7 @@ index 8ad65ad..8ea9953 100644
  	parms          map[string]int
  	maxDecodeBytes int64
  }
-@@ -146,38 +158,40 @@ func (f baseFilter) decodeLimit(maxLen int64) int64 {
+@@ -146,10 +158,7 @@ func (f baseFilter) decodeLimit(maxLen int64) int64 {
  	if maxLen >= 0 {
  		return maxLen
  	}
@@ -695,7 +695,11 @@ index 8ad65ad..8ea9953 100644
 +	return FullDecodeLimit(f.maxDecodeBytes)
  }
  
- func (f baseFilter) copyDecoded(r io.Reader, maxLen int64) (*bytes.Buffer, error) {
+ func (f baseFilter) checkDecodeLength(maxLen int64) error {
+@@ -165,31 +174,36 @@ func (f baseFilter) copyDecoded(r io.Reader, maxLen int64) (*bytes.Buffer, error
+ 	if err := f.checkDecodeLength(maxLen); err != nil {
+ 		return nil, err
+ 	}
 +	if err := f.contextError(); err != nil {
 +		return nil, err
 +	}
@@ -735,7 +739,7 @@ index 8ad65ad..8ea9953 100644
 +	return &b, f.contextError()
  }
 diff --git a/pkg/filter/flateDecode.go b/pkg/filter/flateDecode.go
-index 15dc463..241d4e2 100644
+index eafed62..f1c8358 100644
 --- a/pkg/filter/flateDecode.go
 +++ b/pkg/filter/flateDecode.go
 @@ -20,6 +20,7 @@ import (
@@ -746,57 +750,85 @@ index 15dc463..241d4e2 100644
  	"errors"
  	"fmt"
  	"io"
-@@ -197,7 +198,7 @@ func (f flate) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
- 		log.Trace.Println("DecodeFlate begin")
+@@ -188,7 +189,7 @@ func (f flate) Encode(r io.Reader) (io.Reader, error) {
+ func (f flate) encodePreProcess(w io.Writer, r io.Reader) (int64, error) {
+ 	predictor, found := f.parms["Predictor"]
+ 	if !found || predictor == PredictorNo {
+-		return io.Copy(w, r)
++		return io.Copy(w, ContextReader(f.ctx, r))
  	}
+ 	if err := validatePredictor(predictor); err != nil {
+ 		return 0, err
+@@ -304,6 +305,10 @@ func (f flate) Decode(r io.Reader) (io.Reader, error) {
  
--	rc, err := acquireZlibReader(r)
-+	rc, err := acquireZlibReader(ContextReader(f.ctx, r))
- 	if err != nil {
+ // DecodeLength implements decoding for a Flate filter with a maximum output length.
+ func (f flate) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
++	if err := f.contextError(); err != nil {
++		return nil, err
++	}
++	r = ContextReader(f.ctx, r)
+ 	if err := f.checkDecodeLength(maxLen); err != nil {
  		return nil, err
  	}
-@@ -330,9 +331,20 @@ func predictorRowParams(predictor, colors, bpc, columns int) (rowSize, rowLen, b
- // }
- 
- func applyHorDiff(row []byte, colors int) ([]byte, error) {
-+	return applyHorDiffWithContext(context.Background(), row, colors)
+@@ -404,15 +409,27 @@ func predictorRowParams(predictor, colors, bpc, columns int) (rowSize, rowLen, b
+ // components narrower than a byte are packed MSB first and any padding bits at
+ // the end of the row are left untouched.
+ func applyHorDiff(row []byte, colors, bpc, columns int) ([]byte, error) {
++	return applyHorDiffWithContext(context.Background(), row, colors, bpc, columns)
 +}
-+func applyHorDiffWithContext(c context.Context, row []byte, colors int) ([]byte, error) {
++func applyHorDiffWithContext(c context.Context, row []byte, colors, bpc, columns int) ([]byte, error) {
 +	if c != nil && c.Err() != nil {
 +		return nil, c.Err()
 +	}
-+	processed := 0
- 	// This works for 8 bits per color only.
- 	for i := 1; i < len(row)/colors; i++ {
- 		for j := range colors {
-+			if processed%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
+ 	switch bpc {
+ 
+ 	case 8:
+ 		for i := colors; i < len(row); i++ {
++			if c != nil && c.Err() != nil {
 +				return nil, c.Err()
 +			}
-+			processed++
- 			row[i*colors+j] += row[(i-1)*colors+j]
+ 			row[i] += row[i-colors]
  		}
- 	}
-@@ -340,8 +352,14 @@ func applyHorDiff(row []byte, colors int) ([]byte, error) {
+ 
+ 	case 16:
+ 		for i := 2 * colors; i+1 < len(row); i += 2 {
++			if c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
+ 			v := uint16(row[i])<<8 | uint16(row[i+1])
+ 			v += uint16(row[i-2*colors])<<8 | uint16(row[i-2*colors+1])
+ 			row[i], row[i+1] = byte(v>>8), byte(v)
+@@ -427,6 +444,9 @@ func applyHorDiff(row []byte, colors, bpc, columns int) ([]byte, error) {
+ 		}
+ 		n := colors * columns
+ 		for k := colors; k < n; k++ {
++			if c != nil && c.Err() != nil {
++				return nil, c.Err()
++			}
+ 			bit := k * bpc
+ 			shift := 8 - bpc - bit%8
+ 			v := (get(k) + get(k-colors)) & mask
+@@ -438,8 +458,14 @@ func applyHorDiff(row []byte, colors, bpc, columns int) ([]byte, error) {
  }
  
- func processRow(pr, cr []byte, p, colors, bytesPerPixel int) ([]byte, error) {
-+	return processRowWithContext(context.Background(), pr, cr, p, colors, bytesPerPixel)
+ func processRow(pr, cr []byte, p, colors, bpc, columns, bytesPerPixel int) ([]byte, error) {
++	return processRowWithContext(context.Background(), pr, cr, p, colors, bpc, columns, bytesPerPixel)
 +}
-+func processRowWithContext(c context.Context, pr, cr []byte, p, colors, bytesPerPixel int) ([]byte, error) {
++func processRowWithContext(c context.Context, pr, cr []byte, p, colors, bpc, columns, bytesPerPixel int) ([]byte, error) {
 +	if c != nil && c.Err() != nil {
 +		return nil, c.Err()
 +	}
  	if p == PredictorTIFF {
--		return applyHorDiff(cr, colors)
-+		return applyHorDiffWithContext(c, cr, colors)
+-		return applyHorDiff(cr, colors, bpc, columns)
++		return applyHorDiffWithContext(c, cr, colors, bpc, columns)
  	}
  
  	// Apply the filter.
-@@ -361,11 +379,17 @@ func processRow(pr, cr []byte, p, colors, bytesPerPixel int) ([]byte, error) {
+@@ -459,11 +485,17 @@ func processRow(pr, cr []byte, p, colors, bpc, columns, bytesPerPixel int) ([]by
  
  	case PNGSub:
  		for i := bytesPerPixel; i < len(cdat); i++ {
-+			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++			if c != nil && c.Err() != nil {
 +				return nil, c.Err()
 +			}
  			cdat[i] += cdat[i-bytesPerPixel]
@@ -804,48 +836,32 @@ index 15dc463..241d4e2 100644
  
  	case PNGUp:
  		for i, p := range pdat {
-+			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++			if c != nil && c.Err() != nil {
 +				return nil, c.Err()
 +			}
  			cdat[i] += p
  		}
  
-@@ -373,19 +397,30 @@ func processRow(pr, cr []byte, p, colors, bytesPerPixel int) ([]byte, error) {
+@@ -471,9 +503,15 @@ func processRow(pr, cr []byte, p, colors, bpc, columns, bytesPerPixel int) ([]by
  		// The average of the two neighboring pixels (left and above).
  		// Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
  		for i := range bytesPerPixel {
-+			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++			if c != nil && c.Err() != nil {
 +				return nil, c.Err()
 +			}
  			cdat[i] += pdat[i] / 2
  		}
  		for i := bytesPerPixel; i < len(cdat); i++ {
-+			if i%DecodeWorkChunk == 0 && c != nil && c.Err() != nil {
++			if c != nil && c.Err() != nil {
 +				return nil, c.Err()
 +			}
  			cdat[i] += uint8((int(cdat[i-bytesPerPixel]) + int(pdat[i])) / 2)
  		}
  
- 	case PNGPaeth:
--		filterPaeth(cdat, pdat, bytesPerPixel)
-+		if err := filterPaethWithContext(c, cdat, pdat, bytesPerPixel); err != nil {
-+			return nil, err
-+		}
- 
- 	default:
- 		return nil, fmt.Errorf("flate decode: unexpected PNG predictor %d", f)
- 	}
- 
-+	if c != nil && c.Err() != nil {
-+		return nil, c.Err()
-+	}
- 	return cdat, nil
+@@ -541,6 +579,10 @@ func process(w io.Writer, pr, cr []byte, predictor, colors, bpc, columns, bytesP
  }
  
-@@ -440,6 +475,10 @@ func process(w io.Writer, pr, cr []byte, predictor, colors, bytesPerPixel int) e
- }
- 
- func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, colors, bytesPerPixel int) (*bytes.Buffer, error) {
+ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, colors, bpc, columns, bytesPerPixel int) (*bytes.Buffer, error) {
 +	if err := f.contextError(); err != nil {
 +		return nil, err
 +	}
@@ -853,57 +869,24 @@ index 15dc463..241d4e2 100644
  	// cr and pr are the bytes for the current and previous row.
  	cr := make([]byte, m)
  	pr := make([]byte, m)
-@@ -451,6 +490,9 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
- 
- 		// Read decompressed bytes for one pixel row.
- 		n, err := io.ReadFull(r, cr)
-+		if cancelErr := f.contextError(); cancelErr != nil {
-+			return nil, cancelErr
+@@ -574,7 +616,17 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
+ 		if maxLen >= 0 {
+ 			remaining = maxLen - int64(b.Len())
+ 		}
+-		if err := process(&b, pr, cr, predictor, colors, bpc, columns, bytesPerPixel, remaining); err != nil {
++		row, err := processRowWithContext(f.ctx, pr, cr, predictor, colors, bpc, columns, bytesPerPixel)
++		if err == nil {
++			if remaining >= 0 && int64(len(row)) > remaining {
++				row = row[:remaining]
++			}
++			if maxLen < 0 && f.decodeLimit(-1) >= 0 && int64(len(row)) > f.decodeLimit(-1)-int64(b.Len()) {
++				return nil, ErrDecodeLimitExceeded
++			}
++			_, err = b.Write(row)
 +		}
- 		if err != nil {
- 			if err == io.ErrUnexpectedEOF && n == 0 {
- 				logUnexpectedEOFFlateDecode()
-@@ -469,15 +511,19 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
- 			return nil, fmt.Errorf("flate decode: read error, expected %d bytes, got: %d", m, n)
++		if err != nil {
+ 			return nil, err
  		}
- 
--		if err := process(&b, pr, cr, predictor, colors, bytesPerPixel); err != nil {
--			return nil, err
-+		row, processErr := processRowWithContext(f.ctx, pr, cr, predictor, colors, bytesPerPixel)
-+		if processErr != nil {
-+			return nil, processErr
- 		}
--
- 		if maxLen < 0 {
--			if limit := f.decodeLimit(maxLen); limit >= 0 && int64(b.Len()) > limit {
-+			if limit := f.decodeLimit(maxLen); limit >= 0 && int64(len(row)) > limit-int64(b.Len()) {
- 				return nil, ErrDecodeLimitExceeded
- 			}
- 		}
-+		if cancelErr := f.contextError(); cancelErr != nil {
-+			return nil, cancelErr
-+		}
-+		b.Write(row)
- 
- 		if err == io.EOF {
- 			break
-@@ -486,7 +532,7 @@ func (f flate) decodePostProcessRows(r io.Reader, maxLen int64, m, predictor, co
- 		pr, cr = cr, pr
- 	}
- 
--	return &b, nil
-+	return &b, f.contextError()
- }
- 
- func (f flate) decodePostProcess(r io.Reader, maxLen int64) (io.Reader, error) {
-@@ -509,7 +555,7 @@ func (f flate) decodePostProcess(r io.Reader, maxLen int64) (io.Reader, error) {
- 		return nil, err
- 	}
- 
--	if limit := f.decodeLimit(-1); limit >= 0 && int64(rowLen) > limit {
-+	if limit := f.decodeLimit(-1); limit >= 0 && int64(rowSize) > limit {
- 		return nil, ErrDecodeLimitExceeded
- 	}
  
 diff --git a/pkg/filter/lzwDecode.go b/pkg/filter/lzwDecode.go
 index 9e9af10..64a3dcf 100644
@@ -964,7 +947,7 @@ index c022332..3e68e78 100644
 +	return nil
  }
 diff --git a/pkg/filter/runLengthDecode.go b/pkg/filter/runLengthDecode.go
-index 04506b0..fdbbe19 100644
+index 8c3d1ef..1464f3d 100644
 --- a/pkg/filter/runLengthDecode.go
 +++ b/pkg/filter/runLengthDecode.go
 @@ -30,10 +30,13 @@ func (f runLengthDecode) decode(w io.ByteWriter, src []byte, maxLen int64) error
@@ -991,9 +974,9 @@ index 04506b0..fdbbe19 100644
  }
  
  func detect(i, start, maxLen int, b byte, src []byte) int {
-@@ -165,7 +168,7 @@ func (f runLengthDecode) Decode(r io.Reader) (io.Reader, error) {
- // DecodeLength implements decoding for a RunLengthDecode filter with a maximum output length.
- func (f runLengthDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, error) {
+@@ -168,7 +171,7 @@ func (f runLengthDecode) DecodeLength(r io.Reader, maxLen int64) (io.Reader, err
+ 		return nil, err
+ 	}
  
 -	b1, err := getReaderBytes(r)
 +	b1, err := f.readerBytes(r)
@@ -1845,7 +1828,7 @@ index 0000000..41f5faa
 +	}
 +}
 diff --git a/pkg/pdfcpu/model/parse.go b/pkg/pdfcpu/model/parse.go
-index 044c2e9..b354fac 100644
+index 34427ca..b532b6b 100644
 --- a/pkg/pdfcpu/model/parse.go
 +++ b/pkg/pdfcpu/model/parse.go
 @@ -20,6 +20,7 @@ import (
@@ -1855,26 +1838,17 @@ index 044c2e9..b354fac 100644
 +	"math"
  	"strconv"
  	"strings"
- 	"unicode"
+ 
 @@ -40,6 +41,7 @@ var (
- 	errArrayNotTerminated      = errors.New("parse: unterminated array")
  	errDictionaryNotTerminated = fmt.Errorf("parse: unterminated dictionary: %w", ErrDictionaryCorrupt)
  	errDictionaryDuplicateKey  = errors.New("parse: duplicate key")
+ 	errInvalidBooleanOrNull    = errors.New("parse: invalid boolean or null keyword")
 +	errNumericObject           = errors.New("parse: invalid or unrepresentable numeric object")
  	errHexLiteralCorrupt       = errors.New("parse: corrupt hex literal")
  	errHexLiteralNotTerminated = errors.New("parse: hex literal not terminated")
  	errNameObjectCorrupt       = errors.New("parse: corrupt name object")
-@@ -163,25 +165,19 @@ func hexString(s string) (*string, bool) {
- 	i := 0
- 
- 	for _, c := range strings.ToUpper(s) {
--		if strings.ContainsRune(" \x09\x0A\x0C\x0D", c) {
-+		switch c {
-+		case ' ', '\t', '\n', '\f', '\r':
- 			if i%2 > 0 {
- 				sb.WriteString("0")
- 				i = 0
- 			}
+@@ -165,18 +167,11 @@ func hexString(s string) (*string, bool) {
+ 			// Ignore whitespace within digit pairs (PDF 2.0, 7.3.4.3).
  			continue
  		}
 -		isHexChar := false
@@ -1895,22 +1869,20 @@ index 044c2e9..b354fac 100644
  	}
  
  	// If the final digit of a hexadecimal string is missing -
-@@ -555,28 +551,6 @@ func parseName(line *string) (*types.Name, error) {
+@@ -554,26 +549,6 @@ func parseName(line *string) (*types.Name, error) {
  	return &nameObj, nil
  }
  
--func insertKey(d types.Dict, key string, val types.Object, relaxed bool) error {
+-func insertKey(d types.Dict, key string, val types.Object, validationMode int) error {
 -	if _, found := d[key]; !found {
 -		d[key] = val
 -	} else {
--
--		// was: for now we ignore duplicate keys - config flag ?
--
--		// if !relaxed {
--		// 	return errDictionaryDuplicateKey
--		// }
--
--		d[key] = val
+-		if validationMode != ValidationRelaxed {
+-			return fmt.Errorf("%w: %q", errDictionaryDuplicateKey, key)
+-		}
+-		if val != nil {
+-			d[key] = val
+-		}
 -		ShowDigestedSpecViolation(fmt.Sprintf("duplicate key \"%s\"", key))
 -	}
 -
@@ -1924,7 +1896,7 @@ index 044c2e9..b354fac 100644
  func dictString(l string) bool {
  	return len(l) > 0 && !strings.HasPrefix(l, ">>")
  }
-@@ -585,6 +559,7 @@ func processDictKeys(c context.Context, line *string, level, maxDepth int, relax
+@@ -582,6 +557,7 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
  	l := *line
  	var eol bool
  	d := types.NewDict()
@@ -1932,7 +1904,7 @@ index 044c2e9..b354fac 100644
  
  	for dictString(l) {
  
-@@ -613,6 +588,12 @@ func processDictKeys(c context.Context, line *string, level, maxDepth int, relax
+@@ -610,6 +586,12 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
  			continue
  		}
  
@@ -1945,19 +1917,22 @@ index 044c2e9..b354fac 100644
  		if len(l) == 0 {
  			// Only whitespace after key.
  			return nil, errDictionaryNotTerminated
-@@ -632,8 +613,9 @@ func processDictKeys(c context.Context, line *string, level, maxDepth int, relax
+@@ -628,9 +610,11 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
+ 
  		// Specifying the null object as the value of a dictionary entry (7.3.7, "Dictionary Objects")
  		// shall be equivalent to omitting the entry entirely.
- 		if val != nil {
--			if err := insertKey(d, string(*keyName), val, relaxed); err != nil {
--				return nil, err
+-		// Retain null entries until duplicate keys have been checked.
+-		if err := insertKey(d, string(*keyName), val, validationMode); err != nil {
+-			return nil, err
++		if val != nil {
 +			d[key] = val
 +			if log.ParseEnabled() {
 +				log.Parse.Printf("ParseDict: dict[%s]=%v\n", key, val)
- 			}
++			}
  		}
  
-@@ -714,25 +696,6 @@ func startParseNumericOrIndRef(l string) (string, string, int) {
+ 		// We are positioned on the char behind the last parsed dict value.
+@@ -715,25 +699,6 @@ func startParseNumericOrIndRef(l string) (string, string, int) {
  		str = l[:i1]
  	}
  
@@ -1983,30 +1958,25 @@ index 044c2e9..b354fac 100644
  	return str, l1, i1
  }
  
-@@ -783,30 +746,36 @@ func parseIndRef(s, l, l1 string, line *string, i, i2 int) (types.Object, error)
+@@ -802,27 +767,36 @@ func isPDFReal(s string) bool {
  }
  
  func parseFloat(s string) (types.Object, error) {
 -	// Replace ',' with '.' to accept comma as decimal separator
 -	s = strings.Replace(s, ",", ".", 1)
 -
--	f, n := strconv.ParseFloat(s, 64)
--	if n != nil {
--		// Fallback: handle ".-" case (e.g., ".-5")
--		s = strings.Replace(s, ".-", ".", 1)
--		f, err := strconv.ParseFloat(s, 64)
--		if err != nil {
--			// Skip junk
--			return nil, nil
--		}
--		if log.ParseEnabled() {
--			log.Parse.Printf("parseFloat: value is: %f\n", f)
--		}
--		return types.Float(f), nil
+-	// Preserve the existing tolerance for ".-" (e.g., ".-5").
+-	s = strings.Replace(s, ".-", ".", 1)
+-	if !isPDFReal(s) {
+-		return nil, nil
 +	if !validRealToken(s) {
 +		return nil, errNumericObject
-+	}
-+	f, err := strconv.ParseFloat(s, 64)
+ 	}
+-
+-	// With decimal syntax established, ParseFloat reports overflow as a range error.
+ 	f, err := strconv.ParseFloat(s, 64)
+-	if err != nil {
+-		return nil, nil
 +	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || f == 0 && strings.ContainsAny(s, "123456789") {
 +		return nil, errNumericObject
  	}
@@ -2037,7 +2007,7 @@ index 044c2e9..b354fac 100644
  func parseNumericOrIndRef(line *string) (types.Object, error) {
  	if noBuf(line) {
  		return nil, errBufNotAvailable
-@@ -818,15 +787,18 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
+@@ -834,15 +808,18 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
  	// otherwise it has to be a float
  	// we have to check first for integer
  	s, l1, i1 := startParseNumericOrIndRef(l)
@@ -2060,7 +2030,7 @@ index 044c2e9..b354fac 100644
  		}
  		*line = l1
  		return parseFloat(s)
-@@ -854,7 +826,7 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
+@@ -870,7 +847,7 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
  		return types.Integer(i), nil
  	}
  
@@ -2069,7 +2039,7 @@ index 044c2e9..b354fac 100644
  
  	// if only 2 token, can't be indirect reference.
  	// if not followed by whitespace return sole integer value.
-@@ -1010,6 +982,9 @@ func parseObject(c context.Context, line *string, level, depthLimit int, relaxed
+@@ -1033,6 +1010,9 @@ func parseObject(c context.Context, line *string, level, depthLimit, validationM
  
  	// position to first non whitespace char
  	l, _ = trimLeftSpace(l, false)
@@ -2079,9 +2049,9 @@ index 044c2e9..b354fac 100644
  	if len(l) == 0 {
  		// only whitespace
  		return nil, errBufNotAvailable
-@@ -1017,6 +992,9 @@ func parseObject(c context.Context, line *string, level, depthLimit int, relaxed
+@@ -1040,6 +1020,9 @@ func parseObject(c context.Context, line *string, level, depthLimit, validationM
  
- 	value, err := parseObjectValue(c, &l, level, depthLimit, relaxed)
+ 	value, err := parseObjectValue(c, &l, level, depthLimit, validationMode, repair)
  	if err != nil {
 +		if canceled := contextutil.Check(c); canceled != nil {
 +			return nil, canceled
@@ -2089,7 +2059,7 @@ index 044c2e9..b354fac 100644
  		return nil, err
  	}
  
-@@ -1058,7 +1036,7 @@ func ParseObjectWithPolicy(c context.Context, line *string, level, validationMod
+@@ -1081,7 +1064,7 @@ func ParseObjectWithPolicy(c context.Context, line *string, level, validationMod
  	if err == nil {
  		return ParseObjectResult{Object: value}, nil
  	}
@@ -2097,11 +2067,11 @@ index 044c2e9..b354fac 100644
 +	if errors.Is(err, ErrMaxRecursionDepthExceeded) || errors.Is(err, errDictionaryDuplicateKey) || c.Err() != nil {
  		return ParseObjectResult{}, err
  	}
- 	if !policyManagedParseError(err) {
-@@ -1090,7 +1068,7 @@ func ParseObject(c context.Context, line *string, level int, maxDepth ...int) (t
+ 	if validationMode != ValidationRelaxed &&
+@@ -1117,7 +1100,7 @@ func ParseObject(c context.Context, line *string, level int, maxDepth ...int) (t
  	depthLimit := parseObjectDepthLimit(maxDepth)
  	original := *line
- 	value, err := parseObject(c, line, level, depthLimit, false)
+ 	value, err := parseObject(c, line, level, depthLimit, ValidationRelaxed, false)
 -	if err == nil || errors.Is(err, ErrMaxRecursionDepthExceeded) || c.Err() != nil {
 +	if err == nil || errors.Is(err, ErrMaxRecursionDepthExceeded) || errors.Is(err, errDictionaryDuplicateKey) || c.Err() != nil {
  		return value, err
@@ -2205,7 +2175,7 @@ index 72adb57..0fe5870 100644
  func doTestParseDictIndirectRefs(t *testing.T) {
 diff --git a/pkg/pdfcpu/model/parse_dictionary_keys_test.go b/pkg/pdfcpu/model/parse_dictionary_keys_test.go
 new file mode 100644
-index 0000000..90c12b2
+index 0000000..87125c8
 --- /dev/null
 +++ b/pkg/pdfcpu/model/parse_dictionary_keys_test.go
 @@ -0,0 +1,43 @@
@@ -2226,7 +2196,7 @@ index 0000000..90c12b2
 +	} {
 +		for _, relaxed := range []bool{false, true} {
 +			remaining := input
-+			if _, err := parseObject(t.Context(), &remaining, 0, DefaultResourceLimits().MaxRecursionDepth, relaxed); !errors.Is(err, errDictionaryDuplicateKey) {
++			if _, err := parseObject(t.Context(), &remaining, 0, DefaultResourceLimits().MaxRecursionDepth, ValidationRelaxed, relaxed); !errors.Is(err, errDictionaryDuplicateKey) {
 +				t.Fatalf("input=%q relaxed=%v: %v", input, relaxed, err)
 +			}
 +		}
@@ -2301,10 +2271,34 @@ index 0000000..99ac05b
 +	}
 +}
 diff --git a/pkg/pdfcpu/model/parse_test.go b/pkg/pdfcpu/model/parse_test.go
-index 2cb580c..c6dab69 100644
+index b9e1291..5e98963 100644
 --- a/pkg/pdfcpu/model/parse_test.go
 +++ b/pkg/pdfcpu/model/parse_test.go
-@@ -53,9 +53,9 @@ func TestParseObjectRejectsRecursionDepth(t *testing.T) {
+@@ -166,19 +166,14 @@ func TestParseFloatDecimals(t *testing.T) {
+ 	}
+ }
+ 
+-// TestParseObjectSkipsNonPDFNumbers checks discarded tokens do not consume the next object.
+-func TestParseObjectSkipsNonPDFNumbers(t *testing.T) {
++// The maintained parser rejects malformed numbers instead of discarding an object token.
++func TestParseObjectRejectsNonPDFNumbers(t *testing.T) {
+ 	for _, input := range []string{"NaN", "+Inf", "-Infinity", "1e5", "0x1p2", "1_000.0"} {
+ 		t.Run(input, func(t *testing.T) {
+ 			line := input + " 17"
+ 			got, err := ParseObject(t.Context(), &line, 0)
+-			if err != nil || got != nil || line != " 17" {
+-				t.Fatalf("first object = %v, %v; remaining = %q", got, err, line)
+-			}
+-			got, err = ParseObject(t.Context(), &line, 0)
+-			n, ok := got.(types.Integer)
+-			if err != nil || !ok || n != 17 || line != "" {
+-				t.Fatalf("next object = %v, %v; remaining = %q", got, err, line)
++			if !errors.Is(err, errNumericObject) || got != nil {
++				t.Fatalf("malformed numeric object accepted: %v, %v", got, err)
+ 			}
+ 		})
+ 	}
+@@ -251,9 +246,9 @@ func TestParseObjectRejectsRecursionDepth(t *testing.T) {
  	}
  }
  
@@ -2470,10 +2464,10 @@ index 0000000..f7410d4
 +	return object, nil
 +}
 diff --git a/pkg/pdfcpu/model/xreftable.go b/pkg/pdfcpu/model/xreftable.go
-index 127be78..339ddbc 100644
+index 57e107d..b3f05fd 100644
 --- a/pkg/pdfcpu/model/xreftable.go
 +++ b/pkg/pdfcpu/model/xreftable.go
-@@ -261,19 +261,29 @@ func (xRefTable *XRefTable) VersionString() string {
+@@ -260,19 +260,29 @@ func (xRefTable *XRefTable) VersionString() string {
  
  // ParseRootVersion returns a string representation for an optional Version entry in the root object.
  // This entry overrides the header version.
@@ -2507,7 +2501,7 @@ index 127be78..339ddbc 100644
  
  	return &s, nil
  }
-@@ -390,7 +400,11 @@ func (xRefTable *XRefTable) FindTableEntry(objNr int, genNr int) (*XRefTableEntr
+@@ -392,7 +402,11 @@ func (xRefTable *XRefTable) FindTableEntry(objNr int, genNr int) (*XRefTableEntr
  	if log.TraceEnabled() {
  		log.Trace.Printf("FindTableEntry: obj#:%d gen:%d \n", objNr, genNr)
  	}
@@ -2520,7 +2514,7 @@ index 127be78..339ddbc 100644
  }
  
  // FindTableEntryForIndRef returns the XRefTable entry for given indirect reference.
-@@ -996,7 +1010,11 @@ func (xRefTable *XRefTable) EnsureValidFreeList() error {
+@@ -998,7 +1012,11 @@ func (xRefTable *XRefTable) EnsureValidFreeList() error {
  		xRefTable.Table[0] = head
  	}
  
@@ -2533,7 +2527,7 @@ index 127be78..339ddbc 100644
  	if *head.Generation != types.FreeHeadGeneration {
  		// Fix generation for obj 0.
  		*head.Generation = types.FreeHeadGeneration
-@@ -1192,6 +1210,15 @@ func (xRefTable *XRefTable) SetBeingValidated(ir types.IndirectRef) error {
+@@ -1194,6 +1212,15 @@ func (xRefTable *XRefTable) SetBeingValidated(ir types.IndirectRef) error {
  
  // DereferenceStreamDict resolves a stream dictionary object.
  func (xRefTable *XRefTable) DereferenceStreamDict(o types.Object) (*types.StreamDict, bool, error) {
@@ -2549,7 +2543,7 @@ index 127be78..339ddbc 100644
  	// TODO Check if we still need the bool return value
  	indRef, ok := o.(types.IndirectRef)
  	if !ok {
-@@ -1251,7 +1278,13 @@ func (xRefTable *XRefTable) DereferenceXObjectDict(indRef types.IndirectRef) (*t
+@@ -1253,7 +1280,13 @@ func (xRefTable *XRefTable) DereferenceXObjectDict(indRef types.IndirectRef) (*t
  
  // Catalog returns the document catalog dictionary, which is non-nil on success.
  func (xRefTable *XRefTable) Catalog() (types.Dict, error) {
@@ -2564,7 +2558,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, err
  	}
-@@ -1263,6 +1296,12 @@ func (xRefTable *XRefTable) Catalog() (types.Dict, error) {
+@@ -1265,6 +1298,12 @@ func (xRefTable *XRefTable) Catalog() (types.Dict, error) {
  
  // catalogDict resolves the catalog while preserving PDF null semantics for optional metadata lookup.
  func (xRefTable *XRefTable) catalogDict() (types.Dict, error) {
@@ -2577,7 +2571,7 @@ index 127be78..339ddbc 100644
  	if xRefTable.RootDict != nil {
  		return xRefTable.RootDict, nil
  	}
-@@ -1271,7 +1310,7 @@ func (xRefTable *XRefTable) catalogDict() (types.Dict, error) {
+@@ -1273,7 +1312,7 @@ func (xRefTable *XRefTable) catalogDict() (types.Dict, error) {
  		return nil, errors.New("missing root dict")
  	}
  
@@ -2586,7 +2580,7 @@ index 127be78..339ddbc 100644
  	if err != nil || o == nil {
  		return nil, err
  	}
-@@ -1320,7 +1359,10 @@ func (xRefTable *XRefTable) CatalogHasPieceInfo() (bool, error) {
+@@ -1322,7 +1361,10 @@ func (xRefTable *XRefTable) CatalogHasPieceInfo() (bool, error) {
  
  // Pages returns the Pages reference contained in the catalog, which is non-nil on success.
  func (xRefTable *XRefTable) Pages() (*types.IndirectRef, error) {
@@ -2598,7 +2592,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, err
  	}
-@@ -1392,7 +1434,7 @@ func objStr(entry *XRefTableEntry, objNr int) string {
+@@ -1394,7 +1436,7 @@ func objStr(entry *XRefTableEntry, objNr int) string {
  }
  
  func dumpDecodedStream(c context.Context, sd types.StreamDict, objNr, mode int) (string, error) {
@@ -2607,7 +2601,7 @@ index 127be78..339ddbc 100644
  	if ctxErr := c.Err(); ctxErr != nil {
  		return "", ctxErr
  	}
-@@ -1846,7 +1888,7 @@ func (xRefTable *XRefTable) RemoveNameTree(c context.Context, nameTreeName strin
+@@ -1849,7 +1891,7 @@ func (xRefTable *XRefTable) RemoveNameTree(c context.Context, nameTreeName strin
  	}
  
  	// Remove empty names dict.
@@ -2616,7 +2610,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return fmt.Errorf("name tree %q: obtain catalog: %w", nameTreeName, err)
  	}
-@@ -1866,7 +1908,7 @@ func (xRefTable *XRefTable) RemoveCollection(c context.Context) error {
+@@ -1869,7 +1911,7 @@ func (xRefTable *XRefTable) RemoveCollection(c context.Context) error {
  	if err := contextutil.Check(c); err != nil {
  		return err
  	}
@@ -2625,7 +2619,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return fmt.Errorf("portfolio: catalog: %w", err)
  	}
-@@ -1999,22 +2041,26 @@ type InheritedPageAttrs struct {
+@@ -2002,22 +2044,26 @@ type InheritedPageAttrs struct {
  }
  
  func rect(xRefTable *XRefTable, a types.Array) (*types.Rectangle, error) {
@@ -2656,7 +2650,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, err
  	}
-@@ -2032,7 +2078,10 @@ func weaveResourceSubDict(d1, d2 types.Dict) {
+@@ -2035,7 +2081,10 @@ func weaveResourceSubDict(d1, d2 types.Dict) {
  }
  
  func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *InheritedPageAttrs) error {
@@ -2668,7 +2662,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return err
  	}
-@@ -2045,7 +2094,7 @@ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *Inher
+@@ -2048,7 +2097,7 @@ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *Inher
  		// walking down from page root to leaf node representing the page in question.
  		pAttrs.Resources = d.Clone().(types.Dict)
  		for _, k := range slices.Sorted(maps.Keys(pAttrs.Resources)) {
@@ -2677,7 +2671,7 @@ index 127be78..339ddbc 100644
  			if err != nil {
  				return fmt.Errorf("resource %s: %w", k, err)
  			}
-@@ -2065,7 +2114,7 @@ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *Inher
+@@ -2071,7 +2120,7 @@ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *Inher
  		if k == "ProcSet" || v == nil {
  			continue
  		}
@@ -2686,7 +2680,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return fmt.Errorf("resource %s: %w", k, err)
  		}
-@@ -2090,6 +2139,9 @@ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *Inher
+@@ -2096,6 +2145,9 @@ func (xRefTable *XRefTable) consolidateResources(obj types.Object, pAttrs *Inher
  }
  
  func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs *InheritedPageAttrs, consolidateRes bool) error {
@@ -2696,7 +2690,7 @@ index 127be78..339ddbc 100644
  	// Return mediaBox, cropBox and rotate as inherited.
  	// if consolidateRes is true
  	// then consolidate all inherited resources as required by content stream
-@@ -2100,27 +2152,27 @@ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs
+@@ -2106,27 +2158,27 @@ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs
  	)
  
  	if obj, found = pageDict.Find("MediaBox"); found {
@@ -2729,7 +2723,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return err
  		}
-@@ -2145,7 +2197,7 @@ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs
+@@ -2151,7 +2203,7 @@ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs
  
  	if !consolidateRes {
  		// Return resourceDict as is.
@@ -2738,7 +2732,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return err
  		}
-@@ -2154,11 +2206,15 @@ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs
+@@ -2160,11 +2212,15 @@ func (xRefTable *XRefTable) checkInheritedPageAttrs(pageDict types.Dict, pAttrs
  	}
  
  	// Accumulate inherited resources.
@@ -2757,7 +2751,7 @@ index 127be78..339ddbc 100644
  	if errors.Is(err, filter.ErrUnsupportedFilter) {
  		return fmt.Errorf("page %d content decode: %w", pageNr, err)
  	}
-@@ -2176,12 +2232,18 @@ func (xRefTable *XRefTable) decodeContentStream(sd *types.StreamDict, pageNr int
+@@ -2182,12 +2238,18 @@ func (xRefTable *XRefTable) decodeContentStream(sd *types.StreamDict, pageNr int
  
  // PageContent returns the content in PDF syntax for page dict d.
  func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error) {
@@ -2777,7 +2771,7 @@ index 127be78..339ddbc 100644
  	if err != nil || o == nil {
  		return nil, err
  	}
-@@ -2192,7 +2254,7 @@ func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error
+@@ -2198,7 +2260,7 @@ func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error
  
  	case types.StreamDict:
  		// no further processing.
@@ -2786,7 +2780,7 @@ index 127be78..339ddbc 100644
  			return nil, err
  		}
  		bb = append(bb, o.Content...)
-@@ -2203,14 +2265,14 @@ func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error
+@@ -2209,14 +2271,14 @@ func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error
  			if o == nil {
  				continue
  			}
@@ -2803,7 +2797,7 @@ index 127be78..339ddbc 100644
  				return nil, err
  			}
  			bb = append(bb, o.Content...)
-@@ -2328,12 +2390,15 @@ func (e *contentParseError) Unwrap() error {
+@@ -2335,12 +2397,15 @@ func (e *contentParseError) Unwrap() error {
  }
  
  func (xRefTable *XRefTable) consolidateResourcesWithContent(pageDict, resDict types.Dict, pageNr int, consolidateRes bool) error {
@@ -2820,7 +2814,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		if err == ErrNoContent {
  			return nil
-@@ -2358,12 +2423,15 @@ func (xRefTable *XRefTable) consolidateResourcesWithContent(pageDict, resDict ty
+@@ -2365,12 +2430,15 @@ func (xRefTable *XRefTable) consolidateResourcesWithContent(pageDict, resDict ty
  }
  
  func (xRefTable *XRefTable) pageObjType(indRef types.IndirectRef) (string, error) {
@@ -2838,7 +2832,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return "", err
  	}
-@@ -2405,7 +2473,7 @@ func (xRefTable *XRefTable) processPageTreeKidForPageDict(c context.Context, ind
+@@ -2412,7 +2480,7 @@ func (xRefTable *XRefTable) processPageTreeKidForPageDict(c context.Context, ind
  	if err := contextutil.Check(c); err != nil {
  		return nil, nil, err
  	}
@@ -2847,7 +2841,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, nil, err
  	}
-@@ -2429,7 +2497,10 @@ func (xRefTable *XRefTable) processPageTreeKidForPageDict(c context.Context, ind
+@@ -2436,7 +2504,10 @@ func (xRefTable *XRefTable) processPageTreeKidForPageDict(c context.Context, ind
  }
  
  func (xRefTable *XRefTable) dereferencePageCount(d types.Dict, ownerObjNr int) (*int, error) {
@@ -2859,7 +2853,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, WithValidationErrorObject(err, ownerObjNr)
  	}
-@@ -2457,12 +2528,12 @@ func (xRefTable *XRefTable) processPageTreeForPageDictDepth(c context.Context, r
+@@ -2464,12 +2535,12 @@ func (xRefTable *XRefTable) processPageTreeForPageDictDepth(c context.Context, r
  		return nil, nil, err
  	}
  
@@ -2874,7 +2868,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, nil, fmt.Errorf("page tree obj#%d Count: %w", root.ObjectNumber.Value(), err)
  	}
-@@ -2475,13 +2546,13 @@ func (xRefTable *XRefTable) processPageTreeForPageDictDepth(c context.Context, r
+@@ -2482,13 +2553,13 @@ func (xRefTable *XRefTable) processPageTreeForPageDictDepth(c context.Context, r
  	}
  
  	// Return the current state of all page attributes that may be inherited.
@@ -2890,7 +2884,7 @@ index 127be78..339ddbc 100644
  	}
  	objNr := root.ObjectNumber.Value()
  	if err := visit.Enter(objNr); err != nil {
-@@ -2537,7 +2608,7 @@ func (xRefTable *XRefTable) PageDict(c context.Context, pageNr int, consolidateR
+@@ -2544,7 +2615,7 @@ func (xRefTable *XRefTable) PageDict(c context.Context, pageNr int, consolidateR
  	}
  
  	// Get an indirect reference to the page tree root dict.
@@ -2899,7 +2893,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, nil, nil, err
  	}
-@@ -2567,6 +2638,7 @@ func cloneInheritedPageAttrs(pAttrs InheritedPageAttrs) InheritedPageAttrs {
+@@ -2574,6 +2645,7 @@ func cloneInheritedPageAttrs(pAttrs InheritedPageAttrs) InheritedPageAttrs {
  }
  
  func (xRefTable *XRefTable) consolidatePageResourcesForKid(
@@ -2907,7 +2901,7 @@ index 127be78..339ddbc 100644
  	o types.Object,
  	pAttrs InheritedPageAttrs,
  	pageNr *int,
-@@ -2578,14 +2650,14 @@ func (xRefTable *XRefTable) consolidatePageResourcesForKid(
+@@ -2585,14 +2657,14 @@ func (xRefTable *XRefTable) consolidatePageResourcesForKid(
  		return errors.New("corrupt page node dict")
  	}
  
@@ -2924,7 +2918,7 @@ index 127be78..339ddbc 100644
  }
  
  type pageResourceContextError struct {
-@@ -2603,6 +2675,7 @@ func (e *pageResourceContextError) Unwrap() error {
+@@ -2610,6 +2682,7 @@ func (e *pageResourceContextError) Unwrap() error {
  }
  
  func (xRefTable *XRefTable) consolidatePageResourcesForNode(
@@ -2932,7 +2926,7 @@ index 127be78..339ddbc 100644
  	root *types.IndirectRef,
  	pAttrs InheritedPageAttrs,
  	pageNr *int,
-@@ -2613,7 +2686,7 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
+@@ -2620,7 +2693,7 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
  		return err
  	}
  
@@ -2941,7 +2935,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return err
  	}
-@@ -2621,14 +2694,14 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
+@@ -2628,14 +2701,14 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
  		return ErrPageNotFound
  	}
  	pAttrs = cloneInheritedPageAttrs(pAttrs)
@@ -2958,7 +2952,7 @@ index 127be78..339ddbc 100644
  			return &pageResourceContextError{
  				pageNr: currentPageNr,
  				objNr:  root.ObjectNumber.Value(),
-@@ -2652,7 +2725,7 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
+@@ -2659,7 +2732,7 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
  		if o == nil {
  			continue
  		}
@@ -2967,7 +2961,7 @@ index 127be78..339ddbc 100644
  			return err
  		}
  	}
-@@ -2661,7 +2734,13 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
+@@ -2668,7 +2741,13 @@ func (xRefTable *XRefTable) consolidatePageResourcesForNode(
  
  // ConsolidatePageResources consolidates inherited resource dictionaries in one page-tree pass.
  func (xRefTable *XRefTable) ConsolidatePageResources() error {
@@ -2982,7 +2976,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return fmt.Errorf("page 1: resource dict: %w", err)
  	}
-@@ -2671,6 +2750,7 @@ func (xRefTable *XRefTable) ConsolidatePageResources() error {
+@@ -2678,6 +2757,7 @@ func (xRefTable *XRefTable) ConsolidatePageResources() error {
  
  	pageNr := 0
  	err = xRefTable.consolidatePageResourcesForNode(
@@ -2990,7 +2984,7 @@ index 127be78..339ddbc 100644
  		root,
  		InheritedPageAttrs{},
  		&pageNr,
-@@ -2698,7 +2778,7 @@ func (xRefTable *XRefTable) PageDictIndRef(c context.Context, page int) (*types.
+@@ -2705,7 +2785,7 @@ func (xRefTable *XRefTable) PageDictIndRef(c context.Context, page int) (*types.
  	)
  
  	// Get an indirect reference to the page tree root dict.
@@ -2999,7 +2993,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, err
  	}
-@@ -2728,7 +2808,7 @@ func (xRefTable *XRefTable) processPageTreeForPageNumberDepth(c context.Context,
+@@ -2735,7 +2815,7 @@ func (xRefTable *XRefTable) processPageTreeForPageNumberDepth(c context.Context,
  		return 0, err
  	}
  
@@ -3008,7 +3002,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, err
  	}
-@@ -2756,7 +2836,7 @@ func (xRefTable *XRefTable) processPageTreeForPageNumberDepth(c context.Context,
+@@ -2763,7 +2843,7 @@ func (xRefTable *XRefTable) processPageTreeForPageNumberDepth(c context.Context,
  
  		objNr := indRef.ObjectNumber.Value()
  
@@ -3017,7 +3011,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return 0, fmt.Errorf("page tree kid obj#%d: %w", objNr, err)
  		}
-@@ -2795,7 +2875,7 @@ func (xRefTable *XRefTable) PageNumber(c context.Context, pageObjNr int) (int, e
+@@ -2802,7 +2882,7 @@ func (xRefTable *XRefTable) PageNumber(c context.Context, pageObjNr int) (int, e
  		return 0, err
  	}
  	// Get an indirect reference to the page tree root dict.
@@ -3026,7 +3020,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, err
  	}
-@@ -2955,7 +3035,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTreeKids(
+@@ -2962,7 +3042,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTreeKids(
  			return fmt.Errorf("page tree obj#%d: kid %d: expected indirect reference, got %T", parentObjNr, childIndex+1, o)
  		}
  
@@ -3035,7 +3029,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return fmt.Errorf("page tree obj#%d: kid %d obj#%d: dereference dict: %w",
  				parentObjNr, childIndex+1, indRef.ObjectNumber.Value(), err)
-@@ -2964,7 +3044,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTreeKids(
+@@ -2971,7 +3051,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTreeKids(
  			return fmt.Errorf("page tree obj#%d: kid %d obj#%d: missing dict",
  				parentObjNr, childIndex+1, indRef.ObjectNumber.Value())
  		}
@@ -3044,7 +3038,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return fmt.Errorf("page tree obj#%d: kid %d obj#%d: Type: %w",
  				parentObjNr, childIndex+1, indRef.ObjectNumber.Value(), err)
-@@ -3054,7 +3134,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTree(
+@@ -3061,7 +3141,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTree(
  		return err
  	}
  
@@ -3053,7 +3047,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return fmt.Errorf("page tree obj#%d: dereference dict: %w", root.ObjectNumber.Value(), err)
  	}
-@@ -3086,7 +3166,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTree(
+@@ -3093,7 +3173,7 @@ func (xRefTable *XRefTable) collectPageBoundariesForPageTree(
  	if !found || o == nil {
  		return fmt.Errorf("page tree obj#%d: missing Kids", objNr)
  	}
@@ -3062,7 +3056,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return fmt.Errorf("page tree obj#%d: Kids: dereference: %w", objNr, err)
  	}
-@@ -3120,7 +3200,7 @@ func (xRefTable *XRefTable) PageBoundaries(c context.Context, selectedPages type
+@@ -3127,7 +3207,7 @@ func (xRefTable *XRefTable) PageBoundaries(c context.Context, selectedPages type
  	// }
  
  	// Get an indirect reference to the page tree root dict.
@@ -3071,7 +3065,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return nil, fmt.Errorf("pages root: %w", err)
  	}
-@@ -3374,7 +3454,7 @@ func (xRefTable *XRefTable) insertBlankPagesDepth(
+@@ -3381,7 +3461,7 @@ func (xRefTable *XRefTable) insertBlankPagesDepth(
  	}
  	defer visit.Leave(objNr)
  
@@ -3080,7 +3074,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, fmt.Errorf("page tree obj#%d: dereference dict: %w", objNr, err)
  	}
-@@ -3383,7 +3463,7 @@ func (xRefTable *XRefTable) insertBlankPagesDepth(
+@@ -3390,7 +3470,7 @@ func (xRefTable *XRefTable) insertBlankPagesDepth(
  	}
  
  	consolidateRes := false
@@ -3089,7 +3083,7 @@ index 127be78..339ddbc 100644
  		return 0, fmt.Errorf("page tree obj#%d: inherited attributes: %w", objNr, err)
  	}
  
-@@ -3416,7 +3496,7 @@ func (xRefTable *XRefTable) InsertBlankPages(c context.Context, pages types.IntS
+@@ -3423,7 +3503,7 @@ func (xRefTable *XRefTable) InsertBlankPages(c context.Context, pages types.IntS
  	if err := contextutil.Check(c); err != nil {
  		return err
  	}
@@ -3098,7 +3092,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return fmt.Errorf("pages root: %w", err)
  	}
-@@ -3463,7 +3543,7 @@ func (xRefTable *XRefTable) insertPagesDepth(c context.Context, parent *types.In
+@@ -3486,7 +3566,7 @@ func (xRefTable *XRefTable) insertPagesDepth(c context.Context, parent *types.In
  
  	defer visit.Leave(objNr)
  
@@ -3107,7 +3101,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, err
  	}
-@@ -3491,7 +3571,7 @@ func (xRefTable *XRefTable) insertPagesDepth(c context.Context, parent *types.In
+@@ -3514,7 +3594,7 @@ func (xRefTable *XRefTable) insertPagesDepth(c context.Context, parent *types.In
  			return 0, fmt.Errorf("insertPagesDepth: corrupt page node dict")
  		}
  
@@ -3116,7 +3110,7 @@ index 127be78..339ddbc 100644
  		if err != nil {
  			return 0, fmt.Errorf("page tree kid obj#%d: %w", ir.ObjectNumber.Value(), err)
  		}
-@@ -3545,7 +3625,7 @@ func (xRefTable *XRefTable) AppendPages(c context.Context, rootPageIndRef *types
+@@ -3568,7 +3648,7 @@ func (xRefTable *XRefTable) AppendPages(c context.Context, rootPageIndRef *types
  	}
  	// Create an intermediary page node containing kids array with indRefs For all ctx Pages fromPageNr - end
  
@@ -3125,7 +3119,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, err
  	}
-@@ -3598,7 +3678,7 @@ func (xRefTable *XRefTable) AppendPages(c context.Context, rootPageIndRef *types
+@@ -3616,7 +3696,7 @@ func (xRefTable *XRefTable) AppendPages(c context.Context, rootPageIndRef *types
  
  	d["Kids"] = append(kids, *indRef1)
  
@@ -3134,7 +3128,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, fmt.Errorf("page tree root Count: %w", err)
  	}
-@@ -3608,7 +3688,7 @@ func (xRefTable *XRefTable) AppendPages(c context.Context, rootPageIndRef *types
+@@ -3626,7 +3706,7 @@ func (xRefTable *XRefTable) AppendPages(c context.Context, rootPageIndRef *types
  	pageCount := *rootPageCount + count
  	d["Count"] = types.Integer(pageCount)
  
@@ -3143,7 +3137,7 @@ index 127be78..339ddbc 100644
  	if err != nil {
  		return 0, err
  	}
-@@ -3644,7 +3724,10 @@ func (xRefTable *XRefTable) insertContent(pageDict types.Dict, bb []byte) error
+@@ -3662,7 +3742,10 @@ func (xRefTable *XRefTable) insertContent(pageDict types.Dict, bb []byte) error
  }
  
  func appendToContentStream(sd *types.StreamDict, bb []byte) error {
@@ -3155,7 +3149,7 @@ index 127be78..339ddbc 100644
  	if err == filter.ErrUnsupportedFilter {
  		if log.InfoEnabled() {
  			log.Info.Println("unsupported filter: unable to patch content with watermark.")
-@@ -3662,6 +3745,16 @@ func appendToContentStream(sd *types.StreamDict, bb []byte) error {
+@@ -3680,6 +3763,16 @@ func appendToContentStream(sd *types.StreamDict, bb []byte) error {
  
  // AppendContent appends bb to pageDict's content stream.
  func (xRefTable *XRefTable) AppendContent(pageDict types.Dict, bb []byte) error {
@@ -3172,7 +3166,7 @@ index 127be78..339ddbc 100644
  	obj, found := pageDict.Find("Contents")
  	if !found {
  		return xRefTable.insertContent(pageDict, bb)
-@@ -3681,7 +3774,7 @@ func (xRefTable *XRefTable) AppendContent(pageDict types.Dict, bb []byte) error
+@@ -3699,7 +3792,7 @@ func (xRefTable *XRefTable) AppendContent(pageDict types.Dict, bb []byte) error
  	switch o := obj.(type) {
  
  	case types.StreamDict:
@@ -3181,7 +3175,7 @@ index 127be78..339ddbc 100644
  			return err
  		}
  		entry.Object = o
-@@ -3694,7 +3787,7 @@ func (xRefTable *XRefTable) AppendContent(pageDict types.Dict, bb []byte) error
+@@ -3712,7 +3805,7 @@ func (xRefTable *XRefTable) AppendContent(pageDict types.Dict, bb []byte) error
  		genNr := indRef.GenerationNumber.Value()
  		entry, _ = xRefTable.FindTableEntry(objNr, genNr)
  		sd, _ := (entry.Object).(types.StreamDict)
@@ -3190,7 +3184,7 @@ index 127be78..339ddbc 100644
  			return err
  		}
  		entry.Object = sd
-@@ -3966,25 +4059,9 @@ func (xRefTable *XRefTable) BindViewerPreferences() {
+@@ -3984,25 +4077,9 @@ func (xRefTable *XRefTable) BindViewerPreferences() {
  
  // RectForArray returns a new rectangle for given Array.
  func (xRefTable *XRefTable) RectForArray(a types.Array) (*types.Rectangle, error) {
@@ -3221,10 +3215,10 @@ index 127be78..339ddbc 100644
 +	return rectWithContext(c, xRefTable, a)
  }
 diff --git a/pkg/pdfcpu/optimize.go b/pkg/pdfcpu/optimize.go
-index 035969a..b4e8c28 100644
+index aec6cff..1730af0 100644
 --- a/pkg/pdfcpu/optimize.go
 +++ b/pkg/pdfcpu/optimize.go
-@@ -1777,7 +1777,10 @@ func CacheFormFonts(ctx *model.Context) error {
+@@ -1786,7 +1786,10 @@ func CacheFormFonts(ctx *model.Context) error {
  }
  
  func optimizeResourceDicts(ctx *model.Context) error {
@@ -3236,7 +3230,7 @@ index 035969a..b4e8c28 100644
  		return err
  	}
  	// TODO Remove resource dicts from inner nodes.
-@@ -1854,7 +1857,7 @@ func OptimizeXRefTable(c context.Context, ctx *model.Context) error {
+@@ -1863,7 +1866,7 @@ func OptimizeXRefTable(c context.Context, ctx *model.Context) error {
  
  	if shouldOptimizeResourceDicts(ctx) {
  		// Extra step with potential for performance hit when processing large files.
@@ -3246,10 +3240,10 @@ index 035969a..b4e8c28 100644
  		}
  	}
 diff --git a/pkg/pdfcpu/read.go b/pkg/pdfcpu/read.go
-index 278eb84..872d32c 100644
+index 7227c96..5e6fbf7 100644
 --- a/pkg/pdfcpu/read.go
 +++ b/pkg/pdfcpu/read.go
-@@ -158,6 +158,12 @@ func ReadFile(c context.Context, inFile string, conf *model.Configuration) (*mod
+@@ -160,6 +160,12 @@ func ReadFile(c context.Context, inFile string, conf *model.Configuration) (*mod
  // an in-memory representation containing a cross reference table.
  // If the passed Go context is cancelled, reading will be interrupted.
  func Read(c context.Context, rs io.ReadSeeker, conf *model.Configuration) (*model.Context, error) {
@@ -3262,7 +3256,7 @@ index 278eb84..872d32c 100644
  	if err := contextutil.Check(c); err != nil {
  		return nil, err
  	}
-@@ -204,6 +210,18 @@ func Read(c context.Context, rs io.ReadSeeker, conf *model.Configuration) (*mode
+@@ -210,6 +216,18 @@ func Read(c context.Context, rs io.ReadSeeker, conf *model.Configuration) (*mode
  		ctx.XRefTable.Size = &maxObjNr
  	}
  
@@ -3281,7 +3275,7 @@ index 278eb84..872d32c 100644
  	if log.ReadEnabled() {
  		log.Read.Println("Read: end")
  	}
-@@ -537,13 +555,28 @@ func parseXRefTableSubSection(xRefTable *model.XRefTable, limits model.ResourceL
+@@ -543,17 +561,31 @@ func parseXRefTableSubSection(xRefTable *model.XRefTable, limits model.ResourceL
  	return line, nil
  }
  
@@ -3298,7 +3292,8 @@ index 278eb84..872d32c 100644
 +}
 +
  // Parse compressed object.
- func compressedObject(c context.Context, s string) (types.Object, error) {
+-func compressedObject(c context.Context, s string, validationMode int) (types.Object, error) {
++func compressedObject(c context.Context, s string) (types.Object, error) {
 +	return compressedObjectWithPolicy(c, nil, 0, s)
 +}
 +func compressedObjectWithPolicy(c context.Context, pdf *model.Context, objNr int, s string) (types.Object, error) {
@@ -3306,38 +3301,51 @@ index 278eb84..872d32c 100644
  		log.Read.Println("compressedObject: begin")
  	}
  
--	o, err := model.ParseObject(c, &s, 0)
+-	result, err := model.ParseObjectWithPolicy(c, &s, 0, validationMode)
 +	o, err := parseCompleteObject(c, pdf, &s, objNr)
  	if err != nil {
  		return nil, err
  	}
-@@ -571,6 +604,7 @@ func compressedObject(c context.Context, s string) (types.Object, error) {
+-	o := result.Object
  
- func buildObjectArrayForObjectStream(
- 	c context.Context,
+ 	d, ok := o.(types.Dict)
+ 	if !ok {
+@@ -576,7 +608,13 @@ func compressedObject(c context.Context, s string, validationMode int) (types.Ob
+ 	return nil, errObjectStreamContainsStream
+ }
+ 
+-func buildObjectArrayForObjectStream(c context.Context, osd *types.ObjectStreamDict, objs []string, fullContent bool, decodedContent []byte, decode types.DecodeLazyObjectStreamObjectFunc) (types.Array, error) {
++func buildObjectArrayForObjectStream(
++	c context.Context,
 +	pdf *model.Context,
- 	osd *types.ObjectStreamDict,
- 	objs []string,
- 	fullContent bool,
-@@ -601,12 +635,12 @@ func buildObjectArrayForObjectStream(
++	osd *types.ObjectStreamDict,
++	objs []string,
++	fullContent bool,
++	decodedContent []byte) (types.Array, error) {
+ 	var objArray types.Array
+ 	var offsetOld int
+ 
+@@ -603,12 +641,12 @@ func buildObjectArrayForObjectStream(c context.Context, osd *types.ObjectStreamD
  		}
  
  		if i > 0 {
--			o := types.NewLazyObjectStreamObject(osd, offsetOld, offset, compressedObject)
+-			o := types.NewLazyObjectStreamObject(osd, offsetOld, offset, decode)
 +			o := types.NewLazyObjectStreamObject(osd, offsetOld, offset, objectStreamDecoder(pdf, objs[i-2]))
  			objArray = append(objArray, o)
  		}
  
  		if i == len(objs)-2 {
--			o := types.NewLazyObjectStreamObject(osd, offset, -1, compressedObject)
+-			o := types.NewLazyObjectStreamObject(osd, offset, -1, decode)
 +			o := types.NewLazyObjectStreamObject(osd, offset, -1, objectStreamDecoder(pdf, objs[i]))
  			objArray = append(objArray, o)
  		}
  
-@@ -618,16 +652,30 @@ func buildObjectArrayForObjectStream(
+@@ -619,17 +657,31 @@ func buildObjectArrayForObjectStream(c context.Context, osd *types.ObjectStreamD
+ }
  
  // Parse all objects of an object stream and save them into objectStreamDict.ObjArray.
- func parseObjectStream(c context.Context, osd *types.ObjectStreamDict, limits model.ResourceLimits) error {
+-func parseObjectStream(c context.Context, osd *types.ObjectStreamDict, limits model.ResourceLimits, validationMode int) error {
++func parseObjectStream(c context.Context, osd *types.ObjectStreamDict, limits model.ResourceLimits) error {
 +	return parseObjectStreamWithPolicy(c, nil, osd, limits)
 +}
 +func parseObjectStreamWithPolicy(c context.Context, pdf *model.Context, osd *types.ObjectStreamDict, limits model.ResourceLimits) error {
@@ -3366,16 +3374,19 @@ index 278eb84..872d32c 100644
  		if err != nil {
  			return fmt.Errorf("decode object stream prolog: %w", err)
  		}
-@@ -670,7 +718,7 @@ func parseObjectStream(c context.Context, osd *types.ObjectStreamDict, limits mo
+@@ -672,10 +724,7 @@ func parseObjectStream(c context.Context, osd *types.ObjectStreamDict, limits mo
  
  	// e.g., 10 0 11 25 = 2 Objects: #10 @ offset 0, #11 @ offset 25
  
--	objArray, err := buildObjectArrayForObjectStream(c, osd, objs, fullContent, decodedContent)
+-	decode := func(c context.Context, s string) (types.Object, error) {
+-		return compressedObject(c, s, validationMode)
+-	}
+-	objArray, err := buildObjectArrayForObjectStream(c, osd, objs, fullContent, decodedContent, decode)
 +	objArray, err := buildObjectArrayForObjectStream(c, pdf, osd, objs, fullContent, decodedContent)
  	if err != nil {
  		return fmt.Errorf("build object stream object array: %w", err)
  	}
-@@ -729,11 +777,13 @@ func createXRefTableEntryFromXRefStream(entryType int64, objNr int, c2, c3, offE
+@@ -734,11 +783,13 @@ func createXRefTableEntryFromXRefStream(entryType int64, objNr int, c2, c3, offE
  		}
  		objNumberRef := int(c2)
  		objIndex := int(c3)
@@ -3389,7 +3400,7 @@ index 278eb84..872d32c 100644
  				ObjectStream:    &objNumberRef,
  				ObjectStreamInd: &objIndex,
  				Incr:            incr}
-@@ -892,7 +942,7 @@ func xRefStreamDict(c context.Context, ctx *model.Context, o types.Object, objNr
+@@ -906,7 +957,7 @@ func xRefStreamDict(c context.Context, ctx *model.Context, o types.Object, objNr
  	}
  
  	// Decode xrefstream content
@@ -3398,7 +3409,7 @@ index 278eb84..872d32c 100644
  		return nil, fmt.Errorf("xRefStreamDict: cannot decode stream for obj#:%d: %w", objNr, err)
  	}
  
-@@ -1684,6 +1734,10 @@ func parseAndLoad(c context.Context, ctx *model.Context, line string, offset *in
+@@ -1685,6 +1736,10 @@ func parseAndLoad(c context.Context, ctx *model.Context, line string, offset *in
  		return 0, nil
  	}
  
@@ -3409,7 +3420,7 @@ index 278eb84..872d32c 100644
  	off := *offset
  
  	obj, endInd, streamInd, streamOffset, err := object(c, ctx, off, *objNr, *generation)
-@@ -1750,7 +1804,7 @@ func isCatalogForRepair(c context.Context, ctx *model.Context, d types.Dict) (bo
+@@ -1751,7 +1806,7 @@ func isCatalogForRepair(c context.Context, ctx *model.Context, d types.Dict) (bo
  			return false, nil
  		}
  		if entry.Object == nil && entry.Offset != nil {
@@ -3418,7 +3429,7 @@ index 278eb84..872d32c 100644
  				if errors.Is(err, errNilDereferencedObject) {
  					return false, nil
  				}
-@@ -1761,7 +1815,7 @@ func isCatalogForRepair(c context.Context, ctx *model.Context, d types.Dict) (bo
+@@ -1762,7 +1817,7 @@ func isCatalogForRepair(c context.Context, ctx *model.Context, d types.Dict) (bo
  		return false, nil
  	}
  
@@ -3427,7 +3438,7 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return false, err
  	}
-@@ -1809,18 +1863,21 @@ func ensureNoStartXRef(line string, i int) bool {
+@@ -1810,18 +1865,21 @@ func ensureNoStartXRef(line string, i int) bool {
  	return i == 0 || i > 0 && line[i-1] != 't'
  }
  
@@ -3452,7 +3463,7 @@ index 278eb84..872d32c 100644
  }
  
  func registerXRefObjects(ctx *model.Context, incr int) error {
-@@ -1839,8 +1896,14 @@ func registerXRefObjects(ctx *model.Context, incr int) error {
+@@ -1838,8 +1896,14 @@ func registerXRefObjects(ctx *model.Context, incr int) error {
  		rawLine := s.Text()
  		line := types.TrimLeadingComment(rawLine)
  		checkEndObj(&withinObj, &line)
@@ -3469,7 +3480,7 @@ index 278eb84..872d32c 100644
  		}
  		offset += int64(len(rawLine) + 1)
  	}
-@@ -2472,7 +2535,7 @@ func filterNames(c context.Context, ctx *model.Context, filterArray types.Array)
+@@ -2477,7 +2541,7 @@ func filterNames(c context.Context, ctx *model.Context, filterArray types.Array)
  	for i, o := range filterArray {
  		if ir, ok := o.(types.IndirectRef); ok {
  			var err error
@@ -3478,7 +3489,7 @@ index 278eb84..872d32c 100644
  			if err != nil {
  				return nil, fmt.Errorf("filter pipeline entry %d obj#%d: %w", i, ir.ObjectNumber.Value(), err)
  			}
-@@ -2502,7 +2565,11 @@ func buildFilterPipeline(c context.Context, ctx *model.Context, filterNames []st
+@@ -2507,7 +2571,11 @@ func buildFilterPipeline(c context.Context, ctx *model.Context, filterNames []st
  			if !ok {
  				return nil, fmt.Errorf("filter pipeline DecodeParms entry %d: %w", i, errCorruptDecodeParms)
  			}
@@ -3491,7 +3502,7 @@ index 278eb84..872d32c 100644
  			if err != nil {
  				return nil, fmt.Errorf("filter pipeline DecodeParms entry %d: %w", i, err)
  			}
-@@ -2529,12 +2596,16 @@ func singleFilter(c context.Context, ctx *model.Context, filterName string, d ty
+@@ -2534,12 +2602,16 @@ func singleFilter(c context.Context, ctx *model.Context, filterName string, d ty
  	var err error
  
  	if indRef, ok := obj.(types.IndirectRef); ok {
@@ -3509,7 +3520,7 @@ index 278eb84..872d32c 100644
  	if d, ok := obj.(types.Dict); ok {
  		if len(d) == 0 {
  			d = nil
-@@ -2549,7 +2620,17 @@ func singleFilter(c context.Context, ctx *model.Context, filterName string, d ty
+@@ -2554,7 +2626,17 @@ func singleFilter(c context.Context, ctx *model.Context, filterName string, d ty
  		if len(arr) == 0 || arr[0] == nil {
  			return []types.PDFFilter{{Name: filterName}}, nil
  		}
@@ -3528,7 +3539,7 @@ index 278eb84..872d32c 100644
  		if !ok {
  			return nil, fmt.Errorf("single filter %s DecodeParms: %w", filterName, errCorruptDecodeParms)
  		}
-@@ -2590,11 +2671,15 @@ func pdfFilterPipeline(c context.Context, ctx *model.Context, dict types.Dict) (
+@@ -2596,11 +2678,15 @@ func pdfFilterPipeline(c context.Context, ctx *model.Context, dict types.Dict) (
  	var filterPipeline []types.PDFFilter
  
  	if indRef, ok := o.(types.IndirectRef); ok {
@@ -3545,13 +3556,11 @@ index 278eb84..872d32c 100644
  	//fmt.Printf("dereferenced filter obj: %s\n", obj)
  
  	if name, ok := o.(types.Name); ok {
-@@ -2617,13 +2702,17 @@ func pdfFilterPipeline(c context.Context, ctx *model.Context, dict types.Dict) (
- 	// Optional array of decode parameter dicts.
+@@ -2624,12 +2710,16 @@ func pdfFilterPipeline(c context.Context, ctx *model.Context, dict types.Dict) (
  	var decodeParmsArr types.Array
  	decodeParms, found := dict.Find("DecodeParms")
--	if found {
+ 	if found {
 -		if filterArraySupportsDecodeParms(ctx, names) {
-+	if found && filterArraySupportsDecodeParms(ctx, names) {
 +		if ref, indirect := decodeParms.(types.IndirectRef); indirect {
 +			decodeParms, err = dereferencedReference(c, ctx, ref)
 +			if err != nil {
@@ -3569,7 +3578,7 @@ index 278eb84..872d32c 100644
  			}
  		}
  	}
-@@ -2683,7 +2772,11 @@ func dict(c context.Context, ctx *model.Context, d1 types.Dict, objNr, genNr, en
+@@ -2687,7 +2777,11 @@ func dict(c context.Context, ctx *model.Context, d1 types.Dict, objNr, genNr, en
  }
  
  func parseObjectWithValidationPolicy(c context.Context, ctx *model.Context, line *string, objNr int) (types.Object, error) {
@@ -3582,8 +3591,8 @@ index 278eb84..872d32c 100644
  	if result.StrictFailure == nil {
  		return result.Object, err
  	}
-@@ -2702,6 +2795,46 @@ func parseObjectWithValidationPolicy(c context.Context, ctx *model.Context, line
- 	return result.Object, nil
+@@ -2775,6 +2869,46 @@ func bufferedObject(c context.Context, ctx *model.Context, rd io.Reader) ([]byte
+ 	return buf, endInd, streamInd, streamOffset, nil
  }
  
 +// parseCompleteObject adds a complete isolated-body boundary to the maintained prefix parser.
@@ -3629,7 +3638,7 @@ index 278eb84..872d32c 100644
  func object(c context.Context, ctx *model.Context, offset int64, objNr, genNr int) (o types.Object, endInd, streamInd int, streamOffset int64, err error) {
  	var rd io.Reader
  
-@@ -2781,7 +2914,7 @@ func object(c context.Context, ctx *model.Context, offset int64, objNr, genNr in
+@@ -2854,7 +2988,7 @@ func object(c context.Context, ctx *model.Context, offset int64, objNr, genNr in
  		return nil, endInd, streamInd, streamOffset, err
  	}
  
@@ -3638,7 +3647,7 @@ index 278eb84..872d32c 100644
  
  	return o, endInd, streamInd, streamOffset, err
  }
-@@ -2850,6 +2983,22 @@ func ParseObject(c context.Context, ctx *model.Context, offset int64, objNr, gen
+@@ -2917,6 +3051,22 @@ func ParseObject(c context.Context, ctx *model.Context, offset int64, objNr, gen
  	return resolveObject(c, ctx, obj, offset, objNr, genNr, endInd, streamInd, streamOffset)
  }
  
@@ -3661,7 +3670,7 @@ index 278eb84..872d32c 100644
  func dereferencedObject(c context.Context, ctx *model.Context, objNr int) (types.Object, error) {
  	entry, ok := ctx.Find(objNr)
  	if !ok {
-@@ -3177,6 +3326,15 @@ func ensureIndirectStreamLength(c context.Context, ctx *model.Context, sd *types
+@@ -3244,6 +3394,15 @@ func ensureIndirectStreamLength(c context.Context, ctx *model.Context, sd *types
  		return nil
  	}
  
@@ -3677,7 +3686,7 @@ index 278eb84..872d32c 100644
  	streamLength, err := int64Object(c, ctx, *sd.StreamLengthObjNr)
  	if err != nil && !errors.Is(err, ErrReferenceDoesNotExist) {
  		return err
-@@ -3228,7 +3386,7 @@ func loadEncodedStreamContent(c context.Context, ctx *model.Context, sd *types.S
+@@ -3295,7 +3454,7 @@ func loadEncodedStreamContent(c context.Context, ctx *model.Context, sd *types.S
  	return nil
  }
  
@@ -3686,7 +3695,7 @@ index 278eb84..872d32c 100644
  	if sd == nil {
  		return false, nil
  	}
-@@ -3237,7 +3395,7 @@ func metadataStream(ctx *model.Context, sd *types.StreamDict) (bool, error) {
+@@ -3304,7 +3463,7 @@ func metadataStream(ctx *model.Context, sd *types.StreamDict) (bool, error) {
  		return t != nil && *t == "Metadata", nil
  	}
  
@@ -3695,7 +3704,7 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return false, fmt.Errorf("metadata stream Type: %w", err)
  	}
-@@ -3259,20 +3417,33 @@ func repairablePlaintextMetadata(ctx *model.Context, metadata bool, err error) b
+@@ -3326,20 +3485,33 @@ func repairablePlaintextMetadata(ctx *model.Context, metadata bool, err error) b
  	return errors.Is(err, errAESCiphertextTooShort) || errors.Is(err, errAESCiphertextUnaligned)
  }
  
@@ -3735,9 +3744,9 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return err
  	}
-@@ -3282,7 +3453,15 @@ func decryptStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr
- 
- 	raw, err := decryptStream(sd.Raw, objNr, genNr, ctx.EncKey, ctx.AES4Streams, ctx.E.R)
+@@ -3356,7 +3528,15 @@ func decryptStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr
+ 	}
+ 	raw, err := decryptStream(sd.Raw, objNr, genNr, ctx.EncKey, aes, ctx.E.R)
  	if err != nil {
 -		if repairablePlaintextMetadata(ctx, metadata, err) && validPlaintextMetadata(ctx, sd) {
 +		valid := false
@@ -3752,7 +3761,7 @@ index 278eb84..872d32c 100644
  			model.ShowRepaired(fmt.Sprintf("plaintext metadata obj#%d", objNr))
  			return nil
  		}
-@@ -3294,11 +3473,15 @@ func decryptStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr
+@@ -3368,11 +3548,15 @@ func decryptStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, genNr
  }
  
  func isImageStreamDict(ctx *model.Context, sd *types.StreamDict) (bool, error) {
@@ -3769,7 +3778,7 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return false, fmt.Errorf("stream dict Type: %w", err)
  	}
-@@ -3306,7 +3489,7 @@ func isImageStreamDict(ctx *model.Context, sd *types.StreamDict) (bool, error) {
+@@ -3380,7 +3564,7 @@ func isImageStreamDict(ctx *model.Context, sd *types.StreamDict) (bool, error) {
  		return false, nil
  	}
  
@@ -3778,7 +3787,7 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return false, fmt.Errorf("stream dict Subtype: %w", err)
  	}
-@@ -3314,8 +3497,25 @@ func isImageStreamDict(ctx *model.Context, sd *types.StreamDict) (bool, error) {
+@@ -3388,21 +3572,37 @@ func isImageStreamDict(ctx *model.Context, sd *types.StreamDict) (bool, error) {
  	return subtype != nil && subtype.Value() == "Image", nil
  }
  
@@ -3805,15 +3814,6 @@ index 278eb84..872d32c 100644
  	if log.ReadEnabled() {
  		log.Read.Printf("saveDecodedStreamContent: begin decode=%t\n", decode)
  	}
-@@ -3323,20 +3523,18 @@ func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, g
- 	// If the "Identity" crypt filter is used we do not need to decrypt.
- 	if ctx != nil && ctx.EncKey != nil {
- 		if len(sd.FilterPipeline) == 1 && sd.FilterPipeline[0].Name == "Crypt" {
--			sd.Content = sd.Raw
--			return nil
-+			return publishRawStreamContent(c, sd, maxDecodeBytes)
- 		}
- 	}
  
  	// Special case: If the length of the encoded data is 0, we do not need to decode anything.
  	if len(sd.Raw) == 0 {
@@ -3829,7 +3829,7 @@ index 278eb84..872d32c 100644
  		return fmt.Errorf("decrypt stream content: %w", err)
  	}
  
-@@ -3344,7 +3542,7 @@ func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, g
+@@ -3416,7 +3616,7 @@ func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, g
  		return nil
  	}
  
@@ -3838,7 +3838,7 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return fmt.Errorf("classify image stream: %w", err)
  	}
-@@ -3353,7 +3551,7 @@ func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, g
+@@ -3425,7 +3625,7 @@ func saveDecodedStreamContent(ctx *model.Context, sd *types.StreamDict, objNr, g
  	}
  
  	// Actual decoding of stream data.
@@ -3847,16 +3847,16 @@ index 278eb84..872d32c 100644
  	if errors.Is(err, filter.ErrUnsupportedFilter) {
  		err = nil
  	}
-@@ -3463,7 +3661,7 @@ func decodeObjectStreamObjects(c context.Context, ctx *model.Context, sd *types.
+@@ -3535,7 +3735,7 @@ func decodeObjectStreamObjects(c context.Context, ctx *model.Context, sd *types.
  	}
  
  	// Parse all objects of this object stream and save them to ObjectStreamDict.ObjArray.
--	if err = parseObjectStream(c, osd, ctx.Configuration.Limits); err != nil {
+-	if err = parseObjectStream(c, osd, ctx.Configuration.Limits, ctx.XRefTable.ValidationMode); err != nil {
 +	if err = parseObjectStreamWithPolicy(c, ctx, osd, ctx.Configuration.Limits); err != nil {
  		return nil, fmt.Errorf("object stream obj#%d: parse objects: %w", objNr, err)
  	}
  
-@@ -3509,7 +3707,7 @@ func decodeObjectStream(c context.Context, ctx *model.Context, objNr int) error
+@@ -3582,7 +3782,7 @@ func decodeObjectStream(c context.Context, ctx *model.Context, objNr int) error
  	}
  
  	// Will only decrypt, the actual stream content is decoded later lazily.
@@ -3865,7 +3865,7 @@ index 278eb84..872d32c 100644
  		if log.ReadEnabled() {
  			log.Read.Printf("obj %d: %s", objNr, err)
  		}
-@@ -3546,7 +3744,7 @@ func materializeObjectStreamType(c context.Context, ctx *model.Context, o types.
+@@ -3619,7 +3819,7 @@ func materializeObjectStreamType(c context.Context, ctx *model.Context, o types.
  	if !target.Compressed && (target.Object != nil || target.Offset == nil) {
  		return nil
  	}
@@ -3874,7 +3874,7 @@ index 278eb84..872d32c 100644
  		err = fmt.Errorf("object stream obj#%d Type: entry=Type: %w", objNr, err)
  		return model.WithValidationErrorObject(err, ir.ObjectNumber.Value())
  	}
-@@ -3568,7 +3766,7 @@ func validateObjectStreamType(c context.Context, ctx *model.Context, objNr int)
+@@ -3641,7 +3841,7 @@ func validateObjectStreamType(c context.Context, ctx *model.Context, objNr int)
  		return err
  	}
  
@@ -3883,7 +3883,7 @@ index 278eb84..872d32c 100644
  	if err != nil {
  		return fmt.Errorf("object stream obj#%d Type: %w", objNr, err)
  	}
-@@ -3700,7 +3898,7 @@ func loadStreamDict(c context.Context, ctx *model.Context, sd *types.StreamDict,
+@@ -3773,7 +3973,7 @@ func loadStreamDict(c context.Context, ctx *model.Context, sd *types.StreamDict,
  	}
  
  	// Decode stream content.
@@ -3892,8 +3892,17 @@ index 278eb84..872d32c 100644
  		return fmt.Errorf("stream obj#%d: decode content: %w", objNr, err)
  	}
  
-@@ -4113,9 +4311,6 @@ func dereferenceXRefTable(c context.Context, ctx *model.Context) error {
- 	if err := identifyRootVersion(xRefTable); err != nil {
+@@ -3798,7 +3998,7 @@ func updateBinaryTotalSize(ctx *model.Context, o types.Object) {
+ }
+ 
+ func unrecoverableObjectReadError(err error) bool {
+-	return errors.Is(err, model.ErrCorruptObjectOffset) ||
++	return errors.Is(err, errCorruptDecodeParms) || errors.Is(err, errCorruptFilterArray) || errors.Is(err, model.ErrCorruptObjectOffset) ||
+ 		errors.Is(err, errUnregisteredObject) ||
+ 		errors.Is(err, errObjectReadBudget) ||
+ 		errors.Is(err, errCircularObjectReference)
+@@ -4188,9 +4388,6 @@ func dereferenceXRefTable(c context.Context, ctx *model.Context) error {
+ 	if err := validateInputVersion(c, ctx); err != nil {
  		return err
  	}
 -	if err := materializeDirectInfoDict(xRefTable); err != nil {
@@ -3902,7 +3911,7 @@ index 278eb84..872d32c 100644
  
  	if log.ReadEnabled() {
  		log.Read.Println("dereferenceXRefTable: end")
-@@ -4255,6 +4450,10 @@ func checkForEncryption(c context.Context, ctx *model.Context) error {
+@@ -4338,6 +4535,10 @@ func checkForEncryption(c context.Context, ctx *model.Context) error {
  
  	// Dereference encryptDict.
  	objNr := indRef.ObjectNumber.Value()
@@ -4045,19 +4054,19 @@ index 0000000..8e5981a
 +	}
 +}
 diff --git a/pkg/pdfcpu/read_test.go b/pkg/pdfcpu/read_test.go
-index 9ad6e12..ab2ee28 100644
+index 2164313..90c0c1f 100644
 --- a/pkg/pdfcpu/read_test.go
 +++ b/pkg/pdfcpu/read_test.go
-@@ -236,7 +236,7 @@ func TestProcessObjectSkipsBoundedMalformedObjectRelaxed(t *testing.T) {
- }
+@@ -241,7 +241,7 @@ func TestProcessObjectSkipsBoundedMalformedObjectRelaxed(t *testing.T) {
  
+ // TestProcessObjectRejectsBoundedMalformedObjectStrict checks that strict parsing returns the malformed-object error.
  func TestProcessObjectRejectsBoundedMalformedObjectStrict(t *testing.T) {
 -	input := "1 0 obj\n<</D[0/a0 obj\n<</E 1>>\nendobj\n"
 +	input := "1 0 obj\n<</D[0/a0\n<</E 1>>\nendobj\n"
  	conf := model.NewDefaultConfiguration()
  	conf.ValidationMode = model.ValidationStrict
  	ctx, err := model.NewContext(bytes.NewReader([]byte(input)), conf)
-@@ -251,6 +251,22 @@ func TestProcessObjectRejectsBoundedMalformedObjectStrict(t *testing.T) {
+@@ -256,6 +256,22 @@ func TestProcessObjectRejectsBoundedMalformedObjectStrict(t *testing.T) {
  	}
  }
  
@@ -4071,7 +4080,7 @@ index 9ad6e12..ab2ee28 100644
 +	}
 +
 +	var offset int64
-+	_, err = processObject(t.Context(), ctx, "1 0 obj", &offset, 1, nil)
++	_, _, err = processObject(t.Context(), ctx, "1 0 obj", &offset, 1, nil)
 +	if err == nil || !strings.Contains(err.Error(), "invalid or unrepresentable numeric object") {
 +		t.Fatalf("got %v, want malformed numeric token error", err)
 +	}
@@ -4080,7 +4089,43 @@ index 9ad6e12..ab2ee28 100644
  func TestDecodeSubsectionClassifiesCorruptEntryType(t *testing.T) {
  	_, _, _, err := decodeSubsection([]string{"0000000000", "65535", "x"})
  	if !errors.Is(err, errCorruptXRefSubsection) {
-@@ -877,21 +893,32 @@ func TestCheckForEncryptionRejectsIncompleteContext(t *testing.T) {
+@@ -694,7 +710,7 @@ func TestDecompressXRefTableEntryClassifiesObjectStreamErrors(t *testing.T) {
+ }
+ 
+ func TestCompressedObjectRejectsStreamObjects(t *testing.T) {
+-	_, err := compressedObject(t.Context(), "<< /Length 1 >>", model.ValidationRelaxed)
++	_, err := compressedObject(t.Context(), "<< /Length 1 >>")
+ 	if !errors.Is(err, errObjectStreamContainsStream) {
+ 		t.Fatalf("got %v, want %v", err, errObjectStreamContainsStream)
+ 	}
+@@ -706,7 +722,7 @@ func TestParseObjectStreamClassifiesCorruptDict(t *testing.T) {
+ 		FirstObjOffset: 1,
+ 	}
+ 
+-	err := parseObjectStream(t.Context(), osd, model.DefaultResourceLimits(), model.ValidationRelaxed)
++	err := parseObjectStream(t.Context(), osd, model.DefaultResourceLimits())
+ 	if !errors.Is(err, errCorruptObjectStreamDict) {
+ 		t.Fatalf("got %v, want %v", err, errCorruptObjectStreamDict)
+ 	}
+@@ -721,7 +737,7 @@ func TestParseObjectStreamClassifiesObjectCountLimit(t *testing.T) {
+ 	limits := model.DefaultResourceLimits()
+ 	limits.MaxObjectStreamCount = 1
+ 
+-	err := parseObjectStream(t.Context(), osd, limits, model.ValidationRelaxed)
++	err := parseObjectStream(t.Context(), osd, limits)
+ 	if !errors.Is(err, errObjectStreamObjectCountLimit) {
+ 		t.Fatalf("got %v, want %v", err, errObjectStreamObjectCountLimit)
+ 	}
+@@ -739,7 +755,7 @@ func TestParseObjectStreamRejectsFirstBeyondDecodeLimit(t *testing.T) {
+ 	}
+ 	limits := model.DefaultResourceLimits()
+ 	limits.MaxDecodeBytes = 3
+-	if err := parseObjectStream(t.Context(), osd, limits, model.ValidationRelaxed); !errors.Is(err, filter.ErrDecodeLimitExceeded) {
++	if err := parseObjectStream(t.Context(), osd, limits); !errors.Is(err, filter.ErrDecodeLimitExceeded) {
+ 		t.Fatalf("got %v, want %v", err, filter.ErrDecodeLimitExceeded)
+ 	}
+ }
+@@ -1050,21 +1066,32 @@ func TestCheckForEncryptionRejectsIncompleteContext(t *testing.T) {
  }
  
  func TestCheckForEncryptionWrapsEncryptionDictionaryError(t *testing.T) {
@@ -4560,7 +4605,7 @@ index 900efb7..2d09e19 100644
  	}
  }
 diff --git a/pkg/pdfcpu/types/streamdict.go b/pkg/pdfcpu/types/streamdict.go
-index 722c270..f87625a 100644
+index ad86c5b..1464fde 100644
 --- a/pkg/pdfcpu/types/streamdict.go
 +++ b/pkg/pdfcpu/types/streamdict.go
 @@ -22,6 +22,7 @@ import (
@@ -4611,7 +4656,7 @@ index 722c270..f87625a 100644
  		if l.decodedError != nil {
  			return nil, l.decodedError
  		}
-@@ -341,141 +354,166 @@ func preserveEncodedImageFilter(name string) bool {
+@@ -351,149 +364,170 @@ func preserveEncodedImageFilter(name string) bool {
  }
  
  func decodedContent(r io.Reader) ([]byte, error) {
@@ -4654,7 +4699,7 @@ index 722c270..f87625a 100644
 +	return buffer.Bytes(), nil
  }
  
- // Decode applies sd's filter pipeline to sd.Raw in order to produce sd.Content.
+ // Decode applies sd's non-crypt filters to sd.Raw in order to produce sd.Content.
  func (sd *StreamDict) Decode() error {
 -	_, err := sd.DecodeLengthWithLimit(-1, filter.DefaultMaxDecodeBytes)
 -	return err
@@ -4675,7 +4720,8 @@ index 722c270..f87625a 100644
 -	b = bytes.NewReader(sd.Raw)
 -
 -	// Apply each filter in the pipeline to result of preceding filter.
--	for idx, f := range sd.FilterPipeline {
+-	fpl := sd.nonCryptFilters()
+-	for idx, f := range fpl {
 +// DecodeWithContextAndLimit enforces actual full output length on cached, aliased, eager and lazy
 +// results while propagating cooperative decoding cancellation. The cap is not total memory usage.
 +func (sd *StreamDict) DecodeWithContextAndLimit(c context.Context, limit int64) error {
@@ -4684,14 +4730,15 @@ index 722c270..f87625a 100644
 +}
  
 -		if preserveEncodedImageFilter(f.Name) {
--			if idx != len(sd.FilterPipeline)-1 {
+-			if idx != len(fpl)-1 {
 -				return nil, fmt.Errorf("stream filter[%d] %q: decode: %w", idx, f.Name, filter.ErrUnsupportedFilter)
 -			}
 -			c = b
 -			break
 +func (sd *StreamDict) decodeLengthContext(ctx context.Context, maxLen, maxDecodeBytes int64) ([]byte, error) {
 +	var reader io.Reader = bytes.NewReader(sd.Raw)
-+	for index, stage := range sd.FilterPipeline {
++	pipeline := sd.nonCryptFilters()
++	for index, stage := range pipeline {
 +		if err := ctx.Err(); err != nil {
 +			return nil, err
  		}
@@ -4701,7 +4748,7 @@ index 722c270..f87625a 100644
 -				break
 +		opaque := preserveEncodedImageFilter(stage.Name) || stage.Name == filter.DCT && sd.CSComponents != 4
 +		if opaque {
-+			if index != len(sd.FilterPipeline)-1 {
++			if index != len(pipeline)-1 {
 +				return nil, fmt.Errorf("stream filter[%d] %q: decode: %w", index, stage.Name, filter.ErrUnsupportedFilter)
  			}
 -			// if sd.CSComponents == 4 {
@@ -4733,9 +4780,9 @@ index 722c270..f87625a 100644
 +			return nil, fmt.Errorf("stream filter[%d] %q: construct: %w", index, stage.Name, err)
  		}
 -
--		if maxLen >= 0 && idx == len(sd.FilterPipeline)-1 {
+-		if maxLen >= 0 && idx == len(fpl)-1 {
 -			c, err = fi.DecodeLength(b, maxLen)
-+		partial := maxLen >= 0 && index == len(sd.FilterPipeline)-1
++		partial := maxLen >= 0 && index == len(pipeline)-1
 +		if partial {
 +			reader, err = codec.DecodeLength(reader, maxLen)
  		} else {
@@ -4799,11 +4846,19 @@ index 722c270..f87625a 100644
 -// DecodeLengthWithLimit decodes sd with a maximum output length and resource limits.
 +// DecodeLengthWithLimit retains partial-prefix limit precedence; use the full method for a hard cap.
  func (sd *StreamDict) DecodeLengthWithLimit(maxLen, maxDecodeBytes int64) ([]byte, error) {
+-	limit := maxDecodeBytes
+-	if limit == 0 {
+-		limit = filter.DefaultMaxDecodeBytes
+-	}
+-	if maxLen >= 0 && limit >= 0 && maxLen > limit {
 +	return sd.DecodeLengthWithContextAndLimit(context.Background(), maxLen, maxDecodeBytes)
 +}
 +
 +// DecodeLengthWithContextAndLimit carries cancellation through partial decode and full decode.
 +func (sd *StreamDict) DecodeLengthWithContextAndLimit(ctx context.Context, maxLen, maxDecodeBytes int64) ([]byte, error) {
++	if maxLen >= 0 && filter.FullDecodeLimit(maxDecodeBytes) >= 0 && maxLen > filter.FullDecodeLimit(maxDecodeBytes) {
+ 		return nil, filter.ErrDecodeLimitExceeded
+ 	}
 +	if ctx == nil {
 +		ctx = context.Background()
 +	}
@@ -4827,12 +4882,12 @@ index 722c270..f87625a 100644
 +		return sd.Content[:maxLen], ctx.Err()
  	}
 -
--	fpl := sd.FilterPipeline
+-	fpl := sd.nonCryptFilters()
 -
 -	// No filter, sole DCT except CMYK, or terminal opaque image filters:
 -	// nothing to decode for consumers that can preserve the original image stream.
--	if fpl == nil || len(fpl) == 1 && ((fpl[0].Name == filter.DCT && sd.CSComponents != 4) || preserveEncodedImageFilter(fpl[0].Name)) {
-+	pipeline := sd.FilterPipeline
+-	if len(fpl) == 0 || len(fpl) == 1 && ((fpl[0].Name == filter.DCT && sd.CSComponents != 4) || preserveEncodedImageFilter(fpl[0].Name)) {
++	pipeline := sd.nonCryptFilters()
 +	if len(pipeline) == 0 || len(pipeline) == 1 && (pipeline[0].Name == filter.DCT && sd.CSComponents != 4 || preserveEncodedImageFilter(pipeline[0].Name)) {
 +		if maxLen < 0 && filter.FullDecodeLimit(maxDecodeBytes) >= 0 && int64(len(sd.Raw)) > filter.FullDecodeLimit(maxDecodeBytes) {
 +			return nil, filter.ErrDecodeLimitExceeded
@@ -5051,7 +5106,7 @@ index 0000000..a2ce701
 +	}
 +}
 diff --git a/pkg/pdfcpu/validate/metaData.go b/pkg/pdfcpu/validate/metaData.go
-index 7a60b01..3302c17 100644
+index 377ea30..2e893f4 100644
 --- a/pkg/pdfcpu/validate/metaData.go
 +++ b/pkg/pdfcpu/validate/metaData.go
 @@ -17,6 +17,7 @@ limitations under the License.
@@ -5062,7 +5117,7 @@ index 7a60b01..3302c17 100644
  	"encoding/xml"
  	"fmt"
  	"strings"
-@@ -84,7 +85,7 @@ func validateMetadata(xRefTable *model.XRefTable, d types.Dict, required bool, s
+@@ -86,7 +87,7 @@ func validateMetadata(xRefTable *model.XRefTable, d types.Dict, required bool, s
  	return err
  }
  
@@ -5071,7 +5126,7 @@ index 7a60b01..3302c17 100644
  	rootObjNr := validationRootObjectNumber(xRefTable)
  	metadataObjNr := validationEntryObjectNumber(rootObjNr, rootDict, "Metadata")
  	defer func() {
-@@ -104,7 +105,11 @@ func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required b
+@@ -106,7 +107,11 @@ func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required b
  	// }
  
  	// Decode streamDict for supported filters only.
@@ -5084,7 +5139,7 @@ index 7a60b01..3302c17 100644
  	if err == filter.ErrUnsupportedFilter {
  		return nil, nil
  	}
-@@ -112,9 +117,15 @@ func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required b
+@@ -114,9 +119,15 @@ func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required b
  		return nil, fmt.Errorf("decode catalog metadata: %w", err)
  	}
  
@@ -5100,7 +5155,7 @@ index 7a60b01..3302c17 100644
  		if xRefTable.ValidationMode == model.ValidationStrict {
  			return nil, fmt.Errorf("parse catalog metadata: %w", err)
  		}
-@@ -122,6 +133,9 @@ func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required b
+@@ -124,6 +135,9 @@ func catalogMetaData(xRefTable *model.XRefTable, rootDict types.Dict, required b
  		return nil, nil
  	}
  
@@ -5111,7 +5166,7 @@ index 7a60b01..3302c17 100644
  }
  
 diff --git a/pkg/pdfcpu/validate/page.go b/pkg/pdfcpu/validate/page.go
-index 5493a62..e9a4b84 100644
+index 47c2504..99e9d76 100644
 --- a/pkg/pdfcpu/validate/page.go
 +++ b/pkg/pdfcpu/validate/page.go
 @@ -126,19 +126,8 @@ func (t *resourceTraversal) validate(c context.Context, o types.Object) (hasReso
@@ -5191,7 +5246,7 @@ index 0000000..1c16eb5
 +	}
 +}
 diff --git a/pkg/pdfcpu/validate/xReftable.go b/pkg/pdfcpu/validate/xReftable.go
-index 6eb8ecf..0be6806 100644
+index 6e76b64..59204c5 100644
 --- a/pkg/pdfcpu/validate/xReftable.go
 +++ b/pkg/pdfcpu/validate/xReftable.go
 @@ -97,7 +97,7 @@ func validateXRefTable(c context.Context, ctx *model.Context) error {

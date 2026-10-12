@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -39,8 +40,8 @@ const (
 	// time of a plain coverage run, which does not include compiling the mutated package.
 	defaultTimeoutCoefficient = 25
 
-	// listFieldCount is the number of fields of a package listing line: import path, directory, files.
-	listFieldCount = 3
+	// listFieldCount is the number of fields of a package listing line: import path and files.
+	listFieldCount = 2
 )
 
 // runMutation runs gremlins over the runtime packages in a clean snapshot of the working tree and
@@ -205,13 +206,6 @@ func operatorFlags() []string {
 // mutationScope derives the runtime packages and their host-compiled source files in dir, and the
 // exclusion patterns for every other package of the module.
 func mutationScope(ctx context.Context, dir, module string, only []string) (scopeOfMutation, error) {
-	// The go command reports directories with symbolic links resolved (macOS temporary directories
-	// live behind one), so relative paths must be taken from the resolved directory.
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return scopeOfMutation{}, fmt.Errorf("resolve %s: %w", dir, err)
-	}
-
 	runtimeList, err := runtimePackages(ctx, dir, module)
 	if err != nil {
 		return scopeOfMutation{}, err
@@ -225,7 +219,7 @@ func mutationScope(ctx context.Context, dir, module string, only []string) (scop
 	listing, err := goCommand(
 		dir,
 		append(
-			[]string{goListVerb, "-f", `{{.ImportPath}}|{{.Dir}}|{{join .GoFiles ","}},{{join .CgoFiles ","}}`, allPackages},
+			[]string{goListVerb, "-f", `{{.ImportPath}}|{{join .GoFiles ","}},{{join .CgoFiles ","}}`, allPackages},
 			runtimeList...)...).output(ctx)
 	if err != nil {
 		return scopeOfMutation{}, fmt.Errorf("list packages: %w", err)
@@ -233,7 +227,7 @@ func mutationScope(ctx context.Context, dir, module string, only []string) (scop
 
 	scope := scopeOfMutation{packages: len(runtimeList), hostFiles: map[string]bool{}, excludes: []string{`_test\.go$`, `(^|/)testdata/`}}
 
-	err = scope.collectRuntimeListing(resolved, listing, runtimeSet, only)
+	err = scope.collectRuntimeListing(module, listing, runtimeSet, only)
 	if err != nil {
 		return scopeOfMutation{}, err
 	}
@@ -366,7 +360,7 @@ func executeMutation(
 	return mutationEvidence{discovery: discovery, campaign: campaign}, err
 }
 
-func (s *scopeOfMutation) collectRuntimeListing(resolved, listing string, runtimeSet map[string]bool, only []string) error {
+func (s *scopeOfMutation) collectRuntimeListing(module, listing string, runtimeSet map[string]bool, only []string) error {
 	selected := map[string]bool{}
 
 	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
@@ -375,16 +369,22 @@ func (s *scopeOfMutation) collectRuntimeListing(resolved, listing string, runtim
 			return fmt.Errorf("%w: invalid runtime discovery line %q", errGate, line)
 		}
 
-		relative, relErr := filepath.Rel(resolved, fields[1])
-		if relErr != nil {
-			return fmt.Errorf("package directory %s: %w", fields[1], relErr)
+		// Import paths identify repository packages independently of native directory
+		// aliases, including Windows short names and linked temporary directories.
+		relative := "."
+		if fields[0] != module {
+			var found bool
+			relative, found = strings.CutPrefix(fields[0], module+"/")
+			if !found || !fs.ValidPath(relative) {
+				return fmt.Errorf("%w: package %s is outside module %s", errGate, fields[0], module)
+			}
 		}
 
-		if runtimeSet[fields[0]] && (len(only) == 0 || slices.Contains(only, filepath.ToSlash(relative))) {
-			s.addRuntime(filepath.ToSlash(relative), fields[2])
-			selected[filepath.ToSlash(relative)] = true
+		if runtimeSet[fields[0]] && (len(only) == 0 || slices.Contains(only, relative)) {
+			s.addRuntime(relative, fields[1])
+			selected[relative] = true
 		} else {
-			s.addOther(filepath.ToSlash(relative))
+			s.addOther(relative)
 		}
 	}
 

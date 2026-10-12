@@ -5549,10 +5549,10 @@ index 0000000..7068198
 +}
 diff --git a/internal/execution/process_group_linux.go b/internal/execution/process_group_linux.go
 new file mode 100644
-index 0000000..7925bd9
+index 0000000..6fea887
 --- /dev/null
 +++ b/internal/execution/process_group_linux.go
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,125 @@
 +//go:build linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -5567,6 +5567,7 @@ index 0000000..7925bd9
 +	"path/filepath"
 +	"strconv"
 +	"strings"
++	"syscall"
 +	"time"
 +)
 +
@@ -5633,7 +5634,7 @@ index 0000000..7925bd9
 +			continue
 +		}
 +		content, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
-+		if os.IsNotExist(err) {
++		if processDisappeared(err) {
 +			continue
 +		}
 +		if err != nil {
@@ -5671,18 +5672,29 @@ index 0000000..7925bd9
 +	}
 +	return pid, group, fields[0][0], nil
 +}
++
++// procfs can report either ENOENT or ESRCH when a listed process exits before
++// its stat read. Other errors leave group termination unverified.
++func processDisappeared(err error) bool {
++	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
++}
 diff --git a/internal/execution/process_group_linux_test.go b/internal/execution/process_group_linux_test.go
 new file mode 100644
-index 0000000..b49275f
+index 0000000..05d4561
 --- /dev/null
 +++ b/internal/execution/process_group_linux_test.go
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,47 @@
 +//go:build linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
-+import "testing"
++import (
++	"errors"
++	"os"
++	"syscall"
++	"testing"
++)
 +
 +func TestLinuxProcessIdentityPreservesKernelStatFields(t *testing.T) {
 +	for _, fixture := range []struct {
@@ -5701,6 +5713,21 @@ index 0000000..b49275f
 +	for _, stat := range []string{"", "not-a-pid (worker) Z 0 123", "123 worker Z 0 123", "123 (worker) Z", "123 (worker) Z 0 unknown", "123 (worker) ZZ 0 123"} {
 +		if _, _, _, err := linuxProcessIdentity([]byte(stat)); err == nil {
 +			t.Fatalf("malformed process identity accepted: %q", stat)
++		}
++	}
++}
++
++func TestProcessDisappearanceRejectsUnknownInspectionFailures(t *testing.T) {
++	for _, fixture := range []struct {
++		err  error
++		gone bool
++	}{
++		{nil, false}, {syscall.ENOENT, true}, {syscall.ESRCH, true},
++		{syscall.EACCES, false}, {syscall.EIO, false}, {errors.New("unknown"), false},
++	} {
++		wrapped := &os.PathError{Op: "read", Path: "/proc/123/stat", Err: fixture.err}
++		if got := processDisappeared(wrapped); got != fixture.gone {
++			t.Fatalf("%v: got %t, want %t", fixture.err, got, fixture.gone)
 +		}
 +	}
 +}

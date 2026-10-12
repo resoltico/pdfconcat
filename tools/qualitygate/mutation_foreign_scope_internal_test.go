@@ -94,3 +94,18 @@ func TestMutationScopeCoversPhysicalSourcesOutsideCompiledRuntime(t *testing.T) 
 		}
 	}
 }
+
+func TestMutationListingUsesModulePackageIdentity(t *testing.T) {
+	const module = "example.org/product"
+	scope := scopeOfMutation{hostFiles: map[string]bool{}}
+	listing := module + "/internal/assembly|origin.go,\n" + module + "/tools/check|main.go,"
+	err := scope.collectRuntimeListing(module, listing, map[string]bool{module + "/internal/assembly": true}, nil)
+	if err != nil || !scope.hostFiles["internal/assembly/origin.go"] || scope.packages != 1 {
+		t.Fatalf("module-relative source inventory: %v, %v", scope, err)
+	}
+	for _, invalid := range []string{"example.org/product-other/internal/assembly|origin.go,", module + "/../outside|origin.go,"} {
+		if err := scope.collectRuntimeListing(module, invalid, nil, nil); err == nil {
+			t.Fatalf("accepted package outside module: %s", invalid)
+		}
+	}
+}

@@ -568,7 +568,7 @@ func TestFontPlumbingThatTheJobNeverExercises(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	set := capture.NewSet(workspace)
+	set := capture.NewSet(t.Context(), workspace)
 
 	captured, err := set.Capture(t.Context(), source)
 	if err != nil {

@@ -53,7 +53,7 @@ func TestFontFailureProvenanceHasProportionalVisits(t *testing.T) {
 				t.Fatal("scale fixture not admitted")
 			}
 			workspace := openScratch(t)
-			current := &pipeline{flat: flat, builder: report.NewBuilder("check"), workspace: workspace, registry: capture.NewRegistry(), captures: capture.NewSet(workspace)}
+			current := &pipeline{flat: flat, builder: report.NewBuilder("check"), workspace: workspace, registry: capture.NewRegistry(), captures: capture.NewSet(t.Context(), workspace)}
 			measured := &visitContext{Context: t.Context()}
 			if err := current.loadFonts(measured); err == nil {
 				t.Fatal("invalid font accepted")

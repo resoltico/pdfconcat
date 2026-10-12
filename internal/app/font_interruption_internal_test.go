@@ -24,7 +24,7 @@ func TestCanceledFontLoadingDoesNotFanOutDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspace := openScratch(t)
-	current := &pipeline{flat: flat, registry: capture.NewRegistry(), captures: capture.NewSet(workspace), workspace: workspace, builder: report.NewBuilder("check")}
+	current := &pipeline{flat: flat, registry: capture.NewRegistry(), captures: capture.NewSet(t.Context(), workspace), workspace: workspace, builder: report.NewBuilder("check")}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if loadingErr := current.loadFonts(ctx); loadingErr == nil {

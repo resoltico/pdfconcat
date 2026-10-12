@@ -64,7 +64,7 @@ func TestSetCopiesEachDistinctPathOnce(t *testing.T) {
 	t.Parallel()
 
 	workspace := newTestWorkspace(t)
-	set := NewSet(workspace)
+	set := NewSet(t.Context(), workspace)
 	source := filepath.Join(t.TempDir(), "in.pdf")
 	writeTestFile(t, source, []byte("shared"))
 
@@ -101,7 +101,7 @@ func TestSetCopiesEachDistinctPathOnce(t *testing.T) {
 func TestSetRemembersFailures(t *testing.T) {
 	t.Parallel()
 
-	set := NewSet(newTestWorkspace(t))
+	set := NewSet(t.Context(), newTestWorkspace(t))
 	missing := filepath.Join(t.TempDir(), missingPDFPath)
 
 	_, first := set.Capture(context.Background(), missing)
@@ -116,7 +116,7 @@ func TestSetWaiterStopsWhenItsContextEnds(t *testing.T) {
 	t.Parallel()
 
 	workspace := newTestWorkspace(t)
-	set := NewSet(workspace)
+	set := NewSet(t.Context(), workspace)
 	source := filepath.Join(t.TempDir(), "in.pdf")
 	writeTestFile(t, source, []byte(fixtureContent))
 
@@ -171,7 +171,7 @@ func TestSetCapturesManyDistinctFilesConcurrentlyWithBoundedScratchFiles(t *test
 	workspace := newTestWorkspace(t)
 	counter := &scratchCounter{}
 	workspace.openScratch = counter.openScratch
-	set := NewSet(workspace)
+	set := NewSet(t.Context(), workspace)
 	paths, digests := writeDistinctFiles(t, files)
 
 	jobs := make(chan int)

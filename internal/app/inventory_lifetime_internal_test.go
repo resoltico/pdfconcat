@@ -95,7 +95,7 @@ func TestBuiltinFontLoadsOnlyForAnActualDefaultFontAppearance(t *testing.T) {
 		workspace := openScratch(t)
 		current := &pipeline{
 			flat: flat, command: &cli.Command{Name: cli.NameCheck}, registry: capture.NewRegistry(),
-			workspace: workspace, captures: capture.NewSet(workspace), builder: report.NewBuilder(checkName),
+			workspace: workspace, captures: capture.NewSet(t.Context(), workspace), builder: report.NewBuilder(checkName),
 		}
 
 		if fontErr := current.loadFonts(t.Context()); fontErr != nil {

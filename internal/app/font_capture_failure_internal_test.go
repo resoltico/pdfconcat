@@ -26,7 +26,7 @@ func TestCanceledFontCaptureRetainsNoScratchBytes(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	current := &pipeline{registry: capture.NewRegistry(), captures: capture.NewSet(workspace), workspace: workspace}
+	current := &pipeline{registry: capture.NewRegistry(), captures: capture.NewSet(t.Context(), workspace), workspace: workspace}
 	font, err := current.loadFont(ctx, &assembly.FontFileUse{Path: source})
 
 	if font != nil || !errors.Is(err, context.Canceled) {
@@ -52,7 +52,7 @@ func TestInitiallyOversizedFontCreatesNoSnapshot(t *testing.T) {
 	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	current := &pipeline{registry: capture.NewRegistry(), captures: capture.NewSet(workspace), workspace: workspace}
+	current := &pipeline{registry: capture.NewRegistry(), captures: capture.NewSet(t.Context(), workspace), workspace: workspace}
 	_, err = current.loadFont(t.Context(), &assembly.FontFileUse{Path: source})
 	if !errors.Is(err, errFontTooLarge) {
 		t.Fatalf("wrong limit failure: %v", err)

@@ -182,7 +182,7 @@ func (p *pipeline) execute(ctx context.Context) error {
 
 // executeResources runs the stages that need the private workspace.
 func (p *pipeline) executeResources(ctx context.Context) error {
-	err := p.openWorkspace()
+	err := p.openWorkspace(ctx)
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func (p *pipeline) jobCount(sources int) int {
 
 // openWorkspace creates the private scratch directory: beside the destination for a build, so staging and
 // publication share a filesystem, and in the system temporary directory for a check.
-func (p *pipeline) openWorkspace() error {
+func (p *pipeline) openWorkspace(ctx context.Context) error {
 	var (
 		workspace *capture.Workspace
 		err       error
@@ -324,7 +324,7 @@ func (p *pipeline) openWorkspace() error {
 		return p.stop(stageOutput, err)
 	}
 
-	p.workspace, p.captures = workspace, capture.NewSet(workspace)
+	p.workspace, p.captures = workspace, capture.NewSet(ctx, workspace)
 
 	return nil
 }
@@ -332,6 +332,7 @@ func (p *pipeline) openWorkspace() error {
 // closeWorkspace removes every scratch file. A cleanup failure cannot change what was already published,
 // so it is a warning on standard error that names the directory to remove.
 func (p *pipeline) closeWorkspace() {
+	p.captures.Close()
 	err := p.workspace.Close()
 	if err != nil {
 		p.warnings = append(p.warnings, fmt.Sprintf("could not remove the scratch directory %s: %v", p.workspace.Dir(), err))

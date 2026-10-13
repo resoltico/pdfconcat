@@ -31,6 +31,9 @@ func (ctx *admissionCancellationContext) Err() error {
 }
 
 func TestProgressWindowsCancellationAfterAdmissionKeepsChannelHealthy(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, caller := progressPipe(t)
 	transport := progressNativeTransport(t, caller)
@@ -154,6 +157,9 @@ func TestProgressWindowsUnsupportedOwnerKeepsCallerFile(t *testing.T) {
 }
 
 func TestProgressWindowsAbandonedRecordNeverWritesCaller(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, caller := progressPipe(t)
 	aborted := make(chan struct{})
@@ -185,6 +191,9 @@ func TestProgressWindowsAbandonedRecordNeverWritesCaller(t *testing.T) {
 }
 
 func TestProgressWindowsFullNonblockingBytePipeReportsNoProgress(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	pair := newProgressNamedPair(t, windows.PIPE_TYPE_BYTE, 0)
 	client := pair.wrapClient(t)
@@ -248,6 +257,9 @@ func TestProgressWindowsFullNonblockingBytePipeReportsNoProgress(t *testing.T) {
 }
 
 func TestProgressWindowsCompletedNativeWriteSurvivesLateCancellation(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, caller := progressPipe(t)
 	transport := progressNativeTransport(t, caller)
@@ -282,6 +294,9 @@ func TestProgressWindowsCompletedNativeWriteSurvivesLateCancellation(t *testing.
 }
 
 func TestProgressWindowsCancellationPolicyKeepsActualNativeCauses(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	t.Parallel()
 	reader, caller := progressPipe(t)
 	transport := progressNativeTransport(t, caller)

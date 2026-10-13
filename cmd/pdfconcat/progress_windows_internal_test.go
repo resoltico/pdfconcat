@@ -18,6 +18,9 @@ import (
 
 // AllocConsole changes process console ownership, so this runs before parallel tests.
 func TestProgressUsesWindowsConsoleAndRejectsPipe(t *testing.T) {
+	if runProgressTransportChild(t, progressTransportChildBudget) {
+		return
+	}
 	console := progressConsole(t)
 
 	var mode uint32

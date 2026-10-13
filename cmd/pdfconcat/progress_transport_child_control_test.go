@@ -30,6 +30,13 @@ func TestProgressTransportChildCompletionContract(t *testing.T) {
 	for _, scenario := range []string{"success", "assertion", "false-completion", "false-failure", "cleanup-stall", "startup-stall", "held-stdio", "killed-held-stdio", "unknown-exit", "runtime-fatal"} {
 		t.Run(scenario, func(t *testing.T) {
 			state := filepath.Join(t.TempDir(), "state")
+			if scenario == "held-stdio" || scenario == "killed-held-stdio" {
+				t.Cleanup(func() {
+					if err := os.WriteFile(state+".release", nil, 0o600); err != nil {
+						t.Errorf("release stdio holder during cleanup: %v", err)
+					}
+				})
+			}
 			helperArguments, controlEnv := progressControlArgs(progressChildControlSelector, progressVerboseHelperArgument)
 			ctx, cancel := context.WithTimeout(t.Context(), progressTransportChildBudget+4*time.Second)
 			defer cancel()
@@ -82,6 +89,7 @@ func TestProgressTransportChildCompletionContract(t *testing.T) {
 					if !bytes.Contains(output, []byte("native child capture did not reach EOF")) {
 						t.Fatal("inherited stdio reached no independently verified EOF")
 					}
+					requireProgressNoError(t, os.WriteFile(state+".release", nil, 0o600))
 					deadline := time.Now().Add(3 * time.Second)
 					for {
 						data, err := os.ReadFile(state)
@@ -110,7 +118,20 @@ func TestProgressTransportChildControlFixture(t *testing.T) {
 		if scenario == "killed-held-stdio" {
 			duration = progressTransportChildBudget + 2*time.Second
 		}
-		time.Sleep(duration)
+		state := os.Getenv(progressChildState)
+		requireProgressNoError(t, os.WriteFile(state+".ready", nil, 0o600))
+		deadline := time.Now().Add(duration)
+		for {
+			if _, err := os.Stat(state + ".release"); err == nil {
+				break
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("stdio holder release did not arrive within its existing bound")
+			}
+			time.Sleep(time.Millisecond)
+		}
 		requireProgressNoError(t, os.WriteFile(os.Getenv(progressChildState), []byte("stdio holder completed"), 0o600))
 		return
 	}
@@ -161,6 +182,18 @@ func TestProgressTransportChildControlFixture(t *testing.T) {
 		holder.Env = append(os.Environ(), progressChildHolder+"=1")
 		holder.Stdout, holder.Stderr = os.Stdout, os.Stderr
 		requireProgressNoError(t, holder.Start())
+		deadline := time.Now().Add(progressTransportChildBudget)
+		for {
+			if _, err := os.Stat(state + ".ready"); err == nil {
+				break
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("stdio holder did not become ready")
+			}
+			time.Sleep(time.Millisecond)
+		}
 		if scenario == "killed-held-stdio" {
 			for {
 				time.Sleep(time.Hour)

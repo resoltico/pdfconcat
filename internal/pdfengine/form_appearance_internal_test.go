@@ -13,12 +13,12 @@ import (
 )
 
 func TestDefaultAppearanceRewritesOnlyParsedResourceOperands(t *testing.T) {
-	t.Parallel()
-
 	resources := map[string]types.Dict{keyFont: {"F1": types.Name(keyFont)}, keyExtGState: {"GS": types.Name("graphics")}}
 	text := "% /F1 remains a comment\n/F#31 20 Tf 0.2 0.3 0.4 rg /GS gs 2 Tc"
 
-	appearance, err := parseFormAppearance(t.Context(), text, resources)
+	// Bound parser progress independently of operand consumption. Run before parallel
+	// fixtures so a stalled parser fails before those fixtures allocate more operands.
+	appearance, err := parseFormAppearance(CheckpointContext(t.Context(), t, 4096), text, resources)
 	if err != nil {
 		t.Fatal(err)
 	}

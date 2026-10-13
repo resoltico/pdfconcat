@@ -26,9 +26,10 @@ func TestPhysicalAliasesShareOneConcurrentCapture(t *testing.T) {
 	}
 	var copies atomic.Int64
 	workspace.openScratch = func(path string) (io.WriteCloser, error) { copies.Add(1); return openExclusiveScratch(path) }
-	set := NewSet(t.Context(), workspace)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
+	set := NewSet(ctx, workspace)
+	defer set.Close()
 	var group sync.WaitGroup
 	for index := range 40 {
 		group.Go(func() {
@@ -70,7 +71,9 @@ func TestBoundedCaptureBoundaryAndOverflow(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			captured, err := NewSet(t.Context(), workspace).CaptureLimited(ctx, source, limit)
+			set := NewSet(ctx, workspace)
+			defer set.Close()
+			captured, err := set.CaptureLimited(ctx, source, limit)
 			if size == limit {
 				if err != nil || captured.Size != limit {
 					t.Fatalf("boundary: %+v %v", captured, err)
@@ -131,7 +134,9 @@ func TestGrowingCaptureNeverWritesBeyondLimit(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	captured, err := NewSet(t.Context(), workspace).CaptureLimited(ctx, source, copyChunkSize)
+	set := NewSet(ctx, workspace)
+	defer set.Close()
+	captured, err := set.CaptureLimited(ctx, source, copyChunkSize)
 	var failure *LimitError
 	entries := scratchEntries(t, workspace)
 	if !errors.As(err, &failure) || maximum > copyChunkSize || captured.Path != "" || entries != 0 {

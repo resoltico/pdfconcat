@@ -86,6 +86,8 @@ func TestFitUsedGroupScalarContractAndNativeFailureIdentity(t *testing.T) {
 		{object: types.Dict{"S": types.Name(guardInvalidName)}, reject: true},
 		{object: types.Dict{"S": types.Name(fitTransparency), "I": types.Integer(1)}, reject: true},
 		{object: types.Dict{"S": types.Name(fitTransparency), "K": types.Integer(1)}, reject: true},
+		{object: types.Dict{"S": types.Name(fitTransparency), "I": nil, "K": types.Boolean(false)}},
+		{object: types.Dict{"S": types.Name(fitTransparency), "I": nil, "K": types.Integer(1)}, reject: true},
 	}
 	for n, test := range cases {
 		t.Run(strconv.Itoa(n), func(t *testing.T) {

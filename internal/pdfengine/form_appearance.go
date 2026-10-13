@@ -56,7 +56,7 @@ func parseFormAppearance(ctx context.Context, text string, resources map[string]
 
 		remaining = appearanceSpace(remaining)
 		if remaining == "" {
-			break
+			break // Let the trailing-operand check run below.
 		}
 
 		start := len(text) - len(remaining)

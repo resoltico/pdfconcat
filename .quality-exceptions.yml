@@ -291,3 +291,57 @@ exceptions:
       column: 16
       statuses: [lived]
       retained_property: accepted generated PDFs retain byte-identical ordered references and the same native output write chunks at the equality boundary
+    # parseAppearanceNumber first admits only signed decimal digits with at most one dot;
+    # NaN, Inf, exponents and malformed decimal syntax cannot reach ParseFloat. For these
+    # inputs ParseFloat is finite with nil error, or returns +/-Inf with ErrRange on overflow.
+    # Thus the two refusal predicates always agree and || versus && has the same result.
+    # TestDefaultAppearanceNumberSyntaxAndFiniteOperands covers the admitted grammar, finite
+    # values, nonfinite operands and overflowing decimal text. Keep both refusal checks.
+    - id: mutation-appearance-real-range-error-conjunction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_appearance.go
+      operator: INVERT_LOGICAL
+      anchor: 'if err != nil || !finiteAppearanceNumber(number) {'
+      column: 17
+      statuses: [lived]
+      retained_property: admitted PDF decimal syntax yields finite values or an explicit overflow refusal without nonfinite drawing operands
+    # appearanceArity returns -1 for unsupported operators, or 1, 3 or 4 for numeric
+    # state operators; Tf and gs are handled before this helper. There is no zero-arity
+    # case, so <0 and <=0 reject exactly the same reachable results. Supported numeric
+    # operators and unsupported operators with zero/one operands remain tested.
+    - id: mutation-appearance-unsupported-operator-zero-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_appearance.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if arity < 0 {'
+      column: 11
+      statuses: [lived]
+      retained_property: unsupported numeric state operators are refused and all supported positive operand counts remain enforced
+    # appearanceSpace returns an empty string only after consuming the remaining whitespace
+    # or terminal comment. This break occurs with remaining empty, so continue immediately
+    # exits the outer remaining != "" loop without another body or context check. Both paths
+    # still reach the trailing-operand refusal; returning success here would not be equivalent.
+    - id: mutation-appearance-terminal-space-loop-control
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_appearance.go
+      operator: INVERT_LOOPCTRL
+      anchor: 'break // Let the trailing-operand check run below.'
+      column: 4
+      statuses: [lived]
+      retained_property: terminal whitespace ends scanning and unused trailing operands remain refused before an appearance is accepted
+    # This newline search runs only while text[0] is the percent comment introducer.
+    # A CR/LF can therefore occur only at index >=1, or be absent at -1. The additional
+    # equality case in <0 to <=0 is unreachable; terminal comments and newline-delimited
+    # comments retain the same source bytes and following numeric/operator interpretation.
+    - id: mutation-appearance-comment-newline-zero-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_appearance.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if index < 0 {'
+      column: 13
+      statuses: [lived]
+      retained_property: comment introducers precede any terminating newline and remaining source operands retain their original interpretation

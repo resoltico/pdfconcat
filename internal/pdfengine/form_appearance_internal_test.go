@@ -6,6 +6,7 @@ package pdfengine
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -28,6 +29,50 @@ func TestDefaultAppearanceRewritesOnlyParsedResourceOperands(t *testing.T) {
 	want := "% /F1 remains a comment\n/Form2_Font1 20 Tf 0.2 0.3 0.4 rg /Form2_ExtGState1 gs 2 Tc"
 	if got != want || !appearance.hasFont {
 		t.Fatalf("rewritten appearance %q", got)
+	}
+}
+
+func TestDefaultAppearanceNumberSyntaxAndFiniteOperands(t *testing.T) {
+	t.Parallel()
+	for _, valid := range []string{"0", "9", "-0", "+9", ".125", "9.", "-3.125"} {
+		if !validAppearanceNumber(valid) {
+			t.Errorf("valid PDF number rejected: %q", valid)
+		}
+	}
+	for _, invalid := range []string{"", ".", "+", "-", "+.", "-.", "/", ":", "1e2", "1.2.3", "NaN", "Inf", "0x1p2"} {
+		if validAppearanceNumber(invalid) {
+			t.Errorf("invalid PDF number accepted: %q", invalid)
+		}
+	}
+	for _, value := range []float64{0, -1, .125, math.MaxFloat64} {
+		if !appearanceNumber(types.Float(value)) {
+			t.Errorf("finite operand rejected: %v", value)
+		}
+	}
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if appearanceNumber(types.Float(value)) {
+			t.Errorf("nonfinite operand accepted: %v", value)
+		}
+	}
+	for _, operands := range [][]appearanceOperand{nil, {{object: types.Integer(1)}}} {
+		if err := checkAppearanceNumbers("unknown", operands); !errors.Is(err, errFormState) {
+			t.Fatalf("unsupported operator accepted: %v", err)
+		}
+	}
+	if _, err := parseAppearanceNumber(strings.Repeat("9", 400) + ".0"); !errors.Is(err, errFormState) {
+		t.Fatalf("overflowing PDF real accepted: %v", err)
+	}
+}
+
+func TestDefaultAppearanceSizingPreservesFractionAndOtherOperators(t *testing.T) {
+	t.Parallel()
+	text := "/F#31 12 Tf .125 g 3 Tc"
+	appearance, err := parseFormAppearance(t.Context(), text, map[string]types.Dict{keyFont: {"F1": types.Name(keyFont)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := appearance.sized(3.125); got != "/F#31 3.125 Tf .125 g 3 Tc" {
+		t.Fatalf("sizing changed fraction or source state: %q", got)
 	}
 }
 

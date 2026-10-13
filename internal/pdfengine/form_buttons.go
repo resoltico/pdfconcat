@@ -94,7 +94,7 @@ func (p *buttonAppearancePlan) readGeometry(ctx context.Context, pdf *model.Cont
 	}
 
 	p.width, p.height = values[2]-values[0], values[3]-values[1]
-	if !finiteAppearanceNumber(p.width) || !finiteAppearanceNumber(p.height) || p.width <= 0 || p.width != p.height {
+	if !finiteAppearanceNumber(p.width) || p.width <= 0 || p.width != p.height {
 		return fmt.Errorf("%w: regenerated buttons require a positive square rectangle", errFormState)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
@@ -165,13 +166,13 @@ func (i *fitInspector) quadPoints(ctx context.Context, array types.Array, rect [
 		return nil, fmt.Errorf(fitQuadFailureFormat, err)
 	}
 
-	for index := 0; index < len(values); index += 2 {
-		x, y := values[index], values[index+1]
+	for point := range slices.Chunk(values, 2) {
+		x, y := point[0], point[1]
 		if x < rect[0] || x > rect[2] || y < rect[1] || y > rect[3] {
 			return nil, fmt.Errorf("%w: Link /QuadPoints lies outside /Rect", errFitUnsupported)
 		}
 
-		values[index], values[index+1] = matrix.Point(x, y)
+		point[0], point[1] = matrix.Point(x, y)
 	}
 
 	for _, value := range values {
@@ -180,8 +181,8 @@ func (i *fitInspector) quadPoints(ctx context.Context, array types.Array, rect [
 		}
 	}
 
-	for index := 0; index < len(values); index += fitQuadEntries {
-		if !convexFitQuad(values[index : index+fitQuadEntries]) {
+	for quad := range slices.Chunk(values, fitQuadEntries) {
+		if !convexFitQuad(quad) {
 			return nil, fmt.Errorf("%w: Link /QuadPoints is degenerate, crossed or unrepresentable", errFitUnsupported)
 		}
 	}

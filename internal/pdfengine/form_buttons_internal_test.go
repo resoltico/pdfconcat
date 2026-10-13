@@ -318,7 +318,7 @@ func TestButtonInheritanceBoundsAndCancellation(t *testing.T) {
 	dict := types.Dict{}
 
 	dict[keyParent] = signatureTestObject(pdf, dict)
-	if _, err := buttonInherited(t.Context(), pdf, dict, "Ff"); !errors.Is(err, errFormState) {
+	if _, err := buttonInherited(CheckpointContext(t.Context(), t, 4096), pdf, dict, "Ff"); !errors.Is(err, errFormState) || errors.Is(err, context.Canceled) {
 		t.Fatalf("cyclic inheritance accepted: %v", err)
 	}
 

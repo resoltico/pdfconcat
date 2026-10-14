@@ -4,6 +4,10 @@
 package pdfengine
 
 import (
+	"context"
+	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -91,7 +95,26 @@ func checkInlineColorBoundary(t *testing.T, test fitInlineColorCase) {
 }
 
 func TestFitInlineColorAliasAndDefaultReplacementCyclesAreBounded(t *testing.T) {
-	t.Parallel()
+	// Check depth progression on finite inputs before launching genuinely cyclic
+	// children, so a broken transition is an ordinary refusal assertion failure.
+	for _, aliases := range []int{fitProgramDepthLimit - 2, fitProgramDepthLimit - 1} {
+		spaces := types.Dict{fitDefaultRGB: types.Name("Depth0")}
+		for index := range aliases {
+			var target types.Object = types.Array{types.Name(fitCalRGB), types.Dict{"WhitePoint": types.NewIntegerArray(1, 1, 1)}}
+			if index+1 < aliases {
+				target = types.Name("Depth" + strconv.Itoa(index+1))
+			}
+			spaces["Depth"+strconv.Itoa(index)] = target
+		}
+		count, err := newFitProgramInspector(guardContext(t)).colorComponents(t.Context(), types.Dict{fitColorSpace: spaces}, types.Name(fitDeviceRGB), 0)
+		if aliases == fitProgramDepthLimit-2 {
+			if err != nil || count != 3 {
+				t.Fatalf("last permitted inline color depth: count=%d, %v", count, err)
+			}
+		} else if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), "depth limit") {
+			t.Fatalf("first excess inline color depth accepted or misclassified: %v", err)
+		}
+	}
 
 	for _, replacement := range []string{guardColorAlias, fitDeviceRGB} {
 		t.Run(replacement, func(t *testing.T) {
@@ -102,8 +125,9 @@ func TestFitInlineColorAliasAndDefaultReplacementCyclesAreBounded(t *testing.T) 
 			scope := types.Dict{fitColorSpace: spaces}
 
 			content := "BI /W 1 /H 1 /BPC 8 /CS /" + replacement + " ID abc EI"
-			if err := guardInspect(t, newFitProgramInspector(pdf), content, scope); err == nil {
-				t.Fatal("active color-space cycle accepted")
+			ctx := CheckpointContext(t.Context(), t, 4096)
+			if err := guardInspectContext(ctx, t, newFitProgramInspector(pdf), content, scope); !errors.Is(err, errFitUnsupported) || errors.Is(err, context.Canceled) {
+				t.Fatalf("active color-space cycle lost its policy refusal: %v", err)
 			}
 		})
 	}

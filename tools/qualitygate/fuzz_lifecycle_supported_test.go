@@ -36,7 +36,7 @@ func TestFuzzTargetRequiresActualPassingLifecycle(t *testing.T) {
 
 			dir := fuzzLifecycleFixture(t)
 
-			err := runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: name}, "1x")
+			err := runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: name}, "1x", nil)
 			if (err == nil) != (name == "FuzzPresent") {
 				t.Fatalf("target %s: %v", name, err)
 			}
@@ -94,8 +94,22 @@ func FuzzHang(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T,n int) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
+	storage, err := newFuzzStorage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := storage.close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+	// The fixture is already compiled above; this control isolates worker scratch
+	// cleanup from the separate real-Go private compiler-cache control.
+	environment := []string{"GOTMPDIR=" + filepath.Join(storage.path, "tmp"), "TMPDIR=" + filepath.Join(storage.path, "tmp")}
 	done := make(chan error, 1)
-	go func() { done <- runFuzzTarget(ctx, dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzHang"}, "1x") }()
+	go func() {
+		done <- runFuzzTarget(ctx, dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzHang"}, "1x", environment)
+	}()
 
 	pid := awaitFuzzWorker(t, dir, "worker.pid", done)
 	descendant := awaitFuzzWorker(t, dir, "descendant.pid", done)
@@ -113,6 +127,12 @@ func FuzzHang(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T,n int) {
 
 	requireFuzzWorkerExited(t, pid)
 	requireFuzzWorkerExited(t, descendant)
+	if err := storage.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(storage.path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled fuzz scratch remained: %v", err)
+	}
 }
 
 func awaitFuzzWorker(t *testing.T, dir, name string, done <-chan error) int {

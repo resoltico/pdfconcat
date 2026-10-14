@@ -481,3 +481,58 @@ func TestFitActualEscapedNULNamesRemainRefusedAtEveryRawBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestFitShadingPatternPreservesAppliedGraphicsStateRefusal(t *testing.T) {
+	t.Parallel()
+	for _, invalid := range []bool{false, true} {
+		pdf := guardContext(t)
+		graphics := types.Dict{}
+		if invalid {
+			graphics["SMask"] = types.Name(guardInvalidName)
+		}
+		pattern := types.Dict{"PatternType": types.Integer(2), "Shading": types.Dict{fitColorSpace: types.Name(fitDeviceRGB)}, keyExtGState: graphics}
+		scope := types.Dict{fitPattern: types.Dict{"P": pattern}}
+		err := guardInspect(t, newFitProgramInspector(pdf), guardPaintPattern, scope)
+		if (err != nil) != invalid || invalid && !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("shading pattern invalid=%v: %v", invalid, err)
+		}
+	}
+}
+
+func TestFitInlineColorComponentCountsAndDeviceNLimit(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{0, 1, 2, 3, 4, 5} {
+		inspector := newFitProgramInspector(guardContext(t))
+		array := types.Array{types.Name(fitICCBased), types.StreamDict{Dict: types.Dict{"N": types.Integer(count)}}}
+		got, err := inspector.iccPaintComponents(t.Context(), array)
+		valid := count == 1 || count == 3 || count == 4
+		if (err == nil) != valid || valid && got != count {
+			t.Fatalf("ICC N=%d: components=%d error=%v", count, got, err)
+		}
+	}
+	for _, count := range []int{0, 1, 32, 33} {
+		names := make(types.Array, count)
+		for n := range names {
+			names[n] = types.Name("Ink" + strconv.Itoa(n))
+		}
+		got, err := newFitProgramInspector(guardContext(t)).deviceNComponents(t.Context(), types.Array{types.Name(fitDeviceN), names})
+		valid := count > 0 && count <= 32
+		if (err == nil) != valid || valid && got != count {
+			t.Fatalf("DeviceN count=%d: components=%d error=%v", count, got, err)
+		}
+	}
+}
+
+func TestFitUsedFunctionArrayDepthCountsEveryEdge(t *testing.T) {
+	t.Parallel()
+	for _, depth := range []int{fitProgramDepthLimit - 1, fitProgramDepthLimit} {
+		var object types.Object = types.Integer(1)
+		for range depth {
+			object = types.Array{object}
+		}
+		err := newFitProgramInspector(guardContext(t)).boundedResource(t.Context(), object, 0, map[string]bool{})
+		if (err != nil) != (depth == fitProgramDepthLimit) || err != nil && !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("function depth=%d: %v", depth, err)
+		}
+	}
+}

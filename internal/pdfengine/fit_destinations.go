@@ -39,17 +39,7 @@ func (i *fitInspector) catalog(ctx context.Context) error {
 	}
 
 	keys := slices.Collect(maps.Keys(i.destinations))
-	slices.SortFunc(keys, func(a, b fitDestinationKey) int {
-		if a.legacy != b.legacy {
-			if a.legacy {
-				return -1
-			}
-
-			return 1
-		}
-
-		return cmp.Compare(a.name, b.name)
-	})
+	slices.SortFunc(keys, compareFitDestinationKeys)
 
 	for _, key := range keys {
 		if err = i.destination(ctx, i.destinations[key], newFitGraphWalk(), 0); err != nil {
@@ -58,6 +48,16 @@ func (i *fitInspector) catalog(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func compareFitDestinationKeys(a, b fitDestinationKey) int {
+	if a.legacy != b.legacy {
+		if a.legacy {
+			return -1
+		}
+		return 1
+	}
+	return cmp.Compare(a.name, b.name)
 }
 
 func (i *fitInspector) editableForm(ctx context.Context) error {

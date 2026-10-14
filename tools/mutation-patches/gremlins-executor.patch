@@ -1305,7 +1305,7 @@ index 714271e..bcf9ffa 100644
  	}
  	for _, tc := range testCases {
 diff --git a/internal/engine/executor.go b/internal/engine/executor.go
-index 3fb5ee4..fdf64f6 100644
+index 3fb5ee4..ff5c6e8 100644
 --- a/internal/engine/executor.go
 +++ b/internal/engine/executor.go
 @@ -18,7 +18,6 @@ package engine
@@ -1324,7 +1324,7 @@ index 3fb5ee4..fdf64f6 100644
  	"github.com/go-gremlins/gremlins/internal/gomodule"
  	"github.com/go-gremlins/gremlins/internal/log"
  	"github.com/go-gremlins/gremlins/internal/mutator"
-@@ -58,6 +58,11 @@ type MutantExecutorDealer struct {
+@@ -58,6 +58,12 @@ type MutantExecutorDealer struct {
  	buildTags         string
  	testExecutionTime time.Duration
  	dryRun            bool
@@ -1332,13 +1332,16 @@ index 3fb5ee4..fdf64f6 100644
 +	executionLogDir   string
 +	expectedTests     execution.TestCensus
 +	ctx               context.Context
++	outputBudget      *execution.OutputBudget
 +	cache             *execution.GoCache
  	integrationMode   bool
  	testCPU           int
  }
-@@ -93,9 +98,12 @@ func NewExecutorDealer(mod gomodule.GoModule, wdd workdir.Dealer, elapsed time.D
+@@ -92,10 +98,14 @@ func NewExecutorDealer(mod gomodule.GoModule, wdd workdir.Dealer, elapsed time.D
+ 	}
  
  	jd := MutantExecutorDealer{
++		outputBudget:      execution.NewOutputBudget(execution.CampaignOutputLimit),
  		mod:               mod,
 +		ctx:               context.Background(),
  		wdDealer:          wdd,
@@ -1349,7 +1352,14 @@ index 3fb5ee4..fdf64f6 100644
  		integrationMode:   integrationMode,
  		testCPU:           testCPU,
  		testExecutionTime: elapsed * time.Duration(coefficient),
-@@ -121,6 +129,10 @@ func (m MutantExecutorDealer) NewExecutor(mut mutator.Mutator, outCh chan<- muta
+@@ -115,12 +125,17 @@ func NewExecutorDealer(mod gomodule.GoModule, wdd workdir.Dealer, elapsed time.D
+ // executor is complete.
+ func (m MutantExecutorDealer) NewExecutor(mut mutator.Mutator, outCh chan<- mutator.Mutator, wg *sync.WaitGroup) workerpool.Executor {
+ 	mj := mutantExecutor{
++		outputBudget:      m.outputBudget,
+ 		mutant:            mut,
+ 		outCh:             outCh,
+ 		wg:                wg,
  		wdDealer:          m.wdDealer,
  		module:            m.mod,
  		dryRun:            m.dryRun,
@@ -1360,7 +1370,7 @@ index 3fb5ee4..fdf64f6 100644
  		integrationMode:   m.integrationMode,
  		buildTags:         m.buildTags,
  		execContext:       m.execContext,
-@@ -143,6 +155,12 @@ type mutantExecutor struct {
+@@ -143,6 +158,13 @@ type mutantExecutor struct {
  	buildTags         string
  	testExecutionTime time.Duration
  	dryRun            bool
@@ -1368,12 +1378,13 @@ index 3fb5ee4..fdf64f6 100644
 +	executionLogDir   string
 +	expectedTests     execution.TestCensus
 +	ctx               context.Context
++	outputBudget      *execution.OutputBudget
 +	cache             *execution.GoCache
 +	executionSettled  bool
  	integrationMode   bool
  	testCPU           int
  }
-@@ -158,6 +176,7 @@ type mutantExecutor struct {
+@@ -158,6 +180,7 @@ type mutantExecutor struct {
  // a context with timeout. This is done because the Go test command doesn't
  // make it easy to distinguish failures from timeouts.
  func (m *mutantExecutor) Start(w *workerpool.Worker) {
@@ -1381,7 +1392,7 @@ index 3fb5ee4..fdf64f6 100644
  	defer m.wg.Done()
  	workerName := fmt.Sprintf("%s-%d", w.Name, w.ID)
  	rootDir, err := m.wdDealer.Get(workerName)
-@@ -168,22 +187,54 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -168,22 +191,54 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  	workingDir := filepath.Join(rootDir, m.module.CallingDir)
  	m.mutant.SetWorkdir(workingDir)
  
@@ -1438,7 +1449,7 @@ index 3fb5ee4..fdf64f6 100644
  		log.Errorf("failed to restore mutation at %s - %s\n\t%v", m.mutant.Position(), m.mutant.Status(), err)
  	}
  
-@@ -191,33 +242,48 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -191,33 +246,48 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  }
  
  func (m *mutantExecutor) runTests(rootDir, pkg string) mutator.Status {
@@ -1501,7 +1512,7 @@ index 3fb5ee4..fdf64f6 100644
  	if m.buildTags != "" {
  		args = append(args, "-tags", m.buildTags)
  	}
-@@ -228,11 +294,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -228,11 +298,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	args = append(args, "-failfast")
  
  	if m.testCPU != 0 {
@@ -1517,7 +1528,7 @@ index 3fb5ee4..fdf64f6 100644
  		path = "./..."
  	}
  	args = append(args, path)
-@@ -240,27 +309,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -240,27 +313,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	return args
  }
  
@@ -1731,6 +1742,82 @@ index 0000000..52d3d3f
 +				t.Fatal("invalid source changed shared AST")
 +			}
 +		})
++	}
++}
+diff --git a/internal/engine/output_limit_test.go b/internal/engine/output_limit_test.go
+new file mode 100644
+index 0000000..80189a8
+--- /dev/null
++++ b/internal/engine/output_limit_test.go
+@@ -0,0 +1,70 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestOutputLimitRemainsExecutionErrorWithPartialReceipt(t *testing.T) {
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
++	defer cancel()
++	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestExecutionOutputFloodHelper$")
++	cmd.Env = append(os.Environ(), "GREMLINS_EXECUTION_FLOOD=1")
++	logs := t.TempDir()
++	executor := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: logs, outputBudget: execution.NewOutputBudget(1024)}
++	status, err := executor.executeJudgedTest(ctx, cmd, t.TempDir())
++	if status != mutator.ExecutionError || !errors.Is(err, execution.ErrOutputLimit) || executor.executionSettled || ctx.Err() != nil {
++		t.Fatalf("truncation misjudged: status=%s error=%v settled=%t context=%v", status, err, executor.executionSettled, ctx.Err())
++	}
++	receipts, err := filepath.Glob(filepath.Join(logs, "*.result.json"))
++	if err != nil || len(receipts) != 1 {
++		t.Fatalf("receipt: %v %v", receipts, err)
++	}
++	raw, err := os.ReadFile(receipts[0])
++	if err != nil {
++		t.Fatal(err)
++	}
++	var receipt struct {
++		Status        string `json:"judgment_status"`
++		ArtifactError string `json:"artifact_error"`
++		StdoutSHA256  string `json:"stdout_sha256"`
++	}
++	// Separate tagged counts avoid deriving the oracle from output parser behavior.
++	var counts struct {
++		Stdout int64 `json:"stdout_bytes"`
++		Stderr int64 `json:"stderr_bytes"`
++	}
++	if err := json.Unmarshal(raw, &receipt); err != nil {
++		t.Fatal(err)
++	}
++	if err := json.Unmarshal(raw, &counts); err != nil {
++		t.Fatal(err)
++	}
++	if receipt.Status != mutator.ExecutionError.String() || receipt.ArtifactError == "" || counts.Stdout+counts.Stderr != 1024 || len(receipt.StdoutSHA256) != 64 {
++		t.Fatalf("partial receipt not truthful: %s", raw)
++	}
++}
++func TestExecutionOutputFloodHelper(t *testing.T) {
++	if os.Getenv("GREMLINS_EXECUTION_FLOOD") != "1" {
++		return
++	}
++	payload := bytes.Repeat([]byte("x"), 4096)
++	for {
++		_, _ = os.Stdout.Write(payload)
 +	}
 +}
 diff --git a/internal/engine/package_alias_scope_unix_test.go b/internal/engine/package_alias_scope_unix_test.go
@@ -2419,10 +2506,10 @@ index efa93f5..0d28349 100644
  	gotMutants []mutator.Mutator
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
-index 0000000..a655b3d
+index 0000000..299b150
 --- /dev/null
 +++ b/internal/engine/test_execution.go
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,163 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
@@ -2464,7 +2551,7 @@ index 0000000..a655b3d
 +		}
 +	}
 +	started := time.Now()
-+	runErr, processCleanupErr, processStarted := execution.RunGoCommand(ctx, cmd, stdout, stderr)
++	runErr, processCleanupErr, processStarted := execution.RunGoCommand(ctx, cmd, stdout, stderr, m.outputBudget)
 +	finished := time.Now()
 +	if m.cache != nil {
 +		processCleanupErr = errors.Join(processCleanupErr, m.cache.AfterCommand(ctx, m.executionLogDir, digest))
@@ -2477,9 +2564,7 @@ index 0000000..a655b3d
 +	var stderrHash string
 +	var stderrBytes int64
 +	var stderrHashErr error
-+	if processCleanupErr == nil {
-+		stderrHash, stderrBytes, stderrHashErr = hashRawOutput(stderr)
-+	}
++	stderrHash, stderrBytes, stderrHashErr = hashRawOutput(stderr)
 +	closeErr := stderr.Close()
 +	_, seekErr := stdout.Seek(0, 0)
 +	status, judgmentErr := mutator.ExecutionError, error(nil)
@@ -2501,9 +2586,7 @@ index 0000000..a655b3d
 +	var stdoutHash string
 +	var stdoutBytes int64
 +	var stdoutHashErr error
-+	if processCleanupErr == nil {
-+		stdoutHash, stdoutBytes, stdoutHashErr = hashRawOutput(stdout)
-+	}
++	stdoutHash, stdoutBytes, stdoutHashErr = hashRawOutput(stdout)
 +	artifactErr := errors.Join(processCleanupErr, stderrErr, stderrHashErr, stdoutHashErr, closeErr, seekErr, stdout.Close())
 +	if artifactErr != nil {
 +		status = mutator.ExecutionError
@@ -5014,7 +5097,7 @@ index 0000000..a217a15
 +}
 diff --git a/internal/execution/go_process_unix.go b/internal/execution/go_process_unix.go
 new file mode 100644
-index 0000000..6a7cdfa
+index 0000000..54b7ed7
 --- /dev/null
 +++ b/internal/execution/go_process_unix.go
 @@ -0,0 +1,130 @@
@@ -5040,10 +5123,10 @@ index 0000000..6a7cdfa
 +
 +// RunGoCommand owns the private process group until all signalling finishes,
 +// before Wait reaps its leader and permits numeric PID reuse.
-+func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File) (error, error, bool) {
-+	return runPOSIXTestProcess(ctx, cmd, stdout, stderr, unix.Kill)
++func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*OutputBudget) (error, error, bool) {
++	return runPOSIXTestProcess(ctx, cmd, stdout, stderr, unix.Kill, budgets...)
 +}
-+func runPOSIXTestProcess(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, signalGroup func(int, syscall.Signal) error) (error, error, bool) {
++func runPOSIXTestProcess(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, signalGroup func(int, syscall.Signal) error, budgets ...*OutputBudget) (error, error, bool) {
 +	if cmd.SysProcAttr != nil {
 +		return errors.New("test command must not provide custom process attributes"), nil, false
 +	}
@@ -5089,16 +5172,13 @@ index 0000000..6a7cdfa
 +		return err, errors.Join(outPipe.Close(), errPipe.Close()), false
 +	}
 +	copied := make(chan error, 2)
++	outWriter, errWriter := commandOutputWriters(stdout, stderr, budgets)
 +	drain := func(destination io.Writer, source io.Reader) {
 +		_, copyErr := io.Copy(destination, source)
-+		if copyErr != nil {
-+			_, drainErr := io.Copy(io.Discard, source)
-+			copyErr = errors.Join(copyErr, drainErr)
-+		}
 +		copied <- copyErr
 +	}
-+	go drain(stdout, outPipe)
-+	go drain(stderr, errPipe)
++	go drain(outWriter, outPipe)
++	go drain(errWriter, errPipe)
 +	finishedCopies := 0
 +	var copyErr error
 +	for finishedCopies < 2 {
@@ -5106,6 +5186,9 @@ index 0000000..6a7cdfa
 +		case err := <-copied:
 +			copyErr = errors.Join(copyErr, err)
 +			finishedCopies++
++			if err != nil {
++				goto terminate
++			}
 +		case <-ctx.Done():
 +			goto terminate
 +		}
@@ -5305,10 +5388,10 @@ index 0000000..d986328
 +}
 diff --git a/internal/execution/go_process_windows.go b/internal/execution/go_process_windows.go
 new file mode 100644
-index 0000000..63d4730
+index 0000000..e9ea294
 --- /dev/null
 +++ b/internal/execution/go_process_windows.go
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,266 @@
 +//go:build windows
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -5318,6 +5401,7 @@ index 0000000..63d4730
 +	"context"
 +	"errors"
 +	"fmt"
++	"io"
 +	"os"
 +	"os/exec"
 +	"runtime"
@@ -5356,7 +5440,7 @@ index 0000000..63d4730
 +
 +// The command is suspended until its private job and explicit stdio whitelist
 +// are installed. No process is reopened by PID; owned handles identify it.
-+func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File) (runErr, cleanupErr error, started bool) {
++func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*OutputBudget) (runErr, cleanupErr error, started bool) {
 +	if cmd.Err != nil {
 +		return cmd.Err, nil, false
 +	}
@@ -5381,14 +5465,45 @@ index 0000000..63d4730
 +		return err, nil, false
 +	}
 +	defer func() { cleanupErr = errors.Join(cleanupErr, input.Close()) }()
++	outRead, outWrite, err := os.Pipe()
++	if err != nil {
++		return err, nil, false
++	}
++	defer func() {
++		if err := outRead.Close(); !errors.Is(err, os.ErrClosed) {
++			cleanupErr = errors.Join(cleanupErr, err)
++		}
++	}()
++	errRead, errWrite, err := os.Pipe()
++	if err != nil {
++		return err, outWrite.Close(), false
++	}
++	defer func() {
++		if err := errRead.Close(); !errors.Is(err, os.ErrClosed) {
++			cleanupErr = errors.Join(cleanupErr, err)
++		}
++	}()
++	writersClosed := false
++	closeWriters := func() error {
++		if writersClosed {
++			return nil
++		}
++		writersClosed = true
++		return errors.Join(outWrite.Close(), errWrite.Close())
++	}
++	defer func() { cleanupErr = errors.Join(cleanupErr, closeWriters()) }()
 +	current := windows.CurrentProcess()
 +	handles := make([]windows.Handle, 3)
-+	for i, file := range []*os.File{input, stdout, stderr} {
++	for i, file := range []*os.File{input, outWrite, errWrite} {
 +		if err := windows.DuplicateHandle(current, windows.Handle(file.Fd()), current, &handles[i], 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
 +			return err, nil, false
 +		}
 +		index := i
-+		defer func() { cleanupErr = errors.Join(cleanupErr, windows.CloseHandle(handles[index])) }()
++		defer func() {
++			if handles[index] != 0 {
++				cleanupErr = errors.Join(cleanupErr, windows.CloseHandle(handles[index]))
++			}
++		}()
 +	}
 +	attributes, err := windows.NewProcThreadAttributeList(1)
 +	if err != nil {
@@ -5429,6 +5544,11 @@ index 0000000..63d4730
 +	if err := windows.CreateProcess(application, commandLine, nil, nil, true, flags, &environment[0], directory, &startup.StartupInfo, &process); err != nil {
 +		return err, nil, false
 +	}
++	for i, handle := range handles {
++		cleanupErr = errors.Join(cleanupErr, windows.CloseHandle(handle))
++		handles[i] = 0
++	}
++	cleanupErr = errors.Join(cleanupErr, closeWriters())
 +	runtime.KeepAlive(handles)
 +	runtime.KeepAlive(environment)
 +	runtime.KeepAlive(attributes)
@@ -5442,18 +5562,35 @@ index 0000000..63d4730
 +		if waitErr == nil && state != windows.WAIT_OBJECT_0 {
 +			waitErr = fmt.Errorf("suspended process cleanup wait returned %d", state)
 +		}
-+		return err, errors.Join(killErr, waitErr), false
++		return err, errors.Join(cleanupErr, killErr, waitErr), false
 +	}
 +	if previous, err := windows.ResumeThread(process.Thread); err != nil || previous != 1 {
 +		if err == nil {
 +			err = fmt.Errorf("unexpected suspended thread count %d", previous)
 +		}
-+		cleanupErr = stopWindowsJob(job)
++		cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job))
 +		return err, cleanupErr, false
 +	}
 +	started = true
++	outWriter, errWriter := commandOutputWriters(stdout, stderr, budgets)
++	copied := make(chan error, 2)
++	go func() { _, err := io.Copy(outWriter, outRead); copied <- err }()
++	go func() { _, err := io.Copy(errWriter, errRead); copied <- err }()
++	finishedCopies := 0
++	var copyErr error
 +	var code uint32
++
++waitProcess:
 +	for {
++		select {
++		case err := <-copied:
++			finishedCopies++
++			copyErr = errors.Join(copyErr, err)
++			if err != nil {
++				break waitProcess
++			}
++		default:
++		}
 +		state, waitErr := windows.WaitForSingleObject(process.Process, 20)
 +		if waitErr != nil {
 +			runErr = waitErr
@@ -5476,7 +5613,27 @@ index 0000000..63d4730
 +			break
 +		}
 +	}
-+	cleanupErr = stopWindowsJob(job)
++	cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job))
++	// Job termination closes every inherited writer before copy workers are joined.
++	timer := time.NewTimer(5 * time.Second)
++	defer timer.Stop()
++	for finishedCopies < 2 {
++		select {
++		case err := <-copied:
++			finishedCopies++
++			copyErr = errors.Join(copyErr, err)
++		case <-timer.C:
++			copyErr = errors.Join(copyErr, errors.New("output copy workers persisted after owned job termination"))
++			// Closing owned readers interrupts a blocked Read; then join both workers.
++			_ = outRead.Close()
++			_ = errRead.Close()
++			for finishedCopies < 2 {
++				copyErr = errors.Join(copyErr, <-copied)
++				finishedCopies++
++			}
++		}
++	}
++	cleanupErr = errors.Join(cleanupErr, copyErr)
 +	return runErr, cleanupErr, true
 +}
 +func stopWindowsJob(job windows.Handle) error {
@@ -5700,6 +5857,227 @@ index 0000000..8115afa
 +		})
 +	}
 +}
+diff --git a/internal/execution/output_budget.go b/internal/execution/output_budget.go
+new file mode 100644
+index 0000000..10391ce
+--- /dev/null
++++ b/internal/execution/output_budget.go
+@@ -0,0 +1,57 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"errors"
++	"io"
++	"sync"
++)
++
++const CommandOutputLimit int64 = 32 << 20
++const CampaignOutputLimit int64 = 2 << 30
++
++var ErrOutputLimit = errors.New("retained Go command output budget exhausted")
++
++// OutputBudget counts retained raw stdout and stderr across commands and workers.
++// It does not bound files written directly by tests, build scratch, or metadata.
++type OutputBudget struct {
++	mu        sync.Mutex
++	remaining int64
++}
++
++func NewOutputBudget(limit int64) *OutputBudget { return &OutputBudget{remaining: limit} }
++
++type boundedOutput struct {
++	command, campaign *OutputBudget
++	destination       io.Writer
++}
++
++func commandOutputWriters(stdout, stderr io.Writer, budgets []*OutputBudget) (io.Writer, io.Writer) {
++	command := NewOutputBudget(CommandOutputLimit)
++	var campaign *OutputBudget
++	if len(budgets) > 0 {
++		campaign = budgets[0]
++	}
++	return &boundedOutput{command, campaign, stdout}, &boundedOutput{command, campaign, stderr}
++}
++
++func (w *boundedOutput) Write(p []byte) (int, error) {
++	w.command.mu.Lock()
++	defer w.command.mu.Unlock()
++	available := w.command.remaining
++	if w.campaign != nil {
++		w.campaign.mu.Lock()
++		defer w.campaign.mu.Unlock()
++		available = min(available, w.campaign.remaining)
++	}
++	count := min(int64(len(p)), available)
++	n, err := w.destination.Write(p[:count])
++	w.command.remaining -= int64(n)
++	if w.campaign != nil {
++		w.campaign.remaining -= int64(n)
++	}
++	if int64(len(p)) > available {
++		err = errors.Join(err, ErrOutputLimit)
++	}
++	return n, err
++}
+diff --git a/internal/execution/output_budget_test.go b/internal/execution/output_budget_test.go
+new file mode 100644
+index 0000000..f341a52
+--- /dev/null
++++ b/internal/execution/output_budget_test.go
+@@ -0,0 +1,152 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestCommandOutputBudgetIncludesBothStreamsAtExactBoundary(t *testing.T) {
++	out, stderr := commandOutputWriters(io.Discard, io.Discard, nil)
++	if n, err := io.CopyN(out, zeroReader{}, CommandOutputLimit-1); n != CommandOutputLimit-1 || err != nil {
++		t.Fatalf("prefix: %d %v", n, err)
++	}
++	if n, err := stderr.Write([]byte{1}); n != 1 || err != nil {
++		t.Fatalf("exact boundary: %d %v", n, err)
++	}
++	if n, err := out.Write([]byte{1}); n != 0 || !errors.Is(err, ErrOutputLimit) {
++		t.Fatalf("excess accepted: %d %v", n, err)
++	}
++}
++
++type zeroReader struct{}
++
++func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
++
++func TestCampaignOutputBudgetSharedByConcurrentCommandsAndPhases(t *testing.T) {
++	shared := NewOutputBudget(1024)
++	var wg sync.WaitGroup
++	var retained [8]bytes.Buffer
++	for i := range retained {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			for range 2 { // package prefix and whole-module execution share the dealer budget.
++				out, stderr := commandOutputWriters(&retained[i], &retained[i], []*OutputBudget{shared})
++				for _, writer := range []io.Writer{out, stderr} {
++					_, err := writer.Write(bytes.Repeat([]byte{1}, 300))
++					if err != nil && !errors.Is(err, ErrOutputLimit) {
++						t.Errorf("write: %v", err)
++					}
++				}
++			}
++		}()
++	}
++	wg.Wait()
++	total := 0
++	for i := range retained {
++		total += retained[i].Len()
++	}
++	if total != 1024 {
++		t.Fatalf("aggregate retained %d, want exact 1024", total)
++	}
++}
++
++func TestOwnedOutputFloodIsBoundedAndDescendantJoined(t *testing.T) {
++	root := t.TempDir()
++	heartbeat := filepath.Join(root, "heartbeat")
++	stdout, err := os.Create(filepath.Join(root, "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stdout.Close()
++	stderr, err := os.Create(filepath.Join(root, "stderr"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stderr.Close()
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
++	defer cancel()
++	command := exec.CommandContext(ctx, executable, "-test.run=^TestOwnedOutputFloodHelper$")
++	command.Env = append(os.Environ(), "GREMLINS_FLOOD_ROLE=parent", "GREMLINS_FLOOD_HEARTBEAT="+heartbeat)
++	_, cleanupErr, started := RunGoCommand(ctx, command, stdout, stderr, NewOutputBudget(4096))
++	if !started || !errors.Is(cleanupErr, ErrOutputLimit) || ctx.Err() != nil {
++		t.Fatalf("flood not bounded promptly: started=%t cleanup=%v context=%v", started, cleanupErr, ctx.Err())
++	}
++	outInfo, err := stdout.Stat()
++	if err != nil {
++		t.Fatal(err)
++	}
++	errInfo, err := stderr.Stat()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if outInfo.Size()+errInfo.Size() != 4096 {
++		t.Fatalf("retained output: %d", outInfo.Size()+errInfo.Size())
++	}
++	before, err := os.ReadFile(heartbeat)
++	if err != nil {
++		t.Fatal(err)
++	}
++	time.Sleep(80 * time.Millisecond)
++	after, err := os.ReadFile(heartbeat)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(before, after) {
++		t.Fatal("output flood descendant survived cleanup")
++	}
++}
++
++func TestOwnedOutputFloodHelper(t *testing.T) {
++	role := os.Getenv("GREMLINS_FLOOD_ROLE")
++	if role == "" {
++		return
++	}
++	heartbeat := os.Getenv("GREMLINS_FLOOD_HEARTBEAT")
++	if role == "child" {
++		for {
++			if err := os.WriteFile(heartbeat, []byte(time.Now().String()), 0600); err != nil {
++				os.Exit(2)
++			}
++			time.Sleep(5 * time.Millisecond)
++		}
++	}
++	executable, err := os.Executable()
++	if err != nil {
++		os.Exit(2)
++	}
++	child := exec.Command(executable, "-test.run=^TestOwnedOutputFloodHelper$")
++	child.Env = append(os.Environ(), "GREMLINS_FLOOD_ROLE=child")
++	child.Stdout, child.Stderr = os.Stdout, os.Stderr
++	if err := child.Start(); err != nil {
++		os.Exit(2)
++	}
++	deadline := time.Now().Add(5 * time.Second)
++	for {
++		if data, err := os.ReadFile(heartbeat); err == nil && len(data) > 0 {
++			break
++		}
++		if time.Now().After(deadline) {
++			os.Exit(2)
++		}
++		time.Sleep(time.Millisecond)
++	}
++	data := bytes.Repeat([]byte("x"), 32768)
++	for {
++		_, _ = os.Stdout.Write(data)
++		_, _ = os.Stderr.Write(data)
++	}
++}
 diff --git a/internal/execution/parallel_failfast_test.go b/internal/execution/parallel_failfast_test.go
 new file mode 100644
 index 0000000..ff75d6d
@@ -5794,6 +6172,111 @@ index 0000000..ff75d6d
 +				t.Fatalf("unknown post-failure exit accepted: %s %v", judgment.Status, err)
 +			}
 +		})
++	}
++}
+diff --git a/internal/execution/parallel_panic_test.go b/internal/execution/parallel_panic_test.go
+new file mode 100644
+index 0000000..8eb5b7a
+--- /dev/null
++++ b/internal/execution/parallel_panic_test.go
+@@ -0,0 +1,99 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"bytes"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++type panicProtocolExit int
++
++func (e panicProtocolExit) Error() string { return fmt.Sprintf("exit status %d", e) }
++func (e panicProtocolExit) ExitCode() int { return int(e) }
++
++func TestRepeatedPanicParentFailureRequiresSettledPanicEvidence(t *testing.T) {
++	for _, scenario := range []string{"panic", "no-panic", "no-stack", "success-exit", "unknown-exit", "incomplete-package", "repeated-pass"} {
++		t.Run(scenario, func(t *testing.T) {
++			var raw bytes.Buffer
++			write := func(action, test, output string) {
++				t.Helper()
++				if err := json.NewEncoder(&raw).Encode(testEvent{Action: action, Package: "probe.example", Test: test, Output: output}); err != nil {
++					t.Fatal(err)
++				}
++			}
++			write("start", "", "")
++			write("run", "TestParent", "")
++			terminal := "fail"
++			if scenario == "repeated-pass" {
++				terminal = "pass"
++			}
++			write(terminal, "TestParent", "")
++			if scenario != "no-panic" {
++				write("output", "TestParent", "panic: owned subtest panic\n")
++			}
++			if scenario != "no-stack" {
++				write("output", "TestParent", "goroutine 42 [running]:\n")
++			}
++			write(terminal, "TestParent", "")
++			if scenario != "incomplete-package" {
++				write("fail", "", "")
++			}
++			var processErr error = panicProtocolExit(1)
++			if scenario == "success-exit" {
++				processErr = nil
++			}
++			if scenario == "unknown-exit" {
++				processErr = panicProtocolExit(2)
++			}
++			result, err := JudgeTestStream(&raw, t.TempDir(), processErr, false, nil)
++			if scenario == "panic" {
++				if err != nil || result.Status != mutator.Killed {
++					t.Fatalf("settled native panic refused: %s, %v", result.Status, err)
++				}
++			} else if err == nil || result.Status != mutator.ExecutionError {
++				t.Fatalf("uncertain repeated event accepted: %s, %v", result.Status, err)
++			}
++		})
++	}
++}
++
++func TestNativeParallelSubtestPanicsKeepTheirPackageFailure(t *testing.T) {
++	root := t.TempDir()
++	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module parallelpanic.example\ngo 1.24\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	body := `package parallelpanic
++import("testing";"sync")
++func TestParent(t *testing.T){
++ gate:=make(chan struct{});var ready sync.WaitGroup;ready.Add(2)
++ go func(){ready.Wait();close(gate)}()
++ for _,name:=range []string{"A","B"}{t.Run(name,func(t *testing.T){t.Parallel();ready.Done();<-gate;panic("owned parallel panic")})}
++}
++`
++	if err := os.WriteFile(filepath.Join(root, "value_test.go"), []byte(body), 0600); err != nil {
++		t.Fatal(err)
++	}
++	cmd := exec.CommandContext(t.Context(), "go", "test", "-json", "-cover", "-failfast", "-count=1", ".")
++	cmd.Dir = root
++	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=readonly")
++	var raw, stderr bytes.Buffer
++	cmd.Stdout = &raw
++	cmd.Stderr = &stderr
++	runErr := cmd.Run()
++	var exit *exec.ExitError
++	if !errors.As(runErr, &exit) || exit.ExitCode() != 1 {
++		t.Fatalf("native Go panic did not settle as failure: %v, %s", runErr, stderr.Bytes())
++	}
++	result, err := JudgeTestStream(bytes.NewReader(raw.Bytes()), root, runErr, false, nil)
++	if err != nil || result.Status != mutator.Killed {
++		t.Fatalf("native parallel panic not classified: %s, %v\n%s", result.Status, err, raw.Bytes())
 +	}
 +}
 diff --git a/internal/execution/process_group_darwin.go b/internal/execution/process_group_darwin.go
@@ -6354,10 +6837,10 @@ index 0000000..a8bce09
 +}
 diff --git a/internal/execution/test_judgment.go b/internal/execution/test_judgment.go
 new file mode 100644
-index 0000000..6a0bf86
+index 0000000..2b4a2bf
 --- /dev/null
 +++ b/internal/execution/test_judgment.go
-@@ -0,0 +1,321 @@
+@@ -0,0 +1,327 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -6471,6 +6954,12 @@ index 0000000..6a0bf86
 +			}
 +			if event.Test != "" {
 +				done, exists := p.tests[event.Test]
++				// Parallel subtest panics can repeat their already-failed parent's
++				// terminal event. Only the same failure with an observed panic and
++				// stack is redundant; process and package failure still must settle.
++				if exists && done == "fail" && event.Action == "fail" && p.panicSeen && p.stackSeen {
++					continue
++				}
 +				if !exists || done != "running" {
 +					return TestJudgment{Status: mutator.ExecutionError}, errors.New("named result without active test")
 +				}

@@ -27,15 +27,15 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 	if err := os.WriteFile(filepath.Join(dir, "fuzz_test.go"), []byte(source), fileMode); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := compilerFuzzManifest(t.Context(), dir, []string{fuzzFixturePackage})
+	compiled, err := compilerFuzzManifest(t.Context(), dir, []string{fuzzFixturePackage}, nil)
 	if err != nil || !slices.Contains(compiled, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzPresent"}) {
 		t.Fatalf("compiler manifest lost declared target: %v, %v", compiled, err)
 	}
-	if _, err = discoverFuzzTargets(t.Context(), dir, []string{fuzzFixturePackage}); err == nil || !strings.Contains(err.Error(), "omitted compiler target") {
+	if _, err = discoverFuzzTargets(t.Context(), dir, []string{fuzzFixturePackage}, nil); err == nil || !strings.Contains(err.Error(), "omitted compiler target") {
 		t.Fatalf("suppressed target was not detected: %v", err)
 	}
 	// The omitted target is independently runnable; the fixture only suppresses listing.
-	if err = runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzPresent"}, "1x"); err != nil {
+	if err = runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzPresent"}, "1x", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -50,7 +50,7 @@ func FuzzExternal(f *qa.F) {f.Add(1);f.Fuzz(func(t *qa.T,n int){if err:=os.Write
 	if err := os.WriteFile(filepath.Join(dir, "external_test.go"), []byte(source), fileMode); err != nil {
 		t.Fatal(err)
 	}
-	targets, err := discoverFuzzTargets(t.Context(), dir, []string{fuzzFixturePackage})
+	targets, err := discoverFuzzTargets(t.Context(), dir, []string{fuzzFixturePackage}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func FuzzExternal(f *qa.F) {f.Add(1);f.Fuzz(func(t *qa.T,n int){if err:=os.Write
 	if !slices.Contains(targets, target) {
 		t.Fatalf("external fuzz target missing: %v", targets)
 	}
-	if err = runFuzzTarget(t.Context(), dir, target, "1x"); err != nil {
+	if err = runFuzzTarget(t.Context(), dir, target, "1x", nil); err != nil {
 		t.Fatal(err)
 	}
 	data, err := readInRoot(dir, "external.executed")
@@ -140,7 +140,7 @@ func TestCompilerFuzzManifestRejectsMissingGeneratedEvidence(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := compilerFuzzManifest(ctx, dir, []string{"not-a-package"}); !errors.Is(err, context.Canceled) {
+	if _, err := compilerFuzzManifest(ctx, dir, []string{"not-a-package"}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("compiler discovery lost cancellation: %v", err)
 	}
 }

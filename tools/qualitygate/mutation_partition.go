@@ -4,6 +4,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -34,14 +35,25 @@ func parseMutationPartition(value string) (mutationPartition, error) {
 	return mutationPartition{Index: index, Count: count}, nil
 }
 
-// Sorted-file round robin partitions the complete native inventory, never its covered subset.
-func selectMutationPartition(files map[string]bool, partition mutationPartition) (map[string]bool, error) {
-	if partition.Count < 1 || partition.Index < 0 || partition.Index >= partition.Count || partition.Count > len(files) {
+// Assign larger source files first to the least-loaded partition. Source byte counts
+// are a deterministic work estimate, derived from the same frozen bytes as the hashes;
+// discovery still determines the complete mutant inventory independently.
+func selectMutationPartition(sizes map[string]int, partition mutationPartition) (map[string]bool, error) {
+	if partition.Count < 1 || partition.Index < 0 || partition.Index >= partition.Count || partition.Count > len(sizes) {
 		return nil, fmt.Errorf("%w: invalid or empty mutation partition", errGate)
 	}
+	paths := slices.Sorted(maps.Keys(sizes))
+	slices.SortStableFunc(paths, func(a, b string) int { return cmp.Compare(sizes[b], sizes[a]) })
+	loads := make([]int64, partition.Count)
 	selected := map[string]bool{}
-	for index, path := range slices.Sorted(maps.Keys(files)) {
-		if index%partition.Count == partition.Index {
+	for ordinal, path := range paths {
+		// Seed every partition so zero-size sources cannot leave it empty.
+		index := ordinal
+		if ordinal >= partition.Count {
+			index = slices.Index(loads, slices.Min(loads))
+		}
+		loads[index] += int64(sizes[path])
+		if index == partition.Index {
 			selected[path] = true
 		}
 	}
@@ -53,21 +65,25 @@ func partitionMutationScope(ctx context.Context, scope scopeOfMutation, options 
 	if partition.Count == 0 {
 		partition = mutationPartition{Count: 1}
 	}
-	selected, err := selectMutationPartition(scope.hostFiles, partition)
-	if err != nil {
-		return scopeOfMutation{}, err
-	}
 	commit, err := coverageCommit(ctx, options.root)
 	if err != nil {
 		return scopeOfMutation{}, err
 	}
 	digests := map[string]string{}
+	sizes := map[string]int{}
 	for path := range scope.hostFiles {
 		data, err := readInRoot(options.snapshot, path)
 		if err != nil {
 			return scopeOfMutation{}, err
 		}
 		digests[path] = fmt.Sprintf("%x", sha256.Sum256(data))
+		sizes[path] = len(data)
+	}
+	selected, err := selectMutationPartition(sizes, partition)
+	if err != nil {
+		return scopeOfMutation{}, err
+	}
+	for path := range scope.hostFiles {
 		if !selected[path] {
 			scope.excludes = append(scope.excludes, "^"+regexp.QuoteMeta(path)+"$")
 		}

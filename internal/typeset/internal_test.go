@@ -276,3 +276,28 @@ func TestShapingRejectsUnsupportedRunsAtTheirParagraphOffsets(t *testing.T) {
 		}
 	}
 }
+
+func TestWordWrappingIncludesTheExactRoundingAllowance(t *testing.T) {
+	t.Parallel()
+	clusters := []Cluster{{Text: "A", Glyphs: []Glyph{{Advance: 1}}}, {Text: " ", Glyphs: []Glyph{{Advance: 1}}}, {Text: "B", Glyphs: []Glyph{{Advance: 1}}}}
+	// Three font units fit at this limit only because of the documented rounding allowance.
+	allowance := 1.0 + 1e-9
+	boundary := 3.0 / allowance
+	if boundary*allowance != 3 {
+		t.Fatal("wrapping boundary fixture must exactly fill three font units after rounding")
+	}
+	for _, test := range []struct {
+		limit float64
+		lines int
+	}{
+		{boundary, 1}, {math.Nextafter(math.Nextafter(boundary, math.Inf(-1)), math.Inf(-1)), 2}, {3, 1},
+	} {
+		lines := breakLines(clusters, test.limit)
+		if len(lines) != test.lines {
+			t.Fatalf("wrap at %.17g produced %d lines, want %d", test.limit, len(lines), test.lines)
+		}
+		if test.lines == 2 && (len(lines[0]) != 1 || len(lines[1]) != 1 || lines[0][0].Text != "A" || lines[1][0].Text != "B") {
+			t.Fatalf("wrap consumed text or retained break space: %v", lines)
+		}
+	}
+}

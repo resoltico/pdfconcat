@@ -280,23 +280,32 @@ func executeWithEvidence(ctx context.Context, root string, patterns []string, op
 	return outcome, evidence, errors.Join(runErr, evidence.closeFiles())
 }
 
-// collectTestEvents streams complete evidence while validating outcomes without retaining output in RAM.
+// collectTestEvents streams evidence while validating outcomes without retaining output in RAM.
 func collectTestEvents(ctx context.Context, run *command, evidence *testEvidence) (*testOutcome, error) {
 	outcome := newTestOutcome()
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
 	pipeReader, pipeWriter := io.Pipe()
 	done := make(chan struct{})
 
 	go func() { outcome.consume(pipeReader); close(done) }()
 
-	run.stdout = io.MultiWriter(evidence.stdout, pipeWriter)
-	run.stderr = io.MultiWriter(evidence.stderr, log.Writer())
-	runErr := run.run(ctx)
+	var stdout, stderr io.Writer = evidence.stdout, evidence.stderr
+	var budget *evidenceBudget
+	if evidence.byteLimit > 0 {
+		budget = &evidenceBudget{remaining: evidence.byteLimit, limit: evidence.byteLimit, cancel: cancel}
+		stdout = budgetedEvidenceWriter{budget: budget, target: stdout}
+		stderr = budgetedEvidenceWriter{budget: budget, target: stderr}
+	}
+	run.stdout = io.MultiWriter(stdout, pipeWriter)
+	run.stderr = io.MultiWriter(stderr, log.Writer())
+	runErr := run.run(runContext)
 
 	closeLogged(pipeWriter)
 	<-done
 	closeLogged(pipeReader)
 
-	return outcome, runErr
+	return outcome, errors.Join(runErr, budget.err())
 }
 
 func splitList(value string) []string {
@@ -420,7 +429,7 @@ func validateFuzzBudget(value string) error {
 }
 
 // runFuzzTarget requires the selected target's real lifecycle to pass; skipped or missing targets are failures.
-func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration string) error {
+func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration string, environment []string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("fuzz target canceled: %w", err)
 	}
@@ -430,10 +439,13 @@ func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration
 		return err
 	}
 
+	evidence.byteLimit = fuzzEvidenceLimit
+
 	run := &command{
 		dir:           root,
 		name:          goTool,
 		fuzzLifecycle: true,
+		env:           environment,
 		args: []string{
 			testVerb, jsonFlag, runSelectionFlag, "^$", "-fuzz", "^" + target.name + "$", "-fuzztime", duration, target.pkg,
 		},

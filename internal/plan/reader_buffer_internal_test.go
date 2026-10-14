@@ -77,3 +77,10 @@ func TestCancellationReleasesAPumpWaitingForExhaustedBuffers(t *testing.T) {
 		t.Fatalf("canceled consumer: length=%d err=%v", length, err)
 	}
 }
+
+func TestTokenCancellationUsesPositiveContiguousLowBitMask(t *testing.T) {
+	t.Parallel()
+	if cancelCheckMask <= 0 || cancelCheckMask&(cancelCheckMask+1) != 0 {
+		t.Fatal("token cancellation requires a positive contiguous low-bit mask for uniform cadence")
+	}
+}

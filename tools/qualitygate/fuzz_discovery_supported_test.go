@@ -39,7 +39,7 @@ func FuzzSame(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){if err:=os
 		}
 	}
 	packages := []string{fuzzFixturePackage + "/first", fuzzFixturePackage + "/second"}
-	targets, err := discoverFuzzTargets(t.Context(), dir, packages)
+	targets, err := discoverFuzzTargets(t.Context(), dir, packages, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func FuzzSame(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){if err:=os
 		}
 	}
 	for _, target := range targets {
-		if err = runFuzzTarget(t.Context(), dir, target, "1x"); err != nil {
+		if err = runFuzzTarget(t.Context(), dir, target, "1x", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,7 +116,7 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 			if err := os.WriteFile(filepath.Join(dir, "fuzz_test.go"), []byte(source), fileMode); err != nil {
 				t.Fatal(err)
 			}
-			targets, err := discoverFuzzTargets(t.Context(), dir, []string{fuzzFixturePackage})
+			targets, err := discoverFuzzTargets(t.Context(), dir, []string{fuzzFixturePackage}, nil)
 			if (err != nil) != fixture.discoveryFails {
 				t.Fatalf("discovery failure=%t: %v", fixture.discoveryFails, err)
 			}
@@ -124,7 +124,7 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 			if !fixture.discoveryFails && !slices.Contains(targets, target) {
 				t.Fatalf("fixture did not list %v: %v", target, targets)
 			}
-			if err = runFuzzTarget(t.Context(), dir, target, "1x"); err == nil {
+			if err = runFuzzTarget(t.Context(), dir, target, "1x", nil); err == nil {
 				t.Fatalf("listed target %v passed without its real fuzz lifecycle", target)
 			}
 		})
@@ -160,7 +160,7 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := discoverFuzzTargets(ctx, dir, []string{fuzzFixturePackage})
+		_, err := discoverFuzzTargets(ctx, dir, []string{fuzzFixturePackage}, nil)
 		done <- err
 	}()
 	pid := awaitFuzzWorker(t, dir, "discovery.pid", done)

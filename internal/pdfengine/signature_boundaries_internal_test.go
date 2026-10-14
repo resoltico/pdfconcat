@@ -132,12 +132,12 @@ func TestSignatureDepthAndCancellationPreserveClassification(t *testing.T) {
 	ref := signatureTestObject(pdf, parent)
 
 	parent[keyParent] = ref
-	if _, err := effectiveWidgetKind(t.Context(), pdf, parent); !errors.Is(err, errFormState) {
+	if _, err := effectiveWidgetKind(CheckpointContext(t.Context(), t, 4096), pdf, parent); !errors.Is(err, errFormState) {
 		t.Fatalf("inherited parent cycle: %v", err)
 	}
 
 	parent["FT"] = types.Name("Tx")
-	if err := checkWidgetParents(t.Context(), pdf, parent); !errors.Is(err, errFormState) {
+	if err := checkWidgetParents(CheckpointContext(t.Context(), t, 4096), pdf, parent); !errors.Is(err, errFormState) {
 		t.Fatalf("widget parent cycle: %v", err)
 	}
 }

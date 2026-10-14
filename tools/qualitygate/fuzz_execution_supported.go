@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-func runPlatformFuzz(ctx context.Context, patterns []string, duration string) error {
+func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (result error) {
 	if len(patterns) == 0 {
 		patterns = []string{allPackages}
 	}
@@ -25,7 +25,13 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) er
 		return err
 	}
 
-	targets, err := discoverFuzzTargets(ctx, root, patterns)
+	storage, err := newFuzzStorage()
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, storage.close()) }()
+
+	targets, err := discoverFuzzTargets(ctx, root, patterns, storage.environment())
 	if err != nil {
 		return err
 	}
@@ -46,7 +52,7 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) er
 
 		log.Printf("fuzz: %s %s", target.pkg, target.name)
 
-		if fuzzErr := runFuzzTarget(ctx, root, target, duration); fuzzErr != nil {
+		if fuzzErr := runFuzzTarget(ctx, root, target, duration, storage.environment()); fuzzErr != nil {
 			problems = append(problems, fmt.Sprintf("%s %s: %v", target.pkg, target.name, fuzzErr))
 		}
 	}
@@ -56,14 +62,15 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) er
 
 // discoverFuzzTargets lists every Fuzz function with `go test -list`, which also compiles the test
 // binaries, so a package that does not build fails discovery instead of vanishing from it.
-func discoverFuzzTargets(ctx context.Context, root string, patterns []string) ([]fuzzTarget, error) {
-	compiled, err := compilerFuzzManifest(ctx, root, patterns)
+func discoverFuzzTargets(ctx context.Context, root string, patterns, environment []string) ([]fuzzTarget, error) {
+	compiled, err := compilerFuzzManifest(ctx, root, patterns, environment)
 	if err != nil {
 		return nil, err
 	}
 	run := goCommand(root, append([]string{testVerb, jsonFlag, "-list", "^Fuzz"}, patterns...)...)
 	// Listing runs package init and TestMain, so discovery owns their descendants too.
 	run.fuzzLifecycle = true
+	run.env = environment
 	output, err := run.output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("go test -list: %w", err)

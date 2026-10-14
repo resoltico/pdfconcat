@@ -81,7 +81,7 @@ func TestSignatureWalkerAcceptsLastDepthAndEmptyTerminalChildren(t *testing.T) {
 }
 
 func TestSignatureWidgetParentLimitAndAnnotationFiltering(t *testing.T) {
-	t.Parallel()
+	// Settle finite depth assertions before parallel cyclic fixtures begin.
 	for _, depth := range []int{maxFieldDepth, maxFieldDepth + 1} {
 		pdf := signatureTestContext(t)
 		field := types.Dict{}

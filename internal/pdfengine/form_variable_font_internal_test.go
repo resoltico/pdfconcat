@@ -11,6 +11,7 @@ import (
 
 	"github.com/benoitkugler/pdf/fonts/simpleencodings"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"golang.org/x/text/encoding/charmap"
 )
 
 func TestVariableEncodingDifferencesCoverInclusiveByteRange(t *testing.T) {
@@ -68,6 +69,76 @@ func TestVariableFontIntrinsicSymbolAndNameBoundaries(t *testing.T) {
 	codes := variableGlyphCodes(&encoding)
 	if codes['A'] != 2 || len(codes) != 1 {
 		t.Fatalf("unmapped glyph entries hid later valid code: %v", codes)
+	}
+}
+
+func TestVariableDeclaredWidthRangesIncludeBothByteEndpoints(t *testing.T) {
+	t.Parallel()
+	pdf := signatureTestContext(t)
+	for _, test := range []struct{ first, count int }{{0, 1}, {0, 256}, {255, 1}} {
+		widths := make(types.Array, test.count)
+		for index := range widths {
+			widths[index] = types.Integer(1000)
+		}
+		got, first, err := variableWidthRange(t.Context(), pdf, types.Dict{"FirstChar": types.Integer(test.first), "Widths": widths})
+		if err != nil || first != test.first || len(got) != test.count {
+			t.Fatalf("inclusive range first=%d count=%d: first=%d values=%d, %v", test.first, test.count, first, len(got), err)
+		}
+	}
+	for _, test := range []struct {
+		first types.Object
+		count int
+	}{{types.Integer(-1), 1}, {types.Integer(256), 1}, {types.Integer(255), 2}, {nil, 1}, {types.Name("wrong"), 1}, {types.Integer(65), 0}} {
+		widths := make(types.Array, test.count)
+		for index := range widths {
+			widths[index] = types.Integer(1000)
+		}
+		if _, _, err := variableWidthRange(t.Context(), pdf, types.Dict{"FirstChar": test.first, "Widths": widths}); !errors.Is(err, errFormState) {
+			t.Fatalf("invalid declared range first=%v count=%d accepted: %v", test.first, test.count, err)
+		}
+	}
+}
+
+func TestVariableDeclaredWidthsPreserveMetricsZeroAndNativeErrors(t *testing.T) {
+	t.Parallel()
+	pdf := signatureTestContext(t)
+	font := &variableFont{}
+	dict := types.Dict{"FirstChar": types.Integer(65), "Widths": types.NewNumberArray(1000, 1500), "FontDescriptor": types.Dict{"MissingWidth": types.Integer(500)}}
+	if err := font.readDeclaredWidths(t.Context(), pdf, dict); err != nil {
+		t.Fatal(err)
+	}
+	if font.widths[65] != 1 || font.widths[66] != 1.5 || font.widths[0] != .5 || !font.known[0] || !font.known[65] || !font.known[255] {
+		t.Fatalf("declared and missing glyph advances changed: %v %v %v", font.widths[65], font.widths[66], font.widths[0])
+	}
+	dict["Widths"] = types.NewNumberArray(0)
+	dict["FontDescriptor"] = types.Dict{"MissingWidth": types.Integer(0)}
+	if err := font.readDeclaredWidths(t.Context(), pdf, dict); err != nil || font.widths[65] != 0 || font.widths[0] != 0 {
+		t.Fatalf("explicit zero glyph advances refused or replaced: %v", err)
+	}
+	broken := failedVariableObject(&formFixture{pdf: pdf})
+	for _, key := range []string{"Widths", "FirstChar", "width", "FontDescriptor", "MissingWidth"} {
+		invalid := types.Dict{"FirstChar": types.Integer(65), "Widths": types.NewNumberArray(1000), "FontDescriptor": types.Dict{"MissingWidth": types.Integer(500)}}
+		switch key {
+		case "width":
+			invalid["Widths"] = types.Array{broken}
+		case "MissingWidth":
+			invalid["FontDescriptor"] = types.Dict{"MissingWidth": broken}
+		default:
+			invalid[key] = broken
+		}
+		if err := font.readDeclaredWidths(t.Context(), pdf, invalid); !errors.Is(err, errBoom) {
+			t.Fatalf("declared metric %s lost referenced decode cause: %v", key, err)
+		}
+	}
+}
+
+func TestVariableMetricCodesRetainSpecialFontGlyphs(t *testing.T) {
+	t.Parallel()
+	if got := variableMetricCodes(nameSymbol)["Alpha"]; got != 65 {
+		t.Fatalf("Symbol Alpha metric code=%d, want 65", got)
+	}
+	if got := variableMetricCodes(nameZapfDingbats)["a20"]; got != 52 {
+		t.Fatalf("ZapfDingbats a20 metric code=%d, want 52", got)
 	}
 }
 
@@ -225,5 +296,20 @@ func TestVariableFontRejectsMalformedMetadataAndUnavailableGlyphs(t *testing.T) 
 
 	if _, err = font.encode(ctx, "A"); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestVariableCoreWinAnsiCanonicalGlyphPremise(t *testing.T) {
+	t.Parallel()
+	encoding := simpleencodings.WinAnsi
+	runes := encoding.NameToRune()
+	for _, glyph := range encoding {
+		if glyph == "" {
+			continue
+		}
+		code, found := charmap.Windows1252.EncodeRune(runes[glyph])
+		if found != (encoding[code] == glyph) {
+			t.Fatalf("WinAnsi glyph %q differs between rune mapping and canonical metric code %d", glyph, code)
+		}
 	}
 }

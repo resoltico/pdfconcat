@@ -160,31 +160,29 @@ func (o *featureObserver) catalog(ctx context.Context) error {
 
 func (o *featureObserver) nameTrees(ctx context.Context, names types.Dict) error {
 	for name, object := range names {
-		if name == keyDests {
-			continue
+		if name != keyDests {
+			dictionary, err := o.pdf.DereferenceDictContext(ctx, object)
+			if err != nil {
+				return fmt.Errorf("name tree /%s: %w", name, err)
+			}
+
+			kind := FeatureOtherCatalogNames
+
+			switch name {
+			case "EmbeddedFiles":
+				kind = FeatureCatalogAttachments
+			case "JavaScript":
+				kind = FeatureCatalogActions
+			default: // Other non-destination name trees also have document scope.
+			}
+
+			material, err := o.materialTree(ctx, dictionary, "Names", kind, map[types.IndirectRef]bool{}, 0)
+			if err != nil {
+				return err
+			}
+
+			o.found[kind] = o.found[kind] || material
 		}
-
-		dictionary, err := o.pdf.DereferenceDictContext(ctx, object)
-		if err != nil {
-			return fmt.Errorf("name tree /%s: %w", name, err)
-		}
-
-		kind := FeatureOtherCatalogNames
-
-		switch name {
-		case "EmbeddedFiles":
-			kind = FeatureCatalogAttachments
-		case "JavaScript":
-			kind = FeatureCatalogActions
-		default: // Other non-destination name trees also have document scope.
-		}
-
-		material, err := o.materialTree(ctx, dictionary, "Names", kind, map[types.IndirectRef]bool{}, 0)
-		if err != nil {
-			return err
-		}
-
-		o.found[kind] = o.found[kind] || material
 	}
 
 	return nil

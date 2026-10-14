@@ -31,7 +31,7 @@ func TestCanceledFuzzTargetDoesNotStartGo(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err := runFuzzTarget(ctx, t.TempDir(), fuzzTarget{pkg: "no-package", name: "FuzzMissing"}, "1x")
+	err := runFuzzTarget(ctx, t.TempDir(), fuzzTarget{pkg: "no-package", name: "FuzzMissing"}, "1x", nil)
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("canceled child: %v", err)
 	}

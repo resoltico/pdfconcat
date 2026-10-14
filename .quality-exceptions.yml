@@ -509,3 +509,87 @@ exceptions:
       column: 16
       statuses: [lived]
       retained_property: intrinsic encoding remains restricted to supported unembedded Type1 fonts and referenced errors remain failures
+
+    # Only a zero endpoint changes the crossing-zero test. That endpoint also makes minimumSource
+    # zero. This branch requires exponent < 1, so minimumNormalSource is strictly positive and
+    # the remaining conjunction still rejects it. The exponent >= 1 fast path is unchanged.
+    # Exact-scale normal-preimage and zero-endpoint controls retain both sides of the contract.
+    - id: mutation-fit-downscale-zero-lower-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/fit_precision.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'return !(low <= 0 && high >= 0) && minimumSource >= minimumNormalSource'
+      column: 15
+      statuses: [lived]
+      retained_property: power-of-two downscaling only bypasses interval error bounds when every scaled endpoint is normal
+
+    # Only a zero endpoint changes the crossing-zero test. That endpoint also makes minimumSource
+    # zero. This branch requires exponent < 1, so minimumNormalSource is strictly positive and
+    # the remaining conjunction still rejects it. The exponent >= 1 fast path is unchanged.
+    # Exact-scale normal-preimage and zero-endpoint controls retain both sides of the contract.
+    - id: mutation-fit-downscale-zero-upper-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/fit_precision.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'return !(low <= 0 && high >= 0) && minimumSource >= minimumNormalSource'
+      column: 28
+      statuses: [lived]
+      retained_property: power-of-two downscaling only bypasses interval error bounds when every scaled endpoint is normal
+
+    # Successful ReadToken establishes a nonseparator token byte after the previous offset in
+    # the same immutable document. This scan must stop before len(data); EOF and syntax failures
+    # return before it. The physical position and separator controls retain diagnostic offsets.
+    - id: mutation-plan-token-offset-end-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/plan/decode.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'for start < int64(len(p.doc.data)) && (isJSONSpace(p.doc.data[start]) || p.doc.data[start] == ',' || p.doc.data[start] == ':') {'
+      column: 12
+      statuses: [lived]
+      retained_property: successful token decoding bounds the separator scan before the end of the captured document
+
+    # Only the low-bit mask observes this counter. Starting at zero, either direction reaches
+    # a zero mask on the same multiples of its power-of-two period.
+    # TestTokenCancellationUsesPositiveContiguousLowBitMask protects the premise; real blocked
+    # reader and decoder cancellation controls remain required.
+    - id: mutation-plan-token-cancellation-counter-direction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/plan/decode.go
+      operator: INCREMENT_DECREMENT
+      anchor: 'p.ticks++'
+      column: 9
+      statuses: [lived]
+      retained_property: token scanning observes cancellation at the same uniform intervals in either counter direction
+
+    # compileVariableFont validates the same immutable dictionary through variableFontName before
+    # readWidths, establishing a nonnull supported Subtype. A subsequent name-read failure returns
+    # both an error and a nil name, so either conjunction rejects it. The remaining Type1/core
+    # font restrictions and declared-width path are unchanged.
+    - id: mutation-variable-metric-checked-subtype-conjunction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_variable_widths.go
+      operator: INVERT_LOGICAL
+      anchor: 'if err != nil || kind == nil || *kind != nameType1 || !pdffont.IsCoreFont(base) {'
+      column: 16
+      statuses: [lived]
+      retained_property: intrinsic core metrics remain restricted to supported unembedded Type1 fonts
+
+    # Symbol and ZapfDingbats leave this iteration through the preceding continue. All remaining
+    # metric encodings are the closed maintained WinAnsi table. For every nonempty glyph in that
+    # table, Windows1252 rune encodability equals the canonical-byte glyph comparison.
+    # TestVariableCoreWinAnsiCanonicalGlyphPremise checks this dependency premise independently
+    # of variableMetricCodes, so a changed upstream table invalidates the judgment.
+    - id: mutation-variable-winansi-canonical-conjunction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_variable_widths.go
+      operator: INVERT_LOGICAL
+      anchor: 'if found && encoding[canonical] == glyph {'
+      column: 12
+      statuses: [lived]
+      retained_property: default core-font metric lookup retains the canonical WinAnsi glyph code

@@ -17,10 +17,14 @@ import (
 func TestMutationPartitionsAreDisjointAndCoverEveryHostFile(t *testing.T) {
 	t.Parallel()
 	files := map[string]bool{"cmd/pdfconcat/main.go": true, "internal/app/job.go": true, "internal/app/pipeline.go": true, "internal/capture/set.go": true, "internal/plan/decode.go": true}
+	sizes := map[string]int{}
+	for path := range files {
+		sizes[path] = len(path)
+	}
 	for count := 1; count <= len(files); count++ {
 		union := map[string]bool{}
 		for index := range count {
-			part, err := selectMutationPartition(files, mutationPartition{Index: index, Count: count})
+			part, err := selectMutationPartition(sizes, mutationPartition{Index: index, Count: count})
 			if err != nil || len(part) == 0 {
 				t.Fatalf("empty partition: %v", err)
 			}
@@ -98,7 +102,36 @@ func TestMutationPartitionRejectsInvalidAndEmptySelections(t *testing.T) {
 			t.Fatalf("invalid partition accepted: %s", value)
 		}
 	}
-	if _, err := selectMutationPartition(map[string]bool{"one.go": true}, mutationPartition{Count: 2}); err == nil {
+	if _, err := selectMutationPartition(map[string]int{"one.go": 1}, mutationPartition{Count: 2}); err == nil {
 		t.Fatal("empty partition accepted")
+	}
+}
+
+func TestMutationPartitionsBalanceLargeFilesDeterministically(t *testing.T) {
+	t.Parallel()
+	// Alphabetic round robin would place both large files in partition zero.
+	sizes := map[string]int{"a.go": 100, "b.go": 1, "c.go": 100, "d.go": 1}
+	for index := range 2 {
+		want := map[string]bool{"a.go": true, "b.go": true}
+		if index == 1 {
+			want = map[string]bool{"c.go": true, "d.go": true}
+		}
+		for range 20 {
+			got, err := selectMutationPartition(sizes, mutationPartition{Index: index, Count: 2})
+			if err != nil || !maps.Equal(got, want) {
+				t.Fatalf("partition %d = %v, %v; want %v", index, got, err, want)
+			}
+		}
+	}
+	for count := 1; count <= 3; count++ {
+		for index := range count {
+			got, err := selectMutationPartition(map[string]int{"a": 0, "b": 0, "c": 0}, mutationPartition{Index: index, Count: count})
+			if err != nil || len(got) == 0 {
+				t.Fatalf("zero-byte partition %d/%d: %v, %v", index, count, got, err)
+			}
+		}
+	}
+	if _, err := selectMutationPartition(nil, mutationPartition{Count: 1}); err == nil {
+		t.Fatal("empty source inventory accepted")
 	}
 }

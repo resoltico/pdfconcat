@@ -12,10 +12,11 @@ import (
 )
 
 type testEvidence struct {
-	stdout   *os.File
-	stderr   *os.File
-	path     string
-	explicit bool
+	stdout    *os.File
+	stderr    *os.File
+	path      string
+	explicit  bool
+	byteLimit int64
 }
 
 // openTestEvidence streams complete JSON events and separate process stderr outside source files.
@@ -53,7 +54,7 @@ func (e *testEvidence) closeFiles() error {
 
 func (e *testEvidence) finish(result error) {
 	if e.explicit || result != nil {
-		log.Printf("test: complete JSON event evidence: %s; process stderr: %s.stderr", e.path, e.path)
+		log.Printf("test: JSON event evidence: %s; process stderr: %s.stderr", e.path, e.path)
 		return
 	}
 

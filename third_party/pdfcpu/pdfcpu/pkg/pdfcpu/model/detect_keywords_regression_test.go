@@ -101,8 +101,14 @@ func TestDetectKeywordsLongInput(t *testing.T) {
 		}
 		return time.Since(start)
 	}
+	// Compare the fastest of three interleaved scans of each size to reduce
+	// unrelated scheduling and garbage-collection pauses.
 	small := run(20000)
 	large := run(80000)
+	for range 2 {
+		small = min(small, run(20000))
+		large = min(large, run(80000))
+	}
 	if large > 8*small && large > 200*time.Millisecond {
 		t.Fatalf("4x input took %v vs %v", large, small)
 	}

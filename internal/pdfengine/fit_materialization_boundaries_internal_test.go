@@ -9,6 +9,7 @@ import (
 	"math"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -371,5 +372,51 @@ func TestFittingImportHonorsCancellationAtEveryNativeCheckpoint(t *testing.T) {
 
 	if !completed {
 		t.Fatal("uncancelled fitting import never completed")
+	}
+}
+
+func TestFittedSheetVerifierKeepsInclusiveEdgeAllowanceAndPageNumber(t *testing.T) {
+	t.Parallel()
+	target := PageSize{612, 1008}
+	for _, edge := range []float64{fitSheetTolerance, math.Nextafter(fitSheetTolerance, math.Inf(1))} {
+		geometry := pageGeometry{media: rectangle{x0: edge, x1: 612, y1: 1008}, crop: rectangle{x1: 612, y1: 1008}}
+		err := verifyFitBoxes(geometry, target, 2)
+		if (err != nil) != (edge > fitSheetTolerance) {
+			t.Fatalf("edge %.17g: %v", edge, err)
+		}
+	}
+	pdf := readUnvalidated(t, pdffixture.Pages("verified", 2))
+	fitStaticTestPages(t, pdf, target)
+	root, err := pdf.PagesContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	err = walkPages(t.Context(), pdf, *root, func(_ types.IndirectRef, page types.Dict, _ inheritedAttrs) error {
+		count++
+		if count == 2 {
+			page[keyRotate] = types.Integer(90)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = verifyFittedSheets(t.Context(), pdf, target); err == nil || !strings.Contains(err.Error(), "output page 2 has incorrect Rotate") {
+		t.Fatalf("second page refusal lost its physical page number: %v", err)
+	}
+}
+
+func TestFittedResourceNameStopsAtTheFirstFreeBinding(t *testing.T) {
+	t.Parallel()
+	pdf := guardContext(t)
+	bindings := types.Dict{}
+	for index := range 2000 {
+		bindings["Unrelated"+strconv.Itoa(index)] = types.Name("existing")
+	}
+	ctx := CheckpointContext(t.Context(), t, 256)
+	_, name, err := fittedPageResources(ctx, pdf, types.Dict{keyXObject: bindings}, *types.NewIndirectRef(40, 0))
+	if err != nil || name != fitContentName {
+		t.Fatalf("free binding required scanning unrelated names: %q %v", name, err)
 	}
 }

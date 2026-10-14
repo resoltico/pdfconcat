@@ -294,3 +294,58 @@ func TestCapturedFitRejectsIndividualGeometryContradictions(t *testing.T) {
 		})
 	}
 }
+
+func TestGeometryReferencesDistinguishAbsenceAndCapturedIdentity(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		first, second *int
+		equal         bool
+	}{
+		{nil, nil, true},
+		{nil, new(0), false},
+		{new(0), nil, false},
+		{new(0), new(0), true},
+		{new(0), new(1), false},
+		{new(1), new(0), false},
+	} {
+		if got := sameGeometryReference(test.first, test.second); got != test.equal {
+			t.Fatalf("geometry reference equality = %v, want %v for %v, %v", got, test.equal, test.first, test.second)
+		}
+	}
+}
+
+func TestBriefPartTextPreservesFindingsAndFinalSheet(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		part PartView
+		want string
+	}{
+		{"generated", PartView{ID: "argv:0", Kind: PartBlank, Generated: &GeneratedBrief{Width: 100, Height: 200, Background: "white", Text: &TextBrief{Preview: "wide", HasFindings: true}}, FinalSize: &PageSize{Width: 612, Height: 1008}}, "argv:0 blank pages unknown: 100x200 pt, background white, text \"wide\", measured overflow findings (0 warning records)\n"},
+		{"source", PartView{ID: "argv:1", Kind: PartPDF, Path: "/input.pdf", FinalSize: &PageSize{Width: 612, Height: 1008}, Fit: &FitDeclaration{Paper: "Legal"}}, "argv:1 pdf pages unknown: /input.pdf; final sheet 612x1008 pt; fit to Legal (0 warning records)\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var text bytes.Buffer
+			response := PartResponse{Part: test.part}
+			if err := response.RenderText(&text); err != nil {
+				t.Fatal(err)
+			}
+			if got := text.String(); got != test.want {
+				t.Fatalf("brief part = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCapturedFitAllowsSourceBeforePageInspection(t *testing.T) {
+	t.Parallel()
+	builder := NewBuilder(commandCheck)
+	builder.SetFit(&FitDeclaration{Paper: "Legal", Size: PageSize{Origin: SizeFitTarget, Width: 612, Height: 1008}})
+	source := builder.Source(Source{Path: "/not-yet-inspected.pdf"})
+	builder.AddPart(Part{ID: "argv:0", Kind: PartPDF, Source: &source, Origin: Position{File: featureArgv}})
+	builder.AddDiagnostic(0, Diagnostic{Stage: StageRead, Code: CodeInvalidValue, Message: "source inspection failed before page count"})
+	saved := builder.Build(StatusInvalid)
+	if err := saved.Validate(); err != nil {
+		t.Fatalf("source without captured page count refused: %v", err)
+	}
+}

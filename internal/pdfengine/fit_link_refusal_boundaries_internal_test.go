@@ -4,6 +4,7 @@
 package pdfengine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,23 @@ import (
 )
 
 const fitInvalidAnnotationValue = "invalid annotation value"
+
+func TestFitDestinationOrderIsTotalAcrossNamespacesAndNames(t *testing.T) {
+	t.Parallel()
+	ordered := []fitDestinationKey{
+		{legacy: true, name: "A"},
+		{legacy: true, name: "Z"},
+		{name: "A"},
+		{name: "Z"},
+	}
+	for first, a := range ordered {
+		for second, b := range ordered {
+			if got, want := compareFitDestinationKeys(a, b), cmp.Compare(first, second); cmp.Compare(got, 0) != want {
+				t.Fatalf("destination order %+v versus %+v = %d, want sign %d", a, b, got, want)
+			}
+		}
+	}
+}
 
 func TestFitNamedDestinationDepthAndFirstRepeatedName(t *testing.T) {
 	t.Parallel()
@@ -457,5 +475,19 @@ func TestFitAnnotationAndDestinationEntriesHonorEveryCancellationCheckpoint(t *t
 
 			t.Fatal("uncancelled traversal never completed")
 		})
+	}
+}
+
+func TestFitLinkOwnershipAllowsAbsentAndNullPageReference(t *testing.T) {
+	t.Parallel()
+	for _, present := range []bool{false, true} {
+		pdf, _, link := fitLinkFixture(t)
+		delete(link, "P")
+		if present {
+			link["P"] = nil
+		}
+		if _, err := inspectPageFits(t.Context(), pdf, PageSize{612, 1008}); err != nil {
+			t.Fatalf("optional link page reference present=%v: %v", present, err)
+		}
 	}
 }

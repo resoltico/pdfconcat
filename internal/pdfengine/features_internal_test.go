@@ -255,3 +255,22 @@ func TestMalformedFeatureReferencesAndNameEntriesReject(t *testing.T) {
 		}
 	}
 }
+
+func TestSourceFeaturesObserveEveryNondestinationNameTree(t *testing.T) {
+	t.Parallel()
+	pdf := readUnvalidated(t, pdffixture.Attachment("payload"))
+	names, err := pdf.DereferenceDict(pdf.RootDict[keyNames])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Destinations belong to a separate inspection contract; their value must not
+	// stop observation of document-scoped payload in the other name trees.
+	names[keyDests] = types.Integer(7)
+	names[featureJavaScript] = types.Dict{keyNames: types.Array{types.StringLiteral("script"), types.Dict{"S": types.Name(featureJavaScript), "JS": types.StringLiteral(featureScript)}}}
+	names["Alternate"] = types.Dict{keyNames: types.Array{types.StringLiteral("other"), types.Integer(1)}}
+	got, err := observeFeatures(t.Context(), pdf)
+	want := []SourceFeature{{Kind: FeatureCatalogAttachments, Disposition: FeatureRemoved}, {Kind: FeatureCatalogActions, Disposition: FeatureRemoved}, {Kind: FeatureOtherCatalogNames, Disposition: FeatureRemoved}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("nondestination catalog features: got=%v want=%v error=%v", got, want, err)
+	}
+}

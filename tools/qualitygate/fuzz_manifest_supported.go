@@ -21,9 +21,10 @@ import (
 
 // compilerFuzzManifest obtains Go's recognized target table without executing
 // TestMain, which can suppress ordinary list output while returning success.
-func compilerFuzzManifest(ctx context.Context, root string, patterns []string) ([]fuzzTarget, error) {
+func compilerFuzzManifest(ctx context.Context, root string, patterns, environment []string) ([]fuzzTarget, error) {
 	run := goCommand(root, append([]string{goListVerb, "-compiled", "-test", jsonFlag}, patterns...)...)
 	run.fuzzLifecycle = true
+	run.env = environment
 	output, err := run.output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fuzz compiler manifest: %w", err)

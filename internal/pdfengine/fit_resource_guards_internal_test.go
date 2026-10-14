@@ -83,9 +83,14 @@ func guardStream(t *testing.T, pdf *model.Context, content string, resources typ
 
 func guardInspect(t *testing.T, i *fitProgramInspector, content string, resources types.Dict) error {
 	t.Helper()
+	return guardInspectContext(t.Context(), t, i, content, resources)
+}
+
+func guardInspectContext(ctx context.Context, t *testing.T, i *fitProgramInspector, content string, resources types.Dict) error {
+	t.Helper()
 
 	return i.inspectPage(
-		t.Context(),
+		ctx,
 		types.Dict{keyContents: types.StreamDict{Dict: types.Dict{}, Content: []byte(content)}},
 		resources,
 		PageFit{

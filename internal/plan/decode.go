@@ -71,9 +71,9 @@ const (
 	// Version is the plan format version this package reads.
 	Version = 1
 
-	// cancelCheckInterval is how many tokens pass between context checks.
-	cancelCheckInterval = 0xFFF
-	trailingBuffer      = 4096
+	// cancelCheckMask checks cancellation whenever the low token-counter bits are zero.
+	cancelCheckMask = 0xFFF
+	trailingBuffer  = 4096
 
 	memberBlank = "blank"
 	memberDir   = "dir"
@@ -197,7 +197,7 @@ func (p *parser) next() (token, error) {
 	}
 
 	p.ticks++
-	if p.ticks&cancelCheckInterval == 0 {
+	if p.ticks&cancelCheckMask == 0 {
 		cause := p.stop.err()
 		if cause != nil {
 			return token{}, p.source.fail(cause)

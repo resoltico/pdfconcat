@@ -88,8 +88,15 @@ func fittedPageResources(
 	}
 
 	name := fitContentName
-	for suffix := 1; xobjects[name] != nil; suffix++ {
-		name = fitContentName + strconv.Itoa(suffix)
+	// At most len(xobjects) occupied bindings precede a free name.
+	for suffix := range len(xobjects) {
+		if err := ctx.Err(); err != nil {
+			return nil, "", fmt.Errorf("fit resource binding: %w", err)
+		}
+		if xobjects[name] == nil {
+			break
+		}
+		name = fitContentName + strconv.Itoa(suffix+1)
 	}
 
 	output, bindings := maps.Clone(original), maps.Clone(xobjects)

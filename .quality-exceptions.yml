@@ -546,7 +546,7 @@ exceptions:
       kind: equivalent-mutant
       path: internal/plan/decode.go
       operator: CONDITIONALS_BOUNDARY
-      anchor: 'for start < int64(len(p.doc.data)) && (isJSONSpace(p.doc.data[start]) || p.doc.data[start] == ',' || p.doc.data[start] == ':') {'
+      anchor: 'for start < int64(len(p.doc.data)) && (isJSONSpace(p.doc.data[start]) || p.doc.data[start] == '','' || p.doc.data[start] == '':'') {'
       column: 12
       statuses: [lived]
       retained_property: successful token decoding bounds the separator scan before the end of the captured document

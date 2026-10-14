@@ -5502,14 +5502,17 @@ index 5ebc801..29e78d4 100644
  // ActiveWorkers gives the number of active workers on the Pool.
 diff --git a/internal/execution/cleanup_ownership.go b/internal/execution/cleanup_ownership.go
 new file mode 100644
-index 0000000..3405362
+index 0000000..181c83f
 --- /dev/null
 +++ b/internal/execution/cleanup_ownership.go
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,17 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
-+import "errors"
++import (
++	"errors"
++	"time"
++)
 +
 +// ErrUnsettledProcess requires retaining producer-owned source, cache and scratch.
 +// It is emitted only when native ownership settlement could not be proved.
@@ -5518,6 +5521,8 @@ index 0000000..3405362
 +// ErrCleanupOwnership requires ancestors to preserve a child directory after
 +// its own final cleanup refused or failed. It does not imply a live process.
 +var ErrCleanupOwnership = errors.New("owned directory cleanup could not be completed safely")
++
++const goCommandCleanupBudget = 5 * time.Second
 diff --git a/internal/execution/compiler_physical_path_unix_test.go b/internal/execution/compiler_physical_path_unix_test.go
 new file mode 100644
 index 0000000..8fd8426
@@ -6351,10 +6356,10 @@ index 0000000..fbda586
 +}
 diff --git a/internal/execution/go_process_unix.go b/internal/execution/go_process_unix.go
 new file mode 100644
-index 0000000..37d04f8
+index 0000000..12c7c1e
 --- /dev/null
 +++ b/internal/execution/go_process_unix.go
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,128 @@
 +//go:build darwin || linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -6372,8 +6377,6 @@ index 0000000..37d04f8
 +
 +	"golang.org/x/sys/unix"
 +)
-+
-+const goCommandCleanupBudget = 5 * time.Second
 +
 +// RunGoCommand owns the private process group until all signalling finishes,
 +// before Wait reaps its leader and permits numeric PID reuse.
@@ -6642,10 +6645,10 @@ index 0000000..d81346e
 +}
 diff --git a/internal/execution/go_process_windows.go b/internal/execution/go_process_windows.go
 new file mode 100644
-index 0000000..7cddb8b
+index 0000000..741fc07
 --- /dev/null
 +++ b/internal/execution/go_process_windows.go
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,297 @@
 +//go:build windows
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -6811,18 +6814,17 @@ index 0000000..7cddb8b
 +	}()
 +	if err := windows.AssignProcessToJobObject(job, process.Process); err != nil {
 +		// It cannot have created descendants while still suspended and unassigned.
++		cleanupDeadline := time.Now().Add(goCommandCleanupBudget)
 +		killErr := windows.TerminateProcess(process.Process, 1)
-+		state, waitErr := windows.WaitForSingleObject(process.Process, 5000)
-+		if waitErr == nil && state != windows.WAIT_OBJECT_0 {
-+			waitErr = fmt.Errorf("suspended process cleanup wait returned %d", state)
-+		}
++		waitErr := verifyWindowsProcessExit(process.Process, cleanupDeadline)
 +		return err, errors.Join(cleanupErr, killErr, waitErr), false, killErr == nil && waitErr == nil
 +	}
 +	if previous, err := windows.ResumeThread(process.Thread); err != nil || previous != 1 {
 +		if err == nil {
 +			err = fmt.Errorf("unexpected suspended thread count %d", previous)
 +		}
-+		cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job), verifyWindowsProcessExit(process.Process))
++		cleanupDeadline := time.Now().Add(goCommandCleanupBudget)
++		cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job, cleanupDeadline), verifyWindowsProcessExit(process.Process, cleanupDeadline))
 +		return err, cleanupErr, false, cleanupErr == nil
 +	}
 +	started = true
@@ -6867,12 +6869,12 @@ index 0000000..7cddb8b
 +			break
 +		}
 +	}
-+	stopErr := stopWindowsJob(job)
-+	processWaitErr := verifyWindowsProcessExit(process.Process)
++	cleanupDeadline := time.Now().Add(goCommandCleanupBudget)
++	stopErr := stopWindowsJob(job, cleanupDeadline)
++	processWaitErr := verifyWindowsProcessExit(process.Process, cleanupDeadline)
 +	cleanupErr = errors.Join(cleanupErr, stopErr, processWaitErr)
-+	copiesSettled := true
 +	// Job termination closes every inherited writer before copy workers are joined.
-+	timer := time.NewTimer(5 * time.Second)
++	timer := time.NewTimer(time.Until(cleanupDeadline))
 +	defer timer.Stop()
 +	for finishedCopies < 2 {
 +		select {
@@ -6880,11 +6882,24 @@ index 0000000..7cddb8b
 +			finishedCopies++
 +			copyErr = errors.Join(copyErr, err)
 +		case <-timer.C:
-+			copiesSettled = false
++			// Completion and the deadline can become ready together. Consume
++			// already-joined workers before reporting an output cleanup timeout.
++		drainReady:
++			for finishedCopies < 2 {
++				select {
++				case err := <-copied:
++					finishedCopies++
++					copyErr = errors.Join(copyErr, err)
++				default:
++					break drainReady
++				}
++			}
++			if finishedCopies == 2 {
++				continue
++			}
 +			copyErr = errors.Join(copyErr, errors.New("output copy workers persisted after owned job termination"))
 +			// Closing owned readers interrupts a blocked Read; then join both workers.
-+			_ = outRead.Close()
-+			_ = errRead.Close()
++			copyErr = errors.Join(copyErr, outRead.Close(), errRead.Close())
 +			for finishedCopies < 2 {
 +				copyErr = errors.Join(copyErr, <-copied)
 +				finishedCopies++
@@ -6892,11 +6907,10 @@ index 0000000..7cddb8b
 +		}
 +	}
 +	cleanupErr = errors.Join(cleanupErr, copyErr)
-+	return runErr, cleanupErr, true, stopErr == nil && processWaitErr == nil && copiesSettled && finishedCopies == 2
++	return runErr, cleanupErr, true, stopErr == nil && processWaitErr == nil && finishedCopies == 2
 +}
-+func stopWindowsJob(job windows.Handle) error {
++func stopWindowsJob(job windows.Handle, deadline time.Time) error {
 +	terminateErr := windows.TerminateJobObject(job, 1)
-+	deadline := time.Now().Add(5 * time.Second)
 +	for {
 +		var facts jobAccounting
 +		var returned uint32
@@ -6913,22 +6927,28 @@ index 0000000..7cddb8b
 +		if !time.Now().Before(deadline) {
 +			return errors.Join(terminateErr, errors.New("owned job processes persisted after termination"))
 +		}
-+		time.Sleep(10 * time.Millisecond)
++		time.Sleep(min(10*time.Millisecond, time.Until(deadline)))
 +	}
 +}
 +
 +// A stopped job and a joined output copy do not substitute for observing the
 +// retained process handle itself become signaled.
-+func verifyWindowsProcessExit(process windows.Handle) error {
-+	state, err := windows.WaitForSingleObject(process, 0)
++func verifyWindowsProcessExit(process windows.Handle, deadline time.Time) error {
++	var milliseconds uint32
++	if remaining := time.Until(deadline); remaining > 0 {
++		// The native timeout has millisecond resolution. Never allocate a new
++		// allowance or round beyond the original shared cleanup deadline.
++		milliseconds = uint32(remaining / time.Millisecond)
++	}
++	state, err := windows.WaitForSingleObject(process, milliseconds)
 +	if err == nil && state != windows.WAIT_OBJECT_0 {
-+		err = fmt.Errorf("owned process not settled after job termination: %d", state)
++		err = fmt.Errorf("owned process cleanup wait returned %d", state)
 +	}
 +	return err
 +}
 diff --git a/internal/execution/go_process_windows_test.go b/internal/execution/go_process_windows_test.go
 new file mode 100644
-index 0000000..a3b161e
+index 0000000..a3cec17
 --- /dev/null
 +++ b/internal/execution/go_process_windows_test.go
 @@ -0,0 +1,193 @@
@@ -7064,7 +7084,7 @@ index 0000000..a3b161e
 +			go func() {
 +				runErr, cleanupErr, started, settled := RunGoCommand(ctx, cmd, out, stderr)
 +				if !started || !settled {
-+					finished <- errors.New("process not started")
++					finished <- fmt.Errorf("owned process completion: started=%t settled=%t run=%v cleanup=%v", started, settled, runErr, cleanupErr)
 +					return
 +				}
 +				if mode == "normal" {
@@ -7609,6 +7629,123 @@ index 0000000..19a141d
 +func TestStackOverflowRemainsInfrastructureFailureOnStderr(t *testing.T) {
 +	if err := CheckInfrastructureStream(strings.NewReader("runtime: goroutine stack exceeds limit\nfatal error: stack overflow\n")); err == nil {
 +		t.Fatal("fatal stack overflow stderr accepted as ordinary test failure")
++	}
++}
+diff --git a/internal/execution/process_exit_windows_test.go b/internal/execution/process_exit_windows_test.go
+new file mode 100644
+index 0000000..c2850dc
+--- /dev/null
++++ b/internal/execution/process_exit_windows_test.go
+@@ -0,0 +1,111 @@
++//go:build windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"errors"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++func TestOwnedWindowsProcessExitWaitConsumesOnlyRemainingDeadline(t *testing.T) {
++	ready := filepath.Join(t.TempDir(), "ready")
++	process := startOwnedWindowsWaitControl(t, ready)
++	// The child is positively running. An expired shared allowance must poll,
++	// rather than assigning another complete cleanup allowance.
++	started := time.Now()
++	if err := verifyWindowsProcessExit(process, started.Add(-time.Second)); err == nil || !strings.Contains(err.Error(), "258") {
++		t.Fatalf("live process accepted after expired cleanup allowance: %v", err)
++	}
++	if elapsed := time.Since(started); elapsed > time.Second {
++		t.Fatalf("expired cleanup allowance was renewed: %s", elapsed)
++	}
++
++	started = time.Now()
++	if err := verifyWindowsProcessExit(process, started.Add(20*time.Millisecond)); err == nil || !strings.Contains(err.Error(), "258") {
++		t.Fatalf("live process accepted without signaling: %v", err)
++	}
++	if elapsed := time.Since(started); elapsed < 10*time.Millisecond || elapsed > time.Second {
++		t.Fatalf("process wait ignored remaining allowance: %s", elapsed)
++	}
++
++	deadline := time.Now().Add(goCommandCleanupBudget)
++	if err := windows.TerminateProcess(process, 1); err != nil {
++		t.Fatal(err)
++	}
++	if err := verifyWindowsProcessExit(process, deadline); err != nil {
++		t.Fatalf("terminated retained process did not join within shared allowance: %v", err)
++	}
++	if state, err := windows.WaitForSingleObject(process, 0); err != nil || state != windows.WAIT_OBJECT_0 {
++		t.Fatalf("process wait claimed settlement without signaled handle: state=%d error=%v", state, err)
++	}
++}
++
++func startOwnedWindowsWaitControl(t *testing.T, ready string) windows.Handle {
++	t.Helper()
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	application, err := windows.UTF16PtrFromString(executable)
++	if err != nil {
++		t.Fatal(err)
++	}
++	commandLine, err := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{executable, "-test.run=^TestOwnedWindowsProcessWaitHelper$"}))
++	if err != nil {
++		t.Fatal(err)
++	}
++	environment, err := windowsEnvironment(append(os.Environ(), "GREMLINS_PROCESS_WAIT_HELPER="+ready))
++	if err != nil {
++		t.Fatal(err)
++	}
++	startup := windows.StartupInfo{}
++	startup.Cb = uint32(unsafe.Sizeof(startup))
++	var process windows.ProcessInformation
++	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
++	if err := windows.CreateProcess(application, commandLine, nil, nil, false, flags, &environment[0], nil, &startup, &process); err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		state, inspectErr := windows.WaitForSingleObject(process.Process, 0)
++		var stopErr error
++		if inspectErr != nil || state != windows.WAIT_OBJECT_0 {
++			deadline := time.Now().Add(goCommandCleanupBudget)
++			stopErr = errors.Join(windows.TerminateProcess(process.Process, 1), verifyWindowsProcessExit(process.Process, deadline))
++		}
++		if err := errors.Join(inspectErr, stopErr, windows.CloseHandle(process.Thread), windows.CloseHandle(process.Process)); err != nil {
++			t.Error(err)
++		}
++	})
++	deadline := time.Now().Add(goCommandCleanupBudget)
++	for {
++		if raw, err := os.ReadFile(ready); err == nil && string(raw) == "running" {
++			return process.Process
++		}
++		if time.Now().After(deadline) {
++			state, err := windows.WaitForSingleObject(process.Process, 0)
++			t.Fatalf("native process wait control never became ready: state=%d error=%v", state, err)
++		}
++		time.Sleep(time.Millisecond)
++	}
++}
++
++func TestOwnedWindowsProcessWaitHelper(t *testing.T) {
++	ready := os.Getenv("GREMLINS_PROCESS_WAIT_HELPER")
++	if ready == "" {
++		return
++	}
++	if err := os.WriteFile(ready, []byte("running"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	for {
++		time.Sleep(time.Second)
 +	}
 +}
 diff --git a/internal/execution/process_group_darwin.go b/internal/execution/process_group_darwin.go

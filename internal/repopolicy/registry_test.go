@@ -44,3 +44,12 @@ func TestRegistryCannotAcceptUnjudgedMutationStatus(t *testing.T) {
 		t.Fatalf("unjudged registry acceptance allowed: %v", err)
 	}
 }
+
+// Syntax/schema validation is safe while a mutation changes Go source anchors.
+// Physical anchor freshness belongs to the controller's pristine preflight.
+func TestRepositoryMutationRegistryParses(t *testing.T) {
+	t.Parallel()
+	if _, err := repopolicy.LoadRegistry(filepath.Join("..", "..", registryFile)); err != nil {
+		t.Fatalf("repository mutation registry cannot be loaded: %v", err)
+	}
+}

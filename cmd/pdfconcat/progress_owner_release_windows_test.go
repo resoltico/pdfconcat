@@ -31,9 +31,12 @@ func TestProgressOwnerReleaseReportsActualNativeCloseResult(t *testing.T) {
 			}
 			if fault {
 				requireProgressNoError(t, windows.CloseHandle(owner.transport.handle))
-				// Retire the deliberately broken owned identity before another native handle
-				// can reuse it. The caller's distinct original remains open.
-				owner.transport.handle = windows.InvalidHandle
+				// NULL is never allocated, so retirement cannot target a reused handle.
+				// INVALID_HANDLE_VALUE is also the current-process pseudo-handle.
+				owner.transport.handle = 0
+				if closeErr := windows.CloseHandle(0); !errors.Is(closeErr, windows.ERROR_INVALID_HANDLE) {
+					t.Fatalf("native NULL-handle close fault precondition: %v", closeErr)
+				}
 			}
 			owner.release()
 			if owner.interrupted() != fault || fault && !errors.Is(owner.transport.closeErr, windows.ERROR_INVALID_HANDLE) || !fault && owner.transport.closeErr != nil {

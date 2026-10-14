@@ -89,9 +89,19 @@ func assertProgressHeldConsoleCancellation(t *testing.T, fixture *progressConsol
 	defer cancel()
 
 	result := make(chan error, 1)
+	admitted := make(chan struct{})
+	transport.writeAdmitted = func() { close(admitted) }
 	started := time.Now()
 
 	go func() { result <- transport.WriteRecord(ctx, []byte(progressAbandonedText)) }()
+	select {
+	case <-admitted:
+		t.Logf("console write admitted after %s", time.Since(started))
+	case err := <-result:
+		t.Fatalf("console write completed before native worker admission: %v", err)
+	case <-time.After(time.Until(started.Add(time.Second))):
+		t.Fatal("console worker did not admit the write within its existing completion bound")
+	}
 
 	assertProgressNativePending(t, observer, result)
 	canceled, cancelSchedule := context.WithCancel(t.Context())

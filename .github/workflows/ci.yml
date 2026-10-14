@@ -302,8 +302,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify release snapshot source
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - uses: ./.github/actions/prepare
         with:
           tools: goreleaser

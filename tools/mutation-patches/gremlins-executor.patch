@@ -1200,6 +1200,181 @@ index 0000000..3a00e62
 +		t.Fatalf("child-only mutation escaped actual named execution: %s %v %s", result.Status, err, raw)
 +	}
 +}
+diff --git a/internal/engine/cleanup_deadline_test.go b/internal/engine/cleanup_deadline_test.go
+new file mode 100644
+index 0000000..433aea2
+--- /dev/null
++++ b/internal/engine/cleanup_deadline_test.go
+@@ -0,0 +1,169 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++// A context timer may not have delivered cancellation when its absolute
++// deadline is already past. Exercise that boundary without scheduling a race.
++type pendingDeadlineContext struct {
++	context.Context
++	deadline time.Time
++}
++
++func (c pendingDeadlineContext) Deadline() (time.Time, bool) { return c.deadline, true }
++
++func TestJudgmentIncludesSettledCleanupWorkDeadline(t *testing.T) {
++	for _, name := range []string{"ordinary-assertion", "pending-deadline", "expected-timeout", "canceled"} {
++		t.Run(name, func(t *testing.T) {
++			proof, err := workdir.NewScratch(os.TempDir(), "gremlins-cleanup-deadline-proof-")
++			if err != nil {
++				t.Fatal(err)
++			}
++			cleanupSafe := true
++			defer func() {
++				if !cleanupSafe {
++					if err := proof.Retain(); err != nil {
++						t.Error(err)
++					}
++					t.Logf("retained uncertain deadline proof %q", proof.Path())
++					return
++				}
++				if err := proof.Clean(); err != nil {
++					t.Error(err)
++				}
++			}()
++			root := filepath.Join(proof.Path(), "command")
++			logs := filepath.Join(proof.Path(), "logs")
++			for _, directory := range []string{root, logs} {
++				if err := os.Mkdir(directory, 0700); err != nil {
++					t.Fatal(err)
++				}
++			}
++			ready := filepath.Join(root, "ready")
++			ctx := t.Context()
++			mode := "assertion"
++			want := mutator.Killed
++			var cancel context.CancelFunc = func() {}
++			switch name {
++			case "pending-deadline":
++				ctx = pendingDeadlineContext{ctx, time.Now().Add(-time.Second)}
++				want = mutator.TimedOut
++			case "expected-timeout":
++				ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
++				mode, want = "wait", mutator.TimedOut
++			case "canceled":
++				ctx, cancel = context.WithCancel(ctx)
++				mode, want = "wait", mutator.ExecutionError
++			}
++			defer cancel()
++			executable, err := os.Executable()
++			if err != nil {
++				t.Fatal(err)
++			}
++			command := exec.CommandContext(ctx, executable, "-test.run=^TestCleanupDeadlineProcessHelper$")
++			command.Dir = root
++			command.Env = append(os.Environ(), "GREMLINS_CLEANUP_DEADLINE_HELPER="+mode, "GREMLINS_CLEANUP_DEADLINE_READY="+ready)
++			cancellationJoined := make(chan struct{})
++			if name == "canceled" {
++				go func() {
++					defer close(cancellationJoined)
++					limit := time.NewTimer(5 * time.Second)
++					defer limit.Stop()
++					ticker := time.NewTicker(time.Millisecond)
++					defer ticker.Stop()
++					for {
++						if _, err := os.Stat(ready); err == nil {
++							cancel()
++							return
++						}
++						select {
++						case <-ctx.Done():
++							return
++						case <-limit.C:
++							cancel()
++							return
++						case <-ticker.C:
++						}
++					}
++				}()
++			} else {
++				close(cancellationJoined)
++			}
++			m := mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: judgmentMutant{}, executionLogDir: logs}
++			cleanupSafe = false
++			status, judgmentErr := m.executeJudgedTest(ctx, command, root)
++			cleanupSafe = m.executionSettled
++			cancel()
++			<-cancellationJoined
++			if status != want || !m.executionSettled {
++				t.Fatalf("settled cleanup judgment: got=%s want=%s settled=%t error=%v", status, want, m.executionSettled, judgmentErr)
++			}
++			receipts, err := filepath.Glob(filepath.Join(logs, "*.result.json"))
++			if err != nil || len(receipts) != 1 {
++				t.Fatalf("missing execution receipt: %v %v", receipts, err)
++			}
++			raw, err := os.ReadFile(receipts[0])
++			if err != nil {
++				t.Fatal(err)
++			}
++			var receipt struct {
++				Started  bool   `json:"go_started"`
++				Artifact string `json:"artifact_error"`
++				Run      string `json:"process_error"`
++			}
++			if err := json.Unmarshal(raw, &receipt); err != nil {
++				t.Fatal(err)
++			}
++			if !receipt.Started || receipt.Artifact != "" {
++				t.Fatalf("expected owned producer and clean settled filesystem: %+v", receipt)
++			}
++			if (name == "pending-deadline" || name == "expected-timeout") && !strings.Contains(receipt.Run, context.DeadlineExceeded.Error()) {
++				t.Fatalf("work deadline absent from retained run outcome: %+v", receipt)
++			}
++			if name == "canceled" && !strings.Contains(receipt.Run, context.Canceled.Error()) {
++				t.Fatalf("cancellation lost: %+v", receipt)
++			}
++			if _, err := os.Stat(ready); err != nil {
++				t.Fatalf("helper never ran before context outcome: %v", err)
++			}
++			t.Logf("real owned process %s: status=%s settled=%t process_error=%q", name, status, m.executionSettled, receipt.Run)
++		})
++	}
++}
++
++func TestCleanupDeadlineProcessHelper(t *testing.T) {
++	mode := os.Getenv("GREMLINS_CLEANUP_DEADLINE_HELPER")
++	if mode == "" {
++		return
++	}
++	fmt.Println(`{"Action":"start","Package":"cleanup.example"}`)
++	fmt.Println(`{"Action":"run","Package":"cleanup.example","Test":"TestValue"}`)
++	if err := os.WriteFile(os.Getenv("GREMLINS_CLEANUP_DEADLINE_READY"), []byte("ready"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if mode == "wait" {
++		for {
++			time.Sleep(time.Second)
++		}
++	}
++	if mode != "assertion" {
++		t.Fatalf("unknown helper mode %q", mode)
++	}
++	fmt.Println(`{"Action":"output","Package":"cleanup.example","Test":"TestValue","Output":"    value_test.go:1: assertion\n"}`)
++	fmt.Println(`{"Action":"fail","Package":"cleanup.example","Test":"TestValue","Elapsed":0.001}`)
++	fmt.Println(`{"Action":"fail","Package":"cleanup.example","Elapsed":0.001}`)
++	os.Exit(1)
++}
 diff --git a/internal/engine/command_temp_test.go b/internal/engine/command_temp_test.go
 new file mode 100644
 index 0000000..3ac4a31
@@ -3197,7 +3372,7 @@ index efa93f5..0d28349 100644
  	gotMutants []mutator.Mutator
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
-index 0000000..fb57483
+index 0000000..b90cbb8
 --- /dev/null
 +++ b/internal/engine/test_execution.go
 @@ -0,0 +1,174 @@
@@ -3280,7 +3455,7 @@ index 0000000..fb57483
 +			}
 +			expected = &census
 +		}
-+		judgment, err := execution.JudgeTestStream(stdout, root, runErr, errors.Is(ctx.Err(), context.DeadlineExceeded) && processStarted, expected)
++		judgment, err := execution.JudgeTestStream(stdout, root, runErr, processStarted && (errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(runErr, context.DeadlineExceeded)), expected)
 +		status, judgmentErr = judgment.Status, err
 +	}
 +	var stdoutHash string
@@ -4167,10 +4342,10 @@ index 0000000..71d99a9
 +}
 diff --git a/internal/engine/workdir/command_temp.go b/internal/engine/workdir/command_temp.go
 new file mode 100644
-index 0000000..cde8b3c
+index 0000000..e44338b
 --- /dev/null
 +++ b/internal/engine/workdir/command_temp.go
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,113 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
@@ -4182,6 +4357,7 @@ index 0000000..cde8b3c
 +	"os/exec"
 +	"path/filepath"
 +	"strings"
++	"time"
 +
 +	"github.com/go-gremlins/gremlins/internal/execution"
 +)
@@ -4268,6 +4444,13 @@ index 0000000..cde8b3c
 +		return runErr, errors.Join(execution.ErrUnsettledProcess, fmt.Errorf("retain uncertain command temporary root %q: %w", scratch.Path(), cleanupErr), scratch.Retain()), started
 +	}
 +	tempCleanupErr := scratch.Clear()
++	// Settled filesystem cleanup may outlast the work deadline. Preserve that
++	// outcome in execution judgment without declaring safe cleanup uncertain.
++	if contextErr := ctx.Err(); contextErr != nil {
++		runErr = errors.Join(runErr, contextErr)
++	} else if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
++		runErr = errors.Join(runErr, context.DeadlineExceeded)
++	}
 +	if tempCleanupErr != nil {
 +		// Clear has closed its lease on failure. Retain the namespace for inspection;
 +		// a later owner Close must not retry deletion through an uncertain identity.
@@ -5322,10 +5505,10 @@ index 0000000..806b4ef
 +}
 diff --git a/internal/engine/workdir/scratch.go b/internal/engine/workdir/scratch.go
 new file mode 100644
-index 0000000..16576ad
+index 0000000..95f4c1a
 --- /dev/null
 +++ b/internal/engine/workdir/scratch.go
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,176 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
@@ -5469,8 +5652,9 @@ index 0000000..16576ad
 +		return err
 +	}
 +	var removeErr error
++	var removal scratchRemoval
 +	for _, child := range children {
-+		removeErr = errors.Join(removeErr, d.root.RemoveAll(child.Name()))
++		removeErr = errors.Join(removeErr, removal.remove(d.root, child.Name()))
 +	}
 +	if removeErr == nil && !removeRoot {
 +		rootErr := d.root.Close()
@@ -5500,6 +5684,254 @@ index 0000000..16576ad
 +		return errors.Join(closeErr, fmt.Errorf("scratch identity changed before removal; unknown entry preserved"))
 +	}
 +	return errors.Join(closeErr, parent.Remove(base))
++}
+diff --git a/internal/engine/workdir/scratch_remove_other.go b/internal/engine/workdir/scratch_remove_other.go
+new file mode 100644
+index 0000000..1ced5a5
+--- /dev/null
++++ b/internal/engine/workdir/scratch_remove_other.go
+@@ -0,0 +1,10 @@
++//go:build !windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import "os"
++
++type scratchRemoval struct{}
++
++func (*scratchRemoval) remove(root *os.Root, name string) error { return root.RemoveAll(name) }
+diff --git a/internal/engine/workdir/scratch_remove_windows.go b/internal/engine/workdir/scratch_remove_windows.go
+new file mode 100644
+index 0000000..fb738ff
+--- /dev/null
++++ b/internal/engine/workdir/scratch_remove_windows.go
+@@ -0,0 +1,60 @@
++//go:build windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"errors"
++	"os"
++	"syscall"
++	"time"
++)
++
++// Recently executed Windows images can briefly refuse deletion after their
++// producers settle. One allowance covers all children of this owned cleanup;
++// namespace checks and final root removal never use this retry policy.
++type scratchRemoval struct {
++	deadline time.Time
++	disabled bool
++}
++
++func (r *scratchRemoval) remove(root *os.Root, name string) error {
++	err := root.RemoveAll(name)
++	if err == nil {
++		return nil
++	}
++	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
++		r.disabled = true
++		return err
++	}
++	if r.disabled {
++		return err
++	}
++	if r.deadline.IsZero() {
++		r.deadline = time.Now().Add(2 * time.Second)
++	}
++	for {
++		remaining := time.Until(r.deadline)
++		if remaining <= 0 {
++			return err
++		}
++		time.Sleep(min(10*time.Millisecond, remaining))
++		if !time.Now().Before(r.deadline) {
++			return err
++		}
++		retryErr := root.RemoveAll(name)
++		// Bound admission and reject late retry success; a filesystem syscall or
++		// scheduler delay itself cannot be given a hard wall-clock bound here.
++		if !time.Now().Before(r.deadline) {
++			return errors.Join(err, retryErr)
++		}
++		if retryErr == nil {
++			return nil
++		}
++		err = retryErr
++		if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
++			r.disabled = true
++			return err
++		}
++	}
++}
+diff --git a/internal/engine/workdir/scratch_remove_windows_test.go b/internal/engine/workdir/scratch_remove_windows_test.go
+new file mode 100644
+index 0000000..18cb7d2
+--- /dev/null
++++ b/internal/engine/workdir/scratch_remove_windows_test.go
+@@ -0,0 +1,160 @@
++//go:build windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"errors"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"golang.org/x/sys/windows"
++)
++
++func TestOwnedCommandTempRetainsNativeImageDeletionFailure(t *testing.T) {
++	fixture, err := NewScratch(os.TempDir(), "gremlins-image-proof-")
++	if err != nil {
++		t.Fatal(err)
++	}
++	parent := fixture.Path()
++	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
++		t.Setenv(key, parent)
++	}
++	owner, err := NewCommandTemp()
++	if err != nil {
++		t.Fatal(errors.Join(err, fixture.Clean()))
++	}
++	root := owner.scratch.Path()
++	var mappings []windows.Handle
++	var views []uintptr
++	cleanupSafe := true
++	defer func() {
++		for _, view := range views {
++			if err := windows.UnmapViewOfFile(view); err != nil {
++				t.Error(err)
++			}
++		}
++		for _, mapping := range mappings {
++			if err := windows.CloseHandle(mapping); err != nil {
++				t.Error(err)
++			}
++		}
++		if !cleanupSafe {
++			if err := owner.Retain(); err != nil {
++				t.Error(err)
++			}
++			if err := fixture.Retain(); err != nil {
++				t.Error(err)
++			}
++			t.Logf("retained uncertain native image fixture parent=%q root=%q", parent, root)
++			return
++		}
++		if err := owner.Close(); err != nil {
++			t.Error(errors.Join(err, fixture.Retain()))
++			return
++		}
++		// The outer owner verifies its retained identity and uses one bounded
++		// rooted removal allowance after every image mapping has been closed.
++		if err := fixture.Clean(); err != nil {
++			t.Error(err)
++		}
++	}()
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	identities := make(map[string]os.FileInfo)
++	for _, child := range []string{"image-a", "image-b"} {
++		name := filepath.Join(root, child, "fixture.exe")
++		if err := os.Mkdir(filepath.Dir(name), 0700); err != nil {
++			t.Fatal(err)
++		}
++		input, err := os.Open(executable)
++		if err != nil {
++			t.Fatal(err)
++		}
++		output, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
++		if err != nil {
++			t.Fatal(errors.Join(err, input.Close()))
++		}
++		_, copyErr := io.Copy(output, input)
++		if err := errors.Join(copyErr, input.Close(), output.Close()); err != nil {
++			t.Fatal(err)
++		}
++		info, err := os.Stat(name)
++		if err != nil {
++			t.Fatal(err)
++		}
++		identities[name] = info
++		encoded, err := windows.UTF16PtrFromString(name)
++		if err != nil {
++			t.Fatal(err)
++		}
++		file, err := windows.CreateFile(encoded, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
++		if err != nil {
++			t.Fatal(err)
++		}
++		const secImage = 0x01000000 // SEC_IMAGE, Windows memory-mapping contract.
++		mapping, mapErr := windows.CreateFileMapping(file, nil, windows.PAGE_READONLY|secImage, 0, 0, nil)
++		closeErr := windows.CloseHandle(file)
++		if mapErr != nil {
++			t.Fatal(errors.Join(mapErr, closeErr))
++		}
++		mappings = append(mappings, mapping)
++		if closeErr != nil {
++			t.Fatal(closeErr)
++		}
++		view, err := windows.MapViewOfFile(mapping, windows.FILE_MAP_READ, 0, 0, 0)
++		if err != nil {
++			t.Fatal(err)
++		}
++		views = append(views, view)
++		confined, err := os.OpenRoot(root)
++		if err != nil {
++			t.Fatal(err)
++		}
++		refusal := confined.RemoveAll(child)
++		closeErr = confined.Close()
++		if !errors.Is(refusal, windows.ERROR_ACCESS_DENIED) || closeErr != nil {
++			t.Fatalf("real mapped-image errno5 precondition absent for %s: %v", child, errors.Join(refusal, closeErr))
++		}
++		t.Logf("actual rooted mapped-image deletion refusal %s: %v", child, refusal)
++	}
++	evidence, err := os.MkdirTemp(parent, "evidence-")
++	if err != nil {
++		t.Fatal(err)
++	}
++	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestOwnedCommandTempHelper$")
++	command.Dir = evidence
++	command.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER=normal", "GREMLINS_TEMP_RECORD="+filepath.Join(evidence, "record"), "GREMLINS_TEMP_PROFILE="+filepath.Join(evidence, "profile"))
++	out, err := os.Create(filepath.Join(evidence, "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	startedAt := time.Now()
++	cleanupSafe = false
++	runErr, cleanupErr, started := RunGoCommandWithOwnedTemp(owner, t.Context(), command, out, out)
++	t.Logf("two persistent mapped-image children, one cleanup allowance: elapsed=%s started=%t run=%v cleanup=%v", time.Since(startedAt), started, runErr, cleanupErr)
++	if errors.Is(cleanupErr, execution.ErrUnsettledProcess) {
++		t.Fatalf("producer settlement unknown: %v", cleanupErr)
++	}
++	if !started || runErr != nil || !errors.Is(cleanupErr, windows.ERROR_ACCESS_DENIED) || owner.scratch != nil {
++		t.Fatalf("permanent image deletion refusal hidden/reusable: started=%t run=%v cleanup=%v owner=%+v", started, runErr, cleanupErr, owner)
++	}
++	if err := owner.Close(); err != nil {
++		t.Fatal(err)
++	}
++	for name, want := range identities {
++		live, err := os.Stat(name)
++		if err != nil || !os.SameFile(want, live) {
++			t.Fatalf("mapped child removed or replaced after refused cleanup: %s %v", name, err)
++		}
++	}
++	cleanupSafe = true
 +}
 diff --git a/internal/engine/workdir/scratch_test.go b/internal/engine/workdir/scratch_test.go
 new file mode 100644

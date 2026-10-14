@@ -342,15 +342,16 @@ func (p *variableAppearancePlan) validateDrawing() error {
 	width, height := p.logicalSize()
 	for _, value := range []float64{
 		width, height, p.fontSize,
-		width - 2*p.border, height - 2*p.border,
-		height - variableListLeading*p.fontSize*float64(len(p.lines)),
-		height - variableMultilineTopInset - p.fontSize*float64(len(p.lines)),
-		height/2 - .4*p.fontSize,
+		2 * p.border,
+		variableListLeading * p.fontSize * float64(len(p.lines)),
 	} {
 		if !finiteAppearanceNumber(value) {
 			return fmt.Errorf("%w: variable appearance geometry must be finite", errFormState)
 		}
 	}
+	// The source compiler admits positive dimensions/font size and nonnegative
+	// borders/advances. Subtracting a finite nonnegative extent from a positive
+	// dimension stays finite; list leading also bounds multiline line spacing.
 
 	for _, line := range p.lines {
 		advance := line.width * p.fontSize
@@ -359,16 +360,11 @@ func (p *variableAppearancePlan) validateDrawing() error {
 		}
 	}
 
-	return p.validateCombPosition(width)
-}
-
-func (p *variableAppearancePlan) validateCombPosition(width float64) error {
-	if p.maxLen > 0 {
+	// readCombGlyphs admits glyphs only with positive MaxLen.
+	for _, glyph := range p.glyphs {
 		cell := (width - 2*p.border) / float64(p.maxLen)
-		for _, glyph := range p.glyphs {
-			if !finiteAppearanceNumber((cell - glyph.width*p.fontSize) / 2) {
-				return fmt.Errorf("%w: variable appearance comb position must be finite", errFormState)
-			}
+		if !finiteAppearanceNumber(cell - glyph.width*p.fontSize) {
+			return fmt.Errorf("%w: variable appearance comb position must be finite", errFormState)
 		}
 	}
 

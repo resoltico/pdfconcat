@@ -4,11 +4,39 @@
 package pdfengine
 
 import (
+	"errors"
+	"math"
 	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
+
+func TestVariableAppearanceFiniteDrawingLimits(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		plan  variableAppearancePlan
+		valid bool
+	}{
+		{"large-bordered-width", variableAppearancePlan{width: math.MaxFloat64, height: math.MaxFloat64 / 2, border: math.MaxFloat64 / 4, fontSize: 2}, true},
+		{"large-bordered-height", variableAppearancePlan{width: math.MaxFloat64 / 2, height: math.MaxFloat64, border: math.MaxFloat64 / 4, fontSize: 2}, true},
+		{"overflowing-list-leading", variableAppearancePlan{width: 20, height: 12, fontSize: math.MaxFloat64 / 1.05, kind: "list", lines: []variableAppearanceLine{{data: []byte("A"), width: .6}}}, false},
+		{"overflowing-line-count", variableAppearancePlan{width: 20, height: 12, fontSize: math.MaxFloat64 / 2.05, kind: "list", lines: []variableAppearanceLine{{}, {}}}, false},
+		{"right-text-position-overflow", variableAppearancePlan{width: 20, height: 12, border: math.MaxFloat64 / 2, fontSize: 1000, justification: 2, lines: []variableAppearanceLine{{width: math.MaxFloat64 / 1000}}}, false},
+		{"comb-advance-overflow", variableAppearancePlan{width: 20, height: 12, fontSize: math.MaxFloat64 / 2, maxLen: 4, flags: variableCombFlag, glyphs: []variableAppearanceLine{{data: []byte("A"), width: 3}}}, false},
+		{"large-comb-cell", variableAppearancePlan{width: math.MaxFloat64, height: 12, border: math.MaxFloat64 / 4, fontSize: 2, maxLen: 4, flags: variableCombFlag, glyphs: []variableAppearanceLine{{data: []byte("A"), width: .6}}}, true},
+		{"comb-center-overflow", variableAppearancePlan{width: 20, height: 12, border: math.MaxFloat64 / 2, fontSize: 2, maxLen: 1, flags: variableCombFlag, glyphs: []variableAppearanceLine{{data: []byte("A"), width: math.MaxFloat64 / 2}}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pdf := signatureTestContext(t)
+			_, err := test.plan.stream(t.Context(), pdf)
+			if test.valid && err != nil || !test.valid && !errors.Is(err, errFormState) {
+				t.Fatalf("finite drawing validity = %v, want %v: %v", err == nil, test.valid, err)
+			}
+		})
+	}
+}
 
 func TestVariableAppearancePreservesBorderAndBackgroundGeometry(t *testing.T) {
 	t.Parallel()
@@ -141,6 +169,32 @@ func TestVariableAppearancePreservesCombCellsAndListSelection(t *testing.T) {
 			}
 			if string(stream.Content) != want {
 				t.Fatalf("cell or selection placement changed:\n%s\nwant:\n%s", stream.Content, want)
+			}
+		})
+	}
+}
+
+func TestVariableAppearancePreservesMultilineOffsetsAndUnselectedRows(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, kind, drawing string
+		flags               int
+	}{
+		{name: "multiline", flags: variableMultilineFlag, drawing: "/Tx BMC\nBT\n/F1 2 Tf\n1 0 0 1 0 9.00 Tm\n9.40 -2.00 Td\n<41> Tj\n-0.20 -2.00 Td\n<42> Tj\nET\nEMC\n"},
+		{name: "unselected-list", kind: "list", drawing: "q\nBT\n/F1 2 Tf\n1 0 0 1 9.40 9.80 Tm\n<41> Tj\nET\nQ\nq\nBT\n/F1 2 Tf\n1 0 0 1 9.20 7.60 Tm\n<42> Tj\nET\nQ\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			pdf := signatureTestContext(t)
+			plan := variableAppearancePlan{width: 20, height: 12, border: 2, fontSize: 2, da: "/F1 2 Tf", justification: 1, flags: test.flags, kind: test.kind, lines: []variableAppearanceLine{{data: []byte("A"), width: .6}, {data: []byte("B"), width: .8}}}
+			ref, err := plan.stream(t.Context(), pdf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream := buttonStream(t, pdf, *ref)
+			want := "q\nq\n" + test.drawing + "Q\nQ\n"
+			if string(stream.Content) != want {
+				t.Fatalf("line placement changed:\n%s\nwant:\n%s", stream.Content, want)
 			}
 		})
 	}

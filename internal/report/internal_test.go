@@ -9,9 +9,41 @@ import (
 	"io"
 	"maps"
 	"math"
+	"math/big"
 	"strings"
 	"testing"
 )
+
+func TestQueryDiagnosticCountScopesUseNonnegativeExactSums(t *testing.T) {
+	t.Parallel()
+	for _, total := range []int{-1, 0, 1, 2, math.MaxInt} {
+		for _, failures := range []int{-1, 0, 1, 2, math.MaxInt} {
+			for _, warnings := range []int{-1, 0, 1, 2, math.MaxInt} {
+				sum := new(big.Int).Add(big.NewInt(int64(failures)), big.NewInt(int64(warnings)))
+				want := total >= 0 && failures >= 0 && warnings >= 0 && sum.Cmp(big.NewInt(int64(total))) == 0
+				counts := DiagnosticCounts{DiagnosticCount: total, ErrorCount: failures, WarningCount: warnings}
+				if got := validDiagnosticCounts(counts); got != want {
+					t.Fatalf("count scope %+v = %v, want %v", counts, got, want)
+				}
+			}
+		}
+	}
+	for _, edit := range []func(*QueryResult){
+		func(q *QueryResult) { q.FormatVersion++ },
+		func(q *QueryResult) { q.Kind = KindReport },
+		func(q *QueryResult) { q.Command = commandCheck },
+		func(q *QueryResult) { q.Status = StatusFailed },
+	} {
+		query := &QueryResult{FormatVersion: Version, Kind: "report_query", Command: reportCommand, Status: StatusOK}
+		if !validQueryOperation(query) {
+			t.Fatal("successful query identity refused")
+		}
+		edit(query)
+		if validQueryOperation(query) {
+			t.Fatalf("invalid query identity accepted: %+v", query)
+		}
+	}
+}
 
 const (
 	internalDigest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

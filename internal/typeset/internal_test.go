@@ -5,6 +5,8 @@ package typeset
 
 import (
 	"errors"
+	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +14,98 @@ import (
 	"github.com/go-text/typesetting/shaping"
 	"golang.org/x/image/math/fixed"
 )
+
+func TestOverflowWidthAndPageEdgesKeepInclusiveTolerance(t *testing.T) {
+	t.Parallel()
+	boundary := 100.0 + 2e-6
+	for _, test := range []struct {
+		width float64
+		wide  bool
+	}{{100, false}, {boundary, false}, {math.Nextafter(boundary, math.Inf(1)), true}} {
+		failure := &OverflowError{WrapWidth: test.width, PageWidth: 100, Findings: []Finding{{Kind: FindingOutsidePageHorizontal}}}
+		if got := failure.FixedWidthExceedsPage(); got != test.wide {
+			t.Fatalf("fixed width %.17g classified wide=%v, want %v", test.width, got, test.wide)
+		}
+	}
+	for _, test := range []struct {
+		y       float64
+		outside bool
+	}{{-1e-6, false}, {math.Nextafter(-1e-6, math.Inf(-1)), true}} {
+		findings := pageFindings(Rect{Y: test.y, Width: 1, Height: 1}, Params{PageWidth: 100, PageHeight: 100}, "text block")
+		if (len(findings) != 0) != test.outside {
+			t.Fatalf("lower page edge %.17g findings = %v", test.y, findings)
+		}
+	}
+}
+
+func TestTextProblemAggregationPreservesGapsAndCapacity(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		text string
+		want []Problem
+	}{
+		{"\u061f", []Problem{{Offset: 0, Rune: '\u061f', Reason: "right-to-left character is not supported"}}},
+		{"\t\t\t", []Problem{{Offset: 0, Rune: '\t', More: 2, Reason: "TAB is not supported; use spaces"}}},
+		{"\u2028\u2029", []Problem{{Offset: 0, Rune: '\u2028', More: 1, Reason: "line and paragraph separators are not supported; use LF"}}},
+		{"\ta\t", []Problem{{Offset: 0, Rune: '\t', Reason: "TAB is not supported; use spaces"}, {Offset: 2, Rune: '\t', Reason: "TAB is not supported; use spaces"}}},
+		{"\ta\ta\ta\ta\ta\ta\ta\ta\t\t", []Problem{
+			{Offset: 0, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 2, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 4, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 6, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 8, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 10, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 12, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+			{Offset: 14, Rune: '\t', Reason: "TAB is not supported; use spaces"},
+		}},
+	} {
+		if got := checkSupported(test.text); !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("problems for %q = %+v, want %+v", test.text, got, test.want)
+		}
+	}
+}
+
+func TestPlacementUsesFontMetricsAndGlyphOffsets(t *testing.T) {
+	t.Parallel()
+	font := &Font{upem: 10, ascent: 7, descent: -2, ink: []Rect{{}, {X: 2, Y: 3, Width: 4, Height: 5}, {X: 1, Y: -2, Width: 3, Height: 4}}}
+	placed := &Placed{Font: font, Size: 20}
+	placed.layOut(font, Params{Size: 20, PageWidth: 100, PageHeight: 100, LineSpacing: 1.5}, []wrappedLine{
+		{clusters: []Cluster{{Text: "A", Glyphs: []Glyph{{ID: 1, Advance: 3}}}}},
+		{clusters: []Cluster{{Text: "B", Glyphs: []Glyph{{ID: 2, Advance: 3}}}}},
+	})
+	if placed.Bounds != (Rect{Y: 52, Width: 6, Height: 48}) || placed.Lines[0].Baseline != 86 || placed.Lines[1].Baseline != 56 {
+		t.Fatalf("metric placement = %+v, lines %+v", placed.Bounds, placed.Lines)
+	}
+	ink := &Placed{Font: font, Size: 20}
+	ink.measureLineInk(Line{X: 10, Baseline: 20, Clusters: []Cluster{{Text: "AB", Glyphs: []Glyph{{ID: 1, Advance: 5, XOffset: 1, YOffset: -1}, {ID: 2, Advance: 5}}}}}, 2)
+	if ink.InkBounds == nil || *ink.InkBounds != (Rect{X: 16, Y: 16, Width: 12, Height: 18}) {
+		t.Fatalf("glyph offset and advance ink = %+v", ink.InkBounds)
+	}
+}
+
+func TestInkMeasurementAddsJustificationOnlyAfterInteriorSpaces(t *testing.T) {
+	t.Parallel()
+	font := &Font{ink: []Rect{{}, {Width: 1, Height: 1}}}
+	placed := &Placed{Font: font}
+	placed.measureLineInk(Line{X: 10, Baseline: 20, ExtraSpace: 4, Clusters: []Cluster{
+		{Text: " ", Glyphs: []Glyph{{Advance: 3}}},
+		{Text: "A", Glyphs: []Glyph{{ID: 1, Advance: 5}}},
+		{Text: " ", Glyphs: []Glyph{{Advance: 3}}},
+		{Text: "B", Glyphs: []Glyph{{ID: 1, Advance: 5}}},
+		{Text: "C", Glyphs: []Glyph{{ID: 1, Advance: 5}}},
+	}}, 1)
+	if placed.InkBounds == nil || *placed.InkBounds != (Rect{X: 13, Y: 20, Width: 18, Height: 1}) {
+		t.Fatalf("justified glyph positions changed: %+v", placed.InkBounds)
+	}
+	for _, extent := range []Rect{{Width: 0, Height: 1}, {Width: 1, Height: 0}} {
+		font.ink[1] = extent
+		empty := &Placed{Font: font}
+		empty.includeGlyphInk(Glyph{ID: 1}, 0, 0, 1)
+		if empty.InkBounds != nil {
+			t.Fatalf("zero-area glyph created visible ink: %+v", empty.InkBounds)
+		}
+	}
+}
 
 // The shaping library never produces these results for the supported scripts, so the integrity checks
 // that guard against them are exercised directly.

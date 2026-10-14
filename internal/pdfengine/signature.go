@@ -176,7 +176,7 @@ func checkSignatureValue(ctx context.Context, pdf *model.Context, field types.Di
 func checkPopulatedSignature(ctx context.Context, pdf *model.Context, object types.Object) error {
 	if reference, ok := object.(types.IndirectRef); ok {
 		entry, found := pdf.FindTableEntryForIndRef(&reference)
-		if !found || entry == nil || entry.Free {
+		if !found || entry.Free {
 			return signatureFailure("signature field /V references a missing or free object")
 		}
 	}

@@ -116,6 +116,11 @@ func TestMissingGlyphOffsetCountsAcrossParagraphs(t *testing.T) {
 	if !errors.As(err, &textErr) || textErr.Problems[0].Offset != 6 {
 		t.Errorf("missing glyph offset: %v", err)
 	}
+
+	err = shaper.ValidateText(defaultFont(t), "ab\ncd ☃")
+	if !errors.As(err, &textErr) || textErr.Problems[0].Offset != 6 {
+		t.Errorf("preinspection missing glyph offset: %v", err)
+	}
 }
 
 func TestMissingGlyphsAreCappedAndNeverSubstituted(t *testing.T) {

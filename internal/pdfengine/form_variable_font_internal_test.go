@@ -9,8 +9,67 @@ import (
 	"math"
 	"testing"
 
+	"github.com/benoitkugler/pdf/fonts/simpleencodings"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
+
+func TestVariableEncodingDifferencesCoverInclusiveByteRange(t *testing.T) {
+	t.Parallel()
+	pdf := signatureTestContext(t)
+	for _, differences := range []types.Array{
+		{types.Integer(0), types.Name("A"), types.Name("B")},
+		{types.Integer(255), types.Name("Z")},
+	} {
+		encoding := simpleencodings.Encoding{}
+		if err := variableEncodingDifferences(t.Context(), pdf, types.Dict{keyDifferences: differences}, &encoding); err != nil {
+			t.Fatal(err)
+		}
+		if differences[0] == types.Integer(0) {
+			if encoding[0] != "A" || encoding[1] != "B" {
+				t.Fatalf("consecutive encoding assignments changed: %v", encoding[:2])
+			}
+		} else if encoding[255] != "Z" {
+			t.Fatal("last byte code was not assigned")
+		}
+	}
+	for _, differences := range []types.Array{
+		{types.Integer(-1)},
+		{types.Integer(256)},
+		{types.Integer(255), types.Name("Z"), types.Name("A")},
+	} {
+		encoding := simpleencodings.Encoding{}
+		if err := variableEncodingDifferences(t.Context(), pdf, types.Dict{keyDifferences: differences}, &encoding); !errors.Is(err, errFormState) {
+			t.Fatalf("invalid byte assignment accepted: %v", err)
+		}
+	}
+}
+
+func TestVariableFontIntrinsicSymbolAndNameBoundaries(t *testing.T) {
+	t.Parallel()
+	pdf := signatureTestContext(t)
+	dict := variableFontDictionary()
+	dict["ToUnicode"] = nil
+	if _, err := compileVariableFont(t.Context(), pdf, dict); err != nil {
+		t.Fatalf("null ToUnicode entry treated as a remapping: %v", err)
+	}
+	for _, base := range []string{nameSymbol, nameZapfDingbats} {
+		encoding, err := variableBuiltinEncoding(t.Context(), pdf, types.Dict{keySubtype: types.Name(nameType1)}, base)
+		if err != nil || encoding != variableCoreEncoding(base) {
+			t.Fatalf("intrinsic %s encoding changed: %v", base, err)
+		}
+	}
+	for source, want := range map[string]string{"ABCDEF+Helvetica": "Helvetica", "ABCDEF+": "ABCDEF+"} {
+		name, err := variableFontName(t.Context(), pdf, types.Dict{keySubtype: types.Name("TrueType"), keyBaseFont: types.Name(source)})
+		if err != nil || name != want {
+			t.Fatalf("BaseFont %q = %q, want %q: %v", source, name, want, err)
+		}
+	}
+	encoding := simpleencodings.Encoding{0: ".notdef", 1: "invalid-glyph", 2: "A"}
+	codes := variableGlyphCodes(&encoding)
+	if codes['A'] != 2 || len(codes) != 1 {
+		t.Fatalf("unmapped glyph entries hid later valid code: %v", codes)
+	}
+}
 
 func variableFontDictionary() types.Dict {
 	return types.Dict{
@@ -118,6 +177,7 @@ func TestVariableFontRejectsMalformedMetadataAndUnavailableGlyphs(t *testing.T) 
 	t.Parallel()
 
 	cases := map[string]func(types.Dict){
+		"missing-kind":        func(d types.Dict) { d.Delete(keySubtype) },
 		"kind":                func(d types.Dict) { d[keySubtype] = types.Name("Type0") },
 		"base":                func(d types.Dict) { d.Delete(keyBaseFont) },
 		"encoding":            func(d types.Dict) { d[keyEncoding] = types.Integer(2) },

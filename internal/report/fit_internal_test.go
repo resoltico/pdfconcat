@@ -192,3 +192,77 @@ func TestCapturedFitRepeatedSourceCannotDisagreeOnPageCount(t *testing.T) {
 		t.Fatalf("repeated source count contradiction was not located: %v", failure)
 	}
 }
+
+func TestFitMatrixOrientationAndExtremeCoefficients(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		matrix [6]float64
+		valid  bool
+	}{
+		{"identity", [6]float64{1, 0, 0, 1, 0, 0}, true},
+		{"quarter-turn", [6]float64{0, 1, -1, 0, 0, 0}, true},
+		{"shear", [6]float64{2, 3, 4, 7, 0, 0}, true},
+		{"half-turn", [6]float64{-1, 0, 0, -1, 0, 0}, true},
+		{"reflection", [6]float64{1, 0, 0, -1, 0, 0}, false},
+		{"axis-swap", [6]float64{0, 1, 1, 0, 0, 0}, false},
+		{"singular", [6]float64{1, 2, 2, 4, 0, 0}, false},
+		{"large-scale", [6]float64{1e300, 0, 0, 1e300, 0, 0}, true},
+		{"small-scale", [6]float64{1e-300, 0, 0, 1e-300, 0, 0}, true},
+		{"large-translation", [6]float64{1, 0, 0, 1, 1e300, 0}, true},
+		{"zero-linear-part", [6]float64{0, 0, 0, 0, 10, 20}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if found := fitMatrixFault("/matrix", test.matrix); (found == nil) != test.valid {
+				t.Fatalf("orientation validity = %v, want %v: %v", found == nil, test.valid, found)
+			}
+		})
+	}
+}
+
+func TestFitBoxZeroDimensionsAndReferenceEndAreRejected(t *testing.T) {
+	t.Parallel()
+	for _, box := range [][4]float64{{0, 0, 0, 2}, {0, 0, 2, 0}, {2, 0, 1, 2}, {0, 2, 2, 1}} {
+		if validGeometryBox(box) {
+			t.Fatalf("nonpositive rectangle accepted: %v", box)
+		}
+	}
+	validator := validator{report: capturedFitReport()}
+	if found := validator.geometryReference("/geometry", 1); found == nil {
+		t.Fatal("reference at end of one-entry geometry table accepted")
+	}
+	validator.report.Styles = []Style{{Size: PageSize{Origin: SizeFitTarget}}}
+	validator.report.Fit = nil
+	if found := validator.styleFit(0); found == nil {
+		t.Fatal("fit target canvas without captured geometry accepted")
+	}
+}
+
+func TestCapturedFitRejectsIndividualGeometryContradictions(t *testing.T) {
+	t.Parallel()
+	for name, edit := range map[string]func(*Report){
+		"target-origin":         func(r *Report) { r.Fit.Size.Origin = SizeExplicit },
+		"target-height":         func(r *Report) { r.Fit.Size.Height = 1007 },
+		"crop-without-presence": func(r *Report) { r.Geometries[0].Crop[2] = 101 },
+		"visible-outside-media": func(r *Report) {
+			r.Geometries[0].HasCrop = true
+			r.Geometries[0].Crop[2] = 101
+			r.Geometries[0].Visible[2] = 101
+		},
+		"visible-outside-crop":     func(r *Report) { r.Geometries[0].HasCrop = true; r.Geometries[0].Crop[2] = 99 },
+		"zero-box-width":           func(r *Report) { r.Geometries[0].Media[2] = 0 },
+		"zero-box-height":          func(r *Report) { r.Geometries[0].Media[3] = 0 },
+		"backward-range":           func(r *Report) { r.Sources[0].Geometries[0].Last = 0 },
+		"range-start-gap":          func(r *Report) { r.Sources[0].Geometries[0].First = 2 },
+		"source-range-without-fit": func(r *Report) { r.Fit = nil; r.Geometries = nil },
+		"negative-reference":       func(r *Report) { r.Sources[0].Geometries[0].Geometry = -1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			report := capturedFitReport()
+			edit(report)
+			if err := report.Validate(); err == nil {
+				t.Fatal("captured fit contradiction accepted")
+			}
+		})
+	}
+}

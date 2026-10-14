@@ -61,9 +61,22 @@ func TestQueryScopeInvariantsRejectMismatchedCounts(t *testing.T) {
 		func(q *report.QueryResult) { q.SavedRun.Status = report.StatusFailed },
 		func(q *report.QueryResult) { q.SavedRun.Status = "unknown" },
 		func(q *report.QueryResult) { q.SelectionCounts.ErrorCount = 1 },
+		func(q *report.QueryResult) {
+			q.SelectionCounts = report.DiagnosticCounts{DiagnosticCount: 1, ErrorCount: 1}
+			view, ok := report.ContentOf[report.ViewResponse[report.DiagnosticView]](q.Result)
+			if !ok {
+				t.Fatal("missing diagnostic selection")
+			}
+			view.Records[0].Severity = report.SeverityError
+		},
 		func(q *report.QueryResult) { q.SelectionCounts = report.DiagnosticCounts{} },
 		func(q *report.QueryResult) {
 			q.SelectionCounts = report.DiagnosticCounts{DiagnosticCount: 2, WarningCount: 2}
+			view, ok := report.ContentOf[report.ViewResponse[report.DiagnosticView]](q.Result)
+			if !ok {
+				t.Fatal("missing diagnostic selection")
+			}
+			view.Records = append(view.Records, view.Records[0])
 		},
 	} {
 		query := report.QueryResultOf(

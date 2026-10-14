@@ -58,6 +58,73 @@ func signatureTestWidget(t *testing.T, pdf *model.Context, widget types.Dict) {
 	}
 }
 
+func TestSignatureWalkerAcceptsLastDepthAndEmptyTerminalChildren(t *testing.T) {
+	t.Parallel()
+	pdf := signatureTestContext(t)
+	walker := signatureWalker{pdf: pdf, seen: map[int]bool{}}
+	if err := walker.fields(t.Context(), types.Array{}, "", maxFieldDepth+1); err != nil {
+		t.Fatalf("empty terminal children refused: %v", err)
+	}
+	if err := walker.fields(t.Context(), types.Array{types.Dict{}}, "", maxFieldDepth); err != nil {
+		t.Fatalf("last permitted field depth refused: %v", err)
+	}
+	if err := walker.fields(t.Context(), types.Array{types.Dict{}}, "", maxFieldDepth+1); !errors.Is(err, errFormState) {
+		t.Fatalf("field depth beyond limit accepted: %v", err)
+	}
+	field := types.Dict{}
+	for range maxFieldDepth + 1 {
+		field = types.Dict{"Kids": types.Array{signatureTestObject(pdf, field)}}
+	}
+	if err := walker.fields(t.Context(), types.Array{field}, "", 0); !errors.Is(err, errFormState) {
+		t.Fatalf("actual nested field tree exceeded depth without refusal: %v", err)
+	}
+}
+
+func TestSignatureWidgetParentLimitAndAnnotationFiltering(t *testing.T) {
+	t.Parallel()
+	for _, depth := range []int{maxFieldDepth, maxFieldDepth + 1} {
+		pdf := signatureTestContext(t)
+		field := types.Dict{}
+		for range depth {
+			field = types.Dict{keyParent: signatureTestObject(pdf, field)}
+		}
+		_, kindErr := effectiveWidgetKind(t.Context(), pdf, field)
+		if depth == maxFieldDepth && kindErr != nil || depth > maxFieldDepth && !errors.Is(kindErr, errFormState) {
+			t.Fatalf("inherited kind depth %d: %v", depth, kindErr)
+		}
+		field["FT"] = types.Name(buttonFieldType)
+		err := checkWidgetParents(t.Context(), pdf, field)
+		if depth == maxFieldDepth && err != nil || depth > maxFieldDepth && !errors.Is(err, errFormState) {
+			t.Fatalf("parent depth %d: %v", depth, err)
+		}
+	}
+	pdf := signatureTestContext(t)
+	for _, annotation := range []types.Dict{{}, {keySubtype: types.Name("Link")}} {
+		annotation["FT"] = types.Name(signatureType)
+		annotation["V"] = types.Dict{}
+		if err := checkWidgetSignatures(t.Context(), pdf, types.Dict{"Annots": types.Array{annotation}}); err != nil {
+			t.Fatalf("non-widget annotation inspected as signature field: %v", err)
+		}
+		widget := types.Dict{keySubtype: types.Name(widgetSubtype), "FT": types.Name(signatureType), "V": types.Dict{}}
+		if err := checkWidgetSignatures(t.Context(), pdf, types.Dict{"Annots": types.Array{annotation, widget}}); !errors.Is(err, errSignatureState) {
+			t.Fatalf("non-widget annotation hid a later signed widget: %v", err)
+		}
+	}
+}
+
+func TestSignatureFieldAllowsOnlyActualNullValue(t *testing.T) {
+	t.Parallel()
+	pdf := signatureTestContext(t)
+	null := signatureTestObject(pdf, nil)
+	if err := checkPopulatedSignature(t.Context(), pdf, null); err != nil {
+		t.Fatalf("existing null signature value refused: %v", err)
+	}
+	broken := failedVariableObject(&formFixture{pdf: pdf})
+	if err := checkPopulatedSignature(t.Context(), pdf, broken); !errors.Is(err, errSignatureState) {
+		t.Fatalf("unreadable populated signature reference accepted: %v", err)
+	}
+}
+
 func TestSignatureStateRejectsReachableSignedAndMalformedValues(t *testing.T) {
 	t.Parallel()
 

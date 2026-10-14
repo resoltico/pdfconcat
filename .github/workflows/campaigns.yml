@@ -47,7 +47,7 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
           { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
           path: ${{ runner.temp }}/campaign-source.txt
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           go run ./tools/qualitygate fuzz -time 30s 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: release-fuzz-${{ github.sha }}
@@ -65,7 +65,7 @@ jobs:
           if-no-files-found: error
       - name: Keep failing inputs
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-failing-inputs
           path: "**/testdata/fuzz/**"
@@ -102,13 +102,13 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
           { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
           path: ${{ runner.temp }}/campaign-source.txt
           if-no-files-found: error
       - run: go run ./tools/qualitygate mutation -max-duration=2h -workers=2 -report "${{ runner.temp }}/mutation-report.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: mutation-report-${{ matrix.os }}
@@ -145,7 +145,7 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
           { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
           path: ${{ runner.temp }}/campaign-source.txt
@@ -182,7 +182,7 @@ jobs:
           printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
           { printf 'source_sha=%s\nrunner=%s\nimage=%s %s\n' "$source_sha" "$RUNNER_OS/$RUNNER_ARCH" "$ImageOS" "$ImageVersion"; go version; } > "$RUNNER_TEMP/campaign-source.txt"
       - uses: ./.github/actions/qa-tools
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: campaign-source-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
           path: ${{ runner.temp }}/campaign-source.txt
@@ -192,7 +192,7 @@ jobs:
           -run '^TestScaleAcceptance$' -require TestScaleAcceptance -timeout 30m ./test/scale
         env:
           PDFCONCAT_SCALE_RESULTS: ${{ runner.temp }}/scale-results.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: scale-results

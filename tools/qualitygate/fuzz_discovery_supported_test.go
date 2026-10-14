@@ -139,7 +139,10 @@ import("testing";"os";"strconv";"time")
 func TestMain(m *testing.M) {
  if err:=os.WriteFile("discovery.pid.pending",[]byte(strconv.Itoa(os.Getpid())),0600);err!=nil {panic(err)}
  if err:=os.Rename("discovery.pid.pending","discovery.pid");err!=nil {panic(err)}
- time.Sleep(time.Hour)
+ for {
+  if _,err:=os.Stat("discovery.stop");err==nil {break}
+  time.Sleep(10*time.Millisecond)
+ }
  os.Exit(m.Run())
 }
 func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
@@ -164,15 +167,15 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 		done <- err
 	}()
 	pid := awaitFuzzWorker(t, dir, "discovery.pid", done)
-	// Preserve cleanup if a regression leaves TestMain alive.
+	workerExitObserved := false
+	// Failure cleanup uses this fixture's private stop file. Never reopen or
+	// signal a PID after its original process may already have terminated.
 	t.Cleanup(func() {
-		if !fuzzWorkerStopped(pid) {
-			process, err := os.FindProcess(pid)
-			if err != nil {
-				t.Error(err)
-			} else if err = process.Kill(); err != nil {
-				t.Error(err)
-			}
+		if workerExitObserved {
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dir, "discovery.stop"), nil, fileMode); err != nil {
+			t.Error(err)
 		}
 		requireFuzzWorkerExited(t, pid)
 	})
@@ -180,11 +183,12 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("discovery lost cancellation: %v", err)
+		if !errors.Is(err, context.Canceled) || errors.Is(err, errFuzzCleanupUncertain) {
+			t.Errorf("discovery lost cancellation or cleanup settlement: %v", err)
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("fuzz discovery cancellation did not finish")
 	}
 	requireFuzzWorkerExited(t, pid)
+	workerExitObserved = true
 }

@@ -99,7 +99,7 @@ func scanFuzzLinuxGroup(root *os.Root, entries []os.DirEntry, pid int) (map[stri
 		}
 
 		content, readErr := root.ReadFile(entry.Name() + "/stat")
-		if errors.Is(readErr, os.ErrNotExist) || errors.Is(readErr, unix.ESRCH) {
+		if fuzzLinuxProcessDisappeared(readErr) {
 			continue
 		} // Unrelated processes may exit during discovery.
 
@@ -149,4 +149,9 @@ func fuzzLinuxProcessState(content []byte) (int, string, error) {
 	}
 
 	return group, fields[0], nil
+}
+
+// A task can disappear after its proc entry is opened but before stat is read.
+func fuzzLinuxProcessDisappeared(readErr error) bool {
+	return errors.Is(readErr, os.ErrNotExist) || errors.Is(readErr, unix.ESRCH)
 }

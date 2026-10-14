@@ -4,7 +4,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"strconv"
 )
@@ -22,7 +21,7 @@ func fuzzWorkerStopped(pid int) bool {
 		return false
 	}
 
-	if errors.Is(readErr, os.ErrNotExist) {
+	if fuzzLinuxProcessDisappeared(readErr) {
 		return true
 	}
 

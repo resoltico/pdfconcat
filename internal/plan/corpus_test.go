@@ -648,6 +648,7 @@ func corpusLexicalStructure() []corpusCase {
 // corpusLeadingBounds lists the cases at and around both ends of the leading range.
 func corpusLeadingBounds() []corpusCase {
 	return []corpusCase{
+		{Name: "negative leading with in-range magnitude", Doc: `{"version":1,"blank":{"text":{"leading":-2}},"items":["a"]}`, Code: plan.CodeOutOfRange, Schema: schemaReject},
 		{Name: "leading 10", Doc: `{"version":1,"blank":{"text":{"leading":10}},"items":["a"]}`, Schema: schemaAccept},
 		{Name: "leading 10.0", Doc: `{"version":1,"blank":{"text":{"leading":10.0}},"items":["a"]}`, Schema: schemaAccept},
 		{Name: "leading rounded from above maximum", Doc: `{"version":1,"blank":{"text":{"leading":10.0000000000000001}},"items":["a"]}`, Code: plan.CodeOutOfRange, Schema: schemaReject},

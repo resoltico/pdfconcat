@@ -48,6 +48,10 @@ func TestRenderingStateCannotHideLayersOutsideCatalogDeclaration(t *testing.T) {
 	if err := checkRenderingState(t.Context(), pdf); err != nil {
 		t.Fatalf("unlayered source rejected: %v", err)
 	}
+	pdf.Table[4] = &model.XRefTableEntry{Object: types.Dict{keyType: types.Name("OCG")}}
+	if err := checkRenderingState(t.Context(), pdf); err == nil {
+		t.Fatal("unused cross-reference slots hid a live layer object")
+	}
 }
 
 func TestDynamicFormsAreRejectedButStaticCatalogRemainsSupported(t *testing.T) {

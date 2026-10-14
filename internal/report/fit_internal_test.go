@@ -238,6 +238,34 @@ func TestFitBoxZeroDimensionsAndReferenceEndAreRejected(t *testing.T) {
 	}
 }
 
+func TestCapturedSourceGeometryRangesMatchDecodedNodeBudget(t *testing.T) {
+	t.Parallel()
+	report := capturedFitReport()
+	rotated := report.Geometries[0]
+	rotated.Rotation, rotated.Width, rotated.Height, rotated.Scale = 90, 200, 100, 3.06
+	rotated.Matrix = [6]float64{0, -3.06, 3.06, 0, 0, 657}
+	report.Geometries = append(report.Geometries, rotated)
+	before := report.nodes()
+	report.Sources[0].Geometries = []GeometryRange{{First: 1, Last: 1, Geometry: 0}, {First: 2, Last: 3, Geometry: 1}}
+	// Each extra range is one object containing three integer values.
+	if got := report.nodes(); got != before+4 {
+		t.Fatalf("second source geometry range changed node count by %d, want 4", got-before)
+	}
+	var wire bytes.Buffer
+	if _, err := Write(&wire, report, MaxReportBytes); err != nil {
+		t.Fatal(err)
+	}
+	limits := DefaultLimits()
+	limits.MaxNodes = report.nodes()
+	if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), capturedFitFile, ReaderRequiringStorage(bytes.NewReader(wire.Bytes())), limits); err != nil {
+		t.Fatalf("exact structured budget refused encoded geometry ranges: %v", err)
+	}
+	limits.MaxNodes--
+	if _, err := DecodeLimited(DecoderTestContext(t.Context(), t), capturedFitFile, ReaderRequiringStorage(bytes.NewReader(wire.Bytes())), limits); err == nil {
+		t.Fatal("one-less structured budget accepted encoded geometry ranges")
+	}
+}
+
 func TestCapturedFitRejectsIndividualGeometryContradictions(t *testing.T) {
 	t.Parallel()
 	for name, edit := range map[string]func(*Report){

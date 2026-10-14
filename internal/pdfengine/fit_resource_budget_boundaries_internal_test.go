@@ -62,6 +62,54 @@ func TestFitDeepExecutedFormChainHasBoundedWorkWithoutRefusingUnusedChain(t *tes
 	}
 }
 
+func TestFitExecutedFormChainKeepsLastDepthAndRefusesOneMore(t *testing.T) {
+	t.Parallel()
+	pdf := guardContext(t)
+	leaf := guardStream(t, pdf, "", nil)
+	// The page itself consumes one invocation; the remaining budget is for forms.
+	for range fitProgramDepthLimit - 2 {
+		leaf = guardStream(t, pdf, "/Next Do", types.Dict{keyXObject: types.Dict{"Next": leaf}})
+	}
+	if err := guardInspect(t, newFitProgramInspector(pdf), "/Deep Do", types.Dict{keyXObject: types.Dict{"Deep": leaf}}); err != nil {
+		t.Fatalf("last permitted form depth refused: %v", err)
+	}
+	leaf = guardStream(t, pdf, "/Next Do", types.Dict{keyXObject: types.Dict{"Next": leaf}})
+	if err := guardInspect(t, newFitProgramInspector(pdf), "/Deep Do", types.Dict{keyXObject: types.Dict{"Deep": leaf}}); !errors.Is(err, errFitUnsupported) {
+		t.Fatalf("one more form invocation exceeded depth without refusal: %v", err)
+	}
+}
+
+func TestFitGraphVisitBudgetRefusesTheFirstExcessEdge(t *testing.T) {
+	t.Parallel()
+	walk := newFitGraphWalk()
+	for range maxFitGraphVisits {
+		if err := walk.visit(t.Context()); err != nil {
+			t.Fatalf("in-budget graph edge refused: %v", err)
+		}
+	}
+	if err := walk.visit(t.Context()); !errors.Is(err, errFitUnsupported) {
+		t.Fatalf("first excess graph edge accepted: %v", err)
+	}
+}
+
+func TestFitClippedBoundsRejectsEdgeOnlyIntersections(t *testing.T) {
+	t.Parallel()
+	fit := PageFit{Visible: [4]float64{10, 10, 20, 20}, Matrix: Affine{2, 0, 0, 2, 0, 0}}
+	for _, box := range [][4]float64{{0, 10, 10, 20}, {10, 0, 20, 10}} {
+		if _, visible := fit.ClippedBounds(box); visible {
+			t.Fatalf("edge-only intersection painted a rectangle: %v", box)
+		}
+	}
+	if box, visible := fit.ClippedBounds([4]float64{5, 5, 15, 15}); !visible || box != ([4]float64{20, 20, 30, 30}) {
+		t.Fatalf("positive visible intersection changed: %v, visible=%v", box, visible)
+	}
+	for _, box := range [][4]float64{{0, 0, 0, 1}, {0, 0, 1, 0}} {
+		if _, err := fitTransformedBox(fitIdentityMatrix(), box); !errors.Is(err, errFitGeometry) {
+			t.Fatalf("empty transformed rectangle accepted: %v, %v", box, err)
+		}
+	}
+}
+
 func TestFitAggregateResourceBudgetsRejectAnotherSourceProgram(t *testing.T) {
 	t.Parallel()
 

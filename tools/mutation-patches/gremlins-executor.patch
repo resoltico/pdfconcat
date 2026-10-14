@@ -1305,7 +1305,7 @@ index 714271e..bcf9ffa 100644
  	}
  	for _, tc := range testCases {
 diff --git a/internal/engine/executor.go b/internal/engine/executor.go
-index 3fb5ee4..4b1e982 100644
+index 3fb5ee4..fdf64f6 100644
 --- a/internal/engine/executor.go
 +++ b/internal/engine/executor.go
 @@ -18,7 +18,6 @@ package engine
@@ -1438,7 +1438,7 @@ index 3fb5ee4..4b1e982 100644
  		log.Errorf("failed to restore mutation at %s - %s\n\t%v", m.mutant.Position(), m.mutant.Status(), err)
  	}
  
-@@ -191,33 +242,27 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -191,33 +242,48 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  }
  
  func (m *mutantExecutor) runTests(rootDir, pkg string) mutator.Status {
@@ -1446,11 +1446,32 @@ index 3fb5ee4..4b1e982 100644
 +	m.executionSettled = false
 +	ctx, cancel := context.WithTimeout(m.callerContext(), m.testExecutionTime)
  	defer cancel()
++	if m.integrationMode && m.executionLogDir != "" && (m.expectedTests == nil || len(m.expectedTests[pkg].Tests) != 0) {
++		// A combined Go command continues building later packages after a named
++		// failure. Settle the affected package before starting the full census.
++		packageExecutor := *m
++		packageExecutor.integrationMode = false
++		status := packageExecutor.runTestCommand(ctx, rootDir, pkg, true)
++		m.executionSettled = packageExecutor.executionSettled
++		if status != mutator.Lived {
++			return status
++		}
++		if err := m.retainPackageCheck(); err != nil {
++			m.executionSettled = false
++			log.Errorf("retain mutation package check: %v", err)
++			return mutator.ExecutionError
++		}
++	}
++	return m.runTestCommand(ctx, rootDir, pkg, m.integrationMode)
++}
++
++func (m *mutantExecutor) runTestCommand(ctx context.Context, rootDir, pkg string, moduleRoot bool) mutator.Status {
++	m.executionSettled = false
  
  	cmd := m.execContext(ctx, "go", m.getTestArgs(pkg)...)
  	cmd.Dir = m.mutant.Workdir()
 -	if m.integrationMode {
-+	if m.integrationMode || cmd.Dir == "" {
++	if moduleRoot || cmd.Dir == "" {
  		cmd.Dir = rootDir
  	}
  	cmd.Env = append(cmd.Env, os.Environ()...)
@@ -1480,7 +1501,7 @@ index 3fb5ee4..4b1e982 100644
  	if m.buildTags != "" {
  		args = append(args, "-tags", m.buildTags)
  	}
-@@ -228,11 +273,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -228,11 +294,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	args = append(args, "-failfast")
  
  	if m.testCPU != 0 {
@@ -1496,7 +1517,7 @@ index 3fb5ee4..4b1e982 100644
  		path = "./..."
  	}
  	args = append(args, path)
-@@ -240,27 +288,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -240,27 +309,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	return args
  }
  
@@ -1800,6 +1821,163 @@ index 0000000..cd86d4b
 +	actual, err := os.ReadFile(foreign)
 +	if err != nil || !bytes.Equal(actual, source) {
 +		t.Fatalf("outside alias source changed: err=%v", err)
++	}
++}
+diff --git a/internal/engine/package_execution_test.go b/internal/engine/package_execution_test.go
+new file mode 100644
+index 0000000..1c41952
+--- /dev/null
++++ b/internal/engine/package_execution_test.go
+@@ -0,0 +1,151 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"encoding/json"
++	"fmt"
++	"go/token"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++type packageExecutionMutant struct{ judgmentMutant }
++
++func (packageExecutionMutant) Pkg() string     { return "packageexecution.example/target" }
++func (packageExecutionMutant) Workdir() string { return "" }
++func (packageExecutionMutant) Position() token.Position {
++	return token.Position{Filename: "target/value.go", Line: 1, Column: 1}
++}
++
++func TestPackageExecutionSettlesFailuresBeforeBuildingOtherPackages(t *testing.T) {
++	t.Setenv("GOWORK", "off")
++	t.Setenv("GOFLAGS", "-mod=readonly")
++	for _, mode := range []string{"target-failure", "later-failure", "survivor", "archive-collision"} {
++		t.Run(mode, func(t *testing.T) {
++			root := t.TempDir()
++			write := func(name, body string) {
++				t.Helper()
++				path := filepath.Join(root, name)
++				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
++					t.Fatal(err)
++				}
++				if err := os.WriteFile(path, []byte(body), 0600); err != nil {
++					t.Fatal(err)
++				}
++			}
++			write("go.mod", "module packageexecution.example\ngo 1.24\n")
++			write("target/value.go", "package target\nfunc Value() int { return 1 }\n")
++			write("target/value_test.go", "package target\nimport \"testing\"\nfunc TestTarget(t *testing.T){if Value()!=1{t.Fatal(\"target assertion\")}}\n")
++			write("sibling/value.go", "package sibling\nfunc Value() int { return 1 }\n")
++			write("sibling/value_test.go", "package sibling\nimport \"testing\"\nfunc TestSibling(t *testing.T){if Value()!=1{t.Fatal(\"later assertion\")}}\n")
++			baseline := exec.CommandContext(t.Context(), "go", "test", "-json", "-cover", "-count=1", "./...")
++			baseline.Dir = root
++			var output bytes.Buffer
++			baseline.Stdout = &output
++			baseline.Stderr = &output
++			runErr := baseline.Run()
++			judgment, err := execution.JudgeTestStream(bytes.NewReader(output.Bytes()), root, runErr, false, nil)
++			if err != nil || judgment.Status != mutator.Lived {
++				t.Fatalf("baseline: %v, %s", err, output.Bytes())
++			}
++			if mode == "target-failure" {
++				write("target/value.go", "package target\nfunc Value() int { return 2 }\n")
++				// Go's combined failfast command still builds this unrelated package.
++				write("sibling/value.go", "package sibling\nvar Invalid = doesNotCompile\n")
++			} else if mode == "later-failure" {
++				write("sibling/value.go", "package sibling\nfunc Value() int { return 2 }\n")
++			}
++			logs := t.TempDir()
++			var deadlines []time.Time
++			executor := &mutantExecutor{mutant: packageExecutionMutant{}, integrationMode: true, testExecutionTime: time.Minute, expectedTests: judgment.Census, executionLogDir: logs, execContext: func(ctx context.Context, name string, args ...string) *exec.Cmd {
++				deadline, present := ctx.Deadline()
++				if !present {
++					t.Fatal("execution has no bound")
++				}
++				deadlines = append(deadlines, deadline)
++				return exec.CommandContext(ctx, name, args...)
++			}, wdDealer: directDealer{root: root}, ctx: t.Context()}
++			if mode == "archive-collision" {
++				// Preexisting evidence must never be overwritten or treated as this run.
++				key := "target/value.go:1:1:CONDITIONALS_BOUNDARY"
++				digest := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
++				if err := os.Mkdir(filepath.Join(logs, digest+".package"), 0700); err != nil {
++					t.Fatal(err)
++				}
++			}
++			status := executor.runTests(root, executor.mutant.Pkg())
++			want := mutator.Lived
++			if mode == "target-failure" || mode == "later-failure" {
++				want = mutator.Killed
++			}
++			if mode == "archive-collision" {
++				want = mutator.ExecutionError
++			}
++			if status != want {
++				t.Fatalf("status=%s, want=%s", status, want)
++			}
++			if mode == "survivor" || mode == "later-failure" {
++				if len(deadlines) != 2 || !deadlines[0].Equal(deadlines[1]) {
++					t.Fatalf("execution stages changed the original deadline: %v", deadlines)
++				}
++			} else if len(deadlines) != 1 {
++				t.Fatalf("unexpected later stage after package termination: %v", deadlines)
++			}
++			if mode == "archive-collision" {
++				if executor.executionSettled {
++					t.Fatal("uncertain evidence archive allowed worker reuse")
++				}
++				return
++			}
++			entries, err := os.ReadDir(logs)
++			if err != nil {
++				t.Fatal(err)
++			}
++			var record []byte
++			for _, entry := range entries {
++				if strings.HasSuffix(entry.Name(), ".result.json") {
++					record, err = os.ReadFile(filepath.Join(logs, entry.Name()))
++				}
++			}
++			if err != nil || len(record) == 0 {
++				t.Fatalf("missing final result: %v", err)
++			}
++			var evidence struct {
++				JudgmentStatus string `json:"judgment_status"`
++				ProcessError   string `json:"process_error"`
++			}
++			if err := json.Unmarshal(record, &evidence); err != nil {
++				t.Fatal(err)
++			}
++			if evidence.JudgmentStatus != want.String() || !executor.executionSettled {
++				t.Fatalf("unsettled final evidence: %+v", evidence)
++			}
++			if mode == "target-failure" {
++				for _, entry := range entries {
++					if entry.IsDir() {
++						t.Fatal("failed package launched or archived an integration stage")
++					}
++					if strings.HasSuffix(entry.Name(), ".stdout.json") {
++						data, err := os.ReadFile(filepath.Join(logs, entry.Name()))
++						if err != nil {
++							t.Fatal(err)
++						}
++						if bytes.Contains(data, []byte("doesNotCompile")) {
++							t.Fatal("named package failure built unrelated source")
++						}
++					}
++				}
++			}
++		})
 +	}
 +}
 diff --git a/internal/engine/package_failfast_test.go b/internal/engine/package_failfast_test.go
@@ -2241,10 +2419,10 @@ index efa93f5..0d28349 100644
  	gotMutants []mutator.Mutator
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
-index 0000000..e770065
+index 0000000..a655b3d
 --- /dev/null
 +++ b/internal/engine/test_execution.go
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,167 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
@@ -2369,6 +2547,31 @@ index 0000000..e770065
 +	m.executionSettled = artifactErr == nil && encodeErr == nil && resultErr == nil
 +	return status, errors.Join(judgmentErr, artifactErr, encodeErr, resultErr)
 +}
++
++func (m *mutantExecutor) retainPackageCheck() (err error) {
++	key := fmt.Sprintf("%s:%s", m.mutant.Position(), m.mutant.Type())
++	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
++	root, err := os.OpenRoot(m.executionLogDir)
++	if err != nil {
++		return err
++	}
++	defer func() { err = errors.Join(err, root.Close()) }()
++	directory := digest + ".package"
++	if err := root.Mkdir(directory, 0o700); err != nil {
++		return err
++	}
++	for _, suffix := range []string{".stdout.json", ".stderr.txt", ".result.json", ".cache.json"} {
++		name := digest + suffix
++		if err := root.Rename(name, filepath.Join(directory, name)); err != nil {
++			if suffix == ".cache.json" && m.cache == nil && errors.Is(err, os.ErrNotExist) {
++				continue
++			}
++			return err
++		}
++	}
++	return nil
++}
++
 +func errorText(err error) string {
 +	if err == nil {
 +		return ""

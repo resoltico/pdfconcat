@@ -97,6 +97,17 @@ func checkFitPrintBoxPaper(t *testing.T, target PageSize) {
 	}
 }
 
+func TestFitPrintBoxesPreserveTrimWithoutBleed(t *testing.T) {
+	t.Parallel()
+	inspector := fitInspector{pdf: guardContext(t)}
+	page := types.Dict{keyTrimBox: types.NewNumberArray(10, 10, 90, 90)}
+	fit := PageFit{Media: [4]float64{0, 0, 100, 100}, Target: PageSize{Width: 200, Height: 200}, Matrix: Affine{2, 0, 0, 2, 0, 0}}
+	boxes, err := inspector.printBoxes(t.Context(), page, fit)
+	if err != nil || len(boxes) != 1 || boxes[keyTrimBox] != ([4]float64{20, 20, 180, 180}) {
+		t.Fatalf("absent BleedBox hid TrimBox: %v, %v", boxes, err)
+	}
+}
+
 func TestFitMaterializationRejectsMissingCapturedPagesAndChangedPageCount(t *testing.T) {
 	t.Parallel()
 

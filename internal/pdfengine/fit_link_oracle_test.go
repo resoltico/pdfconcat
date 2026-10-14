@@ -78,6 +78,9 @@ func TestFittedLinkDestinationsPreserveTypedNamespaceCollision(t *testing.T) {
 
 	output := assembleOracleLinks(t, source, dir, pdfengine.PageSize{612, 1008}, []pdfengine.Run{pdfengine.SourcePages(0, 1, 2)})
 	link := output.link(t, 0)
+	if _, present := link["/QuadPoints"]; present {
+		t.Fatal("rectangle-only source link acquired an empty quadrilateral hit region")
+	}
 	action := output.dictionary(t, link["/A"])
 
 	next := output.dictionary(t, action["/Next"])

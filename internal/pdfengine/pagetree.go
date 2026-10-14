@@ -154,8 +154,8 @@ func (w *pageWalker) nodeKind(ctx context.Context, node types.Dict, number, dept
 }
 
 func (w *pageWalker) walkKids(ctx context.Context, number int, node types.Dict, inherited inheritedAttrs, depth int) error {
-	kidsObject, found := node.Find(keyKids)
-	if !found || kidsObject == nil {
+	kidsObject := node[keyKids]
+	if kidsObject == nil {
 		return fmt.Errorf(pageObjectFailure, errPageKidsRequired, number)
 	}
 

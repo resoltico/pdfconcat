@@ -64,6 +64,10 @@ func TestInBoundsAllowDoesNotInventWarnings(t *testing.T) {
 	if saved.WarningCount != 0 || len(saved.Diagnostics) != 0 {
 		t.Fatal("allow alone triggered a warning")
 	}
+	page := queryAs[report.PageResponse](t, saved, report.Request{Page: new(int64(1))})
+	if page.Part.Generated.Text.HasFindings {
+		t.Fatal("in-bounds text preview invented measured findings")
+	}
 }
 
 func TestCapturedWarningContextFollowsPublicationAndHistoricalQuery(t *testing.T) {

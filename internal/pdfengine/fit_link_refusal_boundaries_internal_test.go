@@ -18,6 +18,78 @@ import (
 
 const fitInvalidAnnotationValue = "invalid annotation value"
 
+func TestFitNamedDestinationDepthAndFirstRepeatedName(t *testing.T) {
+	t.Parallel()
+	for _, depth := range []int{maxFeatureDepth, maxFeatureDepth + 1} {
+		pdf, _, _ := fitLinkFixture(t)
+		page := *types.NewIndirectRef(3, 0)
+		inspector := fitInspector{pdf: pdf, pages: map[types.IndirectRef]bool{page: true}, destinations: map[fitDestinationKey]types.Object{}}
+		var destination types.Object = types.Array{page, types.Name(fitDestinationMode)}
+		for index := range depth {
+			name := fmt.Sprintf("Destination%d", index)
+			inspector.destinations[fitDestinationKey{legacy: true, name: name}] = destination
+			destination = types.Name(name)
+		}
+		err := inspector.destination(t.Context(), destination, newFitGraphWalk(), 0)
+		if depth == maxFeatureDepth && err != nil || depth > maxFeatureDepth && !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("named destination depth %d: %v", depth, err)
+		}
+	}
+	pdf, _, _ := fitLinkFixture(t)
+	inspector := fitInspector{pdf: pdf, destinations: map[fitDestinationKey]types.Object{
+		{legacy: true, name: "A"}: types.Name("B"),
+		{legacy: true, name: "B"}: types.Name("A"),
+	}}
+	walk := newFitGraphWalk()
+	err := inspector.destination(t.Context(), types.Name("A"), walk, 0)
+	if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), "cyclic") || walk.visits > 3 {
+		t.Fatalf("two-name cycle was not refused at its first repeated name: visits=%d, %v", walk.visits, err)
+	}
+}
+
+func TestFitLinkFlagsKeepZeroAndDiagnoseKnownUnsupportedBits(t *testing.T) {
+	t.Parallel()
+	inspector := fitInspector{pdf: guardContext(t)}
+	if err := inspector.linkFlags(t.Context(), types.Dict{"F": nil}); err != nil {
+		t.Fatalf("null optional flag word refused: %v", err)
+	}
+	for _, flags := range []int{0, 4, 32, 999} {
+		if err := inspector.linkFlags(t.Context(), types.Dict{"F": types.Integer(flags)}); err != nil {
+			t.Fatalf("supported flag word %d refused: %v", flags, err)
+		}
+	}
+	err := inspector.linkFlags(t.Context(), types.Dict{"F": types.Integer(1023)})
+	if !errors.Is(err, errFitUnsupported) || !strings.Contains(err.Error(), "NoZoom/NoRotate") {
+		t.Fatalf("known integer flag word lost its unsupported behavior diagnosis: %v", err)
+	}
+}
+
+func TestFitActionArrayDepthAndGoToContinuationConsumeTheirLevels(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		arrays int
+		goTo   bool
+		valid  bool
+	}{{maxFeatureDepth / 2, false, true}, {maxFeatureDepth/2 + 1, false, false}, {maxFeatureDepth / 2, true, false}} {
+		pdf, _, _ := fitLinkFixture(t)
+		page := *types.NewIndirectRef(3, 0)
+		inspector := fitInspector{pdf: pdf, pages: map[types.IndirectRef]bool{page: true}}
+		root := fitURIAction()
+		if test.goTo {
+			root = fitLocalAction()
+		}
+		for range test.arrays {
+			parent := fitURIAction()
+			parent[keyNext] = types.Array{root}
+			root = parent
+		}
+		err := inspector.linkActionNode(t.Context(), root, newFitGraphWalk(), 0)
+		if test.valid && err != nil || !test.valid && !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("action arrays=%d GoTo=%v: %v", test.arrays, test.goTo, err)
+		}
+	}
+}
+
 func TestFitCatalogRejectsMalformedTreesAndEditableFields(t *testing.T) {
 	t.Parallel()
 

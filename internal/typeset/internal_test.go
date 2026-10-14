@@ -260,3 +260,19 @@ func TestNominalTextValidationUsesKnownOutlinesWithoutShaping(t *testing.T) {
 		}
 	}
 }
+
+func TestShapingRejectsUnsupportedRunsAtTheirParagraphOffsets(t *testing.T) {
+	t.Parallel()
+	font, err := LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, paragraph := range []string{"abc \u061f", "abc \u4f60"} {
+		var shaper Shaper
+		_, err := shaper.shapeParagraph(font, paragraph, 13, "")
+		var unsupported *TextError
+		if !errors.As(err, &unsupported) || len(unsupported.Problems) != 1 || unsupported.Problems[0].Offset != 17 || !strings.Contains(unsupported.Problems[0].Reason, "unsupported-script run") {
+			t.Fatalf("unsupported shaped run lost its cause or absolute rune position: %q, %v", paragraph, err)
+		}
+	}
+}

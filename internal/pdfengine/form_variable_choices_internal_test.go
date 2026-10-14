@@ -5,6 +5,7 @@ package pdfengine
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -130,6 +131,38 @@ func TestChoiceRegenerationRejectsInvalidOptionsValuesAndIndices(t *testing.T) {
 
 			if err := checkFormState(t.Context(), fixture.pdf); !errors.Is(err, errFormState) {
 				t.Fatalf("invalid choice accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestChoiceRegenerationMaterializesEmptyOptionsAndSingleDuplicateSelection(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name       string
+		options    types.Array
+		value      types.Object
+		selections int
+	}{
+		{name: "empty", options: types.Array{}},
+		{name: "duplicate-export", options: types.Array{
+			types.Array{types.StringLiteral("EXPORT"), types.StringLiteral("First")},
+			types.Array{types.StringLiteral("EXPORT"), types.StringLiteral("Second")},
+		}, value: types.StringLiteral("EXPORT"), selections: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := variableStyleSource(t, types.Dict{"FT": types.Name("Ch"), "Opt": test.options, "V": test.value})
+			if _, err := prepareFormResources(t.Context(), fixture.pdf, 1); err != nil {
+				t.Fatal(err)
+			}
+			appearance := buttonDictionary(t, fixture.pdf, fixture.widget["AP"])
+			stream := buttonStream(t, fixture.pdf, appearance["N"])
+			if selected := strings.Count(string(stream.Content), "q\n0 g\n"); selected != test.selections {
+				t.Fatalf("normal appearance selected %d rows, want %d: %s", selected, test.selections, stream.Content)
+			}
+			if test.selections != 0 && (!strings.Contains(string(stream.Content), "<4669727374> Tj") || !strings.Contains(string(stream.Content), "<5365636f6e64> Tj")) {
+				t.Fatalf("choice display labels lost: %s", stream.Content)
 			}
 		})
 	}

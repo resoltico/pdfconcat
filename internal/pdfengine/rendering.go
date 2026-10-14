@@ -38,11 +38,7 @@ func checkRenderingState(ctx context.Context, pdf *model.Context) error {
 	// OCG/OCMD objects and /OC references remain dangerous even when a missing catalog
 	// declaration leaves their default visibility up to a reader. Scan direct children too.
 	for _, entry := range pdf.Table {
-		if entry == nil || entry.Free {
-			continue
-		}
-
-		if hasOptionalContent(entry.Object) {
+		if entry != nil && !entry.Free && hasOptionalContent(entry.Object) {
 			return fmt.Errorf("%w: /OC, /OCG or /OCMD; provide a source without layers to preserve visibility", errRenderingState)
 		}
 	}

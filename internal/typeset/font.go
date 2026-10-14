@@ -198,10 +198,12 @@ func checkSignature(data []byte) error {
 func readTableRecord(data []byte, index int) (string, []byte, error) {
 	record := data[directoryHeader+directoryRecord*index:]
 	tag := string(record[:4])
-	offset := int(binary.BigEndian.Uint32(record[recordOffsetField:]))
-	length := int(binary.BigEndian.Uint32(record[recordLengthField:]))
+	// Keep unsigned SFNT extents representable before comparing with the file size.
+	offset := int64(binary.BigEndian.Uint32(record[recordOffsetField:]))
+	length := int64(binary.BigEndian.Uint32(record[recordLengthField:]))
+	size := int64(len(data))
 
-	if offset < 0 || length < 0 || offset > len(data) || length > len(data)-offset {
+	if offset > size || length > size-offset {
 		return "", nil, fmt.Errorf("%w: table %q extends past end of file", ErrMalformedFont, tag)
 	}
 

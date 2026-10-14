@@ -345,3 +345,167 @@ exceptions:
       column: 13
       statuses: [lived]
       retained_property: comment introducers precede any terminating newline and remaining source operands retain their original interpretation
+
+    # At zero remaining bytes, the mutated caller proceeds only to fitDecodeProgram, which
+    # independently rejects every nonpositive budget before decoding. Negative budgets take the
+    # original caller branch. The exact-zero and excess concatenation controls retain refusal;
+    # cancellation remains a failure.
+    - id: mutation-fit-stream-exhausted-zero-budget-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/fit_streams.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if remaining <= 0 {'
+      column: 16
+      statuses: [lived]
+      retained_property: zero remaining bytes cannot admit or decode another logical program
+
+    # The only changed values are plus or minus maxRotateMagnitude. The current power-of-two magnitude
+    # is not divisible by the quarter-turn unit, so the same predicate rejects them through its
+    # remainder check. Integer boundary controls cover the last permitted quarter-turn, the next one,
+    # and equality; a future divisible bound makes this mutation detectable.
+    - id: mutation-source-rotation-nonquarter-magnitude-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/geometry.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if math.Abs(value) > maxRotateMagnitude || math.Mod(value, quarterTurn) != 0 {'
+      column: 21
+      statuses: [lived]
+      retained_property: supported quarter-turn rotations remain inside the exact integer-conversion magnitude
+
+    # At exactly nameHeader bytes, the count/storage words exist but not even one complete positive-
+    # sized nameRecordSize record can exist. The original loop therefore performs no record decoding
+    # and returns the same nameFallback as the mutated early return.
+    - id: mutation-font-name-header-without-record-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/typeset/font.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if len(table) < nameHeader {'
+      column: 16
+      statuses: [lived]
+      retained_property: truncated or record-free name tables select the same fixed safe font name
+
+    # Changing the strict ordering to inclusive ordering writes the identical rune when char equals
+    # old. All unequal comparisons and the first assignment are unchanged; this construction happens
+    # before the immutable Font is shared.
+    - id: mutation-font-rune-equal-selection-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/typeset/font.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if !seen || char < old {'
+      column: 20
+      statuses: [lived]
+      retained_property: each glyph keeps its canonical minimum Unicode rune
+
+    # Equality inserts only an empty ProcSet array into the newly constructed resource dictionary.
+    # Both an omitted list and an empty list declare no procedures, and the reader/merge loops observe
+    # the same zero names. The independent nonempty procedure-name preservation control still detects
+    # dropping actual source names.
+    - id: mutation-form-empty-procedure-set-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_resources.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if len(state.procSet) > 0 {'
+      column: 24
+      statuses: [lived]
+      retained_property: nonempty procedure names survive namespacing and empty procedure declarations add no bindings
+
+    # The sole extra case is a conforming zero-byte Reader result. The retained document buffer never
+    # exceeds MaxPlanBytes, so zero cannot exceed its remaining room. Appending destination[:0]
+    # changes no bytes, length or allocation; the same error/EOF classification follows.
+    - id: mutation-plan-zero-byte-read-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/plan/reader.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if length > 0 {'
+      column: 12
+      statuses: [lived]
+      retained_property: zero-byte reads retain identical plan bytes and error locations without bypassing the byte cap
+
+    # The counter is used only to generate private occurrence resource labels. Increasing and
+    # decreasing from zero both provide distinct integers for the bounded import sequence. Their Form-
+    # prefixed decimal spellings are legal PDF names, and every dictionary binding and DA reference
+    # derives from the same label. Existing independent multi-source form tests retain namespace
+    # separation and rendered values.
+    - id: mutation-form-occurrence-namespace-direction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/pool.go
+      operator: INCREMENT_DECREMENT
+      anchor: 'p.formOccurrence++'
+      column: 18
+      statuses: [lived]
+      retained_property: distinct source occurrences keep distinct internally consistent resource namespaces
+
+    # Normal callers supply positive named paper targets. For the public canvas helper, an invalid
+    # target axis still yields a nonpositive/nonfinite scale or a nonfinite/unrepresentable transform,
+    # which the independent scale, serialization and precision guards reject. Individual zero,
+    # negative, NaN and infinite target-axis controls retain geometry refusal.
+    - id: mutation-fit-target-dimension-conjunction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/fit_geometry.go
+      operator: INVERT_LOGICAL
+      anchor: 'if !positiveFinite(target.Width) || !positiveFinite(target.Height) ||'
+      column: 35
+      statuses: [lived]
+      retained_property: invalid targets cannot produce an admitted finite representable page fit
+
+    # CanvasFit uses unit one, so both operands agree. Captured source geometry has positive units; a
+    # nonpositive/nonfinite scale also makes its product invalid. If only the product overflows or
+    # underflows, every rotation still contains that product and the independent finite-
+    # matrix/interior-precision checks refuse the resulting transform.
+    - id: mutation-fit-derived-scale-conjunction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/fit_geometry.go
+      operator: INVERT_LOGICAL
+      anchor: 'if !positiveFinite(scale) || !positiveFinite(s) {'
+      column: 28
+      statuses: [lived]
+      retained_property: page fits cannot admit a nonfinite or collapsed scale through serialized geometry
+
+    # The pinned backend enumerates V10 from zero, so v minus V10 and v plus V10 are identical for
+    # every input. The existing native-version table includes V10 itself and would detect the mutation
+    # if the backend origin changed.
+    - id: mutation-native-version-zero-origin-addition
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/version.go
+      operator: ARITHMETIC_BASE
+      anchor: 'return Version(versionRadix) + Version(v-model.V10)'
+      column: 42
+      statuses: [lived]
+      retained_property: backend version conversion retains the declared PDF version origin
+
+    # The pinned backend enumerates V10 from zero, so changing subtraction of that origin to addition
+    # is identical for every input. Existing native-version table controls include V10 and preserve
+    # the separate PDF 2.0 mapping.
+    - id: mutation-native-version-zero-origin-negation
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/version.go
+      operator: INVERT_NEGATIVES
+      anchor: 'return Version(versionRadix) + Version(v-model.V10)'
+      column: 42
+      statuses: [lived]
+      retained_property: backend version conversion retains the declared PDF version origin
+
+    # The runtime caller compiles the same immutable font dictionary through variableFontName first,
+    # which requires a non-null supported Subtype. A subsequent name-entry error returns both a nil
+    # name and the error, so either conjunction rejects it with the joined cause. Successful
+    # Type1/TrueType lookups retain the explicit intrinsic-encoding restriction.
+    - id: mutation-variable-font-checked-subtype-conjunction
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_variable_encoding.go
+      operator: INVERT_LOGICAL
+      anchor: 'if err != nil || kind == nil || *kind != nameType1 {'
+      column: 16
+      statuses: [lived]
+      retained_property: intrinsic encoding remains restricted to supported unembedded Type1 fonts and referenced errors remain failures

@@ -112,6 +112,10 @@ func TestFitLogicalStreamConcatenationChargesOnlyActualDecodedBytes(t *testing.T
 		if _, budgetErr := fitDecodeProgram(t.Context(), &stream, limit); !errors.Is(budgetErr, errFitUnsupported) {
 			t.Fatalf("invalid direct decoder budget accepted: %d %v", limit, budgetErr)
 		}
+		empty := types.StreamDict{Dict: types.Dict{}}
+		if _, budgetErr := fitDecodeProgram(t.Context(), &empty, limit); !errors.Is(budgetErr, errFitUnsupported) {
+			t.Fatalf("empty content hid invalid direct decoder budget %d: %v", limit, budgetErr)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(t.Context())

@@ -24,6 +24,7 @@ const (
 	directoryHeaderSize      = 12
 	directoryRecordSize      = 16
 	recordOffsetField        = 8
+	recordLengthField        = 12
 	maxTableCount            = 128
 	glyphCountOffset         = 4
 	headBBoxOffset           = 36
@@ -92,6 +93,10 @@ func TestTableDirectoryBoundaries(t *testing.T) {
 	for index := range len(requiredTableTags()) {
 		binary.BigEndian.PutUint32(zeroOffsets[directoryHeaderSize+directoryRecordSize*index+recordOffsetField:], 0)
 	}
+	highOffset := append([]byte(nil), exact...)
+	binary.BigEndian.PutUint32(highOffset[directoryHeaderSize+recordOffsetField:], 0x80000000)
+	highLength := append([]byte(nil), exact...)
+	binary.BigEndian.PutUint32(highLength[directoryHeaderSize+recordLengthField:], 0x80000000)
 
 	withExtraTables := func(extra int) []byte {
 		tables := emptyRequiredTables()
@@ -109,6 +114,8 @@ func TestTableDirectoryBoundaries(t *testing.T) {
 		"empty tables at the end of the file": {errTableTooShort, exact},
 		"directory one byte short":            {errBadDirectory, exact[:len(exact)-1]},
 		"empty table at offset zero":          {errTableTooShort, zeroOffsets},
+		"unsigned high-bit table offset":      {"extends past end of file", highOffset},
+		"unsigned high-bit table length":      {"extends past end of file", highLength},
 		"header without records":              {errBadDirectory, append([]byte{0, 1, 0, 0, 0, 0}, make([]byte, 6)...)},
 		"header one byte short":               {errTruncatedHead, append([]byte{0, 1, 0, 0, 0, 0}, make([]byte, 5)...)},
 		"maximum table count":                 {errTableTooShort, withExtraTables(maxTableCount - len(requiredTableTags()))},

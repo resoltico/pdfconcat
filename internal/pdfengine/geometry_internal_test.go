@@ -20,6 +20,28 @@ const (
 	userUnitKey  = "UserUnit"
 )
 
+func TestRotationMagnitudeBoundaryRequiresAQuarterTurn(t *testing.T) {
+	t.Parallel()
+	pdf := guardContext(t)
+	last := maxRotateMagnitude / quarterTurn * quarterTurn
+	for _, test := range []struct {
+		value int
+		valid bool
+	}{
+		{last, true},
+		{-last, true},
+		{last + quarterTurn, false},
+		{-last - quarterTurn, false},
+		{maxRotateMagnitude, maxRotateMagnitude%quarterTurn == 0},
+		{-maxRotateMagnitude, maxRotateMagnitude%quarterTurn == 0},
+	} {
+		_, err := rotationOf(t.Context(), pdf, types.Dict{keyRotate: types.Integer(test.value)}, nil)
+		if (err == nil) != test.valid {
+			t.Fatalf("rotation %d validity = %v, want %v: %v", test.value, err == nil, test.valid, err)
+		}
+	}
+}
+
 // TestVisibleSizeRejectsWhatValidationAdmits reads documents without pdfcpu's validation, so the
 // geometry rules themselves are tested rather than the validator in front of them.
 func TestVisibleSizeRejectsWhatValidationAdmits(t *testing.T) {

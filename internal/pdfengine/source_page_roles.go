@@ -45,7 +45,7 @@ func checkLeafKids(ctx context.Context, pdf *model.Context, page types.Dict) err
 
 	if ref, indirect := object.(types.IndirectRef); indirect {
 		entry, found := pdf.FindTableEntryForIndRef(&ref)
-		if !found || entry == nil || entry.Free {
+		if !found || entry.Free {
 			return fmt.Errorf(
 				"%w: declared /Page /Kids has unresolved object %s; repair the source page tree and recheck",
 				errPageKidsAmbiguity,

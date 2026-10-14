@@ -101,8 +101,8 @@ func analyzeForm(ctx context.Context, pdf *model.Context) (*formState, error) {
 }
 
 func (s *formState) readRegeneration(ctx context.Context, pdf *model.Context) error {
-	flag, exists := s.root.Find("NeedAppearances")
-	if !exists || flag == nil {
+	flag := s.root["NeedAppearances"]
+	if flag == nil {
 		return nil
 	}
 
@@ -347,7 +347,7 @@ func checkFormParent(dict types.Dict, parent *types.IndirectRef) error {
 	}
 
 	ref, ok := object.(types.IndirectRef)
-	if !found || !ok || ref != *parent {
+	if !ok || ref != *parent {
 		return fmt.Errorf("%w: form field Parent does not match its containing Kids array: %v", errFormState, object)
 	}
 

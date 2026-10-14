@@ -5,6 +5,7 @@ package capture
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -42,5 +43,29 @@ func TestPrivateCreatorsRejectMissingParent(t *testing.T) {
 
 	if path, err := createWorkspaceDirectory(parent, privateFixturePattern); err == nil || path != "" {
 		t.Fatal("private workspace accepted missing parent")
+	}
+}
+
+func TestPrivateTemporaryFileUsesDefaultParent(t *testing.T) {
+	t.Parallel()
+	file, err := CreatePrivateTemp("", privateFixturePattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := os.Remove(file.Name()); err != nil {
+			t.Error(err)
+		}
+	})
+	parent, err := os.Stat(filepath.Dir(file.Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultParent, err := os.Stat(os.TempDir())
+	if err != nil || !os.SameFile(parent, defaultParent) {
+		t.Fatalf("default temporary parent changed: %s, %v", file.Name(), err)
 	}
 }

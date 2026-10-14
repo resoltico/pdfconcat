@@ -276,6 +276,24 @@ exceptions:
       column: 16
       statuses: [lived]
       retained_property: accepted generated PDFs retain byte-identical ordered references and the same native output write chunks at the equality boundary
+    # Negating this flush predicate sends each reference to the existing 64 KiB
+    # bufio buffer instead of batching about 4 KiB of references. Both paths
+    # preserve the same ordered bytes. Native physical versions produced the
+    # same PDF SHA-256 and outer Write lengths for 8,193 blank pages (31 calls)
+    # and 50,160 pages with one font (188 calls); qpdf accepted both documents.
+    # Both versions passed the complete generated-PDF race suite, including
+    # public short-write and refusal checks. Internal CPU work increases; this
+    # exception claims no allocation, callback timing or failing-byte-count
+    # equivalence. Retain batching to amortize internal sink calls.
+    - id: mutation-generated-pdf-reference-flush-negation
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/genpage/write.go
+      operator: CONDITIONALS_NEGATION
+      anchor: 'if len(refs) > refsBufferSize {'
+      column: 16
+      statuses: [lived]
+      retained_property: successful generated PDFs retain byte-identical ordered references and production output chunks while output failures still prevent publication
     # parseAppearanceNumber first admits only signed decimal digits with at most one dot;
     # NaN, Inf, exponents and malformed decimal syntax cannot reach ParseFloat. For these
     # inputs ParseFloat is finite with nil error, or returns +/-Inf with ErrRange on overflow.

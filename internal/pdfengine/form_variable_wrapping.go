@@ -55,10 +55,6 @@ func wrapVariableParagraph(
 
 	// Each line consumes at least one byte, including an oversized first glyph.
 	for range paragraph.data {
-		if start >= len(paragraph.data) {
-			break
-		}
-
 		split, err := breakVariableLine(ctx, font, paragraph.data, start, size, available)
 		if err != nil {
 			return nil, err
@@ -66,6 +62,9 @@ func wrapVariableParagraph(
 
 		lines = append(lines, variableAppearanceLine{data: paragraph.data[start:split.end], width: split.width})
 		start = split.next
+		if start >= len(paragraph.data) {
+			return lines, nil
+		}
 	}
 
 	return lines, nil

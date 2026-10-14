@@ -462,11 +462,10 @@ func (s *Summary) compactTruncationLabels() {
 		if s.fits() {
 			return
 		}
-		for _, field := range s.TruncatedFields {
-			if truncationWithin(field, scope) {
-				s.markTruncated(scope)
-				break
-			}
+		if slices.ContainsFunc(s.TruncatedFields, func(field string) bool {
+			return truncationWithin(field, scope)
+		}) {
+			s.markTruncated(scope)
 		}
 	}
 }

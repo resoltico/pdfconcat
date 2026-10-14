@@ -94,7 +94,7 @@ func FuzzHang(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T,n int) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	storage, err := newFuzzStorage()
+	storage, err := newFuzzStorage(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

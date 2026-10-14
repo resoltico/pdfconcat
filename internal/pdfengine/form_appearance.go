@@ -98,13 +98,12 @@ func appearanceValue(ctx context.Context, remaining *string, start int) (appeara
 	input := *remaining
 	if strings.ContainsRune("+-.0123456789", rune(input[0])) {
 		token := appearanceOperator(input)
+		*remaining = (*remaining)[len(token):]
 
 		number, err := parseAppearanceNumber(token)
 		if err != nil {
 			return appearanceOperand{}, err
 		}
-
-		*remaining = (*remaining)[len(token):]
 
 		return appearanceOperand{object: number.object, start: start, end: start + len(token)}, nil
 	}
@@ -189,7 +188,7 @@ func appearanceSpace(text string) string {
 			continue
 		}
 
-		break
+		return text
 	}
 
 	return text

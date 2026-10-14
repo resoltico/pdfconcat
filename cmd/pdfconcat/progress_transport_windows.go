@@ -204,9 +204,7 @@ func (transport *progressTransport) cancelWrite(ctx context.Context, result <-ch
 
 	for {
 		cancelled, _, cancelErr := transport.cancellation.Call(uintptr(transport.thread))
-		if cancelled == 0 && !errors.Is(cancelErr, windows.ERROR_NOT_FOUND) {
-			failure = fmt.Errorf("cancel native progress write: %w", cancelErr)
-		}
+		failure = progressCancellationFailure(failure, cancelled, cancelErr)
 
 		select {
 		case completedErr := <-result:
@@ -214,6 +212,19 @@ func (transport *progressTransport) cancelWrite(ctx context.Context, result <-ch
 		case <-ticker.C:
 		}
 	}
+}
+
+// CancelSynchronousIo defines GetLastError only when its BOOL result is zero.
+// ERROR_NOT_FOUND means the native write completed or has not entered I/O yet.
+// Successful or idle attempts preserve any earlier cancellation failure.
+func progressCancellationFailure(previous error, cancelled uintptr, nativeErr error) error {
+	if cancelled != 0 {
+		return previous
+	}
+	if errors.Is(nativeErr, windows.ERROR_NOT_FOUND) {
+		return previous
+	}
+	return fmt.Errorf("cancel native progress write: %w", nativeErr)
 }
 
 func progressCancellationResult(ctx context.Context, completedErr, cancellationErr error) error {
@@ -247,11 +258,10 @@ func duplicateProgressHandle(file *os.File, volumeQuery *windows.LazyProc) (wind
 		process := windows.CurrentProcess()
 		admissionErr = windows.DuplicateHandle(process, original, process, &handle, 0, false, windows.DUPLICATE_SAME_ACCESS)
 	})
+	// RawControl errors precede its callback; a successful callback returns nil.
+	// DuplicateHandle is the callback's final operation, so an owned duplicate
+	// exists only on the successful return below.
 	if err = errors.Join(controlErr, admissionErr); err != nil {
-		if handle != 0 {
-			err = errors.Join(err, windows.CloseHandle(handle))
-		}
-
 		return 0, false, fmt.Errorf("admit owned progress stderr handle: %w", err)
 	}
 

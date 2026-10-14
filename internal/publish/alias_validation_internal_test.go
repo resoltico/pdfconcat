@@ -97,6 +97,15 @@ func TestArtifactAliasIdentityRequiresTwoExistingMatchingObjects(t *testing.T) {
 	if err := rejectArtifactAlias(output, report); err != nil {
 		t.Fatalf("two absent destinations confused with matching objects: %v", err)
 	}
+	if err := os.WriteFile(report, []byte("independent report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectArtifactAlias(output, report); err != nil {
+		t.Fatalf("absent PDF destination confused with report identity: %v", err)
+	}
+	if err := os.Remove(report); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(output, []byte(pdfContent), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -218,7 +218,13 @@ func rejectArtifactAlias(output, target string) error {
 		return fmt.Errorf("inspect report target %q: %w", target, reportErr)
 	}
 
-	if pdfErr == nil && reportErr == nil && pdfIdentity == reportIdentity {
+	if pdfErr != nil {
+		return nil
+	}
+	if reportErr != nil {
+		return nil
+	}
+	if pdfIdentity == reportIdentity {
 		return &DestinationError{Subject: "report", Path: target, Reason: "aliases the output PDF"}
 	}
 

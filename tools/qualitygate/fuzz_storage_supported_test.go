@@ -16,7 +16,7 @@ import (
 
 func TestFuzzStorageConfiguresRealGoAndOwnsChildTemporaryFiles(t *testing.T) {
 	t.Parallel()
-	storage, err := newFuzzStorage()
+	storage, err := newFuzzStorage(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestFuzzStorageMakesRelativeTemporaryParentAbsolute(t *testing.T) {
 	if err := os.Mkdir("scratch", dirMode); err != nil {
 		t.Fatal(err)
 	}
-	storage, err := newFuzzStorage()
+	storage, err := newFuzzStorage(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

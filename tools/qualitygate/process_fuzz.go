@@ -20,6 +20,8 @@ const (
 	fuzzPipeDrain = 2 * time.Second
 )
 
+var errFuzzCleanupUncertain = errors.New("owned fuzz cleanup could not prove producer termination")
+
 // runFuzzProcess never reaps the group leader until all group signaling has finished.
 // The unreaped child pins its PID, so cancellation cannot signal a reused process group.
 // Go's inheriting workers share this group; deliberately detached processes are unsupported.
@@ -61,7 +63,11 @@ func (c *command) runFuzzProcess(ctx context.Context) (result error) {
 		}
 	}
 
-	return errors.Join(observed, terminated, process.Wait())
+	waitErr := process.Wait()
+	if terminated != nil || errors.Is(waitErr, exec.ErrWaitDelay) {
+		terminated = errors.Join(errFuzzCleanupUncertain, terminated)
+	}
+	return errors.Join(observed, terminated, waitErr)
 }
 
 // The cleanup deadline is independent of the already-canceled work context.

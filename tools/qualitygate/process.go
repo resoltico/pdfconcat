@@ -53,6 +53,10 @@ func (c *command) configure(process *exec.Cmd) {
 
 // output runs the command and returns its standard output; a failure carries the standard error text.
 func (c *command) output(ctx context.Context) (string, error) {
+	if c.fuzzLifecycle {
+		return c.boundedFuzzOutput(ctx, fuzzEvidenceLimit)
+	}
+
 	var stdout, stderr bytes.Buffer
 
 	captured := *c

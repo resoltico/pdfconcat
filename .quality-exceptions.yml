@@ -593,3 +593,20 @@ exceptions:
       column: 12
       statuses: [lived]
       retained_property: default core-font metric lookup retains the canonical WinAnsi glyph code
+
+    # GetFinalPathNameByHandleW reports text length without NUL on success, and
+    # NUL-inclusive required capacity only when the supplied buffer is too small.
+    # Equality with the supplied capacity fits neither documented return case:
+    # an exactly sufficient allocation succeeds with capacity minus one.
+    # https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew
+    # TestWindowsFinalPathBufferBoundaryContract exercises both native allocations;
+    # the pinned wrapper maps every zero return to an error before this guard.
+    - id: mutation-native-parent-unreachable-equal-buffer-count
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/capture/native_parent_windows.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if count >= uint32(len(buffer)) {'
+      column: 11
+      statuses: [lived]
+      retained_property: native parent resolution rejects insufficient buffers without accepting truncated paths

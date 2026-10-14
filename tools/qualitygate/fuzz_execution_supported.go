@@ -25,11 +25,11 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (r
 		return err
 	}
 
-	storage, err := newFuzzStorage()
+	storage, err := newFuzzStorage(root)
 	if err != nil {
 		return err
 	}
-	defer func() { result = errors.Join(result, storage.close()) }()
+	defer func() { result = storage.finish(result) }()
 
 	targets, err := discoverFuzzTargets(ctx, root, patterns, storage.environment())
 	if err != nil {
@@ -43,6 +43,7 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (r
 	log.Printf("fuzz: %d targets, %s each", len(targets), duration)
 
 	var problems []string
+	var cleanupUncertainty error
 
 	for _, target := range targets {
 		if contextErr := ctx.Err(); contextErr != nil {
@@ -54,10 +55,14 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (r
 
 		if fuzzErr := runFuzzTarget(ctx, root, target, duration, storage.environment()); fuzzErr != nil {
 			problems = append(problems, fmt.Sprintf("%s %s: %v", target.pkg, target.name, fuzzErr))
+			if errors.Is(fuzzErr, errFuzzCleanupUncertain) {
+				cleanupUncertainty = errFuzzCleanupUncertain
+				break
+			}
 		}
 	}
 
-	return report(fuzzCommand, problems, fmt.Sprintf("%d targets fuzzed for %s each", len(targets), duration))
+	return errors.Join(report(fuzzCommand, problems, fmt.Sprintf("%d targets fuzzed for %s each", len(targets), duration)), cleanupUncertainty)
 }
 
 // discoverFuzzTargets lists every Fuzz function with `go test -list`, which also compiles the test

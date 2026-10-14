@@ -24,7 +24,7 @@ func TestGremlinsSourceSelectionRetainsCriticalSubpackageControls(t *testing.T) 
 	} {
 		args := gremlinsSourceTestArgs(platform.os, platform.arch)
 		for _, critical := range []string{
-			"./internal/execution", "./internal/coverage", "./internal/engine",
+			"./cmd", "./internal/execution", "./internal/coverage", "./internal/engine",
 			"./internal/engine/workerpool", "./internal/engine/workdir", "./internal/report",
 		} {
 			if !slices.Contains(args, critical) {
@@ -56,7 +56,7 @@ func TestGremlinsSourceSelectionDetectsRealFailingWorkdirControl(t *testing.T) {
 func writeGremlinsSelectionFixture(t *testing.T, dir string) {
 	t.Helper()
 
-	files := map[string]string{sourceModuleFile: "module example.org/selection\n"}
+	files := map[string]string{sourceModuleFile: "module example.org/selection\n", "cmd/source.go": "package fixture\n"}
 	for _, pkg := range []string{"execution", "coverage", "engine", "engine/workerpool", "engine/workdir", "report"} {
 		files["internal/"+pkg+"/source.go"] = "package fixture\n"
 	}

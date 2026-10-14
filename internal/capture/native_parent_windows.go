@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"slices"
+	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 )
@@ -22,19 +23,21 @@ func nativeParentPath(parent string) (path string, failure error) {
 		return "", err
 	}
 	defer func() { failure = errors.Join(failure, windows.CloseHandle(handle)) }()
-	// The Windows extended-path maximum is 32,767 UTF-16 units, including the terminal NUL.
+	// Bound the native path buffer around the documented extended-path range;
+	// larger native results must fail rather than yield a truncated parent.
 	var buffer [32768]uint16
 	count, err := windows.GetFinalPathNameByHandle(handle, &buffer[0], uint32(len(buffer)), 0)
 	if err != nil {
 		return "", err
 	}
-	if count == 0 || count >= uint32(len(buffer)) {
+	// The native wrapper reports every zero return as an error above.
+	if count >= uint32(len(buffer)) {
 		return "", windows.ERROR_INSUFFICIENT_BUFFER
 	}
 	units := buffer[:count]
 	decoded := windows.UTF16ToString(units)
-	encoded, err := windows.UTF16FromString(decoded)
-	if err != nil || !slices.Equal(units, encoded[:len(encoded)-1]) {
+	encoded := utf16.Encode([]rune(decoded))
+	if !slices.Equal(units, encoded) {
 		return "", fs.ErrInvalid
 	}
 	return decoded, nil

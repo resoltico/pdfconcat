@@ -100,6 +100,10 @@ func runMutation(ctx context.Context, args []string) (resultErr error) {
 
 // cleanupMutationSnapshot preserves the campaign verdict and makes unsettled owned cleanup fail.
 func cleanupMutationSnapshot(result *error, snapshot string) {
+	if errors.Is(*result, errMutationCleanupUncertain) {
+		*result = errors.Join(*result, fmt.Errorf("retain mutation snapshot %s: producer termination was not proved", snapshot))
+		return
+	}
 	if err := os.RemoveAll(snapshot); err != nil {
 		*result = errors.Join(*result, fmt.Errorf("remove owned mutation snapshot %s: %w", snapshot, err))
 	}
@@ -334,7 +338,7 @@ func executeMutation(
 		env: env,
 	}).runMutation(ctx, options.maxDuration)
 	if err != nil {
-		return mutationEvidence{}, fmt.Errorf("mutation discovery failed: %w", err)
+		return mutationEvidence{}, fmt.Errorf("mutation discovery failed: %w", mutationCommandFailure(discoveryFile, err))
 	}
 
 	discovery, err := readMutationDiscovery(ctx, discoveryFile, hostFiles)
@@ -348,7 +352,7 @@ func executeMutation(
 		env: env,
 	}).runMutation(ctx, options.maxDuration)
 	if err != nil {
-		return mutationEvidence{}, fmt.Errorf("mutation tool failure (infrastructure, not a pass): %w", err)
+		return mutationEvidence{}, fmt.Errorf("mutation tool failure (infrastructure, not a pass): %w", mutationCommandFailure(reportFile, err))
 	}
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -418,4 +422,24 @@ func readMutationDiscovery(ctx context.Context, file string, hostFiles map[strin
 	}
 
 	return discovery, nil
+}
+
+var errMutationCleanupUncertain = errors.New("mutation SDK producer cleanup was not proved")
+
+// A failed SDK process can leave separately owned native process groups behind.
+// Only its fresh terminal report can distinguish a settled failure from missing
+// or uncertain cleanup; an unreadable report must preserve source inputs.
+func mutationCommandFailure(reportFile string, commandErr error) error {
+	terminal, err := readMutationReport(reportFile)
+	if err == nil {
+		switch terminal.TerminationReason {
+		case "deadline_exceeded", "canceled", "execution_failure":
+			return commandErr
+		case "":
+			if terminal.Complete {
+				return commandErr
+			}
+		}
+	}
+	return errors.Join(commandErr, errMutationCleanupUncertain, err)
 }

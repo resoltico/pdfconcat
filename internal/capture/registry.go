@@ -169,15 +169,14 @@ func (r *Registry) ProtectOutput(path string) error {
 
 func inspectArtifactIdentity(role Role, path string) (Identity, error) {
 	identity, err := IdentityOf(path)
-	if errors.Is(err, fs.ErrNotExist) || (err != nil && artifactParentUnavailable(path)) {
+	if err == nil {
+		return identity, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) || artifactParentUnavailable(path) {
 		return Identity{}, nil
 	}
 
-	if err != nil {
-		return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}
-	}
-
-	return identity, nil
+	return Identity{}, &SourceError{Path: path, Operation: "identify " + role.String(), Err: err}
 }
 
 // artifactParentUnavailable requires observed absence or a regular-file ancestor, not an I/O guess.

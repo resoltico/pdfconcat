@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,6 +126,10 @@ func assertProgressWindowsStoppedWrite(t *testing.T, transport *progressTranspor
 
 	if !errors.Is(err, expected) || !errors.Is(err, windows.ERROR_OPERATION_ABORTED) {
 		t.Fatalf("stalled second write: %v", err)
+	}
+
+	if strings.Contains(err.Error(), "cancel native progress write:") {
+		t.Fatalf("successful native cancellation fabricated an API failure: %v", err)
 	}
 
 	if !transport.Interrupted() {

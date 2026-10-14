@@ -176,12 +176,6 @@ func (p *variableAppearancePlan) sizeVariableText(ctx context.Context) error {
 		return fmt.Errorf("%w: variable field has no finite positive drawing size", errFormState)
 	}
 
-	for _, line := range p.lines {
-		if !finiteAppearanceNumber(line.width * p.fontSize) {
-			return fmt.Errorf("%w: variable text advance exceeds finite drawing geometry", errFormState)
-		}
-	}
-
 	return nil
 }
 

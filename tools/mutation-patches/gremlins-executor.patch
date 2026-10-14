@@ -1,3 +1,53 @@
+diff --git a/cmd/campaign_cleanup_test.go b/cmd/campaign_cleanup_test.go
+new file mode 100644
+index 0000000..61c4ab8
+--- /dev/null
++++ b/cmd/campaign_cleanup_test.go
+@@ -0,0 +1,44 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package cmd
++
++import (
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
++	"github.com/go-gremlins/gremlins/internal/execution"
++)
++
++func TestCampaignScratchCleanupRequiresSettledProducers(t *testing.T) {
++	for _, uncertain := range []bool{false, true} {
++		t.Run(map[bool]string{false: "settled failed command", true: "uncertain descendant"}[uncertain], func(t *testing.T) {
++			scratch, err := workdir.NewScratch(t.TempDir(), "campaign-*")
++			if err != nil {
++				t.Fatal(err)
++			}
++			path := filepath.Join(scratch.Path(), "source.go")
++			if err := os.WriteFile(path, []byte("owned source"), 0600); err != nil {
++				t.Fatal(err)
++			}
++			failure := errors.New("original execution failure")
++			result := error(failure)
++			if uncertain {
++				result = errors.Join(result, execution.ErrUnsettledProcess)
++			}
++			finishCampaignScratch(scratch, &result)
++			if !errors.Is(result, failure) {
++				t.Fatalf("execution cause lost: %v", result)
++			}
++			contents, readErr := os.ReadFile(path)
++			if uncertain {
++				if readErr != nil || string(contents) != "owned source" || !errors.Is(result, execution.ErrUnsettledProcess) {
++					t.Fatalf("unsettled producer lost source/cause: %q/%v/%v", contents, readErr, result)
++				}
++			} else if !errors.Is(readErr, os.ErrNotExist) {
++				t.Fatalf("settled failure leaked workspace: %v", readErr)
++			}
++		})
++	}
++}
 diff --git a/cmd/gremlins/main.go b/cmd/gremlins/main.go
 index f6b4568..6807ad6 100644
 --- a/cmd/gremlins/main.go
@@ -33,7 +83,7 @@ index f6b4568..6807ad6 100644
  
  func buildVersion(version string) string {
 diff --git a/cmd/unleash.go b/cmd/unleash.go
-index d7eddb2..580b503 100644
+index d7eddb2..44e2eba 100644
 --- a/cmd/unleash.go
 +++ b/cmd/unleash.go
 @@ -18,10 +18,12 @@ package cmd
@@ -50,7 +100,15 @@ index d7eddb2..580b503 100644
  
  	"github.com/MakeNowJust/heredoc"
  	"github.com/spf13/cobra"
-@@ -88,8 +90,7 @@ func longExplainer() string {
+@@ -32,6 +34,7 @@ import (
+ 	"github.com/go-gremlins/gremlins/internal/engine"
+ 	"github.com/go-gremlins/gremlins/internal/engine/workdir"
+ 	"github.com/go-gremlins/gremlins/internal/exclusion"
++	"github.com/go-gremlins/gremlins/internal/execution"
+ 	"github.com/go-gremlins/gremlins/internal/log"
+ 	"github.com/go-gremlins/gremlins/internal/mutator"
+ 	"github.com/go-gremlins/gremlins/internal/report"
+@@ -88,8 +91,7 @@ func longExplainer() string {
  		first gathering the coverage of the test suite and then analysing the source
  		code to look for supported mutants.
  
@@ -60,7 +118,7 @@ index d7eddb2..580b503 100644
  
  		In 'dry-run' mode, unleash only performs the analysis of the source code, but it
  		doesn't actually perform the test.
-@@ -101,8 +102,31 @@ func longExplainer() string {
+@@ -101,8 +103,31 @@ func longExplainer() string {
  	`)
  }
  
@@ -94,7 +152,7 @@ index d7eddb2..580b503 100644
  		log.Infoln("Starting...")
  		path, _ := os.Getwd()
  		if len(args) > 0 {
-@@ -113,58 +137,35 @@ func runUnleash(ctx context.Context) func(cmd *cobra.Command, args []string) err
+@@ -113,58 +138,37 @@ func runUnleash(ctx context.Context) func(cmd *cobra.Command, args []string) err
  			return fmt.Errorf("not in a Go module: %w", err)
  		}
  
@@ -117,16 +175,15 @@ index d7eddb2..580b503 100644
 -		wg.Wait()
 -		if err != nil {
 -			return err
--		}
--		if cancelled {
--			return nil
-+		defer func() { returnedErr = errors.Join(returnedErr, scratch.Clean()) }()
++		defer finishCampaignScratch(scratch, &returnedErr)
 +		workDir := scratch.Path()
 +
 +		results, runErr := run(ctx, mod, workDir)
 +		if runErr != nil || ctx.Err() != nil {
 +			results.Incomplete = true
-+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
++			if errors.Is(runErr, execution.ErrUnsettledProcess) {
++				results.TerminationReason = "process_cleanup_unsettled"
++			} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 +				results.TerminationReason = "deadline_exceeded"
 +			} else if ctx.Err() != nil {
 +				results.TerminationReason = "canceled"
@@ -134,6 +191,9 @@ index d7eddb2..580b503 100644
 +				results.TerminationReason = "execution_failure"
 +			}
  		}
+-		if cancelled {
+-			return nil
+-		}
 -
 -		return report.Do(results)
 -	}
@@ -170,19 +230,25 @@ index d7eddb2..580b503 100644
  
  	exclude, err := exclusion.New()
  	if err != nil {
-@@ -177,9 +178,9 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
+@@ -177,9 +181,15 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
  	}
  
  	wdDealer := workdir.NewCachedDealer(workDir, mod.Root)
 -	defer wdDealer.Clean()
-+	defer func() { resultErr = errors.Join(resultErr, wdDealer.Clean()) }()
++	defer func() {
++		if errors.Is(resultErr, execution.ErrUnsettledProcess) {
++			resultErr = errors.Join(resultErr, wdDealer.Retain())
++			return
++		}
++		resultErr = errors.Join(resultErr, wdDealer.Clean())
++	}()
  
 -	jDealer := engine.NewExecutorDealer(mod, wdDealer, cProfile.Elapsed)
 +	jDealer := engine.NewExecutorDealer(mod, wdDealer, cProfile.Elapsed, engine.WithExpectedTests(cProfile.TestCensus), engine.WithContext(ctx))
  
  	codeData := engine.CodeData{
  		Cov:       cProfile.Profile,
-@@ -190,7 +191,7 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
+@@ -190,7 +200,7 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
  	mut := engine.New(mod, codeData, jDealer)
  	results := mut.Run(ctx)
  
@@ -191,7 +257,7 @@ index d7eddb2..580b503 100644
  }
  
  func setFlagsOnCmd(cmd *cobra.Command) error {
-@@ -206,6 +207,10 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
+@@ -206,6 +216,10 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
  	})
  
  	fls := []*flags.Flag{
@@ -202,6 +268,20 @@ index d7eddb2..580b503 100644
  		{Name: paramDryRun, CfgKey: configuration.UnleashDryRunKey, Shorthand: "d", DefaultV: false, Usage: "find mutations but do not executes tests"},
  		{Name: paramOutputStatuses, CfgKey: configuration.UnleashOutputStatusesKey, Shorthand: "S", DefaultV: "", Usage: "print only statuses from this flag, allowed values - 'lctkvsr'"},
  		{Name: paramBuildTags, CfgKey: configuration.UnleashTagsKey, Shorthand: "t", DefaultV: "", Usage: "a comma-separated list of build tags"},
+@@ -252,3 +266,13 @@ func setMutantTypeFlags(cmd *cobra.Command) error {
+ 
+ 	return nil
+ }
++
++// Unknown descendant ownership forbids deleting either worker source trees or
++// their parent workspace, even after the SDK's direct child has returned.
++func finishCampaignScratch(scratch *workdir.ScratchDirectory, result *error) {
++	if errors.Is(*result, execution.ErrUnsettledProcess) {
++		*result = errors.Join(*result, fmt.Errorf("retain campaign workspace %q after unsettled cleanup", scratch.Path()), scratch.Retain())
++		return
++	}
++	*result = errors.Join(*result, scratch.Clean())
++}
 diff --git a/internal/configuration/configuration.go b/internal/configuration/configuration.go
 index be4a411..f4ef025 100644
 --- a/internal/configuration/configuration.go
@@ -488,7 +568,7 @@ index 0000000..7928232
 +	}
 +}
 diff --git a/internal/coverage/coverage.go b/internal/coverage/coverage.go
-index d7be532..25ae82c 100644
+index d7be532..81eb01e 100644
 --- a/internal/coverage/coverage.go
 +++ b/internal/coverage/coverage.go
 @@ -18,6 +18,8 @@
@@ -500,10 +580,11 @@ index d7be532..25ae82c 100644
  	"fmt"
  	"io"
  	"os"
-@@ -31,19 +33,25 @@ import (
+@@ -31,24 +33,32 @@ import (
  	"github.com/go-gremlins/gremlins/internal/log"
  
  	"github.com/go-gremlins/gremlins/internal/configuration"
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
 +	"github.com/go-gremlins/gremlins/internal/execution"
  	"github.com/go-gremlins/gremlins/internal/gomodule"
 +	"github.com/go-gremlins/gremlins/internal/mutator"
@@ -522,13 +603,24 @@ index d7be532..25ae82c 100644
  // Coverage is responsible for executing a Go test with coverage via the Run() method,
  // then parsing the result coverage report file.
  type Coverage struct {
-+	ctx        context.Context
-+	cache      *execution.GoCache
-+	testCensus execution.TestCensus
- 	cmdContext execContext
- 	workDir    string
- 	path       string
-@@ -74,6 +82,7 @@ func NewWithCmd(cmdContext execContext, workdir string, mod gomodule.GoModule, o
+-	cmdContext execContext
+-	workDir    string
+-	path       string
+-	fileName   string
+-	mod        gomodule.GoModule
++	ctx         context.Context
++	cache       *execution.GoCache
++	commandTemp *workdir.CommandTemp
++	testCensus  execution.TestCensus
++	cmdContext  execContext
++	workDir     string
++	path        string
++	fileName    string
++	mod         gomodule.GoModule
+ 
+ 	buildTags       string
+ 	coverPkg        string
+@@ -74,6 +84,7 @@ func NewWithCmd(cmdContext execContext, workdir string, mod gomodule.GoModule, o
  
  	c := &Coverage{
  		cmdContext:      cmdContext,
@@ -536,7 +628,7 @@ index d7be532..25ae82c 100644
  		workDir:         workdir,
  		path:            "./...",
  		fileName:        "coverage",
-@@ -94,13 +103,23 @@ func NewWithCmd(cmdContext execContext, workdir string, mod gomodule.GoModule, o
+@@ -94,13 +105,35 @@ func NewWithCmd(cmdContext execContext, workdir string, mod gomodule.GoModule, o
  // Before executing the coverage, it downloads the go modules in a separate step.
  // This is done to avoid that the download phase impacts the execution time which
  // is later used as timeout for the mutant testing execution.
@@ -551,7 +643,19 @@ index d7be532..25ae82c 100644
 +		return Result{}, err
 +	}
 +	c.cache = cache
-+	defer func() { resultErr = errors.Join(resultErr, cache.Close()) }()
++	defer func() {
++		if errors.Is(resultErr, execution.ErrUnsettledProcess) {
++			resultErr = errors.Join(resultErr, fmt.Errorf("retain unsettled baseline cache %q", cache.Path), cache.Retain())
++		} else {
++			resultErr = errors.Join(resultErr, cache.Close())
++		}
++	}()
++	commandTemp, err := workdir.NewCommandTemp()
++	if err != nil {
++		return Result{}, err
++	}
++	c.commandTemp = commandTemp
++	defer func() { resultErr = errors.Join(resultErr, commandTemp.Close()) }()
  	log.Infof("Gathering coverage... ")
  	_ = os.Chdir(c.mod.Root)
  	if err := c.downloadModules(); err != nil {
@@ -562,7 +666,7 @@ index d7be532..25ae82c 100644
  	if err != nil {
  		return Result{}, fmt.Errorf("impossible to executeCoverage coverage: %w", err)
  	}
-@@ -110,7 +129,7 @@ func (c *Coverage) Run() (Result, error) {
+@@ -110,7 +143,7 @@ func (c *Coverage) Run() (Result, error) {
  		return Result{}, fmt.Errorf("an error occurred while generating coverage profile: %w", err)
  	}
  
@@ -571,7 +675,7 @@ index d7be532..25ae82c 100644
  }
  
  func (c *Coverage) profile() (Profile, error) {
-@@ -135,14 +154,28 @@ func (c *Coverage) filePath() string {
+@@ -135,14 +168,32 @@ func (c *Coverage) filePath() string {
  
  func (c *Coverage) downloadModules() error {
  	cmd := c.cmdContext("go", "mod", "download")
@@ -594,18 +698,22 @@ index d7be532..25ae82c 100644
 +	if err := c.cache.Configure(cmd); err != nil {
 +		return errors.Join(err, out.Close(), stderr.Close())
 +	}
-+	runErr, cleanupErr, _ := execution.RunGoCommand(c.callerContext(), cmd, out, stderr)
-+	return errors.Join(runErr, cleanupErr, c.cache.AfterCommand(c.callerContext(), artifactRoot, "download"), out.Close(), stderr.Close())
++	runErr, cleanupErr, _ := workdir.RunGoCommandWithOwnedTemp(c.commandTemp, c.callerContext(), cmd, out, stderr)
++	var cacheErr error
++	if !errors.Is(cleanupErr, execution.ErrUnsettledProcess) {
++		cacheErr = c.cache.AfterCommand(c.callerContext(), artifactRoot, "download")
++	}
++	return errors.Join(runErr, cleanupErr, cacheErr, out.Close(), stderr.Close())
  }
  
 -func (c *Coverage) executeCoverage() (time.Duration, error) {
 -	args := []string{"test"}
 +func (c *Coverage) executeCoverage(baseline string) (time.Duration, error) {
-+	args := []string{"test", "-json"}
++	args := []string{"test", "-json", "-count=1"}
  	if c.buildTags != "" {
  		args = append(args, "-tags", c.buildTags)
  	}
-@@ -150,17 +183,49 @@ func (c *Coverage) executeCoverage() (time.Duration, error) {
+@@ -150,17 +201,57 @@ func (c *Coverage) executeCoverage() (time.Duration, error) {
  		args = append(args, "-coverpkg", c.coverPkg)
  	}
  
@@ -635,16 +743,24 @@ index d7be532..25ae82c 100644
 +		return 0, errors.Join(err, stdout.Close(), stderr.Close())
 +	}
 +	start := time.Now()
-+	runErr, processCleanupErr, _ := execution.RunGoCommand(c.callerContext(), cmd, stdout, stderr)
++	runErr, processCleanupErr, _ := workdir.RunGoCommandWithOwnedTemp(c.commandTemp, c.callerContext(), cmd, stdout, stderr)
 +	elapsed := time.Since(start)
-+	processCleanupErr = errors.Join(processCleanupErr, c.cache.AfterCommand(c.callerContext(), artifactRoot, "baseline"))
-+	_, stderrSeekErr := stderr.Seek(0, 0)
-+	stderrErr := stderrSeekErr
++	if !errors.Is(processCleanupErr, execution.ErrUnsettledProcess) {
++		processCleanupErr = errors.Join(processCleanupErr, c.cache.AfterCommand(c.callerContext(), artifactRoot, "baseline"))
++	}
++	producerUnsettled := errors.Is(processCleanupErr, execution.ErrUnsettledProcess)
++	var stderrErr error
++	if !producerUnsettled {
++		_, stderrErr = stderr.Seek(0, 0)
++	}
 +	if stderrErr == nil && processCleanupErr == nil {
 +		stderrErr = execution.CheckInfrastructureStream(stderr)
 +	}
 +	closeErr := stderr.Close()
-+	_, seekErr := stdout.Seek(0, 0)
++	var seekErr error
++	if !producerUnsettled {
++		_, seekErr = stdout.Seek(0, 0)
++	}
 +	judgment := execution.TestJudgment{Status: mutator.ExecutionError}
 +	var judgmentErr error
 +	if seekErr == nil && processCleanupErr == nil {
@@ -662,7 +778,7 @@ index d7be532..25ae82c 100644
  }
  
  func (c *Coverage) scanPath() string {
-@@ -205,3 +270,40 @@ func (c *Coverage) removeModuleFromPath(p *cover.Profile) string {
+@@ -205,3 +296,40 @@ func (c *Coverage) removeModuleFromPath(p *cover.Profile) string {
  
  	return path
  }
@@ -704,7 +820,7 @@ index d7be532..25ae82c 100644
 +	return selected, nil
 +}
 diff --git a/internal/coverage/coverage_test.go b/internal/coverage/coverage_test.go
-index 78f3002..0d0801c 100644
+index 78f3002..4d1cc9e 100644
 --- a/internal/coverage/coverage_test.go
 +++ b/internal/coverage/coverage_test.go
 @@ -80,7 +80,7 @@ func TestCoverageRun(t *testing.T) {
@@ -721,7 +837,7 @@ index 78f3002..0d0801c 100644
  
  			firstWant := "go mod download"
 -			secondWant := fmt.Sprintf("go test -tags tag1 tag2 -coverpkg %s -cover -coverprofile %v %s",
-+			secondWant := fmt.Sprintf("go test -json -tags tag1 tag2 -coverpkg %s -cover -coverprofile %v %s",
++			secondWant := fmt.Sprintf("go test -json -count=1 -tags tag1 tag2 -coverpkg %s -cover -coverprofile %v %s",
  				coverpkg, wantFilePath, tc.wantPath)
  
  			if len(holder.events) != 2 {
@@ -904,6 +1020,118 @@ index 0000000..84f602e
 +	if strings.Compare(string(before), string(after)) != 0 {
 +		t.Fatal("active mutation test survived cancellation")
 +	}
++}
+diff --git a/internal/engine/child_source_cache_test.go b/internal/engine/child_source_cache_test.go
+new file mode 100644
+index 0000000..3a00e62
+--- /dev/null
++++ b/internal/engine/child_source_cache_test.go
+@@ -0,0 +1,79 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"slices"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestMutationCommandsExecuteTestsAfterChildOnlySourceChanges(t *testing.T) {
++	root := t.TempDir()
++	for _, name := range []string{"observer", "child"} {
++		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
++			t.Fatal(err)
++		}
++	}
++	mustWrite(t, filepath.Join(root, "go.mod"), "module childcache.example\ngo 1.24\n")
++	mustWrite(t, filepath.Join(root, "child", "main.go"), "package main\nimport \"fmt\"\nfunc main(){fmt.Print(\"good\")}\n")
++	mustWrite(t, filepath.Join(root, "observer", "value_test.go"), `package observer
++import("os";"os/exec";"path/filepath";"strings";"testing")
++func TestChildSource(t *testing.T){
++ if err:=os.WriteFile(filepath.Join(t.TempDir(),"fixture"),[]byte("owned"),0600);err!=nil{t.Fatal(err)}
++ out,err:=exec.Command("go","run","../child").CombinedOutput()
++ if err!=nil||strings.TrimSpace(string(out))!="good"{t.Fatalf("child changed: %s (%v)",out,err)}
++}
++`)
++	owner := newCommandTempFixture(t)
++	executor := mutantExecutor{testExecutionTime: time.Minute}
++	actual := executor.getTestArgs("childcache.example/observer")
++	// Prime the unsafe cached-result path as an independent negative control.
++	cachedArgs := slices.DeleteFunc(slices.Clone(actual), func(arg string) bool { return arg == "-count=1" })
++	run := func(args []string) (execution.TestJudgment, []byte, error) {
++		t.Helper()
++		evidence := t.TempDir()
++		stdout, err := os.Create(filepath.Join(evidence, "stdout"))
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer stdout.Close()
++		stderr, err := os.Create(filepath.Join(evidence, "stderr"))
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer stderr.Close()
++		cmd := exec.CommandContext(t.Context(), "go", args...)
++		cmd.Dir = root
++		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=readonly")
++		runErr, cleanupErr, started := workdir.RunGoCommandWithOwnedTemp(owner, t.Context(), cmd, stdout, stderr)
++		if !started || cleanupErr != nil {
++			t.Fatalf("owned Go control failed: started=%t run=%v cleanup=%v", started, runErr, cleanupErr)
++		}
++		raw, err := os.ReadFile(stdout.Name())
++		if err != nil {
++			t.Fatal(err)
++		}
++		judgment, judgeErr := execution.JudgeTestStream(bytes.NewReader(raw), root, runErr, false, nil)
++		return judgment, raw, judgeErr
++	}
++	if result, _, err := run(cachedArgs); err != nil || result.Status != mutator.Lived {
++		t.Fatalf("healthy child baseline: %s %v", result.Status, err)
++	}
++	if result, raw, err := run(cachedArgs); err != nil || result.Status != mutator.Lived || !strings.Contains(string(raw), "(cached)") {
++		t.Fatalf("negative control did not reproduce real cached named result: %s %v %s", result.Status, err, raw)
++	}
++	mustWrite(t, filepath.Join(root, "child", "main.go"), "package main\nimport \"fmt\"\nfunc main(){fmt.Print(\"bad\")}\n")
++	result, raw, err := run(actual)
++	if err != nil || result.Status != mutator.Killed || !strings.Contains(string(raw), "child changed: bad") || strings.Contains(string(raw), "(cached)") {
++		t.Fatalf("child-only mutation escaped actual named execution: %s %v %s", result.Status, err, raw)
++	}
++}
+diff --git a/internal/engine/command_temp_test.go b/internal/engine/command_temp_test.go
+new file mode 100644
+index 0000000..3ac4a31
+--- /dev/null
++++ b/internal/engine/command_temp_test.go
+@@ -0,0 +1,21 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
++	"testing"
++)
++
++func newCommandTempFixture(t *testing.T) *workdir.CommandTemp {
++	t.Helper()
++	owner, err := workdir.NewCommandTemp()
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := owner.Close(); err != nil {
++			t.Error(err)
++		}
++	})
++	return owner
 +}
 diff --git a/internal/engine/coverage_census_test.go b/internal/engine/coverage_census_test.go
 new file mode 100644
@@ -1305,7 +1533,7 @@ index 714271e..bcf9ffa 100644
  	}
  	for _, tc := range testCases {
 diff --git a/internal/engine/executor.go b/internal/engine/executor.go
-index 3fb5ee4..ff5c6e8 100644
+index 3fb5ee4..6cc55b2 100644
 --- a/internal/engine/executor.go
 +++ b/internal/engine/executor.go
 @@ -18,7 +18,6 @@ package engine
@@ -1370,7 +1598,7 @@ index 3fb5ee4..ff5c6e8 100644
  		integrationMode:   m.integrationMode,
  		buildTags:         m.buildTags,
  		execContext:       m.execContext,
-@@ -143,6 +158,13 @@ type mutantExecutor struct {
+@@ -143,6 +158,15 @@ type mutantExecutor struct {
  	buildTags         string
  	testExecutionTime time.Duration
  	dryRun            bool
@@ -1378,21 +1606,24 @@ index 3fb5ee4..ff5c6e8 100644
 +	executionLogDir   string
 +	expectedTests     execution.TestCensus
 +	ctx               context.Context
++	commandTemp       *workdir.CommandTemp
 +	outputBudget      *execution.OutputBudget
 +	cache             *execution.GoCache
 +	executionSettled  bool
++	producerUnsettled bool
  	integrationMode   bool
  	testCPU           int
  }
-@@ -158,6 +180,7 @@ type mutantExecutor struct {
+@@ -158,6 +182,8 @@ type mutantExecutor struct {
  // a context with timeout. This is done because the Go test command doesn't
  // make it easy to distinguish failures from timeouts.
  func (m *mutantExecutor) Start(w *workerpool.Worker) {
 +	m.executionSettled = false
++	m.producerUnsettled = false
  	defer m.wg.Done()
  	workerName := fmt.Sprintf("%s-%d", w.Name, w.ID)
  	rootDir, err := m.wdDealer.Get(workerName)
-@@ -168,22 +191,54 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -168,56 +194,118 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  	workingDir := filepath.Join(rootDir, m.module.CallingDir)
  	m.mutant.SetWorkdir(workingDir)
  
@@ -1427,6 +1658,18 @@ index 3fb5ee4..ff5c6e8 100644
 +		}
 +		w.Cache = cache
 +	}
++	if w.Temp == nil {
++		temp, err := workdir.NewCommandTemp()
++		if err != nil {
++			w.Invalid = true
++			m.mutant.SetStatus(mutator.ExecutionError)
++			log.Errorf("create worker-owned Go temporary root: %v", err)
++			m.outCh <- m.mutant
++			return
++		}
++		w.Temp = temp
++	}
++	m.commandTemp = w.Temp
 +	m.cache = w.Cache
  	if err := m.mutant.Apply(); err != nil {
 +		w.Invalid = true
@@ -1438,18 +1681,24 @@ index 3fb5ee4..ff5c6e8 100644
  	}
  
  	m.mutant.SetStatus(m.runTests(rootDir, m.mutant.Pkg()))
++	w.Unsettled = w.Unsettled || m.producerUnsettled
 +	if m.mutant.Status() == mutator.ExecutionError && !m.executionSettled {
 +		w.Invalid = true
 +	}
  
- 	if err := m.mutant.Rollback(); err != nil {
+-	if err := m.mutant.Rollback(); err != nil {
 -		// What should we do now?
-+		w.Invalid = true
-+		m.mutant.SetStatus(mutator.ExecutionError)
- 		log.Errorf("failed to restore mutation at %s - %s\n\t%v", m.mutant.Position(), m.mutant.Status(), err)
+-		log.Errorf("failed to restore mutation at %s - %s\n\t%v", m.mutant.Position(), m.mutant.Status(), err)
++	// Preserve the source bytes while an unjoined producer may still read them.
++	if !m.producerUnsettled {
++		if err := m.mutant.Rollback(); err != nil {
++			w.Invalid = true
++			m.mutant.SetStatus(mutator.ExecutionError)
++			log.Errorf("failed to restore mutation at %s - %s\n\t%v", m.mutant.Position(), m.mutant.Status(), err)
++		}
  	}
  
-@@ -191,33 +246,48 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+ 	m.outCh <- m.mutant
  }
  
  func (m *mutantExecutor) runTests(rootDir, pkg string) mutator.Status {
@@ -1486,11 +1735,11 @@ index 3fb5ee4..ff5c6e8 100644
  		cmd.Dir = rootDir
  	}
  	cmd.Env = append(cmd.Env, os.Environ()...)
- 	cmd.Env = append(cmd.Env, fmt.Sprintf("GOTMPDIR=%s", m.wdDealer.WorkDir()))
- 
+-	cmd.Env = append(cmd.Env, fmt.Sprintf("GOTMPDIR=%s", m.wdDealer.WorkDir()))
+-
 -	rel, err := run(cmd)
 -	defer rel()
--
+ 
 -	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 -		return mutator.TimedOut
 -	}
@@ -1508,11 +1757,11 @@ index 3fb5ee4..ff5c6e8 100644
  
  func (m *mutantExecutor) getTestArgs(pkg string) []string {
 -	args := []string{"test"}
-+	args := []string{"test", "-json", "-cover"}
++	args := []string{"test", "-json", "-cover", "-count=1"}
  	if m.buildTags != "" {
  		args = append(args, "-tags", m.buildTags)
  	}
-@@ -228,11 +298,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -228,11 +316,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	args = append(args, "-failfast")
  
  	if m.testCPU != 0 {
@@ -1528,7 +1777,7 @@ index 3fb5ee4..ff5c6e8 100644
  		path = "./..."
  	}
  	args = append(args, path)
-@@ -240,27 +313,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -240,27 +331,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	return args
  }
  
@@ -1567,10 +1816,42 @@ index 3fb5ee4..ff5c6e8 100644
 +	return func(m MutantExecutorDealer) MutantExecutorDealer { m.ctx = ctx; return m }
  }
 diff --git a/internal/engine/executor_test.go b/internal/engine/executor_test.go
-index e5a1c67..efc0911 100644
+index e5a1c67..5f3991e 100644
 --- a/internal/engine/executor_test.go
 +++ b/internal/engine/executor_test.go
-@@ -134,28 +134,28 @@ func TestMutatorTestExecution(t *testing.T) {
+@@ -21,6 +21,7 @@ import (
+ 	"fmt"
+ 	"os"
+ 	"os/exec"
++	"path/filepath"
+ 	"strings"
+ 	"sync"
+ 	"testing"
+@@ -58,6 +59,11 @@ func TestApplyAndRollback(t *testing.T) {
+ 			Name: "test",
+ 			ID:   1,
+ 		}
++		t.Cleanup(func() {
++			if err := w.Temp.Close(); err != nil {
++				t.Error(err)
++			}
++		})
+ 		go func() {
+ 			<-outCh
+ 			close(outCh)
+@@ -99,6 +105,11 @@ func TestApplyAndRollback(t *testing.T) {
+ 			Name: "test",
+ 			ID:   1,
+ 		}
++		t.Cleanup(func() {
++			if err := w.Temp.Close(); err != nil {
++				t.Error(err)
++			}
++		})
+ 		go func() {
+ 			<-outCh
+ 			close(outCh)
+@@ -134,28 +145,28 @@ func TestMutatorTestExecution(t *testing.T) {
  			wantMutStatus: mutator.NotCovered,
  		},
  		{
@@ -1606,17 +1887,62 @@ index e5a1c67..efc0911 100644
  			defer viperReset()
  			wdDealer := newWdDealerStub(t)
  			holder := &commandHolder{}
-@@ -200,6 +200,9 @@ func TestMutatorTestExecution(t *testing.T) {
+@@ -180,6 +191,11 @@ func TestMutatorTestExecution(t *testing.T) {
+ 				Name: "test",
+ 				ID:   1,
+ 			}
++			t.Cleanup(func() {
++				if err := w.Temp.Close(); err != nil {
++					t.Error(err)
++				}
++			})
+ 
+ 			var got mutator.Mutator
+ 			mutex := sync.RWMutex{}
+@@ -200,18 +216,33 @@ func TestMutatorTestExecution(t *testing.T) {
  			}
  
  			if tc.mutantStatus != mutator.NotCovered {
+-				goTmpDirEnv := fmt.Sprintf("GOTMPDIR=%s", wdDealer.WorkDir())
+-				actualGoTmpDir := ""
+-				for _, v := range holder.cmd.Env {
+-					if strings.HasPrefix(v, "GOTMPDIR=") {
+-						actualGoTmpDir = v
+-
+-						break
 +				if holder.cmd == nil {
 +					t.Fatal("mutation command was not launched; inspect the execution result before environment assertions")
 +				}
- 				goTmpDirEnv := fmt.Sprintf("GOTMPDIR=%s", wdDealer.WorkDir())
- 				actualGoTmpDir := ""
- 				for _, v := range holder.cmd.Env {
-@@ -251,7 +254,7 @@ func TestMutatorRun(t *testing.T) {
++				environment := map[string]string{}
++				for _, entry := range holder.cmd.Env {
++					if key, value, found := strings.Cut(entry, "="); found {
++						environment[key] = value
++					}
++				}
++				ownedTemp := environment["GOTMPDIR"]
++				if ownedTemp == "" || !filepath.IsAbs(ownedTemp) {
++					t.Fatalf("command has no absolute owned temporary root: %q", ownedTemp)
++				}
++				for _, key := range []string{"GOTMPDIR", "TMPDIR", "TMP", "TEMP"} {
++					if environment[key] != ownedTemp {
++						t.Errorf("%s=%q, want the command's owned temporary root %q", key, environment[key], ownedTemp)
+ 					}
+ 				}
+-				if goTmpDirEnv != actualGoTmpDir {
+-					t.Errorf("expected GOTMPDIR to be %s, got %s", goTmpDirEnv, actualGoTmpDir)
++				ownedInfo, ownedErr := os.Stat(ownedTemp)
++				sharedInfo, sharedErr := os.Stat(wdDealer.WorkDir())
++				if ownedErr != nil || sharedErr != nil {
++					t.Fatalf("inspect temporary ownership: owned=%v shared=%v", ownedErr, sharedErr)
+ 				}
++				if os.SameFile(ownedInfo, sharedInfo) {
++					t.Fatal("command temporary files still use the shared work directory")
++				}
++
+ 			}
+ 		})
+ 	}
+@@ -251,7 +282,7 @@ func TestMutatorRun(t *testing.T) {
  			pkg:      "example.com/my/package",
  			callDir:  "test/dir",
  			tags:     "tag1,t1g2",
@@ -1625,27 +1951,76 @@ index e5a1c67..efc0911 100644
  		},
  		{
  			name:               "it can override timeout coefficient",
-@@ -308,7 +311,7 @@ func TestMutatorRun(t *testing.T) {
+@@ -297,6 +328,11 @@ func TestMutatorRun(t *testing.T) {
+ 				Name: "test",
+ 				ID:   1,
+ 			}
++			t.Cleanup(func() {
++				if err := w.Temp.Close(); err != nil {
++					t.Error(err)
++				}
++			})
+ 			go func() {
+ 				<-outCh
+ 				close(outCh)
+@@ -308,7 +344,7 @@ func TestMutatorRun(t *testing.T) {
  			if tc.timeoutCoefficient != 0 {
  				wantTimeout = 2*time.Second + expectedTimeout*time.Duration(tc.timeoutCoefficient)
  			}
 -			want := fmt.Sprintf("go test -tags %s -timeout %s -failfast %s", tc.tags, wantTimeout, tc.wantPath)
-+			want := fmt.Sprintf("go test -json -cover -tags %s -timeout %s -failfast %s", tc.tags, wantTimeout, tc.wantPath)
++			want := fmt.Sprintf("go test -json -cover -count=1 -tags %s -timeout %s -failfast %s", tc.tags, wantTimeout, tc.wantPath)
  			got := fmt.Sprintf("go %v", strings.Join(holder.args, " "))
  
  			if !cmp.Equal(got, want) {
+@@ -386,6 +422,11 @@ func TestCPU(t *testing.T) {
+ 				Name: "test",
+ 				ID:   1,
+ 			}
++			t.Cleanup(func() {
++				if err := w.Temp.Close(); err != nil {
++					t.Error(err)
++				}
++			})
+ 			go func() {
+ 				<-outCh
+ 				close(outCh)
+@@ -467,6 +508,11 @@ func TestMutatorRunInTheCorrectFolder(t *testing.T) {
+ 			Name: "test",
+ 			ID:   1,
+ 		}
++		t.Cleanup(func() {
++			if err := w.Temp.Close(); err != nil {
++				t.Error(err)
++			}
++		})
+ 		go func() {
+ 			<-outCh
+ 			close(outCh)
+@@ -513,6 +559,11 @@ func TestMutatorRunInTheCorrectFolder(t *testing.T) {
+ 			Name: "test",
+ 			ID:   1,
+ 		}
++		t.Cleanup(func() {
++			if err := w.Temp.Close(); err != nil {
++				t.Error(err)
++			}
++		})
+ 		go func() {
+ 			<-outCh
+ 			close(outCh)
 diff --git a/internal/engine/invalid_source_package_test.go b/internal/engine/invalid_source_package_test.go
 new file mode 100644
-index 0000000..52d3d3f
+index 0000000..558cd68
 --- /dev/null
 +++ b/internal/engine/invalid_source_package_test.go
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,105 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
 +import (
 +	"bytes"
 +	"context"
++	"errors"
 +	"github.com/go-gremlins/gremlins/internal/engine/workerpool"
 +	"github.com/go-gremlins/gremlins/internal/gomodule"
 +	"github.com/go-gremlins/gremlins/internal/mutator"
@@ -1724,7 +2099,7 @@ index 0000000..52d3d3f
 +			executor.Start(worker)
 +			wg.Wait()
 +			if worker.Cache != nil {
-+				if err := worker.Cache.Close(); err != nil {
++				if err := errors.Join(worker.Cache.Close(), worker.Temp.Close()); err != nil {
 +					t.Fatal(err)
 +				}
 +			}
@@ -1746,7 +2121,7 @@ index 0000000..52d3d3f
 +}
 diff --git a/internal/engine/output_limit_test.go b/internal/engine/output_limit_test.go
 new file mode 100644
-index 0000000..80189a8
+index 0000000..f887efd
 --- /dev/null
 +++ b/internal/engine/output_limit_test.go
 @@ -0,0 +1,70 @@
@@ -1778,7 +2153,7 @@ index 0000000..80189a8
 +	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestExecutionOutputFloodHelper$")
 +	cmd.Env = append(os.Environ(), "GREMLINS_EXECUTION_FLOOD=1")
 +	logs := t.TempDir()
-+	executor := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: logs, outputBudget: execution.NewOutputBudget(1024)}
++	executor := mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: judgmentMutant{}, executionLogDir: logs, outputBudget: execution.NewOutputBudget(1024)}
 +	status, err := executor.executeJudgedTest(ctx, cmd, t.TempDir())
 +	if status != mutator.ExecutionError || !errors.Is(err, execution.ErrOutputLimit) || executor.executionSettled || ctx.Err() != nil {
 +		t.Fatalf("truncation misjudged: status=%s error=%v settled=%t context=%v", status, err, executor.executionSettled, ctx.Err())
@@ -1912,7 +2287,7 @@ index 0000000..cd86d4b
 +}
 diff --git a/internal/engine/package_execution_test.go b/internal/engine/package_execution_test.go
 new file mode 100644
-index 0000000..1c41952
+index 0000000..f7496e6
 --- /dev/null
 +++ b/internal/engine/package_execution_test.go
 @@ -0,0 +1,151 @@
@@ -1985,7 +2360,7 @@ index 0000000..1c41952
 +			}
 +			logs := t.TempDir()
 +			var deadlines []time.Time
-+			executor := &mutantExecutor{mutant: packageExecutionMutant{}, integrationMode: true, testExecutionTime: time.Minute, expectedTests: judgment.Census, executionLogDir: logs, execContext: func(ctx context.Context, name string, args ...string) *exec.Cmd {
++			executor := &mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: packageExecutionMutant{}, integrationMode: true, testExecutionTime: time.Minute, expectedTests: judgment.Census, executionLogDir: logs, execContext: func(ctx context.Context, name string, args ...string) *exec.Cmd {
 +				deadline, present := ctx.Deadline()
 +				if !present {
 +					t.Fatal("execution has no bound")
@@ -2069,7 +2444,7 @@ index 0000000..1c41952
 +}
 diff --git a/internal/engine/package_failfast_test.go b/internal/engine/package_failfast_test.go
 new file mode 100644
-index 0000000..c3227ed
+index 0000000..f7d4a1b
 --- /dev/null
 +++ b/internal/engine/package_failfast_test.go
 @@ -0,0 +1,133 @@
@@ -2138,7 +2513,7 @@ index 0000000..c3227ed
 +		args = append(args, "./...")
 +		if strings.HasPrefix(name, "priority-") {
 +			executor := &mutantExecutor{integrationMode: true, testExecutionTime: time.Minute}
-+			args = append(executor.getTestArgs("scheduling.example/b"), "-count=1")
++			args = executor.getTestArgs("scheduling.example/b")
 +		}
 +		cmd := exec.CommandContext(t.Context(), "go", args...)
 +		cmd.Dir = root
@@ -2208,7 +2583,7 @@ index 0000000..c3227ed
 +}
 diff --git a/internal/engine/physical_package_priority_test.go b/internal/engine/physical_package_priority_test.go
 new file mode 100644
-index 0000000..a9d8c9d
+index 0000000..c75f2cb
 --- /dev/null
 +++ b/internal/engine/physical_package_priority_test.go
 @@ -0,0 +1,154 @@
@@ -2335,7 +2710,7 @@ index 0000000..a9d8c9d
 +							}
 +						}
 +					})
-+					executor := &mutantExecutor{mutant: mutant, module: mod, integrationMode: integration, testExecutionTime: time.Minute, expectedTests: census.Census, executionLogDir: t.TempDir(), execContext: exec.CommandContext, wdDealer: directDealer{root: root}, ctx: context.Background()}
++					executor := &mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: mutant, module: mod, integrationMode: integration, testExecutionTime: time.Minute, expectedTests: census.Census, executionLogDir: t.TempDir(), execContext: exec.CommandContext, wdDealer: directDealer{root: root}, ctx: context.Background()}
 +					if status := executor.runTests(root, mutant.Pkg()); status != mutator.Lived {
 +						t.Fatalf("real nested-package survivor not resolved: %s", status)
 +					}
@@ -2506,10 +2881,10 @@ index efa93f5..0d28349 100644
  	gotMutants []mutator.Mutator
 diff --git a/internal/engine/test_execution.go b/internal/engine/test_execution.go
 new file mode 100644
-index 0000000..299b150
+index 0000000..fb57483
 --- /dev/null
 +++ b/internal/engine/test_execution.go
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,174 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
@@ -2525,6 +2900,7 @@ index 0000000..299b150
 +	"path/filepath"
 +	"time"
 +
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
 +	"github.com/go-gremlins/gremlins/internal/execution"
 +	"github.com/go-gremlins/gremlins/internal/mutator"
 +)
@@ -2551,22 +2927,30 @@ index 0000000..299b150
 +		}
 +	}
 +	started := time.Now()
-+	runErr, processCleanupErr, processStarted := execution.RunGoCommand(ctx, cmd, stdout, stderr, m.outputBudget)
++	runErr, processCleanupErr, processStarted := workdir.RunGoCommandWithOwnedTemp(m.commandTemp, ctx, cmd, stdout, stderr, m.outputBudget)
 +	finished := time.Now()
-+	if m.cache != nil {
++	m.producerUnsettled = errors.Is(processCleanupErr, execution.ErrUnsettledProcess)
++	if m.cache != nil && !m.producerUnsettled {
 +		processCleanupErr = errors.Join(processCleanupErr, m.cache.AfterCommand(ctx, m.executionLogDir, digest))
 +	}
-+	_, stderrSeekErr := stderr.Seek(0, 0)
-+	stderrErr := stderrSeekErr
++	var stderrErr error
++	if !m.producerUnsettled {
++		_, stderrErr = stderr.Seek(0, 0)
++	}
 +	if stderrErr == nil && processCleanupErr == nil {
 +		stderrErr = execution.CheckInfrastructureStream(stderr)
 +	}
 +	var stderrHash string
 +	var stderrBytes int64
 +	var stderrHashErr error
-+	stderrHash, stderrBytes, stderrHashErr = hashRawOutput(stderr)
++	if !m.producerUnsettled {
++		stderrHash, stderrBytes, stderrHashErr = hashRawOutput(stderr)
++	}
 +	closeErr := stderr.Close()
-+	_, seekErr := stdout.Seek(0, 0)
++	var seekErr error
++	if !m.producerUnsettled {
++		_, seekErr = stdout.Seek(0, 0)
++	}
 +	status, judgmentErr := mutator.ExecutionError, error(nil)
 +	if seekErr == nil && processCleanupErr == nil {
 +		var expected *execution.TestCensus
@@ -2586,7 +2970,9 @@ index 0000000..299b150
 +	var stdoutHash string
 +	var stdoutBytes int64
 +	var stdoutHashErr error
-+	stdoutHash, stdoutBytes, stdoutHashErr = hashRawOutput(stdout)
++	if !m.producerUnsettled {
++		stdoutHash, stdoutBytes, stdoutHashErr = hashRawOutput(stdout)
++	}
 +	artifactErr := errors.Join(processCleanupErr, stderrErr, stderrHashErr, stdoutHashErr, closeErr, seekErr, stdout.Close())
 +	if artifactErr != nil {
 +		status = mutator.ExecutionError
@@ -2606,7 +2992,7 @@ index 0000000..299b150
 +		StderrSHA256    string    `json:"stderr_sha256"`
 +		StderrBytes     int64     `json:"stderr_bytes"`
 +		CachePolicy     string    `json:"cache_policy"`
-+	}{Mutation: key, Status: status.String(), GoStarted: processStarted, StdoutSHA256: stdoutHash, StdoutBytes: stdoutBytes, StderrSHA256: stderrHash, StderrBytes: stderrBytes, CachePolicy: "Go test source/input-keyed cache enabled; named events may be cached replay", Started: started, Finished: finished, ProcessError: errorText(runErr), JudgmentError: errorText(judgmentErr), ArtifactError: errorText(artifactErr)}
++	}{Mutation: key, Status: status.String(), GoStarted: processStarted, StdoutSHA256: stdoutHash, StdoutBytes: stdoutBytes, StderrSHA256: stderrHash, StderrBytes: stderrBytes, CachePolicy: "Go build cache enabled; -count=1 executes named tests for every command", Started: started, Finished: finished, ProcessError: errorText(runErr), JudgmentError: errorText(judgmentErr), ArtifactError: errorText(artifactErr)}
 +	if original, ok := m.mutant.(interface{ DiscoveryStatus() (mutator.Status, bool) }); ok {
 +		if status, present := original.DiscoveryStatus(); present {
 +			evidence.DiscoveryStatus = status.String()
@@ -2675,7 +3061,7 @@ index 0000000..299b150
 +}
 diff --git a/internal/engine/test_judgment_test.go b/internal/engine/test_judgment_test.go
 new file mode 100644
-index 0000000..4fd9006
+index 0000000..5e219cf
 --- /dev/null
 +++ b/internal/engine/test_judgment_test.go
 @@ -0,0 +1,233 @@
@@ -2740,7 +3126,7 @@ index 0000000..4fd9006
 +				mustWrite(t, block, "block")
 +				cmd.Env = append(cmd.Env, "GOCACHE="+block)
 +			}
-+			m := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: t.TempDir()}
++			m := mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: judgmentMutant{}, executionLogDir: t.TempDir()}
 +			status, err := m.executeJudgedTest(ctx, cmd, root)
 +			if status != c.want {
 +				t.Fatalf("got %s want %s: %v", status, c.want, err)
@@ -2777,7 +3163,7 @@ index 0000000..4fd9006
 +	}
 +}
 +func TestJudgmentArtifactFailureIsError(t *testing.T) {
-+	m := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: filepath.Join(t.TempDir(), "missing")}
++	m := mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: judgmentMutant{}, executionLogDir: filepath.Join(t.TempDir(), "missing")}
 +	cmd := exec.Command("go", "version")
 +	status, err := m.executeJudgedTest(context.Background(), cmd, t.TempDir())
 +	if status != mutator.ExecutionError || err == nil {
@@ -2803,7 +3189,7 @@ index 0000000..4fd9006
 +	if err := os.Mkdir(filepath.Join(logs, digest+".result.json"), 0o700); err != nil {
 +		t.Fatal(err)
 +	}
-+	m := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: logs}
++	m := mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: judgmentMutant{}, executionLogDir: logs}
 +	cmd := exec.Command("go", "test", "-json", "./...")
 +	cmd.Dir = root
 +	status, err := m.executeJudgedTest(context.Background(), cmd, root)
@@ -2861,7 +3247,7 @@ index 0000000..4fd9006
 +	mustWrite(t, filepath.Join(root, "go.mod"), "module probe.example\ngo 1.27.1\n")
 +	mustWrite(t, filepath.Join(root, "value.go"), "package probe\nfunc broken(){_ = |nil}\n")
 +	logs := t.TempDir()
-+	m := mutantExecutor{mutant: judgmentMutant{}, executionLogDir: logs}
++	m := mutantExecutor{commandTemp: newCommandTempFixture(t), mutant: judgmentMutant{}, executionLogDir: logs}
 +	cmd := exec.Command("go", "test", "-json", "-cover", "./...")
 +	cmd.Dir = root
 +	status, err := m.executeJudgedTest(context.Background(), cmd, root)
@@ -3096,6 +3482,590 @@ index 1ef1bc2..6e7a988 100644
 +// ExecutionReference identifies the complete retained raw/result files for this outcome.
 +func (m *TokenMutator) ExecutionReference() string             { return m.executionReference }
 +func (m *TokenMutator) SetExecutionReference(reference string) { m.executionReference = reference }
+diff --git a/internal/engine/workdir/command_temp.go b/internal/engine/workdir/command_temp.go
+new file mode 100644
+index 0000000..cde8b3c
+--- /dev/null
++++ b/internal/engine/workdir/command_temp.go
+@@ -0,0 +1,105 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++)
++
++// CommandTemp owns a stable temporary environment for serial Go commands.
++type CommandTemp struct{ scratch *ScratchDirectory }
++
++// NewCommandTemp owns one stable temporary environment for a serial worker or
++// baseline lifetime. The root is a sibling of the outer campaign scratch.
++func NewCommandTemp() (*CommandTemp, error) {
++	parent, err := filepath.Abs(os.TempDir())
++	if err != nil {
++		return nil, err
++	}
++	parent, err = filepath.EvalSymlinks(parent)
++	if err != nil {
++		return nil, err
++	}
++	scratch, err := NewScratch(parent, "gremlins-command-*")
++	if err != nil {
++		return nil, err
++	}
++	return &CommandTemp{scratch: scratch}, nil
++}
++
++// Retain closes the lease once and leaves all producer files for inspection.
++func (owner *CommandTemp) Retain() error {
++	if owner == nil || owner.scratch == nil {
++		return nil
++	}
++	scratch := owner.scratch
++	owner.scratch = nil
++	return scratch.Retain()
++}
++
++func (owner *CommandTemp) Close() error {
++	if owner == nil || owner.scratch == nil {
++		return nil
++	}
++	scratch := owner.scratch
++	owner.scratch = nil
++	return scratch.Clean()
++}
++
++func RunGoCommandWithOwnedTemp(owner *CommandTemp, ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*execution.OutputBudget) (runErr, cleanupErr error, started bool) {
++	for _, budget := range budgets {
++		if budget != nil && budget.Exhausted() {
++			return nil, execution.ErrOutputLimit, false
++		}
++	}
++	if owner == nil {
++		return errors.New("missing owned command temporary root"), nil, false
++	}
++
++	if owner.scratch == nil {
++		return errors.New("owned command temporary root is no longer reusable"), nil, false
++	}
++	scratch := owner.scratch
++	directory, err := filepath.Abs(cmd.Dir)
++	if err != nil {
++		return err, nil, false
++	}
++	directory, err = filepath.EvalSymlinks(directory)
++	if err != nil {
++		return err, nil, false
++	}
++	// Compare physical parent names so a symlinked temporary parent cannot put
++	// generated Go sources below the module and alter ./... package discovery.
++	parent := filepath.Dir(scratch.Path())
++	relative, relErr := filepath.Rel(directory, parent)
++	if relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
++		return fmt.Errorf("Go temporary parent %q must be outside command directory %q", parent, directory), nil, false
++	}
++	current, namespaceErr := os.Lstat(scratch.Path())
++	if namespaceErr != nil || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(scratch.identity, current) {
++		owner.scratch = nil
++		return nil, errors.Join(namespaceErr, fmt.Errorf("owned command temporary namespace identity changed; retained %q", scratch.Path()), scratch.Retain()), false
++	}
++	cmd.Env = append(cmd.Environ(), "GOTMPDIR="+scratch.Path(), "TMPDIR="+scratch.Path(), "TMP="+scratch.Path(), "TEMP="+scratch.Path())
++	var settled bool
++	runErr, cleanupErr, started, settled = execution.RunGoCommand(ctx, cmd, stdout, stderr, budgets...)
++	if !settled {
++		owner.scratch = nil
++		return runErr, errors.Join(execution.ErrUnsettledProcess, fmt.Errorf("retain uncertain command temporary root %q: %w", scratch.Path(), cleanupErr), scratch.Retain()), started
++	}
++	tempCleanupErr := scratch.Clear()
++	if tempCleanupErr != nil {
++		// Clear has closed its lease on failure. Retain the namespace for inspection;
++		// a later owner Close must not retry deletion through an uncertain identity.
++		owner.scratch = nil
++		tempCleanupErr = fmt.Errorf("clean owned command temporary root %q: %w", scratch.Path(), tempCleanupErr)
++	}
++	return runErr, errors.Join(cleanupErr, tempCleanupErr), started
++}
+diff --git a/internal/engine/workdir/command_temp_test.go b/internal/engine/workdir/command_temp_test.go
+new file mode 100644
+index 0000000..6a0d780
+--- /dev/null
++++ b/internal/engine/workdir/command_temp_test.go
+@@ -0,0 +1,375 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++)
++
++type commandTempRecord struct {
++	Root, TestDirectory, BuildDirectory string
++	Environment                         map[string]string
++}
++
++func commandTempFixture(t *testing.T) *CommandTemp {
++	t.Helper()
++	owner, err := NewCommandTemp()
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := owner.Close(); err != nil {
++			t.Error(err)
++		}
++	})
++	return owner
++}
++
++func TestOwnedCommandTempCleansSettledProducersIncludingOutputFailure(t *testing.T) {
++	for _, mode := range []string{"normal", "panic", "cancel", "output-limit"} {
++		t.Run(mode, func(t *testing.T) {
++			ambient := t.TempDir()
++			for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
++				t.Setenv(key, ambient)
++			}
++			sentinel := filepath.Join(ambient, "unrelated-sentinel")
++			if err := os.WriteFile(sentinel, []byte("ambient remains"), 0600); err != nil {
++				t.Fatal(err)
++			}
++			evidence := t.TempDir()
++			recordPath := filepath.Join(evidence, "record.json")
++			profilePath := filepath.Join(evidence, "profile")
++			executable, err := os.Executable()
++			if err != nil {
++				t.Fatal(err)
++			}
++			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
++			defer cancel()
++			cmd := exec.CommandContext(ctx, executable, "-test.run=^TestOwnedCommandTempHelper$")
++			cmd.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER="+mode, "GREMLINS_TEMP_RECORD="+recordPath, "GREMLINS_TEMP_PROFILE="+profilePath, "GOTMPDIR="+ambient)
++			out, err := os.Create(filepath.Join(evidence, "stdout"))
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer out.Close()
++			stderr, err := os.Create(filepath.Join(evidence, "stderr"))
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer stderr.Close()
++			type result struct {
++				run, cleanup error
++				started      bool
++			}
++			done := make(chan result, 1)
++			budget := execution.CommandOutputLimit
++			if mode == "output-limit" {
++				budget = 512
++			}
++			owner := commandTempFixture(t)
++			go func() {
++				run, cleanup, started := RunGoCommandWithOwnedTemp(owner, ctx, cmd, out, stderr, execution.NewOutputBudget(budget))
++				done <- result{run, cleanup, started}
++			}()
++			var record commandTempRecord
++			deadline := time.Now().Add(5 * time.Second)
++			for {
++				raw, readErr := os.ReadFile(recordPath)
++				if readErr == nil && json.Unmarshal(raw, &record) == nil {
++					break
++				}
++				if time.Now().After(deadline) {
++					cancel()
++					<-done
++					t.Fatalf("child did not record temporary files: %v", readErr)
++				}
++				time.Sleep(time.Millisecond)
++			}
++			if mode == "cancel" {
++				cancel()
++			}
++			finished := <-done
++			if err := owner.Close(); err != nil {
++				t.Fatalf("final owned root close: %v", err)
++			}
++			if !finished.started {
++				t.Fatalf("owned child not started: %v %v", finished.run, finished.cleanup)
++			}
++			parentInfo, parentErr := os.Stat(filepath.Dir(record.Root))
++			ambientInfo, ambientErr := os.Stat(ambient)
++			if !filepath.IsAbs(record.Root) || parentErr != nil || ambientErr != nil || !os.SameFile(parentInfo, ambientInfo) || !strings.HasPrefix(filepath.Base(record.Root), "gremlins-command-") {
++				t.Fatalf("temporary root escaped independent owner: %q", record.Root)
++			}
++			for _, key := range []string{"GOTMPDIR", "TMPDIR", "TMP", "TEMP"} {
++				if record.Environment[key] != record.Root {
++					t.Fatalf("%s not confined: %q", key, record.Environment[key])
++				}
++			}
++			for _, path := range []string{record.TestDirectory, record.BuildDirectory} {
++				rel, err := filepath.Rel(record.Root, path)
++				if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
++					t.Fatalf("temporary child escaped: %q %v", path, err)
++				}
++			}
++			if mode == "output-limit" {
++				if !errors.Is(finished.cleanup, execution.ErrOutputLimit) {
++					t.Fatalf("bounded output failure hidden: %v", finished.cleanup)
++				}
++			} else if finished.cleanup != nil {
++				t.Fatalf("settled child cleanup: %v", finished.cleanup)
++			}
++			if _, err := os.Stat(record.Root); !os.IsNotExist(err) {
++				t.Fatalf("settled producer left temporary data despite join: %v", err)
++			}
++
++			if mode == "normal" && finished.run != nil || mode == "panic" && finished.run == nil || mode == "cancel" && !errors.Is(finished.run, context.Canceled) {
++				t.Fatalf("native process result changed: %v", finished.run)
++			}
++			if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "ambient remains" {
++				t.Fatalf("ambient sentinel changed: %q %v", raw, err)
++			}
++			if raw, err := os.ReadFile(profilePath); err != nil || string(raw) != "explicit profile remains" {
++				t.Fatalf("explicit coverage artifact deleted with scratch: %q %v", raw, err)
++			}
++		})
++	}
++}
++
++func TestOwnedCommandTempHelper(t *testing.T) {
++	mode := os.Getenv("GREMLINS_TEMP_HELPER")
++	if mode == "" {
++		return
++	}
++	root := os.TempDir()
++	testDir := t.TempDir()
++	if err := os.WriteFile(filepath.Join(testDir, "test-file"), []byte("test temporary data"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	buildDir, err := os.MkdirTemp(os.Getenv("GOTMPDIR"), "nested-go-build-")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(buildDir, "object"), bytes.Repeat([]byte("x"), 4096), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(os.Getenv("GREMLINS_TEMP_PROFILE"), []byte("explicit profile remains"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	env := map[string]string{}
++	for _, key := range []string{"GOTMPDIR", "TMPDIR", "TMP", "TEMP"} {
++		env[key] = os.Getenv(key)
++	}
++	raw, err := json.Marshal(commandTempRecord{root, testDir, buildDir, env})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(os.Getenv("GREMLINS_TEMP_RECORD"), raw, 0600); err != nil {
++		t.Fatal(err)
++	}
++	switch mode {
++	case "normal":
++		return
++	case "panic":
++		panic("owned command temporary files")
++	case "cancel":
++		for {
++			time.Sleep(time.Second)
++		}
++	case "replace":
++		if err := os.Rename(root, root+"-retained"); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.Symlink(os.Getenv("GREMLINS_TEMP_OUTSIDE"), root); err != nil {
++			t.Fatal(err)
++		}
++		os.Exit(0) // Skip testing cleanup through the deliberately replaced name.
++	case "output-limit":
++		for {
++			_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), 4096))
++		}
++	}
++	t.Fatalf("unknown temporary helper mode %q", mode)
++}
++
++func TestOwnedCommandTempRejectsParentInsideCommandDirectory(t *testing.T) {
++	parent := t.TempDir()
++	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
++		t.Setenv(key, parent)
++	}
++	command := exec.Command("go", "version")
++	command.Dir = parent
++	out, err := os.Create(filepath.Join(t.TempDir(), "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	owner := commandTempFixture(t)
++	runErr, cleanup, started := RunGoCommandWithOwnedTemp(owner, t.Context(), command, out, out)
++	if err := owner.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if started || cleanup != nil {
++		t.Fatalf("rejected temporary namespace started child or lost cleanup: %t %v", started, cleanup)
++	}
++	// Check the rejection itself, rather than accepting an unrelated failed start.
++	if runErr == nil || !strings.Contains(runErr.Error(), "must be outside command directory") {
++		t.Fatalf("unsafe temporary parent not rejected: %v", runErr)
++	}
++	entries, err := os.ReadDir(parent)
++	if err != nil || len(entries) != 0 {
++		t.Fatalf("rejection created temporary children: %v %v", entries, err)
++	}
++}
++
++func TestOwnedCommandTempRefusesExhaustedOutputBudgetBeforeAnyWork(t *testing.T) {
++	parent := t.TempDir()
++	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
++		t.Setenv(key, parent)
++	}
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	evidence := t.TempDir()
++	record := filepath.Join(evidence, "must-not-exist")
++	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestOwnedCommandTempHelper$")
++	command.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER=normal", "GREMLINS_TEMP_RECORD="+record, "GREMLINS_TEMP_PROFILE="+filepath.Join(evidence, "profile"))
++	out, err := os.Create(filepath.Join(evidence, "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	run, cleanup, started := RunGoCommandWithOwnedTemp(nil, t.Context(), command, out, out, execution.NewOutputBudget(0))
++	if started || run != nil || !errors.Is(cleanup, execution.ErrOutputLimit) {
++		t.Fatalf("exhausted command admission changed failure: started=%t run=%v cleanup=%v", started, run, cleanup)
++	}
++	if _, err := os.Stat(record); !os.IsNotExist(err) {
++		t.Fatalf("exhausted budget executed child: %v", err)
++	}
++	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
++		t.Fatalf("exhausted budget created temporary work: %v %v", entries, err)
++	}
++}
++
++func TestOwnedCommandTempKeepsEnvironmentStableAndClearsEachCommand(t *testing.T) {
++	owner := commandTempFixture(t)
++	root := owner.scratch.Path()
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, phase := range []string{"package-prefix", "full-module"} {
++		evidence := t.TempDir()
++		recordPath := filepath.Join(evidence, "record.json")
++		cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestOwnedCommandTempHelper$")
++		cmd.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER=normal", "GREMLINS_TEMP_RECORD="+recordPath, "GREMLINS_TEMP_PROFILE="+filepath.Join(evidence, "profile"))
++		out, err := os.Create(filepath.Join(evidence, "stdout"))
++		if err != nil {
++			t.Fatal(err)
++		}
++		stderr, err := os.Create(filepath.Join(evidence, "stderr"))
++		if err != nil {
++			t.Fatal(err)
++		}
++		run, cleanup, started := RunGoCommandWithOwnedTemp(owner, t.Context(), cmd, out, stderr)
++		closeErr := errors.Join(out.Close(), stderr.Close())
++		if !started || run != nil || cleanup != nil || closeErr != nil {
++			t.Fatalf("%s: run=%v cleanup=%v close=%v", phase, run, cleanup, closeErr)
++		}
++		raw, err := os.ReadFile(recordPath)
++		if err != nil {
++			t.Fatal(err)
++		}
++		var record commandTempRecord
++		if err := json.Unmarshal(raw, &record); err != nil {
++			t.Fatal(err)
++		}
++		if record.Root != root {
++			t.Fatalf("%s changed cached temporary environment: got %q want %q", phase, record.Root, root)
++		}
++		if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
++			t.Fatalf("%s retained previous command contents: %v %v", phase, entries, err)
++		}
++	}
++	if err := owner.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if err := owner.Close(); err != nil {
++		t.Fatalf("repeated final close: %v", err)
++	}
++	if _, err := os.Stat(root); !os.IsNotExist(err) {
++		t.Fatalf("final lifetime close retained root: %v", err)
++	}
++}
++
++func TestOwnedCommandTempRetainClosesLeaseWithoutLaterDeletion(t *testing.T) {
++	owner := commandTempFixture(t)
++	root := owner.scratch.Path()
++	file := filepath.Join(root, "uncertain-producer-data")
++	if err := os.WriteFile(file, []byte("retain"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := owner.Retain(); err != nil {
++		t.Fatal(err)
++	}
++	if err := owner.Retain(); err != nil {
++		t.Fatalf("repeat retain: %v", err)
++	}
++	if err := owner.Close(); err != nil {
++		t.Fatalf("later close: %v", err)
++	}
++	if raw, err := os.ReadFile(file); err != nil || string(raw) != "retain" {
++		t.Fatalf("uncertain data deleted by later close: %q %v", raw, err)
++	}
++	// This fixture has no actual producer. Remove only this known test-owned root.
++	if err := os.RemoveAll(root); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestOwnedCommandTempRefusesReplacedNamespaceBeforeStartingProducer(t *testing.T) {
++	owner := commandTempFixture(t)
++	root := owner.scratch.Path()
++	parked := filepath.Join(t.TempDir(), "owned")
++	if err := os.Rename(root, parked); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(root, 0700); err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := os.RemoveAll(root); err != nil {
++			t.Error(err)
++		}
++	})
++	sentinel := filepath.Join(root, "unknown-sentinel")
++	if err := os.WriteFile(sentinel, []byte("unknown"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	command := exec.Command("go", "version")
++	out, err := os.Create(filepath.Join(t.TempDir(), "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	run, cleanup, started := RunGoCommandWithOwnedTemp(owner, t.Context(), command, out, out)
++	if started || run != nil || cleanup == nil || !strings.Contains(cleanup.Error(), "identity changed") {
++		t.Fatalf("replaced namespace started producer: started=%t run=%v cleanup=%v", started, run, cleanup)
++	}
++	if err := owner.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "unknown" {
++		t.Fatalf("unknown replacement changed: %q %v", raw, err)
++	}
++}
+diff --git a/internal/engine/workdir/command_temp_unix_test.go b/internal/engine/workdir/command_temp_unix_test.go
+new file mode 100644
+index 0000000..e89fe20
+--- /dev/null
++++ b/internal/engine/workdir/command_temp_unix_test.go
+@@ -0,0 +1,86 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"encoding/json"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestOwnedCommandTempPreservesActualSymlinkReplacement(t *testing.T) {
++	ambient := t.TempDir()
++	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
++		t.Setenv(key, ambient)
++	}
++	outside := t.TempDir()
++	sentinel := filepath.Join(outside, "sentinel")
++	if err := os.WriteFile(sentinel, []byte("outside remains"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	evidence := t.TempDir()
++	recordPath := filepath.Join(evidence, "record.json")
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestOwnedCommandTempHelper$")
++	cmd.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER=replace", "GREMLINS_TEMP_RECORD="+recordPath, "GREMLINS_TEMP_PROFILE="+filepath.Join(evidence, "profile"), "GREMLINS_TEMP_OUTSIDE="+outside)
++	out, err := os.Create(filepath.Join(evidence, "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	stderr, err := os.Create(filepath.Join(evidence, "stderr"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stderr.Close()
++	run, cleanup, started := RunGoCommandWithOwnedTemp(commandTempFixture(t), t.Context(), cmd, out, stderr)
++	if !started || run != nil || cleanup == nil || !strings.Contains(cleanup.Error(), "identity changed") {
++		t.Fatalf("actual root substitution not rejected: started=%t run=%v cleanup=%v", started, run, cleanup)
++	}
++	raw, err := os.ReadFile(recordPath)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var record commandTempRecord
++	if err := json.Unmarshal(raw, &record); err != nil {
++		t.Fatal(err)
++	}
++	if info, err := os.Lstat(record.Root); err != nil || info.Mode()&os.ModeSymlink == 0 {
++		t.Fatalf("unknown replacement removed: %v", err)
++	}
++	if _, err := os.Stat(filepath.Join(record.Root+"-retained", filepath.Base(record.BuildDirectory), "object")); err != nil {
++		t.Fatalf("original owned data removed through changed namespace: %v", err)
++	}
++	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "outside remains" {
++		t.Fatalf("outside target changed: %q %v", raw, err)
++	}
++}
++
++func TestOwnedCommandTempRejectsAliasedParentInsideCommandDirectory(t *testing.T) {
++	directory := t.TempDir()
++	alias := filepath.Join(t.TempDir(), "temporary-parent")
++	if err := os.Symlink(directory, alias); err != nil {
++		t.Fatal(err)
++	}
++	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
++		t.Setenv(key, alias)
++	}
++	command := exec.Command("go", "version")
++	command.Dir = directory
++	out, err := os.Create(filepath.Join(t.TempDir(), "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	run, cleanup, started := RunGoCommandWithOwnedTemp(commandTempFixture(t), t.Context(), command, out, out)
++	if started || cleanup != nil || run == nil || !strings.Contains(run.Error(), "must be outside command directory") {
++		t.Fatalf("aliased source-contained temp parent accepted: started=%t run=%v cleanup=%v", started, run, cleanup)
++	}
++}
 diff --git a/internal/engine/workdir/fd_control_unix_test.go b/internal/engine/workdir/fd_control_unix_test.go
 new file mode 100644
 index 0000000..22b28c8
@@ -3412,10 +4382,10 @@ index 0000000..806b4ef
 +}
 diff --git a/internal/engine/workdir/scratch.go b/internal/engine/workdir/scratch.go
 new file mode 100644
-index 0000000..cacd0d5
+index 0000000..abdc058
 --- /dev/null
 +++ b/internal/engine/workdir/scratch.go
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,165 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
@@ -3464,7 +4434,24 @@ index 0000000..cacd0d5
 +	return &ScratchDirectory{path: path, pin: pin, identity: info}, nil
 +}
 +func (d *ScratchDirectory) Path() string { return d.path }
-+func (d *ScratchDirectory) Clean() (resultErr error) {
++
++// Retain closes ownership handles without removing a tree whose producers may
++// still be alive. Callers report Path so the retained evidence can be inspected.
++func (d *ScratchDirectory) Retain() error {
++	var rootErr error
++	if d.root != nil {
++		rootErr = d.root.Close()
++	}
++	return errors.Join(rootErr, d.pin.Close())
++}
++
++func (d *ScratchDirectory) Clean() error { return d.clean(true) }
++
++// Clear removes settled command contents while retaining the owned root and
++// its identity for subsequent commands with the same temporary environment.
++func (d *ScratchDirectory) Clear() error { return d.clean(false) }
++
++func (d *ScratchDirectory) clean(removeRoot bool) (resultErr error) {
 +	closed := false
 +	defer func() {
 +		if !closed {
@@ -3540,6 +4527,15 @@ index 0000000..cacd0d5
 +	for _, child := range children {
 +		removeErr = errors.Join(removeErr, d.root.RemoveAll(child.Name()))
 +	}
++	if removeErr == nil && !removeRoot {
++		rootErr := d.root.Close()
++		d.root = nil
++		if rootErr != nil {
++			return rootErr
++		}
++		closed = true // The persistent lease remains open for the next command.
++		return nil
++	}
 +	closeErr := errors.Join(d.root.Close(), d.pin.Close())
 +	closed = true
 +	if removeErr != nil {
@@ -3612,16 +4608,18 @@ index 0000000..3c22d59
 +}
 diff --git a/internal/engine/workdir/scratch_unix_test.go b/internal/engine/workdir/scratch_unix_test.go
 new file mode 100644
-index 0000000..654e9c7
+index 0000000..72a9852
 --- /dev/null
 +++ b/internal/engine/workdir/scratch_unix_test.go
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,96 @@
 +//go:build darwin || linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
 +import (
++	"errors"
++	"io/fs"
 +	"os"
 +	"path/filepath"
 +	"testing"
@@ -3688,8 +4686,30 @@ index 0000000..654e9c7
 +		})
 +	}
 +}
++
++func TestScratchCleanupReportsActualParentRemovalFailure(t *testing.T) {
++	parent := t.TempDir()
++	scratch, err := NewScratch(parent, "owned-")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Chmod(parent, 0500); err != nil {
++		t.Fatal(err)
++	}
++	defer func() {
++		if err := os.Chmod(parent, 0700); err != nil {
++			t.Error(err)
++		}
++	}()
++	if err := scratch.Clean(); !errors.Is(err, fs.ErrPermission) {
++		t.Fatalf("native parent deletion failure hidden: %v", err)
++	}
++	if info, err := os.Stat(scratch.Path()); err != nil || !info.IsDir() {
++		t.Fatalf("failed removal did not retain root: %v", err)
++	}
++}
 diff --git a/internal/engine/workdir/workdir.go b/internal/engine/workdir/workdir.go
-index 6f479c5..2f79767 100644
+index 6f479c5..3557551 100644
 --- a/internal/engine/workdir/workdir.go
 +++ b/internal/engine/workdir/workdir.go
 @@ -18,13 +18,12 @@
@@ -3761,9 +4781,20 @@ index 6f479c5..2f79767 100644
  }
  
  // WorkDir provides the root working directory.
-@@ -94,17 +93,19 @@ func (cd *CachedDealer) WorkDir() string {
+@@ -93,18 +92,30 @@ func (cd *CachedDealer) WorkDir() string {
+ 	return cd.workDir
  }
  
++// Retain closes worker source leases without deleting uncertain producers' files.
++func (cd *CachedDealer) Retain() error {
++	var err error
++	for _, directory := range cd.cache {
++		err = errors.Join(err, directory.Retain())
++	}
++	cd.cache = make(map[string]*ScratchDirectory)
++	return err
++}
++
  // Clean frees all the cached folders and removes all of them from disk.
 -func (cd *CachedDealer) Clean() {
 +func (cd *CachedDealer) Clean() error {
@@ -3786,7 +4817,7 @@ index 6f479c5..2f79767 100644
  	cd.mutex.RLock()
  	defer cd.mutex.RUnlock()
  	dstDir, ok := cd.cache[idf]
-@@ -112,10 +113,10 @@ func (cd *CachedDealer) fromCache(idf string) (string, bool) {
+@@ -112,10 +123,10 @@ func (cd *CachedDealer) fromCache(idf string) (string, bool) {
  		return dstDir, true
  	}
  
@@ -3799,7 +4830,7 @@ index 6f479c5..2f79767 100644
  	cd.mutex.Lock()
  	defer cd.mutex.Unlock()
  	cd.cache[idf] = folder
-@@ -155,20 +156,14 @@ func copyPath(srcPath, dstPath string, info fs.FileInfo) error {
+@@ -155,20 +166,14 @@ func copyPath(srcPath, dstPath string, info fs.FileInfo) error {
  }
  
  func doCopy(srcPath, dstPath string, fileMode fs.FileMode) error {
@@ -3814,12 +4845,12 @@ index 6f479c5..2f79767 100644
 +	destination, err := os.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, fileMode)
  	if err != nil {
 -		return err
--	}
++		return errors.Join(err, source.Close())
+ 	}
 -
 -	if _, err = io.Copy(d, s); err != nil {
 -		return err
-+		return errors.Join(err, source.Close())
- 	}
+-	}
 -
 -	return nil
 +	_, copyErr := io.Copy(destination, source)
@@ -3899,10 +4930,10 @@ index 106fed3..797edc5 100644
  		}
 diff --git a/internal/engine/worker_integrity_test.go b/internal/engine/worker_integrity_test.go
 new file mode 100644
-index 0000000..e464c72
+index 0000000..7ff64a3
 --- /dev/null
 +++ b/internal/engine/worker_integrity_test.go
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,107 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
@@ -3974,6 +5005,11 @@ index 0000000..e464c72
 +			mustWrite(t, filepath.Join(root, "value.go"), "package probe\n")
 +			mustWrite(t, filepath.Join(root, "value_test.go"), "package probe\nimport \"testing\"\nfunc TestValue(t *testing.T){}\n")
 +			worker := workerpool.NewWorker(1, "integrity")
++			t.Cleanup(func() {
++				if err := worker.Temp.Close(); err != nil {
++					t.Error(err)
++				}
++			})
 +			counter := 0
 +			run := func(ctx context.Context, name string, args ...string) *exec.Cmd {
 +				counter++
@@ -4007,10 +5043,10 @@ index 0000000..e464c72
 +}
 diff --git a/internal/engine/worker_settlement_test.go b/internal/engine/worker_settlement_test.go
 new file mode 100644
-index 0000000..6026ec8
+index 0000000..b0ea728
 --- /dev/null
 +++ b/internal/engine/worker_settlement_test.go
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,210 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package engine
 +
@@ -4019,6 +5055,7 @@ index 0000000..6026ec8
 +	"context"
 +	"crypto/sha256"
 +	"encoding/json"
++	"errors"
 +	"fmt"
 +	"go/ast"
 +	"go/format"
@@ -4044,7 +5081,7 @@ index 0000000..6026ec8
 +			worker := workerpool.NewWorker(1, "settlement")
 +			t.Cleanup(func() {
 +				if worker.Cache != nil {
-+					if err := worker.Cache.Close(); err != nil {
++					if err := errors.Join(worker.Cache.Close(), worker.Temp.Close()); err != nil {
 +						t.Error(err)
 +					}
 +				}
@@ -4110,7 +5147,7 @@ index 0000000..6026ec8
 +			worker := workerpool.NewWorker(1, "settlement")
 +			t.Cleanup(func() {
 +				if worker.Cache != nil {
-+					if err := worker.Cache.Close(); err != nil {
++					if err := errors.Join(worker.Cache.Close(), worker.Temp.Close()); err != nil {
 +						t.Error(err)
 +					}
 +				}
@@ -4220,41 +5257,95 @@ index 0000000..6026ec8
 +	result := <-out
 +	return result, executor.executionSettled
 +}
+diff --git a/internal/engine/workerpool/retention_test.go b/internal/engine/workerpool/retention_test.go
+new file mode 100644
+index 0000000..9ed0161
+--- /dev/null
++++ b/internal/engine/workerpool/retention_test.go
+@@ -0,0 +1,37 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workerpool
++
++import (
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++)
++
++func TestUnsettledWorkerRetainsCacheAndFailureThroughStop(t *testing.T) {
++	worker := NewWorker(1, "unsettled")
++	cache, err := execution.NewGoCache(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	worker.Cache = cache
++	worker.Unsettled = true
++	sentinel := filepath.Join(cache.Path, "producer-data")
++	if err := os.WriteFile(sentinel, []byte("retain"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	queue := make(chan Executor)
++	worker.Start(queue)
++	close(queue)
++	if err := worker.stop(); !errors.Is(err, execution.ErrUnsettledProcess) {
++		t.Fatalf("unknown producer stop became successful: %v", err)
++	}
++	if err := cache.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "retain" {
++		t.Fatalf("later cache close deleted uncertain data: %q %v", raw, err)
++	}
++}
 diff --git a/internal/engine/workerpool/workerpool.go b/internal/engine/workerpool/workerpool.go
-index 5ebc801..8ddc899 100644
+index 5ebc801..29e78d4 100644
 --- a/internal/engine/workerpool/workerpool.go
 +++ b/internal/engine/workerpool/workerpool.go
-@@ -18,6 +18,8 @@
+@@ -18,6 +18,10 @@
  package workerpool
  
  import (
 +	"errors"
++	"fmt"
++	"github.com/go-gremlins/gremlins/internal/engine/workdir"
 +	"github.com/go-gremlins/gremlins/internal/execution"
  	"runtime"
  	"sync"
  
-@@ -34,6 +36,9 @@ type Worker struct {
+@@ -34,6 +38,11 @@ type Worker struct {
  	stopCh chan struct{}
  	Name   string
  	ID     int
 +	// Invalid prevents reuse after a mutation failed to apply or roll back. Start is serial per worker.
-+	Invalid bool
-+	Cache   *execution.GoCache
++	Invalid   bool
++	Unsettled bool
++	Cache     *execution.GoCache
++	Temp      *workdir.CommandTemp
  }
  
  // NewWorker instantiates a new worker with an ID and name.
-@@ -60,8 +65,9 @@ func (w *Worker) Start(executorQueue <-chan Executor) {
+@@ -60,8 +69,16 @@ func (w *Worker) Start(executorQueue <-chan Executor) {
  	}()
  }
  
 -func (w *Worker) stop() {
 +func (w *Worker) stop() error {
  	<-w.stopCh
-+	return w.Cache.Close()
++	if w.Unsettled {
++		var location string
++		if w.Cache != nil {
++			location = w.Cache.Path
++		}
++		return errors.Join(execution.ErrUnsettledProcess, fmt.Errorf("retain unsettled worker cache %q", location), w.Cache.Retain(), w.Temp.Retain())
++	}
++	return errors.Join(w.Cache.Close(), w.Temp.Close())
  }
  
  // Pool manages and limits the number of concurrent Worker.
-@@ -116,17 +122,24 @@ func (p *Pool) Start() {
+@@ -116,17 +133,24 @@ func (p *Pool) Start() {
  }
  
  // Stop the Pool and wait for all the pending Worker to complete.
@@ -4436,10 +5527,10 @@ index 0000000..8807047
 +}
 diff --git a/internal/execution/go_cache.go b/internal/execution/go_cache.go
 new file mode 100644
-index 0000000..a8c3da0
+index 0000000..98c40a7
 --- /dev/null
 +++ b/internal/execution/go_cache.go
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,227 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -4477,6 +5568,17 @@ index 0000000..a8c3da0
 +		return nil, err
 +	}
 +	return &GoCache{Path: path, lease: lease, budget: GoCacheBudgetBytes}, nil
++}
++
++// Retain relinquishes the identity lease without trimming or deleting files
++// which may still have an unjoined producer. Repeated close is harmless.
++func (c *GoCache) Retain() error {
++	if c == nil || c.lease == nil {
++		return nil
++	}
++	lease := c.lease
++	c.lease = nil
++	return lease.Close()
 +}
 +func (c *GoCache) Close() error {
 +	if c == nil || c.lease == nil {
@@ -5034,7 +6136,7 @@ index 0000000..41dea2e
 +}
 diff --git a/internal/execution/go_process_output_unix_test.go b/internal/execution/go_process_output_unix_test.go
 new file mode 100644
-index 0000000..a217a15
+index 0000000..fbda586
 --- /dev/null
 +++ b/internal/execution/go_process_output_unix_test.go
 @@ -0,0 +1,57 @@
@@ -5079,8 +6181,8 @@ index 0000000..a217a15
 +	}()
 +	command := exec.CommandContext(ctx, executable, "-test.run=^TestOwnedOutputCopyFailureHelper$")
 +	command.Env = append(os.Environ(), "GREMLINS_OUTPUT_COPY_FAILURE=1")
-+	_, cleanupErr, started := RunGoCommand(ctx, command, out, stderr)
-+	if !started || ctx.Err() != nil || !errors.Is(cleanupErr, os.ErrClosed) {
++	_, cleanupErr, started, settled := RunGoCommand(ctx, command, out, stderr)
++	if !started || !settled || ctx.Err() != nil || !errors.Is(cleanupErr, os.ErrClosed) {
 +		t.Fatalf("real closed output accepted: started=%t context=%v cleanup=%v", started, ctx.Err(), cleanupErr)
 +	}
 +	if command.ProcessState == nil {
@@ -5097,7 +6199,7 @@ index 0000000..a217a15
 +}
 diff --git a/internal/execution/go_process_unix.go b/internal/execution/go_process_unix.go
 new file mode 100644
-index 0000000..54b7ed7
+index 0000000..37d04f8
 --- /dev/null
 +++ b/internal/execution/go_process_unix.go
 @@ -0,0 +1,130 @@
@@ -5123,21 +6225,21 @@ index 0000000..54b7ed7
 +
 +// RunGoCommand owns the private process group until all signalling finishes,
 +// before Wait reaps its leader and permits numeric PID reuse.
-+func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*OutputBudget) (error, error, bool) {
++func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*OutputBudget) (error, error, bool, bool) {
 +	return runPOSIXTestProcess(ctx, cmd, stdout, stderr, unix.Kill, budgets...)
 +}
-+func runPOSIXTestProcess(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, signalGroup func(int, syscall.Signal) error, budgets ...*OutputBudget) (error, error, bool) {
++func runPOSIXTestProcess(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, signalGroup func(int, syscall.Signal) error, budgets ...*OutputBudget) (error, error, bool, bool) {
 +	if cmd.SysProcAttr != nil {
-+		return errors.New("test command must not provide custom process attributes"), nil, false
++		return errors.New("test command must not provide custom process attributes"), nil, false, true
 +	}
 +	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 +	outPipe, err := cmd.StdoutPipe()
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	errPipe, err := cmd.StderrPipe()
 +	if err != nil {
-+		return err, outPipe.Close(), false
++		return err, outPipe.Close(), false, true
 +	}
 +	var ownership sync.Mutex
 +	closed := false
@@ -5169,7 +6271,7 @@ index 0000000..54b7ed7
 +		ownership.Lock()
 +		closed = true
 +		ownership.Unlock()
-+		return err, errors.Join(outPipe.Close(), errPipe.Close()), false
++		return err, errors.Join(outPipe.Close(), errPipe.Close()), false, true
 +	}
 +	copied := make(chan error, 2)
 +	outWriter, errWriter := commandOutputWriters(stdout, stderr, budgets)
@@ -5229,11 +6331,11 @@ index 0000000..54b7ed7
 +	}
 +
 +	waitErr := cmd.Wait()
-+	return errors.Join(waitErr, ctx.Err()), errors.Join(killErr, copyErr, readerErr), true
++	return errors.Join(waitErr, ctx.Err()), errors.Join(killErr, copyErr, readerErr), true, killErr == nil && readerErr == nil && finishedCopies == 2
 +}
 diff --git a/internal/execution/go_process_unix_test.go b/internal/execution/go_process_unix_test.go
 new file mode 100644
-index 0000000..d986328
+index 0000000..d81346e
 --- /dev/null
 +++ b/internal/execution/go_process_unix_test.go
 @@ -0,0 +1,149 @@
@@ -5338,8 +6440,8 @@ index 0000000..d986328
 +			signalGroup := func(pid int, signal syscall.Signal) error { signals.Add(1); return unix.Kill(pid, signal) }
 +			finished := make(chan error, 1)
 +			go func() {
-+				runErr, cleanupErr, started := runPOSIXTestProcess(ctx, cmd, out, stderr, signalGroup)
-+				if !started {
++				runErr, cleanupErr, started, settled := runPOSIXTestProcess(ctx, cmd, out, stderr, signalGroup)
++				if !started || !settled {
 +					finished <- errors.New("helper not started")
 +					return
 +				}
@@ -5388,10 +6490,10 @@ index 0000000..d986328
 +}
 diff --git a/internal/execution/go_process_windows.go b/internal/execution/go_process_windows.go
 new file mode 100644
-index 0000000..e9ea294
+index 0000000..7cddb8b
 --- /dev/null
 +++ b/internal/execution/go_process_windows.go
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,280 @@
 +//go:build windows
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -5440,34 +6542,34 @@ index 0000000..e9ea294
 +
 +// The command is suspended until its private job and explicit stdio whitelist
 +// are installed. No process is reopened by PID; owned handles identify it.
-+func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*OutputBudget) (runErr, cleanupErr error, started bool) {
++func RunGoCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *os.File, budgets ...*OutputBudget) (runErr, cleanupErr error, started, settled bool) {
 +	if cmd.Err != nil {
-+		return cmd.Err, nil, false
++		return cmd.Err, nil, false, true
 +	}
 +	if cmd.Stdin != nil || cmd.SysProcAttr != nil {
-+		return errors.New("test command must not provide custom stdin or process attributes"), nil, false
++		return errors.New("test command must not provide custom stdin or process attributes"), nil, false, true
 +	}
 +	if err := ctx.Err(); err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	job, err := windows.CreateJobObject(nil, nil)
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	defer func() { cleanupErr = errors.Join(cleanupErr, windows.CloseHandle(job)) }()
 +	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
 +	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 +	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	input, err := os.Open(os.DevNull)
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	defer func() { cleanupErr = errors.Join(cleanupErr, input.Close()) }()
 +	outRead, outWrite, err := os.Pipe()
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	defer func() {
 +		if err := outRead.Close(); !errors.Is(err, os.ErrClosed) {
@@ -5476,7 +6578,7 @@ index 0000000..e9ea294
 +	}()
 +	errRead, errWrite, err := os.Pipe()
 +	if err != nil {
-+		return err, outWrite.Close(), false
++		return err, outWrite.Close(), false, true
 +	}
 +	defer func() {
 +		if err := errRead.Close(); !errors.Is(err, os.ErrClosed) {
@@ -5496,7 +6598,7 @@ index 0000000..e9ea294
 +	handles := make([]windows.Handle, 3)
 +	for i, file := range []*os.File{input, outWrite, errWrite} {
 +		if err := windows.DuplicateHandle(current, windows.Handle(file.Fd()), current, &handles[i], 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
-+			return err, nil, false
++			return err, nil, false, true
 +		}
 +		index := i
 +		defer func() {
@@ -5507,30 +6609,30 @@ index 0000000..e9ea294
 +	}
 +	attributes, err := windows.NewProcThreadAttributeList(1)
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	defer attributes.Delete()
 +	if err := attributes.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&handles[0]), uintptr(len(handles))*unsafe.Sizeof(handles[0])); err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	application, err := windows.UTF16PtrFromString(cmd.Path)
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	commandLine, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(cmd.Args))
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	var directory *uint16
 +	if cmd.Dir != "" {
 +		directory, err = windows.UTF16PtrFromString(cmd.Dir)
 +		if err != nil {
-+			return err, nil, false
++			return err, nil, false, true
 +		}
 +	}
 +	environment, err := windowsEnvironment(cmd.Environ())
 +	if err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	startup := windows.StartupInfoEx{}
 +	startup.Cb = uint32(unsafe.Sizeof(startup))
@@ -5542,7 +6644,7 @@ index 0000000..e9ea294
 +	var process windows.ProcessInformation
 +	flags := uint32(windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
 +	if err := windows.CreateProcess(application, commandLine, nil, nil, true, flags, &environment[0], directory, &startup.StartupInfo, &process); err != nil {
-+		return err, nil, false
++		return err, nil, false, true
 +	}
 +	for i, handle := range handles {
 +		cleanupErr = errors.Join(cleanupErr, windows.CloseHandle(handle))
@@ -5562,14 +6664,14 @@ index 0000000..e9ea294
 +		if waitErr == nil && state != windows.WAIT_OBJECT_0 {
 +			waitErr = fmt.Errorf("suspended process cleanup wait returned %d", state)
 +		}
-+		return err, errors.Join(cleanupErr, killErr, waitErr), false
++		return err, errors.Join(cleanupErr, killErr, waitErr), false, killErr == nil && waitErr == nil
 +	}
 +	if previous, err := windows.ResumeThread(process.Thread); err != nil || previous != 1 {
 +		if err == nil {
 +			err = fmt.Errorf("unexpected suspended thread count %d", previous)
 +		}
-+		cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job))
-+		return err, cleanupErr, false
++		cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job), verifyWindowsProcessExit(process.Process))
++		return err, cleanupErr, false, cleanupErr == nil
 +	}
 +	started = true
 +	outWriter, errWriter := commandOutputWriters(stdout, stderr, budgets)
@@ -5613,7 +6715,10 @@ index 0000000..e9ea294
 +			break
 +		}
 +	}
-+	cleanupErr = errors.Join(cleanupErr, stopWindowsJob(job))
++	stopErr := stopWindowsJob(job)
++	processWaitErr := verifyWindowsProcessExit(process.Process)
++	cleanupErr = errors.Join(cleanupErr, stopErr, processWaitErr)
++	copiesSettled := true
 +	// Job termination closes every inherited writer before copy workers are joined.
 +	timer := time.NewTimer(5 * time.Second)
 +	defer timer.Stop()
@@ -5623,6 +6728,7 @@ index 0000000..e9ea294
 +			finishedCopies++
 +			copyErr = errors.Join(copyErr, err)
 +		case <-timer.C:
++			copiesSettled = false
 +			copyErr = errors.Join(copyErr, errors.New("output copy workers persisted after owned job termination"))
 +			// Closing owned readers interrupts a blocked Read; then join both workers.
 +			_ = outRead.Close()
@@ -5634,7 +6740,7 @@ index 0000000..e9ea294
 +		}
 +	}
 +	cleanupErr = errors.Join(cleanupErr, copyErr)
-+	return runErr, cleanupErr, true
++	return runErr, cleanupErr, true, stopErr == nil && processWaitErr == nil && copiesSettled && finishedCopies == 2
 +}
 +func stopWindowsJob(job windows.Handle) error {
 +	terminateErr := windows.TerminateJobObject(job, 1)
@@ -5658,9 +6764,19 @@ index 0000000..e9ea294
 +		time.Sleep(10 * time.Millisecond)
 +	}
 +}
++
++// A stopped job and a joined output copy do not substitute for observing the
++// retained process handle itself become signaled.
++func verifyWindowsProcessExit(process windows.Handle) error {
++	state, err := windows.WaitForSingleObject(process, 0)
++	if err == nil && state != windows.WAIT_OBJECT_0 {
++		err = fmt.Errorf("owned process not settled after job termination: %d", state)
++	}
++	return err
++}
 diff --git a/internal/execution/go_process_windows_test.go b/internal/execution/go_process_windows_test.go
 new file mode 100644
-index 0000000..8115afa
+index 0000000..a3b161e
 --- /dev/null
 +++ b/internal/execution/go_process_windows_test.go
 @@ -0,0 +1,193 @@
@@ -5794,8 +6910,8 @@ index 0000000..8115afa
 +			defer stderr.Close()
 +			finished := make(chan error, 1)
 +			go func() {
-+				runErr, cleanupErr, started := RunGoCommand(ctx, cmd, out, stderr)
-+				if !started {
++				runErr, cleanupErr, started, settled := RunGoCommand(ctx, cmd, out, stderr)
++				if !started || !settled {
 +					finished <- errors.New("process not started")
 +					return
 +				}
@@ -5859,10 +6975,10 @@ index 0000000..8115afa
 +}
 diff --git a/internal/execution/output_budget.go b/internal/execution/output_budget.go
 new file mode 100644
-index 0000000..10391ce
+index 0000000..27b4b22
 --- /dev/null
 +++ b/internal/execution/output_budget.go
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,64 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -5885,6 +7001,13 @@ index 0000000..10391ce
 +}
 +
 +func NewOutputBudget(limit int64) *OutputBudget { return &OutputBudget{remaining: limit} }
++
++// Exhausted permits refusing another command before creating scratch or producers.
++func (b *OutputBudget) Exhausted() bool {
++	b.mu.Lock()
++	defer b.mu.Unlock()
++	return b.remaining <= 0
++}
 +
 +type boundedOutput struct {
 +	command, campaign *OutputBudget
@@ -5922,7 +7045,7 @@ index 0000000..10391ce
 +}
 diff --git a/internal/execution/output_budget_test.go b/internal/execution/output_budget_test.go
 new file mode 100644
-index 0000000..f341a52
+index 0000000..8153cb6
 --- /dev/null
 +++ b/internal/execution/output_budget_test.go
 @@ -0,0 +1,152 @@
@@ -6009,8 +7132,8 @@ index 0000000..f341a52
 +	defer cancel()
 +	command := exec.CommandContext(ctx, executable, "-test.run=^TestOwnedOutputFloodHelper$")
 +	command.Env = append(os.Environ(), "GREMLINS_FLOOD_ROLE=parent", "GREMLINS_FLOOD_HEARTBEAT="+heartbeat)
-+	_, cleanupErr, started := RunGoCommand(ctx, command, stdout, stderr, NewOutputBudget(4096))
-+	if !started || !errors.Is(cleanupErr, ErrOutputLimit) || ctx.Err() != nil {
++	_, cleanupErr, started, settled := RunGoCommand(ctx, command, stdout, stderr, NewOutputBudget(4096))
++	if !started || !settled || !errors.Is(cleanupErr, ErrOutputLimit) || ctx.Err() != nil {
 +		t.Fatalf("flood not bounded promptly: started=%t cleanup=%v context=%v", started, cleanupErr, ctx.Err())
 +	}
 +	outInfo, err := stdout.Stat()
@@ -6176,21 +7299,23 @@ index 0000000..ff75d6d
 +}
 diff --git a/internal/execution/parallel_panic_test.go b/internal/execution/parallel_panic_test.go
 new file mode 100644
-index 0000000..8eb5b7a
+index 0000000..19a141d
 --- /dev/null
 +++ b/internal/execution/parallel_panic_test.go
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,156 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
 +import (
 +	"bytes"
++	"context"
 +	"encoding/json"
 +	"errors"
 +	"fmt"
 +	"os"
 +	"os/exec"
 +	"path/filepath"
++	"strings"
 +	"testing"
 +
 +	"github.com/go-gremlins/gremlins/internal/mutator"
@@ -6202,41 +7327,90 @@ index 0000000..8eb5b7a
 +func (e panicProtocolExit) ExitCode() int { return int(e) }
 +
 +func TestRepeatedPanicParentFailureRequiresSettledPanicEvidence(t *testing.T) {
-+	for _, scenario := range []string{"panic", "no-panic", "no-stack", "success-exit", "unknown-exit", "incomplete-package", "repeated-pass"} {
++	scenarios := []string{"panic", "before-panic", "before-stack", "no-panic", "no-stack", "success-exit", "unknown-exit", "signal-exit", "canceled", "deadline-error", "incomplete-package", "package-pass", "foreign-panic", "repeated-pass", "repeated-skip", "fail-after-pass", "unknown-test", "stack-overflow", "out-of-memory", "timeout-malformed", "timeout-malformed-header", "timeout-malformed-stack", "timeout-unknown-exit"}
++	for _, scenario := range scenarios {
 +		t.Run(scenario, func(t *testing.T) {
 +			var raw bytes.Buffer
-+			write := func(action, test, output string) {
++			writePackage := func(pkg, action, test, output string) {
 +				t.Helper()
-+				if err := json.NewEncoder(&raw).Encode(testEvent{Action: action, Package: "probe.example", Test: test, Output: output}); err != nil {
++				if err := json.NewEncoder(&raw).Encode(testEvent{Action: action, Package: pkg, Test: test, Output: output}); err != nil {
 +					t.Fatal(err)
 +				}
 +			}
++			write := func(action, test, output string) { writePackage("probe.example", action, test, output) }
 +			write("start", "", "")
 +			write("run", "TestParent", "")
 +			terminal := "fail"
-+			if scenario == "repeated-pass" {
++			if scenario == "repeated-pass" || scenario == "fail-after-pass" {
 +				terminal = "pass"
 +			}
-+			write(terminal, "TestParent", "")
-+			if scenario != "no-panic" {
-+				write("output", "TestParent", "panic: owned subtest panic\n")
-+			}
-+			if scenario != "no-stack" {
-+				write("output", "TestParent", "goroutine 42 [running]:\n")
++			if scenario == "repeated-skip" {
++				terminal = "skip"
 +			}
 +			write(terminal, "TestParent", "")
-+			if scenario != "incomplete-package" {
-+				write("fail", "", "")
++			duplicate := func() {
++				action, name := terminal, "TestParent"
++				if scenario == "fail-after-pass" {
++					action = "fail"
++				}
++				if scenario == "unknown-test" {
++					name = "TestUnknown"
++				}
++				write(action, name, "")
++			}
++			early := scenario == "before-panic" || scenario == "foreign-panic"
++			if early {
++				duplicate()
++			}
++			panicPackage := "probe.example"
++			if scenario == "foreign-panic" {
++				panicPackage = "foreign.example"
++				writePackage(panicPackage, "start", "", "")
++			}
++			if scenario != "no-panic" && scenario != "timeout-malformed-header" {
++				writePackage(panicPackage, "output", "TestParent", "panic: owned subtest panic\n")
++			}
++			if scenario == "before-stack" {
++				duplicate()
++			}
++			if scenario != "no-stack" && scenario != "timeout-malformed-stack" {
++				writePackage(panicPackage, "output", "TestParent", "goroutine 42 [running]:\n")
++			}
++			if !early && scenario != "before-stack" {
++				duplicate()
++			}
++			if scenario == "foreign-panic" {
++				writePackage(panicPackage, "fail", "", "")
++			}
++			if scenario == "stack-overflow" {
++				write("output", "TestParent", "fatal error: stack overflow\n")
++			}
++			if scenario == "out-of-memory" {
++				write("output", "TestParent", "runtime: out of memory\n")
++			}
++			if scenario != "incomplete-package" && scenario != "timeout-malformed" {
++				packageTerminal := "fail"
++				if scenario == "package-pass" {
++					packageTerminal = "pass"
++				}
++				write(packageTerminal, "", "")
 +			}
 +			var processErr error = panicProtocolExit(1)
-+			if scenario == "success-exit" {
++			switch scenario {
++			case "success-exit":
 +				processErr = nil
-+			}
-+			if scenario == "unknown-exit" {
++			case "unknown-exit", "timeout-unknown-exit":
 +				processErr = panicProtocolExit(2)
++			case "signal-exit":
++				processErr = panicProtocolExit(-1)
++			case "canceled":
++				processErr = context.Canceled
++			case "deadline-error":
++				processErr = context.DeadlineExceeded
 +			}
-+			result, err := JudgeTestStream(&raw, t.TempDir(), processErr, false, nil)
-+			if scenario == "panic" {
++			timedOut := strings.HasPrefix(scenario, "timeout-") || scenario == "deadline-error"
++			result, err := JudgeTestStream(&raw, t.TempDir(), processErr, timedOut, nil)
++			if scenario == "panic" || scenario == "before-panic" || scenario == "before-stack" {
 +				if err != nil || result.Status != mutator.Killed {
 +					t.Fatalf("settled native panic refused: %s, %v", result.Status, err)
 +				}
@@ -6277,6 +7451,12 @@ index 0000000..8eb5b7a
 +	result, err := JudgeTestStream(bytes.NewReader(raw.Bytes()), root, runErr, false, nil)
 +	if err != nil || result.Status != mutator.Killed {
 +		t.Fatalf("native parallel panic not classified: %s, %v\n%s", result.Status, err, raw.Bytes())
++	}
++}
++
++func TestStackOverflowRemainsInfrastructureFailureOnStderr(t *testing.T) {
++	if err := CheckInfrastructureStream(strings.NewReader("runtime: goroutine stack exceeds limit\nfatal error: stack overflow\n")); err == nil {
++		t.Fatal("fatal stack overflow stderr accepted as ordinary test failure")
 +	}
 +}
 diff --git a/internal/execution/process_group_darwin.go b/internal/execution/process_group_darwin.go
@@ -6698,6 +7878,20 @@ index 0000000..05d4561
 +		}
 +	}
 +}
+diff --git a/internal/execution/process_settlement.go b/internal/execution/process_settlement.go
+new file mode 100644
+index 0000000..8bfd8c2
+--- /dev/null
++++ b/internal/execution/process_settlement.go
+@@ -0,0 +1,8 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import "errors"
++
++// ErrUnsettledProcess requires retaining producer-owned source, cache and scratch.
++// It is emitted only when native ownership settlement could not be proved.
++var ErrUnsettledProcess = errors.New("owned Go process cleanup remains unsettled")
 diff --git a/internal/execution/sparse_unix_test.go b/internal/execution/sparse_unix_test.go
 new file mode 100644
 index 0000000..68669de
@@ -6837,10 +8031,10 @@ index 0000000..a8bce09
 +}
 diff --git a/internal/execution/test_judgment.go b/internal/execution/test_judgment.go
 new file mode 100644
-index 0000000..2b4a2bf
+index 0000000..f0cb940
 --- /dev/null
 +++ b/internal/execution/test_judgment.go
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,342 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -6862,9 +8056,9 @@ index 0000000..2b4a2bf
 +
 +// packageJudgment keeps only facts needed for judging; complete output lives on disk.
 +type packageJudgment struct {
-+	started, finished, failed, namedFailed, panicSeen, stackSeen bool
-+	tests                                                        map[string]string
-+	outcome                                                      string
++	started, finished, failed, namedFailed, panicSeen, stackSeen, repeatedFailure bool
++	tests                                                                         map[string]string
++	outcome                                                                       string
 +}
 +type testEvent struct {
 +	Action, Package, Test, Output, ImportPath, FailedBuild string
@@ -6954,10 +8148,11 @@ index 0000000..2b4a2bf
 +			}
 +			if event.Test != "" {
 +				done, exists := p.tests[event.Test]
-+				// Parallel subtest panics can repeat their already-failed parent's
-+				// terminal event. Only the same failure with an observed panic and
-+				// stack is redundant; process and package failure still must settle.
-+				if exists && done == "fail" && event.Action == "fail" && p.panicSeen && p.stackSeen {
++				// Parallel panics can repeat an already-failed parent's terminal
++				// event before either panic header reaches test2json. Defer only
++				// this exact duplicate until the package and process settle.
++				if exists && done == "fail" && event.Action == "fail" {
++					p.repeatedFailure = true
 +					continue
 +				}
 +				if !exists || done != "running" {
@@ -6990,6 +8185,20 @@ index 0000000..2b4a2bf
 +	}
 +	if errors.Is(runErr, context.Canceled) {
 +		return TestJudgment{Status: mutator.ExecutionError}, fmt.Errorf("test execution canceled: %w", runErr)
++	}
++	// An ambiguous repeated failure cannot be hidden by the timeout shortcut.
++	// Its supporting panic/stack evidence must belong to the same package.
++	for name, p := range packages {
++		if !p.repeatedFailure {
++			continue
++		}
++		var exitErr interface {
++			error
++			ExitCode() int
++		}
++		if !p.finished || !p.failed || !p.panicSeen || !p.stackSeen || !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 1 {
++			return TestJudgment{Status: mutator.ExecutionError}, fmt.Errorf("repeated named failure without settled package panic: %s", name)
++		}
 +	}
 +	if timedOut || timeoutSeen {
 +		return TestJudgment{Status: mutator.TimedOut}, nil
@@ -7111,7 +8320,7 @@ index 0000000..2b4a2bf
 +	return rootErr == nil && rootInfo.IsDir() && err == nil && info.Mode().IsRegular()
 +}
 +func InfrastructureOutput(line string) bool {
-+	return strings.HasPrefix(line, "signal: ") || strings.Contains(line, "runtime: out of memory") || strings.Contains(line, "runtime: cannot allocate memory") || strings.Contains(line, "runtime: failed to create new OS thread") || strings.Contains(line, "fatal error: newosproc")
++	return strings.HasPrefix(line, "signal: ") || strings.Contains(line, "runtime: out of memory") || strings.Contains(line, "runtime: cannot allocate memory") || strings.Contains(line, "runtime: failed to create new OS thread") || strings.Contains(line, "fatal error: newosproc") || strings.Contains(line, "fatal error: stack overflow")
 +}
 +
 +func framedJSONLine(data []byte, atEOF bool) (int, []byte, error) {
@@ -7170,7 +8379,7 @@ index 0000000..2b4a2bf
 +}
 diff --git a/internal/execution/zombie_wait_darwin_test.go b/internal/execution/zombie_wait_darwin_test.go
 new file mode 100644
-index 0000000..21ea127
+index 0000000..a24ea18
 --- /dev/null
 +++ b/internal/execution/zombie_wait_darwin_test.go
 @@ -0,0 +1,165 @@
@@ -7289,11 +8498,11 @@ index 0000000..21ea127
 +		if err != nil {
 +			t.Fatal(err)
 +		}
-+		runErr, cleanupErr, started := RunGoCommand(context.Background(), exec.Command("/usr/bin/true"), out, stderr)
++		runErr, cleanupErr, started, settled := RunGoCommand(context.Background(), exec.Command("/usr/bin/true"), out, stderr)
 +		if err := errors.Join(out.Close(), stderr.Close()); err != nil {
 +			t.Fatal(err)
 +		}
-+		if !started || runErr != nil || cleanupErr != nil {
++		if !started || !settled || runErr != nil || cleanupErr != nil {
 +			t.Fatalf("native fast exit rejected at%d: %v %v", i, runErr, cleanupErr)
 +		}
 +	}

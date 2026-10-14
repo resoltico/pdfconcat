@@ -156,13 +156,13 @@ func verifyBuiltGremlins(ctx context.Context, file, version string) error {
 	return repopolicy.VerifyGremlinsBinaryMetadata(file)
 }
 
-// All six packages own required judgment, lifecycle, pool, descriptor and reporting controls.
+// These packages own required command, judgment, lifecycle, pool, descriptor and reporting controls.
 func gremlinsSourceTestArgs(goos, goarch string) []string {
 	args := []string{sourceTestVerb}
 	if goos != windowsOS || goarch != arm64Arch {
 		args = append(args, sourceRaceFlag)
 	}
 
-	return append(args, "./internal/execution", "./internal/coverage", "./internal/engine",
+	return append(args, "./cmd", "./internal/execution", "./internal/coverage", "./internal/engine",
 		"./internal/engine/workerpool", "./internal/engine/workdir", "./internal/report")
 }

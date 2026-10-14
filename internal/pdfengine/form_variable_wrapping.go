@@ -67,9 +67,19 @@ func breakVariableLine(
 	start int,
 	size, available float64,
 ) (variableLineBreak, error) {
-	split := variableLineBreak{end: start}
+	if err := ctx.Err(); err != nil {
+		return variableLineBreak{}, fmt.Errorf("wrap variable text: %w", err)
+	}
+
+	// Every line consumes its first glyph, even when that glyph alone exceeds
+	// the available width. The caller supplies a nonempty remaining suffix.
+	code := data[start]
+	split := variableLineBreak{end: start + 1, width: font.widths[code]}
 	wordEnd, wordWidth := -1, 0.0
 	space, hasSpace := font.codes[' ']
+	if hasSpace && code == space {
+		wordEnd = start
+	}
 
 	for split.end < len(data) {
 		if err := ctx.Err(); err != nil {
@@ -79,7 +89,7 @@ func breakVariableLine(
 		code := data[split.end]
 
 		advance := font.widths[code]
-		if split.end > start && (split.width+advance)*size > available {
+		if (split.width+advance)*size > available {
 			break
 		}
 

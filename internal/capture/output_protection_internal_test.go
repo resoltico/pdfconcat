@@ -92,3 +92,30 @@ func TestProtectedOutputRefreshRejectsInputAndReportIdentityAliases(t *testing.T
 		t.Fatalf("report aliased protected output: %v", err)
 	}
 }
+
+func TestArtifactIdentityDistinguishesObjectsMissingParentsAndNativeErrors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "existing.pdf")
+	writeTestFile(t, existing, []byte("identity"))
+	want, err := IdentityOf(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := inspectArtifactIdentity(RoleOutput, existing)
+	if err != nil || got != want {
+		t.Fatalf("existing output lost native identity: %v %v", got, err)
+	}
+	for _, path := range []string{filepath.Join(dir, "absent", "out.pdf"), filepath.Join(existing, "out.pdf")} {
+		got, err = inspectArtifactIdentity(RoleOutput, path)
+		if err != nil || got != (Identity{}) {
+			t.Fatalf("proven unavailable parent %q: %v %v", path, got, err)
+		}
+	}
+	invalid := filepath.Join(dir, "invalid\x00.pdf")
+	_, err = inspectArtifactIdentity(RoleOutput, invalid)
+	var source *SourceError
+	if !errors.As(err, &source) || source.Path != invalid || source.Operation != "identify "+RoleOutput.String() {
+		t.Fatalf("native lookup failure guessed as absence: %v", err)
+	}
+}

@@ -137,3 +137,31 @@ func TestDefaultAppearanceNumericAndDelimiterFailures(t *testing.T) {
 		t.Fatalf("comment parsed as an operator: %v", err)
 	}
 }
+
+func TestDefaultAppearanceNumericOperandsConsumeExactlyTheirToken(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		input, remaining string
+		want             types.Object
+		end              int
+	}{
+		{"0 RG", " RG", types.Integer(0), 1},
+		{"20 Tf", " Tf", types.Integer(20), 2},
+		{".25 rg", " rg", types.Float(.25), 3},
+	} {
+		remaining := test.input
+		value, err := appearanceValue(t.Context(), &remaining, 7)
+		if err != nil || remaining != test.remaining || value.object != test.want || value.start != 7 || value.end != 7+test.end {
+			t.Fatalf("operand %q: remaining=%q value=%+v error=%v", test.input, remaining, value, err)
+		}
+	}
+}
+
+func TestDefaultAppearanceWhitespaceAndCommentsStopAtTheOperand(t *testing.T) {
+	t.Parallel()
+	for _, text := range []string{" \t\r\n% first\r\n% second\n  /F1", "\x00\f\t/F1", "/F1"} {
+		if got := appearanceSpace(text); got != "/F1" {
+			t.Fatalf("leading whitespace/comments lost operand: %q", got)
+		}
+	}
+}

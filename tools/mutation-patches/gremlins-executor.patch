@@ -1,9 +1,9 @@
 diff --git a/cmd/campaign_cleanup_test.go b/cmd/campaign_cleanup_test.go
 new file mode 100644
-index 0000000..61c4ab8
+index 0000000..3b02a14
 --- /dev/null
 +++ b/cmd/campaign_cleanup_test.go
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,133 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package cmd
 +
@@ -15,6 +15,7 @@ index 0000000..61c4ab8
 +
 +	"github.com/go-gremlins/gremlins/internal/engine/workdir"
 +	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/report"
 +)
 +
 +func TestCampaignScratchCleanupRequiresSettledProducers(t *testing.T) {
@@ -46,6 +47,94 @@ index 0000000..61c4ab8
 +				t.Fatalf("settled failure leaked workspace: %v", readErr)
 +			}
 +		})
++	}
++}
++
++func TestCampaignScratchPreservesChildCleanupRefusals(t *testing.T) {
++	for _, kind := range []string{"cache", "source"} {
++		t.Run(kind, func(t *testing.T) {
++			outer, err := workdir.NewScratch(t.TempDir(), "campaign-*")
++			if err != nil {
++				t.Fatal(err)
++			}
++			var child string
++			var closeChild func() error
++			var results report.Results
++			if kind == "cache" {
++				cache, err := execution.NewGoCache(outer.Path())
++				if err != nil {
++					t.Fatal(err)
++				}
++				child = cache.Path
++				closeChild = cache.Close
++			} else {
++				source := t.TempDir()
++				if err := os.WriteFile(filepath.Join(source, "value.go"), []byte("package value\n"), 0600); err != nil {
++					t.Fatal(err)
++				}
++				dealer := workdir.NewCachedDealer(outer.Path(), source)
++				child, err = dealer.Get("worker")
++				if err != nil {
++					t.Fatal(err)
++				}
++				closeChild = func() error {
++					var resultErr error
++					finishCampaignSources(dealer, &results, &resultErr)
++					return resultErr
++				}
++			}
++			parked := filepath.Join(t.TempDir(), "original")
++			if err := os.Rename(child, parked); err != nil {
++				t.Fatal(err)
++			}
++			if err := os.Mkdir(child, 0700); err != nil {
++				t.Fatal(err)
++			}
++			sentinel := filepath.Join(child, "unknown-sentinel")
++			if err := os.WriteFile(sentinel, []byte("unknown replacement"), 0600); err != nil {
++				t.Fatal(err)
++			}
++			childErr := closeChild()
++			if kind == "source" && !errors.Is(results.Error, execution.ErrCleanupOwnership) {
++				t.Fatalf("source cleanup failure missing from Results.Error: %v", results.Error)
++			}
++			if !errors.Is(childErr, execution.ErrCleanupOwnership) || errors.Is(childErr, execution.ErrUnsettledProcess) {
++				t.Fatalf("child ownership refusal misclassified: %v", childErr)
++			}
++			if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "unknown replacement" {
++				t.Fatalf("child cleanup changed unknown directory: %q %v", raw, err)
++			}
++			result := childErr
++			finishCampaignScratch(outer, &result)
++			if !errors.Is(result, childErr) || !errors.Is(result, execution.ErrCleanupOwnership) {
++				t.Fatalf("ancestor lost original cleanup cause: %v", result)
++			}
++			if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "unknown replacement" {
++				t.Fatalf("ancestor deleted child-refused namespace: %q %v", raw, err)
++			}
++		})
++	}
++}
++
++func TestCampaignSourcesCleanOrdinarySettledFailure(t *testing.T) {
++	source := t.TempDir()
++	if err := os.WriteFile(filepath.Join(source, "value.go"), []byte("package value\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	dealer := workdir.NewCachedDealer(t.TempDir(), source)
++	child, err := dealer.Get("worker")
++	if err != nil {
++		t.Fatal(err)
++	}
++	failure := errors.New("ordinary settled test failure")
++	resultErr := error(failure)
++	var results report.Results
++	finishCampaignSources(dealer, &results, &resultErr)
++	if !errors.Is(resultErr, failure) || !errors.Is(results.Error, failure) || errors.Is(resultErr, execution.ErrCleanupOwnership) || errors.Is(resultErr, execution.ErrUnsettledProcess) {
++		t.Fatalf("ordinary source cleanup misclassified: result=%v return=%v", results.Error, resultErr)
++	}
++	if _, err := os.Stat(child); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("ordinary settled failure retained worker source: %v", err)
 +	}
 +}
 diff --git a/cmd/gremlins/main.go b/cmd/gremlins/main.go
@@ -83,7 +172,7 @@ index f6b4568..6807ad6 100644
  
  func buildVersion(version string) string {
 diff --git a/cmd/unleash.go b/cmd/unleash.go
-index d7eddb2..44e2eba 100644
+index d7eddb2..9735ac2 100644
 --- a/cmd/unleash.go
 +++ b/cmd/unleash.go
 @@ -18,10 +18,12 @@ package cmd
@@ -152,7 +241,7 @@ index d7eddb2..44e2eba 100644
  		log.Infoln("Starting...")
  		path, _ := os.Getwd()
  		if len(args) > 0 {
-@@ -113,58 +138,37 @@ func runUnleash(ctx context.Context) func(cmd *cobra.Command, args []string) err
+@@ -113,58 +138,39 @@ func runUnleash(ctx context.Context) func(cmd *cobra.Command, args []string) err
  			return fmt.Errorf("not in a Go module: %w", err)
  		}
  
@@ -183,6 +272,8 @@ index d7eddb2..44e2eba 100644
 +			results.Incomplete = true
 +			if errors.Is(runErr, execution.ErrUnsettledProcess) {
 +				results.TerminationReason = "process_cleanup_unsettled"
++			} else if errors.Is(runErr, execution.ErrCleanupOwnership) {
++				results.TerminationReason = "cleanup_ownership_unsettled"
 +			} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 +				results.TerminationReason = "deadline_exceeded"
 +			} else if ctx.Err() != nil {
@@ -230,25 +321,19 @@ index d7eddb2..44e2eba 100644
  
  	exclude, err := exclusion.New()
  	if err != nil {
-@@ -177,9 +181,15 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
+@@ -177,9 +183,9 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
  	}
  
  	wdDealer := workdir.NewCachedDealer(workDir, mod.Root)
 -	defer wdDealer.Clean()
-+	defer func() {
-+		if errors.Is(resultErr, execution.ErrUnsettledProcess) {
-+			resultErr = errors.Join(resultErr, wdDealer.Retain())
-+			return
-+		}
-+		resultErr = errors.Join(resultErr, wdDealer.Clean())
-+	}()
++	defer finishCampaignSources(wdDealer, &result, &resultErr)
  
 -	jDealer := engine.NewExecutorDealer(mod, wdDealer, cProfile.Elapsed)
 +	jDealer := engine.NewExecutorDealer(mod, wdDealer, cProfile.Elapsed, engine.WithExpectedTests(cProfile.TestCensus), engine.WithContext(ctx))
  
  	codeData := engine.CodeData{
  		Cov:       cProfile.Profile,
-@@ -190,7 +200,7 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
+@@ -190,7 +196,7 @@ func run(ctx context.Context, mod gomodule.GoModule, workDir string) (report.Res
  	mut := engine.New(mod, codeData, jDealer)
  	results := mut.Run(ctx)
  
@@ -257,7 +342,7 @@ index d7eddb2..44e2eba 100644
  }
  
  func setFlagsOnCmd(cmd *cobra.Command) error {
-@@ -206,6 +216,10 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
+@@ -206,6 +212,10 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
  	})
  
  	fls := []*flags.Flag{
@@ -268,15 +353,24 @@ index d7eddb2..44e2eba 100644
  		{Name: paramDryRun, CfgKey: configuration.UnleashDryRunKey, Shorthand: "d", DefaultV: false, Usage: "find mutations but do not executes tests"},
  		{Name: paramOutputStatuses, CfgKey: configuration.UnleashOutputStatusesKey, Shorthand: "S", DefaultV: "", Usage: "print only statuses from this flag, allowed values - 'lctkvsr'"},
  		{Name: paramBuildTags, CfgKey: configuration.UnleashTagsKey, Shorthand: "t", DefaultV: "", Usage: "a comma-separated list of build tags"},
-@@ -252,3 +266,13 @@ func setMutantTypeFlags(cmd *cobra.Command) error {
+@@ -252,3 +262,22 @@ func setMutantTypeFlags(cmd *cobra.Command) error {
  
  	return nil
  }
 +
-+// Unknown descendant ownership forbids deleting either worker source trees or
-+// their parent workspace, even after the SDK's direct child has returned.
++func finishCampaignSources(dealer *workdir.CachedDealer, result *report.Results, resultErr *error) {
++	if errors.Is(*resultErr, execution.ErrUnsettledProcess) || errors.Is(*resultErr, execution.ErrCleanupOwnership) {
++		*resultErr = errors.Join(*resultErr, dealer.Retain())
++	} else {
++		*resultErr = errors.Join(*resultErr, dealer.Clean())
++	}
++	result.Error = *resultErr
++}
++
++// Child cleanup refusals and unproved descendant ownership forbid deleting the
++// enclosing workspace, even after the SDK's direct child has returned.
 +func finishCampaignScratch(scratch *workdir.ScratchDirectory, result *error) {
-+	if errors.Is(*result, execution.ErrUnsettledProcess) {
++	if errors.Is(*result, execution.ErrUnsettledProcess) || errors.Is(*result, execution.ErrCleanupOwnership) {
 +		*result = errors.Join(*result, fmt.Errorf("retain campaign workspace %q after unsettled cleanup", scratch.Path()), scratch.Retain())
 +		return
 +	}
@@ -4382,10 +4476,10 @@ index 0000000..806b4ef
 +}
 diff --git a/internal/engine/workdir/scratch.go b/internal/engine/workdir/scratch.go
 new file mode 100644
-index 0000000..abdc058
+index 0000000..bf24820
 --- /dev/null
 +++ b/internal/engine/workdir/scratch.go
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,170 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
@@ -4445,7 +4539,12 @@ index 0000000..abdc058
 +	return errors.Join(rootErr, d.pin.Close())
 +}
 +
-+func (d *ScratchDirectory) Clean() error { return d.clean(true) }
++func (d *ScratchDirectory) Clean() error {
++	if err := d.clean(true); err != nil {
++		return errors.Join(execution.ErrCleanupOwnership, err)
++	}
++	return nil
++}
 +
 +// Clear removes settled command contents while retaining the owned root and
 +// its identity for subsequent commands with the same temporary environment.
@@ -5259,10 +5358,10 @@ index 0000000..b0ea728
 +}
 diff --git a/internal/engine/workerpool/retention_test.go b/internal/engine/workerpool/retention_test.go
 new file mode 100644
-index 0000000..9ed0161
+index 0000000..a4a0c7d
 --- /dev/null
 +++ b/internal/engine/workerpool/retention_test.go
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,66 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workerpool
 +
@@ -5298,6 +5397,35 @@ index 0000000..9ed0161
 +	}
 +	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "retain" {
 +		t.Fatalf("later cache close deleted uncertain data: %q %v", raw, err)
++	}
++}
++
++func TestInvalidWorkerPoolPreservesCacheCleanupOwnershipFailure(t *testing.T) {
++	worker := NewWorker(1, "invalid-cache")
++	cache, err := execution.NewGoCache(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	worker.Cache = cache
++	worker.Invalid = true
++	parked := filepath.Join(t.TempDir(), "original")
++	if err := os.Rename(cache.Path, parked); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(cache.Path, 0700); err != nil {
++		t.Fatal(err)
++	}
++	sentinel := filepath.Join(cache.Path, "unknown")
++	if err := os.WriteFile(sentinel, []byte("preserve"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	pool := &Pool{queue: make(chan Executor), workers: []*Worker{worker}}
++	pool.Start()
++	if err := pool.Stop(); !errors.Is(err, execution.ErrCleanupOwnership) || errors.Is(err, execution.ErrUnsettledProcess) {
++		t.Fatalf("invalid worker hid namespace failure from pool result: %v", err)
++	}
++	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "preserve" {
++		t.Fatalf("pool stop changed unknown cache: %q %v", raw, err)
 +	}
 +}
 diff --git a/internal/engine/workerpool/workerpool.go b/internal/engine/workerpool/workerpool.go
@@ -5372,6 +5500,24 @@ index 5ebc801..29e78d4 100644
  }
  
  // ActiveWorkers gives the number of active workers on the Pool.
+diff --git a/internal/execution/cleanup_ownership.go b/internal/execution/cleanup_ownership.go
+new file mode 100644
+index 0000000..3405362
+--- /dev/null
++++ b/internal/execution/cleanup_ownership.go
+@@ -0,0 +1,12 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import "errors"
++
++// ErrUnsettledProcess requires retaining producer-owned source, cache and scratch.
++// It is emitted only when native ownership settlement could not be proved.
++var ErrUnsettledProcess = errors.New("owned Go process cleanup remains unsettled")
++
++// ErrCleanupOwnership requires ancestors to preserve a child directory after
++// its own final cleanup refused or failed. It does not imply a live process.
++var ErrCleanupOwnership = errors.New("owned directory cleanup could not be completed safely")
 diff --git a/internal/execution/compiler_physical_path_unix_test.go b/internal/execution/compiler_physical_path_unix_test.go
 new file mode 100644
 index 0000000..8fd8426
@@ -5527,10 +5673,10 @@ index 0000000..8807047
 +}
 diff --git a/internal/execution/go_cache.go b/internal/execution/go_cache.go
 new file mode 100644
-index 0000000..98c40a7
+index 0000000..bde91fd
 --- /dev/null
 +++ b/internal/execution/go_cache.go
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,233 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -5580,7 +5726,13 @@ index 0000000..98c40a7
 +	c.lease = nil
 +	return lease.Close()
 +}
-+func (c *GoCache) Close() error {
++func (c *GoCache) Close() (resultErr error) {
++	defer func() {
++		if resultErr != nil {
++			resultErr = errors.Join(ErrCleanupOwnership, resultErr)
++		}
++	}()
++
 +	if c == nil || c.lease == nil {
 +		return nil
 +	}
@@ -7878,20 +8030,6 @@ index 0000000..05d4561
 +		}
 +	}
 +}
-diff --git a/internal/execution/process_settlement.go b/internal/execution/process_settlement.go
-new file mode 100644
-index 0000000..8bfd8c2
---- /dev/null
-+++ b/internal/execution/process_settlement.go
-@@ -0,0 +1,8 @@
-+// Copyright 2026. Licensed under the Apache License, Version 2.0.
-+package execution
-+
-+import "errors"
-+
-+// ErrUnsettledProcess requires retaining producer-owned source, cache and scratch.
-+// It is emitted only when native ownership settlement could not be proved.
-+var ErrUnsettledProcess = errors.New("owned Go process cleanup remains unsettled")
 diff --git a/internal/execution/sparse_unix_test.go b/internal/execution/sparse_unix_test.go
 new file mode 100644
 index 0000000..68669de

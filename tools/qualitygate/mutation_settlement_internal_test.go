@@ -21,6 +21,7 @@ func TestMutationFailedSDKRetainsSnapshotUnlessTerminalOwnershipSettled(t *testi
 		{"missing completion", `{}`, true},
 		{"unknown termination", `{"complete":false,"termination_reason":"unknown"}`, true},
 		{"unsettled native cleanup", `{"complete":false,"termination_reason":"process_cleanup_unsettled"}`, true},
+		{"unsettled directory ownership", `{"complete":false,"termination_reason":"cleanup_ownership_unsettled"}`, true},
 		{"settled deadline", `{"complete":false,"termination_reason":"deadline_exceeded"}`, false},
 		{"settled cancellation", `{"complete":false,"termination_reason":"canceled"}`, false},
 		{"settled execution failure", `{"complete":false,"termination_reason":"execution_failure"}`, false},

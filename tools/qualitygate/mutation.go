@@ -101,7 +101,7 @@ func runMutation(ctx context.Context, args []string) (resultErr error) {
 // cleanupMutationSnapshot preserves the campaign verdict and makes unsettled owned cleanup fail.
 func cleanupMutationSnapshot(result *error, snapshot string) {
 	if errors.Is(*result, errMutationCleanupUncertain) {
-		*result = errors.Join(*result, fmt.Errorf("retain mutation snapshot %s: producer termination was not proved", snapshot))
+		*result = errors.Join(*result, fmt.Errorf("retain mutation snapshot %s: cleanup ownership was not proved", snapshot))
 		return
 	}
 	if err := os.RemoveAll(snapshot); err != nil {
@@ -424,10 +424,10 @@ func readMutationDiscovery(ctx context.Context, file string, hostFiles map[strin
 	return discovery, nil
 }
 
-var errMutationCleanupUncertain = errors.New("mutation SDK producer cleanup was not proved")
+var errMutationCleanupUncertain = errors.New("mutation SDK process or directory cleanup was not proved")
 
-// A failed SDK process can leave separately owned native process groups behind.
-// Only its fresh terminal report can distinguish a settled failure from missing
+// A failed SDK can leave native process groups or reject directory ownership.
+// Only its fresh terminal report distinguishes a settled failure from missing
 // or uncertain cleanup; an unreadable report must preserve source inputs.
 func mutationCommandFailure(reportFile string, commandErr error) error {
 	terminal, err := readMutationReport(reportFile)

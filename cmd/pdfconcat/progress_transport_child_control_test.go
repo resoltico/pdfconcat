@@ -240,13 +240,10 @@ func TestProgressTransportChildControlFixture(t *testing.T) {
 	scenario := os.Getenv(progressChildControl)
 	if os.Getenv(progressChildHolder) == "1" {
 		// Finite foreign holder demonstrates drain settlement, not descendant ownership.
-		duration := 3 * time.Second
-		if scenario == "killed-held-stdio" {
-			duration = progressTransportChildBudget + 2*time.Second
-		}
+		// Outlive the child budget, capture refusal and one second of settlement.
 		state := os.Getenv(progressChildState)
 		requireProgressNoError(t, os.WriteFile(state+".ready", nil, 0o600))
-		deadline := time.Now().Add(duration)
+		deadline := time.Now().Add(progressTransportChildBudget + 2*time.Second)
 		for {
 			if _, err := os.Stat(state + ".release"); err == nil {
 				break

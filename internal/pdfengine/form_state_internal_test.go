@@ -49,6 +49,7 @@ func TestFormNormalizationPreservesEffectiveInheritedDefaultsAndIndependentScope
 
 	fixture := formTestContext()
 	pdf := fixture.pdf
+	buttonDictionary(t, pdf, fixture.form["DR"])[keyProcSet] = types.Array{types.Name(procedurePDF), types.Name(procedureText)}
 	appearanceFonts := types.Dict{"F1": types.Name("appearance-font")}
 	appearance := types.Dict{"N": types.Dict{"Resources": types.Dict{keyFont: appearanceFonts}}}
 	fixture.widget["AP"] = appearance
@@ -80,6 +81,11 @@ func TestFormNormalizationPreservesEffectiveInheritedDefaultsAndIndependentScope
 
 	if appearanceFonts["F1"] != types.Name("appearance-font") {
 		t.Fatal("independent AP resource scope was renamed")
+	}
+	resources := buttonDictionary(t, pdf, fixture.form["DR"])
+	procedures, err := pdf.DereferenceArrayContext(t.Context(), resources[keyProcSet])
+	if err != nil || len(procedures) != 2 || procedures[0] != types.Name(procedurePDF) || procedures[1] != types.Name(procedureText) {
+		t.Fatalf("namespace preparation lost source procedure names: %v, %v", procedures, err)
 	}
 }
 

@@ -45,6 +45,32 @@ func TestQueryDiagnosticCountScopesUseNonnegativeExactSums(t *testing.T) {
 	}
 }
 
+func TestRelevantDiagnosticCountsContinuePastUnrelatedRecords(t *testing.T) {
+	t.Parallel()
+	report := &Report{Diagnostics: []Diagnostic{
+		{Severity: SeverityError, Consumers: []string{"/items/0"}},
+		{Severity: SeverityWarning, Consumers: []string{"/items/1"}},
+	}}
+	if got := report.relevantCounts([]string{"/items/0"}); got != (DiagnosticCounts{DiagnosticCount: 1, ErrorCount: 1}) {
+		t.Fatalf("selected error counts = %+v", got)
+	}
+	if got := report.relevantCounts([]string{"/items/1"}); got != (DiagnosticCounts{DiagnosticCount: 1, WarningCount: 1}) {
+		t.Fatalf("unrelated first record hid selected warning: %+v", got)
+	}
+}
+
+func TestLayoutWarningsContinuePastStylesWithoutOverflow(t *testing.T) {
+	t.Parallel()
+	report := &Report{Styles: []Style{{}, {Text: &Text{Overflow: textOverflowAllow, Findings: []TextFinding{{Detail: "outside page"}}}}}, Parts: []Part{
+		{ID: "/items/0", Style: new(0)},
+		{ID: "/items/1", Style: new(1), Origin: Position{File: "/plan.json"}},
+	}}
+	warnings := layoutWarnings(report)
+	if len(warnings) != 1 || warnings[0].Severity != SeverityWarning || len(warnings[0].Consumers) != 1 || warnings[0].Consumers[0] != "/items/1" {
+		t.Fatalf("earlier style hid measured overflow: %+v", warnings)
+	}
+}
+
 const (
 	internalDigest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	internalFile   = "/w/job.json"

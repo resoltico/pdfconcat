@@ -64,7 +64,7 @@ func (i *fitProgramInspector) showTextArray(ctx context.Context, span parser.Con
 			tokenizer.StartProc,
 			tokenizer.EndProc,
 			tokenizer.CharString:
-			continue
+			// Syntax tokens carry no text displacement.
 		default:
 		}
 	}

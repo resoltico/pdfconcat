@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -309,4 +310,42 @@ func variableStyleSource(t *testing.T, properties types.Dict) variableStyleFixtu
 	}
 
 	return variableStyleFixture{pdf: pdf, widget: widget, phase: phase, font: font}
+}
+
+func TestPDF20MaterializesMissingTextAndChoiceAppearancesAfterExistingWidgets(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"Tx", "Ch"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			properties := types.Dict{"FT": types.Name(kind)}
+			if kind == "Ch" {
+				properties["Ff"] = types.Integer(variableComboFlag)
+				properties["Opt"] = types.Array{types.StringLiteral("ABC")}
+			}
+			fixture := variableStyleSource(t, properties)
+			fixture.pdf.RootVersion = new(model.V20)
+			fixture.widget["AP"] = types.Dict{"N": fixture.phase}
+			missing := maps.Clone(fixture.widget)
+			missing.Delete("AP")
+			missing["T"] = types.StringLiteral("missing")
+			form := buttonDictionary(t, fixture.pdf, fixture.pdf.RootDict[keyAcroForm])
+			form["NeedAppearances"] = types.Boolean(false)
+			fields, err := fixture.pdf.DereferenceArrayContext(t.Context(), form[keyFields])
+			if err != nil {
+				t.Fatal(err)
+			}
+			form[keyFields] = append(fields, signatureTestObject(fixture.pdf, missing))
+			if err := ensureOutputFormAppearances(t.Context(), fixture.pdf); err != nil {
+				t.Fatal(err)
+			}
+			if got := buttonDictionary(t, fixture.pdf, fixture.widget["AP"])["N"]; got != fixture.phase {
+				t.Fatal("existing normal appearance changed")
+			}
+			appearance := buttonDictionary(t, fixture.pdf, missing["AP"])
+			stream := buttonStream(t, fixture.pdf, appearance["N"])
+			if !strings.Contains(string(stream.Content), "<414243> Tj") {
+				t.Fatalf("later %s widget lost its ABC appearance: %s", kind, stream.Content)
+			}
+		})
+	}
 }

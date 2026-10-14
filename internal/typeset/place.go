@@ -422,6 +422,7 @@ func (placed *Placed) layOut(font *Font, params Params, lines []wrappedLine) {
 }
 
 // alignLine positions a line of the given width inside a block of blockWidth; X is relative to the block.
+// The block covers every line advance, and unwrapped paragraphs mark each line as final.
 func alignLine(params Params, line wrappedLine, width, blockWidth float64) Line {
 	_, spaces := lineWidth(line.clusters)
 	out := Line{Clusters: line.clusters, Width: width}
@@ -431,7 +432,7 @@ func alignLine(params Params, line wrappedLine, width, blockWidth float64) Line 
 		out.X = (blockWidth - width) / 2
 	case params.Align == AlignRight:
 		out.X = blockWidth - width
-	case params.Align == AlignJustify && !line.last && spaces > 0 && params.WrapWidth > 0 && width < blockWidth:
+	case params.Align == AlignJustify && !line.last && spaces > 0:
 		out.ExtraSpace = (blockWidth - width) / float64(spaces)
 		out.Width = blockWidth
 	default:

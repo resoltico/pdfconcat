@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/benoitkugler/pdf/fonts/simpleencodings"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
@@ -161,6 +162,115 @@ func TestFitType3SpaceAdvanceAndGlyphMatrix(t *testing.T) {
 		}
 		if _, err := fitGlyphPlacement(state, &fitType3Context{matrix: fitIdentityMatrix()}); !errors.Is(err, errFitGeometry) {
 			t.Fatalf("overflowing source=%v glyph placement accepted: %v", source, err)
+		}
+	}
+}
+
+func TestFitDeclaredSimpleMetricsCoverFirstAndLastByteCodes(t *testing.T) {
+	t.Parallel()
+	inspector := newFitProgramInspector(guardContext(t))
+	for _, first := range []int{0, 255} {
+		metrics, err := inspector.declaredSimpleMetrics(t.Context(), types.Dict{
+			"FirstChar": types.Integer(first), "Widths": types.NewNumberArray(1500),
+			"FontDescriptor": types.Dict{"MissingWidth": types.Integer(500)},
+		})
+		if err != nil || !metrics.known || metrics.widths[first] != 1.5 || metrics.widths[128] != .5 {
+			t.Fatalf("declared first code %d metrics = %+v: %v", first, metrics, err)
+		}
+	}
+	widths := make(types.Array, 256)
+	for index := range widths {
+		widths[index] = types.Integer(1000)
+	}
+	metrics, err := inspector.declaredSimpleMetrics(t.Context(), types.Dict{"FirstChar": types.Integer(0), "Widths": widths})
+	if err != nil || metrics.widths[0] != 1 || metrics.widths[255] != 1 {
+		t.Fatalf("inclusive complete byte width range refused: %v", err)
+	}
+	for _, first := range []int{-1, 256} {
+		if _, err := inspector.declaredSimpleMetrics(t.Context(), types.Dict{"FirstChar": types.Integer(first), "Widths": types.NewNumberArray(1000)}); !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("out-of-range first code %d accepted: %v", first, err)
+		}
+	}
+}
+
+func TestFitEncodingAndType3WidthsCoverInclusiveByteRange(t *testing.T) {
+	t.Parallel()
+	inspector := newFitProgramInspector(guardContext(t))
+	for _, code := range []byte{0, 255} {
+		encoding := simpleencodings.Encoding{}
+		position, err := fitEncodingEntry(types.Integer(code), -1, &encoding)
+		if err != nil || position != int(code) {
+			t.Fatalf("encoding position %d refused: %v", code, err)
+		}
+		position, err = fitEncodingEntry(types.Name("A"), position, &encoding)
+		if err != nil || position != int(code)+1 || encoding[code] != "A" {
+			t.Fatalf("encoding assignment %d changed: %v", code, err)
+		}
+		width, err := inspector.type3Width(t.Context(), types.Dict{
+			"FirstChar": types.Integer(code), "LastChar": types.Integer(code), "Widths": types.NewNumberArray(600),
+		}, code)
+		if err != nil || width != 600 {
+			t.Fatalf("Type3 singleton code %d width = %v: %v", code, width, err)
+		}
+	}
+	for _, bounds := range [][2]int{{-1, 0}, {255, 256}, {65, 64}} {
+		widths := types.Array{}
+		code := byte(65)
+		switch bounds[0] {
+		case -1:
+			widths, code = types.NewNumberArray(300, 600), 0
+		case 255:
+			widths, code = types.NewNumberArray(300, 600), 255
+		}
+		if _, err := inspector.type3Width(t.Context(), types.Dict{
+			"FirstChar": types.Integer(bounds[0]), "LastChar": types.Integer(bounds[1]), "Widths": widths,
+		}, code); !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("invalid Type3 character range %v accepted: %v", bounds, err)
+		}
+	}
+	for _, length := range []int{1024, 1025} {
+		values := make(types.Array, length)
+		for index := range values {
+			values[index] = types.Integer(0)
+		}
+		encoding := simpleencodings.Encoding{}
+		_, err := inspector.fitEncodingDifferences(t.Context(), types.Dict{keyDifferences: values}, &encoding)
+		if length == 1024 && err != nil || length == 1025 && !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("Differences entry count %d: %v", length, err)
+		}
+	}
+}
+
+func TestFitResourceBoxRejectsEachNonpositiveAxis(t *testing.T) {
+	t.Parallel()
+	inspector := newFitProgramInspector(guardContext(t))
+	inspector.fit = PageFit{Visible: [4]float64{0, 0, 100, 100}, Matrix: fitIdentityMatrix()}
+	state := &fitGraphicsState{matrix: fitIdentityMatrix(), sourceMatrix: fitIdentityMatrix()}
+	for _, box := range [][4]float64{{0, 0, 0, 1}, {0, 0, 1, 0}} {
+		dict := types.Dict{"BBox": types.NewNumberArray(box[0], box[1], box[2], box[3])}
+		if err := inspector.resourceBox(t.Context(), dict, "BBox", state); !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("empty invoked resource box %v accepted: %v", box, err)
+		}
+	}
+	for _, box := range [][4]float64{{1, 0, 0, 1}, {0, 1, 1, 0}} {
+		if err := inspector.programBox(box, box, state); !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("reversed declared box %v accepted: %v", box, err)
+		}
+	}
+}
+
+func TestCanvasFitRejectsNonpositiveAndNonfiniteDimensions(t *testing.T) {
+	t.Parallel()
+	for _, value := range []float64{0, -1, math.NaN(), math.Inf(1)} {
+		for _, canvas := range []PageSize{{Width: value, Height: 100}, {Width: 100, Height: value}} {
+			if _, err := CanvasFit(canvas, PageSize{Width: 100, Height: 100}); !errors.Is(err, errFitGeometry) {
+				t.Fatalf("invalid authored canvas %+v accepted: %v", canvas, err)
+			}
+		}
+		for _, target := range []PageSize{{Width: value, Height: 100}, {Width: 100, Height: value}} {
+			if _, err := CanvasFit(PageSize{Width: 100, Height: 100}, target); !errors.Is(err, errFitGeometry) {
+				t.Fatalf("invalid fit target %+v accepted: %v", target, err)
+			}
 		}
 	}
 }

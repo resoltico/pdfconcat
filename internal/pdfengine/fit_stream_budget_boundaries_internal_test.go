@@ -22,6 +22,9 @@ func TestFitLogicalProgramBudgetAndStreamCountExactBoundaries(t *testing.T) {
 		if _, err := fitLogicalContentLimit(t.Context(), pdf, types.Dict{keyContents: stream}, limit); !errors.Is(err, errFitUnsupported) {
 			t.Fatalf("invalid program budget accepted: %d %v", limit, err)
 		}
+		if _, err := fitLogicalContentLimit(t.Context(), pdf, types.Dict{}, limit); !errors.Is(err, errFitUnsupported) {
+			t.Fatalf("absent content hid invalid program budget %d: %v", limit, err)
+		}
 	}
 
 	content, err := fitLogicalContentLimit(t.Context(), pdf, types.Dict{keyContents: stream}, 3)
@@ -45,6 +48,10 @@ func TestFitLogicalProgramBudgetAndStreamCountExactBoundaries(t *testing.T) {
 	if _, err = fitLogicalContentLimit(t.Context(), pdf, types.Dict{keyContents: many}, fitProgramByteLimit); err != nil {
 		t.Fatalf("exact absent stream count rejected: %v", err)
 	}
+	pdf.Limits.MaxDecodeBytes = 0
+	if content, err := fitLogicalContentLimit(t.Context(), pdf, types.Dict{keyContents: stream}, 3); err != nil || string(content) != emptyAppearanceDrawing {
+		t.Fatalf("disabled backend byte cap removed the owned program budget: %q, %v", content, err)
+	}
 }
 
 func TestFitProgramDecoderBoundsRawCachedAndMalformedFilterInput(t *testing.T) {
@@ -53,6 +60,10 @@ func TestFitProgramDecoderBoundsRawCachedAndMalformedFilterInput(t *testing.T) {
 	raw := types.StreamDict{Dict: types.Dict{}, Raw: make([]byte, fitProgramByteLimit+1)}
 	if _, err := fitDecodeProgram(t.Context(), &raw, fitProgramByteLimit); !errors.Is(err, errFitUnsupported) {
 		t.Fatalf("encoded program+1 accepted: %v", err)
+	}
+	raw.Raw = raw.Raw[:fitProgramByteLimit]
+	if content, err := fitDecodeProgram(t.Context(), &raw, fitProgramByteLimit); err != nil || int64(len(content)) != fitProgramByteLimit {
+		t.Fatalf("exact encoded byte limit rejected: size=%d, %v", len(content), err)
 	}
 
 	cached := types.StreamDict{Dict: types.Dict{}, Content: []byte(emptyAppearanceDrawing)}
@@ -63,6 +74,9 @@ func TestFitProgramDecoderBoundsRawCachedAndMalformedFilterInput(t *testing.T) {
 	encoded := types.StreamDict{Dict: types.Dict{}, Raw: []byte(emptyAppearanceDrawing)}
 	if _, err := fitDecodeProgram(t.Context(), &encoded, 2); !errors.Is(err, errFitUnsupported) {
 		t.Fatalf("unfiltered raw program+1 accepted: %v", err)
+	}
+	if content, err := fitDecodeProgram(t.Context(), &encoded, 3); err != nil || string(content) != emptyAppearanceDrawing {
+		t.Fatalf("exact unfiltered decoded byte limit rejected: %q, %v", content, err)
 	}
 
 	malformed := types.StreamDict{

@@ -179,7 +179,7 @@ func (i *fitProgramInspector) showSimpleText(
 
 	var mode fitPaintMode
 	if fill {
-		mode |= fitPaintFill
+		mode = fitPaintFill
 	}
 
 	if stroke {

@@ -105,6 +105,13 @@ func TestInkMeasurementAddsJustificationOnlyAfterInteriorSpaces(t *testing.T) {
 			t.Fatalf("zero-area glyph created visible ink: %+v", empty.InkBounds)
 		}
 	}
+	font.ink[1] = Rect{X: 20, Y: 20, Width: 10, Height: 10}
+	overlaid := &Placed{Font: font}
+	overlaid.includeGlyphInk(Glyph{ID: 1}, 0, 0, 1)
+	overlaid.includeGlyphInk(Glyph{ID: 1, XOffset: -18, YOffset: -18}, 0, 0, 1)
+	if overlaid.InkBounds == nil || *overlaid.InkBounds != (Rect{X: 2, Y: 2, Width: 28, Height: 28}) {
+		t.Fatalf("later overlaid glyph shrank earlier ink: %+v", overlaid.InkBounds)
+	}
 }
 
 // The shaping library never produces these results for the supported scripts, so the integrity checks
@@ -235,5 +242,21 @@ func TestOutlineCheckContinuesPastGlyphsAlreadyChecked(t *testing.T) {
 	var outline *OutlineError
 	if !errors.As(err, &outline) || outline.Glyph != maxGlyphID {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestNominalTextValidationUsesKnownOutlinesWithoutShaping(t *testing.T) {
+	t.Parallel()
+	font, err := LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shaper Shaper
+	state := shaper.fontState(font)
+	for range 2 {
+		missing, err := state.checkNominalParagraph(font, "AB")
+		if err != nil || missing {
+			t.Fatalf("intact nominal glyphs required fallback shaping: missing=%v, %v", missing, err)
+		}
 	}
 }

@@ -70,6 +70,33 @@ func nativeReadWriteDeleteLease(t *testing.T, path string) windows.Handle {
 	return handle
 }
 
+func TestWindowsIdentityShareModePermitsConcurrentDataOwners(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	file := filepath.Join(directory, "shared.pdf")
+	writeTestFile(t, file, []byte("concurrent native sharing contract"))
+	for _, path := range []string{directory, file} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			nativeReadWriteDeleteLease(t, path)
+			name, err := windows.UTF16PtrFromString(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Metadata-only opens can bypass sharing conflicts. Exercise the
+			// configured flags with real data/delete access to prove their native
+			// semantics, while inspectIdentity continues to request zero access.
+			handle, err := windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.DELETE,
+				identityShareMode, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+			if err != nil {
+				t.Fatalf("identity sharing configuration conflicted with a native read/write/delete owner: %v", err)
+			}
+			if err := windows.CloseHandle(handle); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestWindowsNativeParentRejectsUnrepresentableUTF16Target(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

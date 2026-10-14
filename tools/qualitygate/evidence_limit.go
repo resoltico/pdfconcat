@@ -43,7 +43,7 @@ func (w budgetedEvidenceWriter) Write(data []byte) (int, error) {
 		return written, err
 	}
 	if int64(len(data)) > allowed {
-		b.failure = fmt.Errorf("%w: infrastructure error: fuzz stdout and stderr exceeded the combined %d-byte evidence limit; retained evidence is partial", errGate, b.limit)
+		b.failure = fmt.Errorf("%w: infrastructure error: stdout and stderr exceeded the combined %d-byte evidence limit; captured output is partial", errGate, b.limit)
 		b.cancel()
 		return written, b.failure
 	}

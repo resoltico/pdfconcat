@@ -28,6 +28,13 @@ const (
 	progressStatusCountOffset = 8
 )
 
+// A mismatched native layout must fail the build before any syscall receives it.
+var (
+	_ [progressPipeDeviceBytes]byte   = [unsafe.Sizeof(progressPipeDevice{})]byte{}
+	_ [progressIOStatusBytes]byte     = [unsafe.Sizeof(windows.IO_STATUS_BLOCK{})]byte{}
+	_ [progressStatusCountOffset]byte = [unsafe.Offsetof(windows.IO_STATUS_BLOCK{}.Information)]byte{}
+)
+
 func qualifyProgressPipe(handle windows.Handle, volumeQuery *windows.LazyProc) error {
 	var flags uint32
 	if err := windows.GetNamedPipeInfo(handle, &flags, nil, nil, nil); err != nil {
@@ -98,13 +105,6 @@ func progressPipeBackend(handle windows.Handle, query *windows.LazyProc) (progre
 		status windows.IO_STATUS_BLOCK
 		pin    runtime.Pinner
 	)
-
-	// The supported Windows64 ABI has an eight-byte device result and a
-	// sixteen-byte status block with its byte-count member at offset eight.
-	if unsafe.Sizeof(device) != progressPipeDeviceBytes || unsafe.Sizeof(status) != progressIOStatusBytes ||
-		unsafe.Offsetof(status.Information) != progressStatusCountOffset {
-		return device, 0, errProgressUnsupportedHandle
-	}
 
 	pin.Pin(&device)
 

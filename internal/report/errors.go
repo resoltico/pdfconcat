@@ -46,6 +46,7 @@ const (
 	CodeReadFailed         Code = "report_read_failed"
 	CodeWriteFailed        Code = "report_write_failed"
 	CodeTooLarge           Code = "report_too_large"
+	CodeResponseTooLarge   Code = "response_too_large"
 	CodeEmpty              Code = "report_json_empty"
 	CodeSyntax             Code = "report_json_syntax"
 	CodeDuplicateMember    Code = "report_json_duplicate_member"

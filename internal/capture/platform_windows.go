@@ -17,6 +17,9 @@ import (
 // errNotDiskFile is returned for a named pipe, console or other device.
 var errNotDiskFile = errors.New("not a disk file (pipe or device)")
 
+// Metadata observation requests permissive sharing across file providers.
+const identityShareMode = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
+
 // IsDiskFull reports whether err means the volume has no space left.
 func IsDiskFull(err error) bool {
 	return errors.Is(err, windows.ERROR_DISK_FULL) || errors.Is(err, windows.ERROR_HANDLE_DISK_FULL)
@@ -60,7 +63,7 @@ func inspectIdentity(path string) (Identity, bool, error) {
 	handle, err := windows.CreateFile(
 		name,
 		0,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		identityShareMode,
 		nil,
 		windows.OPEN_EXISTING,
 		windows.FILE_FLAG_BACKUP_SEMANTICS,

@@ -18,7 +18,7 @@ func nativeParentPath(parent string) (path string, failure error) {
 	if err != nil {
 		return "", err
 	}
-	handle, err := windows.CreateFile(name, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	handle, err := windows.CreateFile(name, 0, identityShareMode, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return "", err
 	}

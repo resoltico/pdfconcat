@@ -64,6 +64,9 @@ func runQueryWith(ctx context.Context, command *cli.Command, env Env, open func(
 	}
 
 	query := report.QueryResultOf(saved, response, env.Executable, path)
+	if err := query.Validate(); err != nil {
+		return queryFailure(env, command, err)
+	}
 
 	err = writeResponse(env.Stdout, command.Format, report.NewResponse(query))
 	if err != nil {

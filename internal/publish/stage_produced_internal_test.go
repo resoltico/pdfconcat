@@ -33,9 +33,12 @@ func TestProducedStageWritesToOwnedFileBeforeProducerReturns(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, reportPath)
 	content := bytes.Repeat([]byte("x"), fixtureChunkBoundaryBytes+1)
+	var writeCounts [2]int
 
 	staged, err := StageProduced(StageTestContext(t), target, int64(2*len(content)), func(w io.Writer) error {
-		if _, err := w.Write(content); err != nil {
+		count, err := w.Write(content)
+		writeCounts[0] = count
+		if err != nil {
 			return producedWriteError(err)
 		}
 
@@ -49,19 +52,59 @@ func TestProducedStageWritesToOwnedFileBeforeProducerReturns(t *testing.T) {
 			t.Fatalf("producer bytes were buffered: %d bytes, %v", len(actual), err)
 		}
 
-		_, err = w.Write(content)
+		writeCounts[1], err = w.Write(content)
 
 		return producedWriteError(err)
 	})
 	if err != nil {
 		t.Fatalf("stage failure %v; leftovers %v", err, names(t, dir))
 	}
+	t.Cleanup(func() { discardStaged(t, staged) })
+	for index, count := range writeCounts {
+		if count != len(content) {
+			t.Fatalf("write %d returned %d bytes for %d bytes of content", index, count, len(content))
+		}
+	}
 
 	if staged.Size() != int64(2*len(content)) {
 		t.Fatalf("size %d", staged.Size())
 	}
+}
 
-	discardStaged(t, staged)
+func TestProducedStageLimitIncludesEarlierWrites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, reportPath)
+	const limit = 5
+	var excessCount, retryCount int
+	var excessErr, retryErr error
+	staged, err := StageProduced(StageTestContext(t), target, limit, func(w io.Writer) error {
+		for _, content := range []string{"ab", "cde"} {
+			count, writeErr := io.WriteString(w, content)
+			if writeErr != nil {
+				return writeErr
+			}
+			if count != len(content) {
+				return fmt.Errorf("write returned %d bytes for %d bytes of content", count, len(content))
+			}
+		}
+		excessCount, excessErr = io.WriteString(w, "!")
+		retryCount, retryErr = io.WriteString(w, "again")
+		return nil // A producer ignoring write failures still cannot publish partial output.
+	})
+	if staged != nil {
+		t.Cleanup(func() { discardStaged(t, staged) })
+	}
+	tooLarge, isLimit := errors.AsType[*SizeLimitError](err)
+	if !isLimit || tooLarge.Limit != limit || tooLarge.Target != target {
+		t.Fatalf("cumulative staging limit lost: staged=%v error=%v", staged, err)
+	}
+	if excessCount != 0 || retryCount != 0 || !errors.Is(err, excessErr) || !errors.Is(retryErr, excessErr) {
+		t.Fatalf("limit writes reported %d/%v and %d/%v; stage error %v", excessCount, excessErr, retryCount, retryErr, err)
+	}
+	if staged != nil || len(names(t, dir)) != 0 {
+		t.Fatalf("over-limit production retained partial staging content: %v", names(t, dir))
+	}
 }
 
 func TestProducedStageFailuresDiscardOwnedContent(t *testing.T) {

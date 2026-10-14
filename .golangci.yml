@@ -284,6 +284,20 @@ linters:
           - gosec
         path: ^tools/qualitygate/process_fuzz\.go$
         text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      # Campaign resource guards query the native volume; the Windows control
+      # independently witnesses that its real owned producer exited.
+      - linters:
+          - depguard
+        path: ^tools/qualitygate/campaign_capacity_unix\.go$
+        text: 'import ''golang\.org/x/sys/unix'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - depguard
+        path: ^tools/qualitygate/campaign_capacity_windows\.go$
+        text: 'import ''golang\.org/x/sys/windows'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
+      - linters:
+          - depguard
+        path: ^tools/qualitygate/campaign_producer_windows_test\.go$
+        text: 'import ''golang\.org/x/sys/windows'' is not allowed from list ''platform-boundary'': OS-specific syscalls belong to publish, capture, app, permissiontest, cmd and the scale harness'
       - linters:
           - depguard
         path: ^tools/qualitygate/process_fuzz_darwin\.go$

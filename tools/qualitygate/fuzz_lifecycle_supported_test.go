@@ -36,7 +36,7 @@ func TestFuzzTargetRequiresActualPassingLifecycle(t *testing.T) {
 
 			dir := fuzzLifecycleFixture(t)
 
-			err := runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: name}, "1x", nil)
+			err := runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: name}, "1x", nil, 2, nil)
 			if (err == nil) != (name == "FuzzPresent") {
 				t.Fatalf("target %s: %v", name, err)
 			}
@@ -108,7 +108,7 @@ func FuzzHang(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T,n int) {
 	environment := []string{"GOTMPDIR=" + filepath.Join(storage.path, "tmp"), "TMPDIR=" + filepath.Join(storage.path, "tmp")}
 	done := make(chan error, 1)
 	go func() {
-		done <- runFuzzTarget(ctx, dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzHang"}, "1x", environment)
+		done <- runFuzzTarget(ctx, dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzHang"}, "1x", environment, 2, nil)
 	}()
 
 	pid := awaitFuzzWorker(t, dir, "worker.pid", done)

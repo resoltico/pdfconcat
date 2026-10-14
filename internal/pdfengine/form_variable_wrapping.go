@@ -13,7 +13,10 @@ type variableLineBreak struct {
 	width     float64
 }
 
-const variableTextInset = 4
+const (
+	variableTextInset        = 4
+	maximumMultilineAutoSize = 20
+)
 
 func wrapVariableLines(
 	ctx context.Context,
@@ -45,9 +48,17 @@ func wrapVariableParagraph(
 		return []variableAppearanceLine{paragraph}, nil
 	}
 
-	var lines []variableAppearanceLine
+	var (
+		lines []variableAppearanceLine
+		start int
+	)
 
-	for start := 0; start < len(paragraph.data); {
+	// Each line consumes at least one byte, including an oversized first glyph.
+	for range paragraph.data {
+		if start >= len(paragraph.data) {
+			break
+		}
+
 		split, err := breakVariableLine(ctx, font, paragraph.data, start, size, available)
 		if err != nil {
 			return nil, err
@@ -81,12 +92,12 @@ func breakVariableLine(
 		wordEnd = start
 	}
 
-	for split.end < len(data) {
+	for offset, code := range data[start+1:] {
 		if err := ctx.Err(); err != nil {
 			return split, fmt.Errorf("wrap variable text: %w", err)
 		}
 
-		code := data[split.end]
+		position := start + 1 + offset
 
 		advance := font.widths[code]
 		if (split.width+advance)*size > available {
@@ -94,11 +105,11 @@ func breakVariableLine(
 		}
 
 		if hasSpace && code == space {
-			wordEnd, wordWidth = split.end, split.width
+			wordEnd, wordWidth = position, split.width
 		}
 
 		split.width += advance
-		split.end++
+		split.end = position + 1
 	}
 
 	split.next = split.end
@@ -118,7 +129,9 @@ func (p *variableAppearancePlan) wrapMultiline(ctx context.Context, font *variab
 
 	paragraphs := p.lines
 	if p.fontSize == 0 {
-		for size := 20.0; size > 1; size-- {
+		// Enumerate descending integer candidates; the minimum fallback follows below.
+		for reduction := range maximumMultilineAutoSize - 1 {
+			size := float64(maximumMultilineAutoSize - reduction)
 			lines, err := wrapVariableLines(ctx, font, paragraphs, size, available)
 			if err != nil {
 				return err

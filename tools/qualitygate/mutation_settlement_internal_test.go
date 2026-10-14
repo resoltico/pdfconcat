@@ -28,10 +28,12 @@ func TestMutationFailedSDKRetainsSnapshotUnlessTerminalOwnershipSettled(t *testi
 		{"complete report then cleanup failure", `{"complete":true}`, false},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			snapshot := filepath.Join(t.TempDir(), "snapshot")
-			if err := os.Mkdir(snapshot, dirMode); err != nil {
+			scratch, watch := mutationStorageFixture(t, campaignDiskUsage{4096, 100})
+			snapshot := filepath.Join(scratch.path, "snapshot")
+			if err := scratch.root.Mkdir("snapshot", dirMode); err != nil {
 				t.Fatal(err)
 			}
+			watch.setSnapshot(snapshot)
 			source := filepath.Join(snapshot, "source.go")
 			if err := os.WriteFile(source, []byte("owned source"), fileMode); err != nil {
 				t.Fatal(err)
@@ -47,7 +49,7 @@ func TestMutationFailedSDKRetainsSnapshotUnlessTerminalOwnershipSettled(t *testi
 			if !errors.Is(result, failure) || errors.Is(result, errMutationCleanupUncertain) != scenario.retain {
 				t.Fatalf("incorrect terminal classification: %v", result)
 			}
-			cleanupMutationSnapshot(&result, snapshot)
+			finishMutationStorage(&result, scratch, watch, false)
 			contents, err := readInRoot(snapshot, "source.go")
 			if scenario.retain {
 				if err != nil || string(contents) != "owned source" {

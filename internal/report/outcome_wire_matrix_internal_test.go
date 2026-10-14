@@ -99,6 +99,10 @@ func TestOutcomeWireMatrix(t *testing.T) {
 											t.Fatalf("saved matrix state accepted=%t expected=%t: %v", savedErr == nil, allowed, savedErr)
 										}
 										if !allowed {
+											failure, found := AsError(savedErr)
+											if !found || failure.Status() != StatusInvalid {
+												t.Fatalf("invalid saved state returned a non-validation outcome: %v", savedErr)
+											}
 											continue
 										}
 										accepted++

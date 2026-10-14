@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"runtime"
 	"strings"
 )
 
@@ -30,6 +31,10 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (r
 		return err
 	}
 	defer func() { result = storage.finish(result) }()
+	workers := runtime.GOMAXPROCS(0)
+	watch := newFuzzStorageWatch(ctx, storage, workers)
+	defer func() { result = errors.Join(result, watch.finish(result)) }()
+	ctx = watch.ctx
 
 	targets, err := discoverFuzzTargets(ctx, root, patterns, storage.environment())
 	if err != nil {
@@ -40,7 +45,17 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (r
 		return fmt.Errorf("%w: no Fuzz function found in %v; refusing to pass with zero targets", errGate, patterns)
 	}
 
-	log.Printf("fuzz: %d targets, %s each", len(targets), duration)
+	module, err := modulePath(root)
+	if err != nil {
+		return err
+	}
+	if err = watch.watchCorpus(root, module, targets); err != nil {
+		return fmt.Errorf("%w: inspect source fuzz corpus: %w", errGate, err)
+	}
+	if err = watch.observeJoined(); err != nil {
+		return err
+	}
+	log.Printf("fuzz: %d targets, %s each; %d workers, owned storage threshold %d bytes/%d entries, new source corpus growth %d bytes", len(targets), duration, workers, watch.limit.bytes, watch.limit.entries, fuzzCorpusGrowthBytes)
 
 	var problems []string
 	var cleanupUncertainty error
@@ -53,7 +68,7 @@ func runPlatformFuzz(ctx context.Context, patterns []string, duration string) (r
 
 		log.Printf("fuzz: %s %s", target.pkg, target.name)
 
-		if fuzzErr := runFuzzTarget(ctx, root, target, duration, storage.environment()); fuzzErr != nil {
+		if fuzzErr := runFuzzTarget(ctx, root, target, duration, storage.environment(), workers, watch.observeJoined); fuzzErr != nil {
 			problems = append(problems, fmt.Sprintf("%s %s: %v", target.pkg, target.name, fuzzErr))
 			if errors.Is(fuzzErr, errFuzzCleanupUncertain) {
 				cleanupUncertainty = errFuzzCleanupUncertain

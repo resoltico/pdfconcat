@@ -27,8 +27,10 @@ func TestVariableWrappingConsumesOversizedAndZeroAdvanceGlyphs(t *testing.T) {
 		{name: "exact width", text: "AB", available: 24, want: []string{"AB"}, widths: []float64{2}},
 		{name: "zero advances at zero width", text: "CC", available: 0, want: []string{"CC"}, widths: []float64{0}},
 		{name: "zero then oversized", text: "CA", available: 0, want: []string{"C", "A"}, widths: []float64{0, 1}},
+		{name: "fitting suffix after overflow", text: "ABC", available: 12, want: []string{"A", "BC"}, widths: []float64{1, 1}},
 		{name: "leading break space", text: " A B", available: 18, want: []string{"", "A", "B"}, widths: []float64{0, 1, 1}},
 		{name: "separating spaces", text: "A  B", available: 18, want: []string{"A", "B"}, widths: []float64{1, 1}},
+		{name: "trailing spaces after break", text: "A  ", available: 18, want: []string{"A"}, widths: []float64{1}},
 		{name: "empty paragraph", text: "", available: 0, want: []string{""}, widths: []float64{0}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -61,5 +63,8 @@ func TestVariableWrappingCancellationPrecedesFirstGlyph(t *testing.T) {
 	font.widths['A'] = 1
 	if _, err := breakVariableLine(ctx, font, []byte("A"), 0, 12, 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("first glyph ignored cancellation: %v", err)
+	}
+	if lines, err := wrapVariableParagraph(ctx, font, variableAppearanceLine{data: []byte("AB")}, 12, 0); !errors.Is(err, context.Canceled) || lines != nil {
+		t.Fatalf("paragraph ignored cancellation: lines=%+v error=%v", lines, err)
 	}
 }

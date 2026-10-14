@@ -3,21 +3,6 @@
 # Lint suppressions live in .golangci.yml; coverage has no exclusions.
 version: 1
 exceptions:
-    # This exact >1 to >=1 boundary mutation cannot remove a supported bounded primary: the
-    # encoded-byte previews and schema-valid name/Recovery/location fields fit the JSON line bound
-    # once one diagnostic remains. This premise is for schema-valid/current-producer inputs, not
-    # validation of arbitrary typed Recovery strings. See internal/report/response.schema.json and
-    # TestCommandErrorPrimarySchemaBoundsFitJSONLine; the independent component proof is retained
-    # with the reviewed campaign evidence. Keep the primary-retention guard and all other mutants.
-    - id: mutation-command-error-single-primary-boundary
-      tool: mutation
-      kind: equivalent-mutant
-      path: internal/report/command_error.go
-      operator: CONDITIONALS_BOUNDARY
-      anchor: 'for len(e.Diagnostics) > 1 && !e.fits() {'
-      column: 25
-      statuses: [lived]
-      retained_property: supported bounded primary diagnostics remain within the command JSON line limit without disappearing
     # The bounded suggestion scan only matches one-edit spellings of declared options. Every option
     # and its one-edit spellings fit strictly below the suggestion cutoff. Changing > to >=
     # therefore only skips names at the cutoff that cannot match anyway.
@@ -610,3 +595,20 @@ exceptions:
       column: 11
       statuses: [lived]
       retained_property: native parent resolution rejects insufficient buffers without accepting truncated paths
+    # Text parsing emits at least one paragraph, even for empty text; wrapping
+    # preserves a nonempty line count. Autosize checks only integer sizes 2..20,
+    # then handles fallback 1 outside this predicate. At a positive fit residual,
+    # height-3 and size*lineCount are on the ULP(size) grid, and so is their
+    # rounded difference. For every actual candidate, float64(.33)*size is off
+    # that grid: exact equality is unreachable. The IEEE-grid premise control
+    # derives candidates from maximumMultilineAutoSize; real empty-text AP and
+    # tiny-height fallback controls preserve the public-path premises.
+    - id: mutation-form-multiline-height-fit-boundary
+      tool: mutation
+      kind: equivalent-mutant
+      path: internal/pdfengine/form_variable_wrapping.go
+      operator: CONDITIONALS_BOUNDARY
+      anchor: 'if height-3-size*float64(len(lines)) >= .33*size {'
+      column: 41
+      statuses: [lived]
+      retained_property: nonempty multiline layouts and integer autosize candidates cannot reach exact IEEE height-fit equality

@@ -35,7 +35,7 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 		t.Fatalf("suppressed target was not detected: %v", err)
 	}
 	// The omitted target is independently runnable; the fixture only suppresses listing.
-	if err = runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzPresent"}, "1x", nil); err != nil {
+	if err = runFuzzTarget(t.Context(), dir, fuzzTarget{pkg: fuzzFixturePackage, name: "FuzzPresent"}, "1x", nil, 2, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -61,7 +61,7 @@ func FuzzExternal(f *qa.F) {f.Add(1);f.Fuzz(func(t *qa.T,n int){if err:=os.Write
 	if !slices.Contains(targets, target) {
 		t.Fatalf("external fuzz target missing: %v", targets)
 	}
-	if err = runFuzzTarget(t.Context(), dir, target, "1x", nil); err != nil {
+	if err = runFuzzTarget(t.Context(), dir, target, "1x", nil, 2, nil); err != nil {
 		t.Fatal(err)
 	}
 	data, err := readInRoot(dir, "external.executed")

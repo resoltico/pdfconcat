@@ -94,7 +94,7 @@ func validateForeignSnapshotInputs(ctx context.Context, source, snapshot string)
 	}
 
 	for _, name := range names {
-		if inputErr := sameSnapshotInput(source, snapshot, name); inputErr != nil {
+		if inputErr := sameSnapshotInput(ctx, source, snapshot, name); inputErr != nil {
 			return inputErr
 		}
 	}
@@ -112,7 +112,7 @@ func copyForeignInputs(ctx context.Context, source, destination string) error {
 		return nil
 	}
 
-	_, err = copyListed(ctx, source, destination, strings.Join(names, "\x00"))
+	_, err = copyListed(ctx, source, destination, strings.Join(names, "\x00"), newSnapshotCopyBudget())
 
 	return err
 }

@@ -36,7 +36,7 @@ type (
 	// lineBlock records the newlines before one block of the data.
 	lineBlock struct {
 		linesBefore int   // newlines in data before the block
-		lastNewline int64 // offset of the last newline before the block, or -1
+		lastNewline int64 // offset of the last newline before the block; ignored before the first newline
 	}
 )
 
@@ -101,7 +101,7 @@ func (d *document) Position(offset int64) (int, int) {
 func (d *document) buildIndex() {
 	count := (len(d.data) + lineBlockSize - 1) / lineBlockSize
 	d.blocks = make([]lineBlock, count)
-	lines, last := 0, int64(-1)
+	lines, last := 0, int64(0)
 
 	for block := range count {
 		d.blocks[block] = lineBlock{linesBefore: lines, lastNewline: last}

@@ -52,7 +52,7 @@ func FuzzSame(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){if err:=os
 		}
 	}
 	for _, target := range targets {
-		if err = runFuzzTarget(t.Context(), dir, target, "1x", nil); err != nil {
+		if err = runFuzzTarget(t.Context(), dir, target, "1x", nil, 2, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,7 +124,7 @@ func FuzzPresent(f *testing.F) {f.Add(1);f.Fuzz(func(t *testing.T,n int){})}
 			if !fixture.discoveryFails && !slices.Contains(targets, target) {
 				t.Fatalf("fixture did not list %v: %v", target, targets)
 			}
-			if err = runFuzzTarget(t.Context(), dir, target, "1x", nil); err == nil {
+			if err = runFuzzTarget(t.Context(), dir, target, "1x", nil, 2, nil); err == nil {
 				t.Fatalf("listed target %v passed without its real fuzz lifecycle", target)
 			}
 		})

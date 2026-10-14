@@ -29,7 +29,16 @@ func (q *QueryResult) Validate() error {
 		return queryCountError("selected records exceed the saved-run diagnostic scope")
 	}
 
-	return q.validateSelectedCounts(captured)
+	if err := q.validateSelectedCounts(captured); err != nil {
+		return err
+	}
+	if _, summary := ContentOf[Summary](q.Result); summary && !q.fits(SummaryBytes) {
+		failure := newError(StatusFailed, StageLimit, CodeResponseTooLarge, nil, nil,
+			"Required summary facts exceed %d bytes; use --expect-attempt %s --view diagnostics --details with the original report operand.", SummaryBytes, q.SavedRun.AttemptID)
+		failure.Diagnostic.Recovery = &Recovery{Action: recoveryInspectReport, Command: reportCommand, ReportFrom: queryReportReference}
+		return failure
+	}
+	return nil
 }
 
 func validDiagnosticCounts(counts DiagnosticCounts) bool {

@@ -190,16 +190,20 @@ func TestPostScriptNameSanitizing(t *testing.T) {
 		want  string
 		table []byte
 	}{
-		"windows":           {"My-Font", nameTable(3, 6, utf16be("My-Font"), 1)},
-		"mac":               {"Mac-Font", nameTable(1, 6, []byte("Mac-Font"), 1)},
-		"delimiters":        {"ABcd", nameTable(3, 6, utf16be("A B(c)/d%"), 1)},
-		"non-latin":         {"A", nameTable(3, 6, utf16be("Aā"), 1)},
-		"wrong id":          {fallbackFontName, nameTable(3, 4, utf16be("Other"), 1)},
-		"too long":          {fallbackFontName, nameTable(3, 6, utf16be(strings.Repeat("A", 64)), 1)},
-		"empty after clean": {fallbackFontName, nameTable(3, 6, utf16be("( )"), 1)},
-		"string past end":   {fallbackFontName, nameTable(3, 6, utf16be(testFontName)[:4], 1)[:20]},
-		"short table":       {fallbackFontName, []byte{0, 0}},
-		"count too large":   {testFontName, nameTable(3, 6, utf16be(testFontName), 40)},
+		"windows":            {"My-Font", nameTable(3, 6, utf16be("My-Font"), 1)},
+		"unicode":            {"AB", nameTable(0, 6, utf16be("AB"), 1)},
+		"wide trailing byte": {"AB", nameTable(3, 6, append(utf16be("AB"), 'Z'), 1)},
+		"single wide byte":   {fallbackFontName, nameTable(3, 6, []byte{'A'}, 1)},
+		"narrow last byte":   {"ABZ", nameTable(1, 6, []byte("ABZ"), 1)},
+		"mac":                {"Mac-Font", nameTable(1, 6, []byte("Mac-Font"), 1)},
+		"delimiters":         {"ABcd", nameTable(3, 6, utf16be("A B(c)/d%"), 1)},
+		"non-latin":          {"A", nameTable(3, 6, utf16be("Aā"), 1)},
+		"wrong id":           {fallbackFontName, nameTable(3, 4, utf16be("Other"), 1)},
+		"too long":           {fallbackFontName, nameTable(3, 6, utf16be(strings.Repeat("A", 64)), 1)},
+		"empty after clean":  {fallbackFontName, nameTable(3, 6, utf16be("( )"), 1)},
+		"string past end":    {fallbackFontName, nameTable(3, 6, utf16be(testFontName)[:4], 1)[:20]},
+		"short table":        {fallbackFontName, []byte{0, 0}},
+		"count too large":    {testFontName, nameTable(3, 6, utf16be(testFontName), 40)},
 	}
 
 	for name, tc := range cases {

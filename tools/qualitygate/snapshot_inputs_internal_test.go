@@ -106,7 +106,7 @@ func TestSnapshotPreservesWorkingTreeDeletionAndRegularAssets(t *testing.T) {
 	defer removeAll(snapshot)
 
 	for _, name := range []string{snapshotSourceFile, snapshotDataFile, snapshotConfigFile} {
-		if inputErr := sameSnapshotInput(root, snapshot, name); inputErr != nil {
+		if inputErr := sameSnapshotInput(t.Context(), root, snapshot, name); inputErr != nil {
 			t.Fatal(inputErr)
 		}
 	}
@@ -130,17 +130,17 @@ func TestSnapshotRejectsChangedBytesAndEscapingEmbed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sameSnapshotInput(root, snapshot, snapshotDataFile); err == nil {
+	if err := sameSnapshotInput(t.Context(), root, snapshot, snapshotDataFile); err == nil {
 		t.Fatal("changed bytes accepted")
 	}
 
 	listing := `{"Dir":"` + filepath.ToSlash(root) + `","EmbedFiles":["../outside"]}`
-	if err := validateSnapshotEmbeds(root, snapshot, listing); err == nil {
+	if err := validateSnapshotEmbeds(t.Context(), root, snapshot, listing); err == nil {
 		t.Fatal("compiler asset escaped rooted snapshot")
 	}
 
 	for _, malformed := range []string{"", "{}", "{"} {
-		if err := validateSnapshotEmbeds(root, snapshot, malformed); err == nil {
+		if err := validateSnapshotEmbeds(t.Context(), root, snapshot, malformed); err == nil {
 			t.Fatalf("invalid compiler asset discovery accepted: %q", malformed)
 		}
 	}

@@ -61,10 +61,11 @@ type (
 
 const (
 	// SummaryBytes is the maximum encoded default result, including its newline.
-	SummaryBytes        = 2048
-	previewBytes        = 96
-	messagePreviewBytes = 256
-	firstPrintable      = 0x20
+	SummaryBytes           = 2048
+	previewBytes           = 96
+	messagePreviewBytes    = 256
+	previewTighteningSteps = 3
+	firstPrintable         = 0x20
 	// PreviewRunes caps a text or message preview, in Unicode scalar values.
 	PreviewRunes = 160
 	// PreviewDiagnostics is how many diagnostics a summary shows.
@@ -173,7 +174,7 @@ func summaryIndices(diagnostics []Diagnostic, shown int) []int {
 
 	for i := range diagnostics {
 		recovery := diagnostics[i].Recovery
-		if recovery != nil && recovery.Action == recoveryChooseNewReport && !slices.Contains(indices, i) && len(indices) < shown {
+		if recovery != nil && recovery.Action == recoveryChooseNewReport && !slices.Contains(indices, i) {
 			indices = append(indices, i)
 			break
 		}
@@ -355,10 +356,15 @@ func (s *Summary) bound() {
 
 	s.tightenPublicationPreviews()
 	shrinkDiagnosticMessages(s.Diagnostics, s.fits)
+	s.compactTruncationLabels()
 }
 
 func (s *Summary) tightenPublicationPreviews() {
-	for limit := previewBytes / 2; limit >= previewBytes/8 && !s.fits(); limit /= 2 {
+	for step := range previewTighteningSteps {
+		if s.fits() {
+			return
+		}
+		limit := previewBytes >> (step + 1)
 		for _, field := range []struct {
 			value *string
 			name  string
@@ -376,7 +382,11 @@ func (s *Summary) tightenPublicationPreviews() {
 
 // Required scope/recovery fields take priority over long message previews; codes and remedies remain.
 func shrinkDiagnosticMessages(records []DiagnosticView, fits func() bool) {
-	for limit := messagePreviewBytes / 2; limit >= messagePreviewBytes/8 && !fits(); limit /= 2 {
+	for step := range previewTighteningSteps {
+		if fits() {
+			return
+		}
+		limit := messagePreviewBytes >> (step + 1)
 		for index := range records {
 			diagnostic := &records[index]
 
@@ -392,11 +402,11 @@ func shrinkDiagnosticMessages(records []DiagnosticView, fits func() bool) {
 // omitDiagnostic removes both a preview and its truncation labels, keeping labels tied to visible fields.
 func (s *Summary) omitDiagnostic() {
 	last := len(s.Diagnostics) - 1
-	prefix := "diagnostics/" + strconv.Itoa(last) + "/"
+	prefix := "diagnostics/" + strconv.Itoa(last)
 
 	labels := s.TruncatedFields[:0]
 	for _, label := range s.TruncatedFields {
-		if !strings.HasPrefix(label, prefix) {
+		if !truncationWithin(label, prefix) {
 			labels = append(labels, label)
 		}
 	}
@@ -437,19 +447,48 @@ func (s *Summary) omitDiagnosticPreviews(index int) {
 
 	diagnostic.Location = nil
 
-	labels := s.TruncatedFields[:0]
-	for _, label := range s.TruncatedFields {
-		if !strings.HasPrefix(label, prefix+"location/") {
-			labels = append(labels, label)
-		}
-	}
-
-	s.TruncatedFields = labels
 	s.markTruncated(prefix + "location")
 }
 
-func (s *Summary) markTruncated(field string) {
-	if !slices.Contains(s.TruncatedFields, field) {
-		s.TruncatedFields = append(s.TruncatedFields, field)
+// Container markers preserve an explicit loss indication when individual preview
+// labels themselves would exceed the transport budget. Visible records remain.
+func (s *Summary) compactTruncationLabels() {
+	scopes := make([]string, 0, len(s.Diagnostics)+1)
+	for index := range s.Diagnostics {
+		scopes = append(scopes, "diagnostics/"+strconv.Itoa(index))
 	}
+	scopes = append(scopes, "publication")
+	for _, scope := range scopes {
+		if s.fits() {
+			return
+		}
+		count := 0
+		for _, field := range s.TruncatedFields {
+			if truncationWithin(field, scope) {
+				count++
+			}
+		}
+		if count > 1 {
+			s.markTruncated(scope)
+		}
+	}
+}
+
+func truncationWithin(field, scope string) bool {
+	return field == scope || strings.HasPrefix(field, scope+"/") || strings.HasPrefix(field, scope+".")
+}
+
+func (s *Summary) markTruncated(field string) {
+	for _, label := range s.TruncatedFields {
+		if truncationWithin(field, label) {
+			return
+		}
+	}
+	labels := s.TruncatedFields[:0]
+	for _, label := range s.TruncatedFields {
+		if !truncationWithin(label, field) {
+			labels = append(labels, label)
+		}
+	}
+	s.TruncatedFields = append(labels, field)
 }

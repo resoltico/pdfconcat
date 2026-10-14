@@ -429,7 +429,7 @@ func validateFuzzBudget(value string) error {
 }
 
 // runFuzzTarget requires the selected target's real lifecycle to pass; skipped or missing targets are failures.
-func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration string, environment []string) error {
+func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration string, environment []string, workers int, finalStorageCheck func() error) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("fuzz target canceled: %w", err)
 	}
@@ -447,10 +447,13 @@ func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration
 		fuzzLifecycle: true,
 		env:           environment,
 		args: []string{
-			testVerb, jsonFlag, runSelectionFlag, "^$", "-fuzz", "^" + target.name + "$", "-fuzztime", duration, target.pkg,
+			testVerb, jsonFlag, runSelectionFlag, "^$", "-fuzz", "^" + target.name + "$", "-fuzztime", duration, "-parallel", strconv.Itoa(workers), target.pkg,
 		},
 	}
 	outcome, runErr := collectTestEvents(ctx, run, evidence)
+	if finalStorageCheck != nil {
+		runErr = errors.Join(runErr, finalStorageCheck())
+	}
 	judged := judgeTests(
 		outcome,
 		[]string{target.pkg},

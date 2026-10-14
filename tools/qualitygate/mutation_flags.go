@@ -15,6 +15,7 @@ import (
 
 // mutationOptions are the flags of the mutation command.
 type mutationOptions struct {
+	storage                      *mutationStorageWatch
 	root, snapshot, report, only string
 	partition                    mutationPartition
 	maxDuration                  time.Duration

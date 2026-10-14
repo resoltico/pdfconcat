@@ -24,19 +24,23 @@ func breakLines(clusters []Cluster, limit float64) [][]Cluster {
 		lineStart int
 		lineWidth float64
 		hasWord   bool
+		wordEnd   int
 	)
 
-	for first := 0; first < len(clusters); {
+	for first := range clusters {
+		if first < wordEnd {
+			continue
+		}
 		if clusters[first].IsSpace() {
-			first++
-
 			continue
 		}
 
-		next, wordWidth := first, 0.0
-		for next < len(clusters) && !clusters[next].IsSpace() {
-			wordWidth += float64(clusters[next].advance())
-			next++
+		// first is a non-space cluster; consuming it guarantees progress.
+		wordEnd = first + 1
+		wordWidth := float64(clusters[first].advance())
+		for wordEnd < len(clusters) && !clusters[wordEnd].IsSpace() {
+			wordWidth += float64(clusters[wordEnd].advance())
+			wordEnd++
 		}
 
 		gapStart, gap := first, 0.0
@@ -54,7 +58,6 @@ func breakLines(clusters []Cluster, limit float64) [][]Cluster {
 		}
 
 		hasWord = true
-		first = next
 	}
 
 	return append(lines, clusters[lineStart:])

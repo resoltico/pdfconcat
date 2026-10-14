@@ -18,7 +18,7 @@ func TestSnapshotSourceCancellationPreventsCopiedInputs(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	if copied, err := copyListed(ctx, source, target, snapshotSourceFile+"\x00"); copied != 0 || !errors.Is(err, context.Canceled) {
+	if copied, err := copyListed(ctx, source, target, snapshotSourceFile+"\x00", newSnapshotCopyBudget()); copied != 0 || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled snapshot copied=%d, err=%v", copied, err)
 	}
 

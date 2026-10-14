@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,67 @@ const (
 	progressChildHolder          = "PDFCONCAT_PROGRESS_CHILD_HOLDER"
 	progressChildControlSelector = "-test.run=^TestProgressTransportChildControlFixture$"
 )
+
+// The holder's release follows the capture refusal itself. Waiting for the
+// controller to exit also charges process and coverage teardown to the holder's
+// separate finite lifetime, even though the missing EOF is already established.
+// os/exec serializes writes when stdout and stderr share this same writer.
+type progressChildControlCapture struct {
+	output          bytes.Buffer
+	releasePath     string
+	refusalObserved bool
+	releaseErr      error
+}
+
+func (c *progressChildControlCapture) Write(data []byte) (int, error) {
+	n, err := c.output.Write(data)
+	if c.releasePath != "" && !c.refusalObserved && bytes.Contains(c.output.Bytes(), []byte("native child capture did not reach EOF")) {
+		c.refusalObserved = true
+		c.releaseErr = os.WriteFile(c.releasePath, nil, 0o600)
+	}
+	return n, errors.Join(err, c.releaseErr)
+}
+
+func progressControllerSettlementError(ctx context.Context, observedAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, known := ctx.Deadline(); known && !observedAt.Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func TestProgressControllerSettlementChecksAbsoluteDeadline(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), progressTransportChildBudget+4*time.Second)
+	defer cancel()
+	deadline, known := ctx.Deadline()
+	if !known || ctx.Err() != nil {
+		t.Fatal("live deadline fixture not established")
+	}
+	for _, item := range []struct {
+		observed time.Time
+		want     error
+	}{
+		{deadline.Add(-time.Nanosecond), nil},
+		{deadline, context.DeadlineExceeded},
+		{deadline.Add(time.Nanosecond), context.DeadlineExceeded},
+	} {
+		if err := progressControllerSettlementError(ctx, item.observed); !errors.Is(err, item.want) {
+			t.Fatalf("process observed at %v: %v, want %v", item.observed, err, item.want)
+		}
+	}
+	cancel()
+	for _, observed := range []time.Time{deadline.Add(-time.Nanosecond), deadline.Add(time.Nanosecond)} {
+		if err := progressControllerSettlementError(ctx, observed); err != context.Canceled {
+			t.Fatalf("parent cancellation changed: %v", err)
+		}
+	}
+	if err := progressControllerSettlementError(context.Background(), deadline); err != nil {
+		t.Fatalf("no-deadline context acquired a deadline: %v", err)
+	}
+}
 
 func TestProgressTransportChildCompletionContract(t *testing.T) {
 	executable, err := os.Executable()
@@ -45,15 +107,35 @@ func TestProgressTransportChildCompletionContract(t *testing.T) {
 			if controlEnv != "" {
 				command.Env = append(command.Env, controlEnv)
 			}
-			output, runErr := command.CombinedOutput()
+			capture := &progressChildControlCapture{}
+			if scenario == "held-stdio" || scenario == "killed-held-stdio" {
+				capture.releasePath = state + ".release"
+			}
+			reader, writer, err := os.Pipe()
+			requireProgressNoError(t, err)
+			command.Stdout, command.Stderr = writer, writer
+			copied := make(chan error, 1)
+			go func() { _, err := io.Copy(capture, reader); copied <- err }()
+			runErr := command.Run() // The direct file handles separate process join from capture.
+			controllerErr := progressControllerSettlementError(ctx, time.Now())
+			captureErr := writer.Close()
+			select {
+			case err := <-copied:
+				captureErr = errors.Join(captureErr, err, reader.Close())
+			case <-time.After(time.Second):
+				captureErr = errors.Join(captureErr, errors.New("controller capture did not reach EOF"), reader.Close())
+				captureErr = errors.Join(captureErr, <-copied)
+			}
+			output := capture.output.Bytes() // Immutable after the owned copier joins.
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("native child control %s: %s", scenario, output)
 				}
 			})
-			if ctx.Err() != nil {
-				t.Fatalf("controller itself did not settle: %v", ctx.Err())
+			if controllerErr != nil {
+				t.Fatalf("controller itself did not settle: %v (process=%v)", controllerErr, runErr)
 			}
+			requireProgressNoError(t, captureErr)
 			var exit *exec.ExitError
 			code := 0
 			if runErr != nil {
@@ -89,7 +171,6 @@ func TestProgressTransportChildCompletionContract(t *testing.T) {
 					if !bytes.Contains(output, []byte("native child capture did not reach EOF")) {
 						t.Fatal("inherited stdio reached no independently verified EOF")
 					}
-					requireProgressNoError(t, os.WriteFile(state+".release", nil, 0o600))
 					deadline := time.Now().Add(3 * time.Second)
 					for {
 						data, err := os.ReadFile(state)
@@ -107,6 +188,51 @@ func TestProgressTransportChildCompletionContract(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProgressChildCaptureReleasesOnlyAfterCompleteEOFRefusal(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "release")
+	capture := &progressChildControlCapture{releasePath: path}
+	_, err := capture.Write([]byte(progressTransportCleaned + "fixture\n--- PASS: fixture (0.00s)\n"))
+	requireProgressNoError(t, err)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("body completion released inherited stdio: %v", err)
+	}
+	_, err = capture.Write([]byte("native child capture did not "))
+	requireProgressNoError(t, err)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial diagnostic released inherited stdio: %v", err)
+	}
+	_, err = capture.Write([]byte("reach EOF"))
+	requireProgressNoError(t, err)
+	_, err = os.Stat(path)
+	requireProgressNoError(t, err)
+	requireProgressNoError(t, os.Remove(path))
+	_, err = capture.Write([]byte("native child capture did not reach EOF"))
+	requireProgressNoError(t, err)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("duplicate refusal repeated holder release: %v", err)
+	}
+}
+
+func TestProgressChildCapturePreservesReleaseFailureWithoutRetry(t *testing.T) {
+	t.Parallel()
+	directory := filepath.Join(t.TempDir(), "missing")
+	path := filepath.Join(directory, "release")
+	capture := &progressChildControlCapture{releasePath: path}
+	_, err := capture.Write([]byte("native child capture did not reach EOF"))
+	if !errors.Is(err, os.ErrNotExist) || !errors.Is(capture.releaseErr, os.ErrNotExist) {
+		t.Fatalf("release failure disappeared: %v / %v", err, capture.releaseErr)
+	}
+	requireProgressNoError(t, os.Mkdir(directory, 0o700))
+	_, err = capture.Write([]byte("later output"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("release was retried or its failure lost: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed release was retried: %v", err)
 	}
 }
 

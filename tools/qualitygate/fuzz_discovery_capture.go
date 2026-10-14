@@ -28,6 +28,9 @@ func (c *command) boundedFuzzOutput(ctx context.Context, limit int64) (string, e
 		return stdout.String(), errors.Join(runErr, limitErr, preserveFuzzDiscoveryOutput(stdout.Bytes(), stderr.Bytes()))
 	}
 	if runErr != nil {
+		if errors.Is(context.Cause(ctx), errGate) {
+			return stdout.String(), errors.Join(runErr, context.Cause(ctx), preserveFuzzDiscoveryOutput(stdout.Bytes(), stderr.Bytes()))
+		}
 		return stdout.String(), fmt.Errorf("%w\n%s", runErr, indent(stderr.String()))
 	}
 	return stdout.String(), nil

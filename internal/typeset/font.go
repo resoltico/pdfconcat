@@ -316,7 +316,8 @@ func decodePostScriptRecord(table, record []byte, storage int) string {
 
 	var out []byte
 
-	for pos := 0; pos+step <= len(raw); pos += step {
+	for character := range len(raw) / step {
+		pos := character * step
 		char := rune(raw[pos+step-1])
 		if step == nameCharWidthWide && raw[pos] != 0 {
 			char = 0

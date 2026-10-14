@@ -123,6 +123,20 @@ func checkResponse(t *testing.T, saved *report.Report, response report.Response,
 	t.Helper()
 
 	query := report.QueryResultOf(saved, response, programName, fixtureReportPath)
+	if err := query.Validate(); err != nil {
+		failure, typed := report.AsError(err)
+		_, summary := report.ContentOf[report.Summary](query.Result)
+		if !typed || !summary || failure.Status() != report.StatusFailed || failure.Diagnostic.Stage != report.StageLimit || failure.Diagnostic.Code != report.CodeResponseTooLarge {
+			t.Fatalf("unexpected query validation failure: %v", err)
+		}
+		candidate, encodeErr := report.Encode(query)
+		var human strings.Builder
+		if encodeErr != nil || query.RenderText(&human) != nil || (len(candidate)+1 <= 2048 && human.Len() <= 2048) {
+			t.Fatal("summary limit rejection lacks an actual transport overflow")
+		}
+		assertBoundedSummaryRejection(t, saved, failure, compiled)
+		return
+	}
 
 	data, err := report.Encode(query)
 	if err != nil {
@@ -168,7 +182,7 @@ func oversizedQueryRecord(response report.Response) bool {
 // usage error or return a bounded, encodable response; paging by next_offset must terminate.
 func FuzzQuery(f *testing.F) {
 	compiled := compileSchema(f, report.ResponseSchema(), responseSchemaURL)
-	reports := []*report.Report{mustDecode(f, completeCheck), mustDecode(f, failedCheck), mustDecode(f, richFailure)}
+	reports := []*report.Report{mustDecode(f, completeCheck), mustDecode(f, failedCheck), mustDecode(f, richFailure), summaryRequiredFacts(f)}
 	reports[1].Diagnostics[0].Message = strings.Repeat("long ", 40_000)
 
 	f.Add(uint8(0), firstItemPointer, int64(1), int64(0), int64(20), uint8(0), false)
@@ -177,6 +191,7 @@ func FuzzQuery(f *testing.F) {
 	f.Add(uint8(2), "", int64(0), int64(-1), int64(101), uint8(2), false)
 	f.Add(uint8(3), firstArgvID, int64(1), int64(5), int64(5), uint8(1), true)
 	f.Add(uint8(4), "", int64(0), int64(0), int64(0), uint8(0), false)
+	f.Add(uint8(4), "", int64(0), int64(0), int64(0), uint8(3), false)
 
 	f.Fuzz(func(t *testing.T, mode uint8, id string, page, offset, limit int64, which uint8, details bool) {
 		saved := reports[int(which)%len(reports)]

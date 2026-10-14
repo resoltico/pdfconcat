@@ -65,7 +65,7 @@ func TestSnapshotRejectsLinkedSourcesConfigsAndFIFO(t *testing.T) {
 	}
 
 	for _, name := range []string{"linked.go", snapshotConfigFile, mutationFIFOName} {
-		if _, err := copyListed(t.Context(), source, target, name+"\x00"); err == nil {
+		if _, err := copyListed(t.Context(), source, target, name+"\x00", newSnapshotCopyBudget()); err == nil {
 			t.Fatalf("unsafe source/config snapshot input accepted: %s", name)
 		}
 	}

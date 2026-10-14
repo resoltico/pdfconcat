@@ -1627,7 +1627,7 @@ index 714271e..bcf9ffa 100644
  	}
  	for _, tc := range testCases {
 diff --git a/internal/engine/executor.go b/internal/engine/executor.go
-index 3fb5ee4..6cc55b2 100644
+index 3fb5ee4..12b4917 100644
 --- a/internal/engine/executor.go
 +++ b/internal/engine/executor.go
 @@ -18,7 +18,6 @@ package engine
@@ -1717,7 +1717,7 @@ index 3fb5ee4..6cc55b2 100644
  	defer m.wg.Done()
  	workerName := fmt.Sprintf("%s-%d", w.Name, w.ID)
  	rootDir, err := m.wdDealer.Get(workerName)
-@@ -168,56 +194,118 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
+@@ -168,56 +194,119 @@ func (m *mutantExecutor) Start(w *workerpool.Worker) {
  	workingDir := filepath.Join(rootDir, m.module.CallingDir)
  	m.mutant.SetWorkdir(workingDir)
  
@@ -1807,6 +1807,7 @@ index 3fb5ee4..6cc55b2 100644
 +		packageExecutor.integrationMode = false
 +		status := packageExecutor.runTestCommand(ctx, rootDir, pkg, true)
 +		m.executionSettled = packageExecutor.executionSettled
++		m.producerUnsettled = packageExecutor.producerUnsettled
 +		if status != mutator.Lived {
 +			return status
 +		}
@@ -1855,7 +1856,7 @@ index 3fb5ee4..6cc55b2 100644
  	if m.buildTags != "" {
  		args = append(args, "-tags", m.buildTags)
  	}
-@@ -228,11 +316,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -228,11 +317,14 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	args = append(args, "-failfast")
  
  	if m.testCPU != 0 {
@@ -1871,7 +1872,7 @@ index 3fb5ee4..6cc55b2 100644
  		path = "./..."
  	}
  	args = append(args, path)
-@@ -240,27 +331,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -240,27 +332,17 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	return args
  }
  
@@ -2674,6 +2675,227 @@ index 0000000..f7d4a1b
 +	run("unknown-failure", "unknown", "1", &baseline.Census)
 +	run("priority-failure", "fail-later", "1", &baseline.Census)
 +	run("priority-survivor", "pass", "1", &baseline.Census)
++}
+diff --git a/internal/engine/package_ownership_unix_test.go b/internal/engine/package_ownership_unix_test.go
+new file mode 100644
+index 0000000..982a987
+--- /dev/null
++++ b/internal/engine/package_ownership_unix_test.go
+@@ -0,0 +1,215 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package engine
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/configuration"
++	"github.com/go-gremlins/gremlins/internal/engine/workerpool"
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++	"github.com/go-gremlins/gremlins/internal/report"
++	"golang.org/x/sys/unix"
++)
++
++type prefixOwnershipDealer struct {
++	base   ExecutorDealer
++	worker **workerpool.Worker
++}
++type prefixOwnershipExecutor struct {
++	inner  workerpool.Executor
++	worker **workerpool.Worker
++}
++
++func (d prefixOwnershipDealer) NewExecutor(mut mutator.Mutator, out chan<- mutator.Mutator, wg *sync.WaitGroup) workerpool.Executor {
++	return prefixOwnershipExecutor{d.base.NewExecutor(mut, out, wg), d.worker}
++}
++func (e prefixOwnershipExecutor) Start(worker *workerpool.Worker) {
++	*e.worker = worker
++	e.inner.Start(worker)
++}
++
++func TestPackagePrefixUnknownOwnershipRetainsWorkerResources(t *testing.T) {
++	beforeIntegration := configuration.Get[bool](configuration.UnleashIntegrationMode)
++	beforeWorkers := configuration.Get[int](configuration.UnleashWorkersKey)
++	beforeLogs := configuration.Get[string](configuration.UnleashExecutionLogDirKey)
++	configuration.Set(configuration.UnleashIntegrationMode, true)
++	configuration.Set(configuration.UnleashWorkersKey, 1)
++	logs := t.TempDir()
++	configuration.Set(configuration.UnleashExecutionLogDirKey, logs)
++	defer func() {
++		configuration.Set(configuration.UnleashIntegrationMode, beforeIntegration)
++		configuration.Set(configuration.UnleashWorkersKey, beforeWorkers)
++		configuration.Set(configuration.UnleashExecutionLogDirKey, beforeLogs)
++	}()
++	root, original, mutants := workerSettlementFixture(t, "exit")
++	sockets, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	unix.CloseOnExec(sockets[0])
++	unix.CloseOnExec(sockets[1])
++	receiver := os.NewFile(uintptr(sockets[0]), "ownership-receiver")
++	defer receiver.Close()
++	sender := os.NewFile(uintptr(sockets[1]), "ownership-sender")
++	defer sender.Close()
++	if err := unix.SetsockoptTimeval(sockets[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 5}); err != nil {
++		t.Fatal(err)
++	}
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithCancel(t.Context())
++	defer cancel()
++	var worker *workerpool.Worker
++	calls := 0
++	var commandArgs []string
++	var child *exec.Cmd
++	factory := func(commandContext context.Context, _ string, args ...string) *exec.Cmd {
++		calls++
++		commandArgs = append([]string(nil), args...)
++		if err := os.WriteFile(filepath.Join(worker.Cache.Path, "retained-cache-data"), []byte("cache remains"), 0600); err != nil {
++			t.Error(err)
++		}
++		command := exec.CommandContext(commandContext, executable, "-test.run=^TestPackagePrefixOwnershipHelper$")
++		command.Env = append(os.Environ(), "GREMLINS_PREFIX_OWNERSHIP_HELPER=1")
++		command.ExtraFiles = []*os.File{sender}
++		child = command
++		return command
++	}
++	module := gomodule.GoModule{Name: "settlement.example", Root: root, CallingDir: "."}
++	base := NewExecutorDealer(module, directDealer{root: root}, time.Minute, WithContext(ctx), WithExecContext(factory))
++	stream := make(chan mutator.Mutator, 1)
++	stream <- mutants[0]
++	close(stream)
++	engine := Engine{jDealer: prefixOwnershipDealer{base, &worker}, mutantStream: stream, logger: report.NewLogger()}
++	finished := make(chan report.Results, 1)
++	go func() { finished <- engine.executeTests(ctx) }()
++	joined := false
++	var held *os.File
++	var retainedTemp string
++	var tempIdentity os.FileInfo
++	defer func() {
++		cancel()
++		if held != nil {
++			if err := held.Close(); err != nil {
++				t.Error(err)
++			}
++		}
++		if !joined {
++			select {
++			case <-finished:
++			case <-time.After(7 * time.Second):
++				t.Error("ownership control did not join before cleanup")
++				return
++			}
++		}
++		// Only this fixture's foreign writer held the pipe after the owned child was
++		// killed and reaped. It is now closed, so fixture-owned retained data is safe.
++		if mutants[0].origFile != nil {
++			if err := mutants[0].Rollback(); err != nil {
++				t.Error(err)
++			}
++		}
++		if retainedTemp != "" && tempIdentity != nil {
++			current, err := os.Stat(retainedTemp)
++			if err != nil || !os.SameFile(current, tempIdentity) {
++				t.Errorf("retained fixture temporary identity changed: %v", err)
++				return
++			}
++			if err := os.RemoveAll(retainedTemp); err != nil {
++				t.Error(err)
++			}
++		}
++	}()
++	data := make([]byte, 4096)
++	control := make([]byte, unix.CmsgSpace(4))
++	n, oobn, flags, _, err := unix.Recvmsg(sockets[0], data, control, 0)
++	if err != nil || n == 0 || flags&(unix.MSG_CTRUNC|unix.MSG_TRUNC) != 0 {
++		t.Fatalf("real prefix did not transfer its output writer: n=%d flags=%d error=%v", n, flags, err)
++	}
++	messages, err := unix.ParseSocketControlMessage(control[:oobn])
++	if err != nil || len(messages) != 1 {
++		t.Fatalf("invalid ownership message: %v", err)
++	}
++	descriptors, err := unix.ParseUnixRights(&messages[0])
++	if err != nil || len(descriptors) != 1 {
++		t.Fatalf("invalid output descriptor transfer: %v", err)
++	}
++	unix.CloseOnExec(descriptors[0])
++	held = os.NewFile(uintptr(descriptors[0]), "foreign-prefix-output-writer")
++	retainedTemp = string(data[:n])
++	if !filepath.IsAbs(retainedTemp) || !strings.HasPrefix(filepath.Base(retainedTemp), "gremlins-command-") {
++		t.Fatalf("prefix temporary owner not identified: %q", retainedTemp)
++	}
++	tempIdentity, err = os.Stat(retainedTemp)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cancel() // Causal cancellation only after the actual child owns and shares stdout.
++	var result report.Results
++	select {
++	case result = <-finished:
++		joined = true
++	case <-time.After(7 * time.Second):
++		t.Fatal("prefix ownership uncertainty did not settle within the existing cleanup allowance")
++	}
++	if child == nil || child.ProcessState == nil || child.ProcessState.Success() {
++		t.Fatalf("owned prefix child was not killed and reaped: %v", child)
++	}
++	if !errors.Is(result.Error, execution.ErrUnsettledProcess) {
++		t.Fatalf("package-prefix ownership failure lost from final result: %v", result.Error)
++	}
++	if worker == nil || !worker.Invalid || !worker.Unsettled || calls != 1 {
++		t.Fatalf("unsafe prefix worker reused or uncertainty lost: worker=%+v commands=%d", worker, calls)
++	}
++	if len(commandArgs) == 0 || commandArgs[len(commandArgs)-1] != module.Name {
++		t.Fatalf("native ownership control did not exercise package-only prefix: %q", commandArgs)
++	}
++	if len(result.Mutants) != 1 || result.Mutants[0].Status() != mutator.ExecutionError {
++		t.Fatalf("unsettled native prefix accepted: %+v", result.Mutants)
++	}
++	current, err := os.ReadFile(filepath.Join(root, "value.go"))
++	if err != nil || bytes.Equal(current, original) {
++		t.Fatalf("source rolled back or deleted while prefix ownership unknown: %v", err)
++	}
++	if raw, err := os.ReadFile(filepath.Join(worker.Cache.Path, "retained-cache-data")); err != nil || string(raw) != "cache remains" {
++		t.Fatalf("unsettled prefix cache deleted: %q %v", raw, err)
++	}
++	if raw, err := os.ReadFile(filepath.Join(retainedTemp, "retained-temp-data")); err != nil || string(raw) != "temporary data remains" {
++		t.Fatalf("unsettled prefix scratch deleted: %q %v", raw, err)
++	}
++	receipts, err := filepath.Glob(filepath.Join(logs, "*.cache.json"))
++	if err != nil || len(receipts) != 0 {
++		t.Fatalf("unsettled prefix performed cache maintenance: %v %v", receipts, err)
++	}
++}
++
++func TestPackagePrefixOwnershipHelper(t *testing.T) {
++	if os.Getenv("GREMLINS_PREFIX_OWNERSHIP_HELPER") != "1" {
++		return
++	}
++	root := os.TempDir()
++	if err := os.WriteFile(filepath.Join(root, "retained-temp-data"), []byte("temporary data remains"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := unix.Sendmsg(3, []byte(root), unix.UnixRights(1), nil, 0); err != nil {
++		t.Fatal(err)
++	}
++	for {
++		time.Sleep(time.Second)
++	}
 +}
 diff --git a/internal/engine/physical_package_priority_test.go b/internal/engine/physical_package_priority_test.go
 new file mode 100644
@@ -3576,6 +3798,373 @@ index 1ef1bc2..6e7a988 100644
 +// ExecutionReference identifies the complete retained raw/result files for this outcome.
 +func (m *TokenMutator) ExecutionReference() string             { return m.executionReference }
 +func (m *TokenMutator) SetExecutionReference(reference string) { m.executionReference = reference }
+diff --git a/internal/engine/workdir/cleanup_diagnostics.go b/internal/engine/workdir/cleanup_diagnostics.go
+new file mode 100644
+index 0000000..735b6b2
+--- /dev/null
++++ b/internal/engine/workdir/cleanup_diagnostics.go
+@@ -0,0 +1,108 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"errors"
++	"io"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++)
++
++const (
++	cleanupDiagnosticEntries   = 8
++	cleanupDiagnosticPathBytes = 128
++	cleanupDiagnosticBytes     = 2048
++)
++
++// remainingCleanupEntries reports a bounded metadata snapshot after removal
++// fails. It neither reads file contents nor establishes producer settlement.
++func remainingCleanupEntries(root *os.Root) string {
++	var output strings.Builder
++	output.WriteString("retained cleanup entries:")
++	count, incomplete := 0, false
++	const suffix = " [diagnostic incomplete]"
++	appendEntry := func(name, mode string, issue error) bool {
++		if count == cleanupDiagnosticEntries {
++			incomplete = true
++			return false
++		}
++		if len(name) > cleanupDiagnosticPathBytes {
++			name = name[:cleanupDiagnosticPathBytes] + "..."
++			incomplete = true
++		}
++		entry := " [path=" + strconv.QuoteToASCII(name) + " mode=" + mode
++		if issue != nil {
++			incomplete = true
++			var pathErr *os.PathError
++			if errors.As(issue, &pathErr) {
++				issue = pathErr.Err
++			}
++			cause := issue.Error()
++			if len(cause) > cleanupDiagnosticPathBytes {
++				cause = cause[:cleanupDiagnosticPathBytes] + "..."
++			}
++			entry += " error=" + strconv.QuoteToASCII(cause)
++		}
++		entry += "]"
++		if output.Len()+len(entry)+len(suffix) > cleanupDiagnosticBytes {
++			incomplete = true
++			return false
++		}
++		output.WriteString(entry)
++		count++
++		return true
++	}
++	pending := []string{"."}
++	for len(pending) != 0 {
++		if count == cleanupDiagnosticEntries {
++			incomplete = true
++			break
++		}
++		name := pending[0]
++		pending = pending[1:]
++		directory, err := root.Open(name)
++		if err != nil {
++			if !appendEntry(name, "unknown", err) {
++				break
++			}
++			continue
++		}
++		opened, openedErr := directory.Stat()
++		current, currentErr := root.Lstat(name)
++		if openedErr != nil || currentErr != nil || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(opened, current) {
++			issue := errors.Join(openedErr, currentErr, directory.Close(), errors.New("directory changed before metadata inspection"))
++			if !appendEntry(name, "unknown", issue) {
++				break
++			}
++			continue
++		}
++		// The extra entry detects truncation without allocating an entire listing.
++		entries, readErr := directory.ReadDir(cleanupDiagnosticEntries - count + 1)
++		closeErr := directory.Close()
++		for _, entry := range entries {
++			path := filepath.Join(name, entry.Name())
++			info, statErr := root.Lstat(path)
++			mode := "unknown"
++			if statErr == nil {
++				mode = info.Mode().String()
++			}
++			if !appendEntry(path, mode, statErr) {
++				return output.String() + suffix
++			}
++			if statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
++				pending = append(pending, path)
++			}
++		}
++		if readErr != nil && !errors.Is(readErr, io.EOF) || closeErr != nil {
++			if !appendEntry(name, current.Mode().String(), errors.Join(readErr, closeErr)) {
++				break
++			}
++		}
++	}
++	if incomplete {
++		return output.String() + suffix
++	}
++	return output.String() + " [diagnostic complete]"
++}
+diff --git a/internal/engine/workdir/cleanup_diagnostics_darwin_test.go b/internal/engine/workdir/cleanup_diagnostics_darwin_test.go
+new file mode 100644
+index 0000000..547817b
+--- /dev/null
++++ b/internal/engine/workdir/cleanup_diagnostics_darwin_test.go
+@@ -0,0 +1,122 @@
++//go:build darwin
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"errors"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"syscall"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"golang.org/x/sys/unix"
++)
++
++func TestOwnedCommandTempRetainsNativeImmutableFailure(t *testing.T) {
++	owner, err := NewCommandTemp()
++	if err != nil {
++		t.Fatal(err)
++	}
++	root := owner.scratch.Path()
++	evidence, err := os.MkdirTemp("", "gremlins-immutable-proof-")
++	if err != nil {
++		t.Fatal(errors.Join(err, owner.Close()))
++	}
++	leaf := filepath.Join(root, "blocked", "immutable.bin")
++	var identity os.FileInfo
++	var originalFlags uint32
++	flagSet, safeCleanup := false, true
++	defer func() {
++		if flagSet {
++			current, err := os.Lstat(leaf)
++			if err != nil || !os.SameFile(identity, current) {
++				if retainErr := owner.Retain(); retainErr != nil {
++					t.Error(retainErr)
++				}
++				t.Errorf("owned immutable fixture identity changed; retained %q: %v", root, err)
++				return
++			}
++			if err := unix.Chflags(leaf, int(originalFlags)); err != nil {
++				if retainErr := owner.Retain(); retainErr != nil {
++					t.Error(retainErr)
++				}
++				t.Errorf("restore native fixture flags before cleanup; retained %q: %v", root, err)
++				return
++			}
++		}
++		if !safeCleanup {
++			if retainErr := owner.Retain(); retainErr != nil {
++				t.Error(retainErr)
++			}
++			t.Logf("retained unsettled native fixture: temporary=%q evidence=%q", root, evidence)
++			return
++		}
++		if err := errors.Join(owner.Close(), os.RemoveAll(root), os.RemoveAll(evidence)); err != nil {
++			t.Error(err)
++		}
++	}()
++	if err := os.Mkdir(filepath.Dir(leaf), 0700); err != nil {
++		t.Fatal(err)
++	}
++	const secret = "private bytes must not appear in cleanup metadata"
++	if err := os.WriteFile(leaf, []byte(secret), 0600); err != nil {
++		t.Fatal(err)
++	}
++	identity, err = os.Lstat(leaf)
++	if err != nil {
++		t.Fatal(err)
++	}
++	attributes, ok := identity.Sys().(*syscall.Stat_t)
++	if !ok {
++		t.Fatal("native file flags unavailable")
++	}
++	originalFlags = attributes.Flags
++
++	if err := unix.Chflags(leaf, int(originalFlags)|unix.UF_IMMUTABLE); err != nil {
++		t.Fatalf("native immutable-file control unavailable: %v", err)
++	}
++	flagSet = true
++	if err := os.Remove(leaf); !errors.Is(err, syscall.EPERM) {
++		t.Fatalf("native immutable deletion refusal not established: %v", err)
++	}
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestOwnedCommandTempHelper$")
++	command.Dir = evidence
++	command.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER=normal", "GREMLINS_TEMP_RECORD="+filepath.Join(evidence, "record"), "GREMLINS_TEMP_PROFILE="+filepath.Join(evidence, "profile"))
++	out, err := os.Create(filepath.Join(evidence, "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	runErr, cleanupErr, started := RunGoCommandWithOwnedTemp(owner, t.Context(), command, out, out)
++	if errors.Is(cleanupErr, execution.ErrUnsettledProcess) {
++		safeCleanup = false
++		t.Fatalf("native producer settlement unavailable: %v", cleanupErr)
++	}
++	if !started || runErr != nil || !errors.Is(cleanupErr, syscall.EPERM) || owner.scratch != nil {
++		t.Fatalf("native cleanup refusal lost or owner reusable: started=%t run=%v cleanup=%v owner=%+v", started, runErr, cleanupErr, owner)
++	}
++	t.Logf("native immutable cleanup refusal: %v", cleanupErr)
++	message := cleanupErr.Error()
++	marker := strings.Index(message, "retained cleanup entries:")
++	if marker < 0 || len(message[marker:]) > 2048 || !strings.Contains(message, filepath.Join("blocked", "immutable.bin")) || !strings.Contains(message, "mode=-") || strings.Contains(message, secret) {
++		t.Fatalf("native retained-entry metadata missing/unbounded/disclosed contents: %s", message)
++	}
++	if err := owner.Close(); err != nil {
++		t.Fatal(err)
++	}
++	current, err := os.Lstat(leaf)
++	if err != nil || !os.SameFile(identity, current) {
++		t.Fatalf("later close changed retained native object: %v", err)
++	}
++	if current.Sys().(*syscall.Stat_t).Flags&unix.UF_IMMUTABLE == 0 {
++		t.Fatal("production cleanup repaired fixture flags")
++	}
++}
+diff --git a/internal/engine/workdir/cleanup_diagnostics_test.go b/internal/engine/workdir/cleanup_diagnostics_test.go
+new file mode 100644
+index 0000000..e4ec8e5
+--- /dev/null
++++ b/internal/engine/workdir/cleanup_diagnostics_test.go
+@@ -0,0 +1,82 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"testing"
++)
++
++func TestCleanupMetadataNamesNestedLeafWithoutFileContents(t *testing.T) {
++	path := t.TempDir()
++	leaf := filepath.Join(path, "exectest", "0", "owned.exe")
++	if err := os.MkdirAll(filepath.Dir(leaf), 0700); err != nil {
++		t.Fatal(err)
++	}
++	const secret = "contents must never enter cleanup diagnostics"
++	if err := os.WriteFile(leaf, []byte(secret), 0600); err != nil {
++		t.Fatal(err)
++	}
++	root, err := os.OpenRoot(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer root.Close()
++	diagnostic := remainingCleanupEntries(root)
++	if !strings.Contains(diagnostic, strconv.QuoteToASCII(filepath.Join("exectest", "0", "owned.exe"))) || !strings.Contains(diagnostic, "mode=-") || !strings.Contains(diagnostic, "diagnostic complete") || strings.Contains(diagnostic, secret) {
++		t.Fatalf("nested cleanup metadata incomplete or disclosed contents: %s", diagnostic)
++	}
++}
++
++func TestCleanupMetadataCapsEntriesPathsAndTotalBytes(t *testing.T) {
++	for _, kind := range []string{"entries", "path", "bytes"} {
++		t.Run(kind, func(t *testing.T) {
++			path := t.TempDir()
++			switch kind {
++			case "entries":
++				for index := range 20 {
++					if err := os.WriteFile(filepath.Join(path, fmt.Sprintf("leaf-%02d", index)), nil, 0600); err != nil {
++						t.Fatal(err)
++					}
++				}
++			case "path":
++				if err := os.WriteFile(filepath.Join(path, strings.Repeat("p", 180)), nil, 0600); err != nil {
++					t.Fatal(err)
++				}
++			case "bytes":
++				for index := range 8 {
++					name := fmt.Sprintf("%d-%s", index, strings.Repeat("é", 60))
++					if err := os.WriteFile(filepath.Join(path, name), nil, 0600); err != nil {
++						t.Fatal(err)
++					}
++				}
++			}
++			root, err := os.OpenRoot(path)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer root.Close()
++			diagnostic := remainingCleanupEntries(root)
++			if len(diagnostic) > 2048 || strings.Count(diagnostic, "[path=") > 8 || !strings.Contains(diagnostic, "diagnostic incomplete") {
++				t.Fatalf("unbounded or silently incomplete metadata: bytes=%d %s", len(diagnostic), diagnostic)
++			}
++		})
++	}
++}
++
++func TestCleanupMetadataMarksInspectionFailure(t *testing.T) {
++	root, err := os.OpenRoot(t.TempDir())
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := root.Close(); err != nil {
++		t.Fatal(err)
++	}
++	diagnostic := remainingCleanupEntries(root)
++	if !strings.Contains(diagnostic, "diagnostic incomplete") || !strings.Contains(diagnostic, "error=") {
++		t.Fatalf("inspection failure hidden: %s", diagnostic)
++	}
++}
+diff --git a/internal/engine/workdir/cleanup_diagnostics_unix_test.go b/internal/engine/workdir/cleanup_diagnostics_unix_test.go
+new file mode 100644
+index 0000000..71d99a9
+--- /dev/null
++++ b/internal/engine/workdir/cleanup_diagnostics_unix_test.go
+@@ -0,0 +1,31 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestCleanupMetadataDoesNotTraverseSymlink(t *testing.T) {
++	path := t.TempDir()
++	outside := t.TempDir()
++	if err := os.WriteFile(filepath.Join(outside, "outside-private-name"), nil, 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Symlink(outside, filepath.Join(path, "link")); err != nil {
++		t.Fatal(err)
++	}
++	root, err := os.OpenRoot(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer root.Close()
++	diagnostic := remainingCleanupEntries(root)
++	if !strings.Contains(diagnostic, "link") || strings.Contains(diagnostic, "outside-private-name") || strings.Contains(diagnostic, outside) {
++		t.Fatalf("cleanup diagnostic traversed symlink: %s", diagnostic)
++	}
++}
 diff --git a/internal/engine/workdir/command_temp.go b/internal/engine/workdir/command_temp.go
 new file mode 100644
 index 0000000..cde8b3c
@@ -4160,6 +4749,263 @@ index 0000000..e89fe20
 +		t.Fatalf("aliased source-contained temp parent accepted: started=%t run=%v cleanup=%v", started, run, cleanup)
 +	}
 +}
+diff --git a/internal/engine/workdir/command_temp_windows_test.go b/internal/engine/workdir/command_temp_windows_test.go
+new file mode 100644
+index 0000000..31aa28b
+--- /dev/null
++++ b/internal/engine/workdir/command_temp_windows_test.go
+@@ -0,0 +1,251 @@
++//go:build windows
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package workdir
++
++import (
++	"bytes"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"syscall"
++	"testing"
++	"time"
++
++	"github.com/go-gremlins/gremlins/internal/execution"
++	"golang.org/x/sys/windows"
++)
++
++func TestOwnedCommandTempClearsExecutableTreeAfterParentPanic(t *testing.T) {
++	evidence, err := os.MkdirTemp("", "gremlins-panic-proof-")
++	if err != nil {
++		t.Fatal(err)
++	}
++	owner, err := NewCommandTemp()
++	if err != nil {
++		t.Fatal(errors.Join(err, os.RemoveAll(evidence)))
++	}
++	root := owner.scratch.Path()
++	safeCleanup := true
++	defer func() {
++		if !safeCleanup {
++			if retainErr := owner.Retain(); retainErr != nil {
++				t.Error(retainErr)
++			}
++			t.Logf("retained native ownership proof: temporary=%q evidence=%q", root, evidence)
++			return
++		}
++		if err := errors.Join(owner.Close(), os.RemoveAll(evidence)); err != nil {
++			t.Error(err)
++		}
++	}()
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	ownedExecutable := filepath.Join(root, "exectest", "0", "fixture.exe")
++	if err := os.MkdirAll(filepath.Dir(ownedExecutable), 0700); err != nil {
++		t.Fatal(err)
++	}
++	input, err := os.Open(executable)
++	if err != nil {
++		t.Fatal(err)
++	}
++	output, err := os.OpenFile(ownedExecutable, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
++	if err != nil {
++		t.Fatal(errors.Join(err, input.Close()))
++	}
++	_, copyErr := io.Copy(output, input)
++	if err := errors.Join(copyErr, output.Close(), input.Close()); err != nil {
++		t.Fatal(err)
++	}
++	ready := filepath.Join(evidence, "live-child")
++	command := exec.CommandContext(t.Context(), ownedExecutable, "-test.run=^TestOwnedCommandTempPanicWindowsHelper$")
++	command.Dir = evidence
++	command.Env = append(os.Environ(), "GREMLINS_TEMP_PANIC_ROLE=driver", "GREMLINS_TEMP_PANIC_READY="+ready)
++	stdout, err := os.Create(filepath.Join(evidence, "stdout"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stdout.Close()
++	stderr, err := os.Create(filepath.Join(evidence, "stderr"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stderr.Close()
++	runErr, cleanupErr, started := RunGoCommandWithOwnedTemp(owner, t.Context(), command, stdout, stderr)
++	if cleanupErr != nil {
++		safeCleanup = false
++		t.Fatalf("panic descendant executable cleanup failed: started=%t run=%v cleanup=%v", started, runErr, cleanupErr)
++	}
++	var exit interface {
++		error
++		ExitCode() int
++	}
++	if !started || !errors.As(runErr, &exit) || exit.ExitCode() != 1 {
++		t.Fatalf("native panic wrapper did not finish with exit1: started=%t run=%v", started, runErr)
++	}
++	raw, err := os.ReadFile(filepath.Join(evidence, "stdout"))
++	if err != nil || !bytes.Contains(raw, []byte("expected owned temporary parent panic")) {
++		t.Fatalf("native parent did not reach its causal panic: %v %s", err, raw)
++	}
++	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
++		t.Fatalf("owned executable namespace remained after joined job: %v %v", entries, err)
++	}
++	before, err := os.ReadFile(ready)
++	if err != nil {
++		t.Fatal(err)
++	}
++	time.Sleep(50 * time.Millisecond)
++	after, err := os.ReadFile(ready)
++	if err != nil || !bytes.Equal(before, after) {
++		t.Fatalf("descendant produced data after owned job cleanup: %q %q %v", before, after, err)
++	}
++}
++
++func TestOwnedCommandTempPanicWindowsHelper(t *testing.T) {
++	role := os.Getenv("GREMLINS_TEMP_PANIC_ROLE")
++	if role == "" {
++		return
++	}
++	if role == "child" {
++		for {
++			if err := os.WriteFile(os.Getenv("GREMLINS_TEMP_PANIC_READY"), []byte(time.Now().String()), 0600); err != nil {
++				t.Fatal(err)
++			}
++			time.Sleep(10 * time.Millisecond)
++		}
++	}
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	child := exec.Command(executable, "-test.run=^TestOwnedCommandTempPanicWindowsHelper$")
++	if role == "driver" {
++		child.Env = append(os.Environ(), "GREMLINS_TEMP_PANIC_ROLE=parent")
++		raw, err := child.CombinedOutput()
++		if _, writeErr := os.Stdout.Write(raw); writeErr != nil {
++			t.Fatal(writeErr)
++		}
++		if err == nil {
++			t.Fatal("test parent unexpectedly passed")
++		}
++		os.Exit(1) // Model Go's failing test driver after the test process aborts.
++	}
++	if role != "parent" {
++		t.Fatalf("unknown panic helper role %q", role)
++	}
++	child.Env = append(os.Environ(), "GREMLINS_TEMP_PANIC_ROLE=child")
++	child.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_CONSOLE, HideWindow: true}
++	discard, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer discard.Close()
++	child.Stdout, child.Stderr = discard, discard
++	if err := child.Start(); err != nil {
++		t.Fatal(err)
++	}
++	deadline := time.Now().Add(5 * time.Second)
++	for {
++		if raw, err := os.ReadFile(os.Getenv("GREMLINS_TEMP_PANIC_READY")); err == nil && len(raw) != 0 {
++			break
++		}
++		if !time.Now().Before(deadline) {
++			stopErr := child.Process.Kill()
++			waitErr := child.Wait()
++			t.Fatalf("actual native descendant did not become ready: %v", errors.Join(stopErr, waitErr))
++		}
++		time.Sleep(time.Millisecond)
++	}
++	panic("expected owned temporary parent panic")
++}
++
++func TestOwnedCommandTempRetainsNativeDeleteSharingFailure(t *testing.T) {
++	for _, count := range []int{1, 12} {
++		t.Run(fmt.Sprint(count), func(t *testing.T) {
++			owner, err := NewCommandTemp()
++			if err != nil {
++				t.Fatal(err)
++			}
++			root := owner.scratch.Path()
++			var handles []windows.Handle
++			safeCleanup := true
++			defer func() {
++				for _, handle := range handles {
++					if err := windows.CloseHandle(handle); err != nil {
++						t.Error(err)
++					}
++				}
++				if !safeCleanup {
++					if retainErr := owner.Retain(); retainErr != nil {
++						t.Error(retainErr)
++					}
++					t.Logf("retained uncertain native fixture %q", root)
++					return
++				}
++				if err := errors.Join(owner.Close(), os.RemoveAll(root)); err != nil {
++					t.Error(err)
++				}
++			}()
++			for index := range count {
++				path := filepath.Join(root, fmt.Sprintf("lock-%02d.bin", index))
++				if err := os.WriteFile(path, []byte("private file contents never enter diagnostics"), 0600); err != nil {
++					t.Fatal(err)
++				}
++				name, err := windows.UTF16PtrFromString(path)
++				if err != nil {
++					t.Fatal(err)
++				}
++				handle, err := windows.CreateFile(name, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
++				if err != nil {
++					t.Fatal(err)
++				}
++				handles = append(handles, handle)
++				if err := os.Remove(path); !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
++					t.Fatalf("native no-delete-share precondition not established: %v", err)
++				}
++			}
++			evidence := t.TempDir()
++			executable, err := os.Executable()
++			if err != nil {
++				t.Fatal(err)
++			}
++			command := exec.CommandContext(t.Context(), executable, "-test.run=^TestOwnedCommandTempHelper$")
++			command.Dir = evidence
++			command.Env = append(os.Environ(), "GREMLINS_TEMP_HELPER=normal", "GREMLINS_TEMP_RECORD="+filepath.Join(evidence, "record"), "GREMLINS_TEMP_PROFILE="+filepath.Join(evidence, "profile"))
++			out, err := os.Create(filepath.Join(evidence, "stdout"))
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer out.Close()
++			runErr, cleanupErr, started := RunGoCommandWithOwnedTemp(owner, t.Context(), command, out, out)
++			if errors.Is(cleanupErr, execution.ErrUnsettledProcess) {
++				safeCleanup = false
++				t.Fatalf("native producer ownership not settled: %v", cleanupErr)
++			}
++			if !started || runErr != nil || !errors.Is(cleanupErr, windows.ERROR_SHARING_VIOLATION) || owner.scratch != nil {
++				t.Fatalf("native deletion failure hidden/reusable: started=%t run=%v cleanup=%v owner=%+v", started, runErr, cleanupErr, owner)
++			}
++			t.Logf("native delete-sharing cleanup refusal: %v", cleanupErr)
++			message := cleanupErr.Error()
++			marker := strings.Index(message, "retained cleanup entries:")
++			if marker < 0 || len(message[marker:]) > 2048 || !strings.Contains(message, "lock-") || !strings.Contains(message, "mode=-") || strings.Contains(message, "private file contents") {
++				t.Fatalf("native cleanup metadata missing/unbounded/disclosed: %s", message)
++			}
++			if count > 8 && !strings.Contains(message, "diagnostic incomplete") {
++				t.Fatalf("native capped metadata claimed completeness: %s", message)
++			}
++			if err := owner.Close(); err != nil {
++				t.Fatal(err)
++			}
++			if entries, err := os.ReadDir(root); err != nil || len(entries) != count {
++				t.Fatalf("later close deleted retained locks: %v %v", entries, err)
++			}
++		})
++	}
++}
 diff --git a/internal/engine/workdir/fd_control_unix_test.go b/internal/engine/workdir/fd_control_unix_test.go
 new file mode 100644
 index 0000000..22b28c8
@@ -4476,10 +5322,10 @@ index 0000000..806b4ef
 +}
 diff --git a/internal/engine/workdir/scratch.go b/internal/engine/workdir/scratch.go
 new file mode 100644
-index 0000000..bf24820
+index 0000000..16576ad
 --- /dev/null
 +++ b/internal/engine/workdir/scratch.go
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,175 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package workdir
 +
@@ -4634,6 +5480,11 @@ index 0000000..bf24820
 +		}
 +		closed = true // The persistent lease remains open for the next command.
 +		return nil
++	}
++	if removeErr != nil {
++		// Go Root.RemoveAll reports the requested child, hiding the failing
++		// nested leaf. Preserve that primary error and inspect metadata only.
++		removeErr = errors.Join(removeErr, errors.New(remainingCleanupEntries(d.root)))
 +	}
 +	closeErr := errors.Join(d.root.Close(), d.pin.Close())
 +	closed = true
@@ -5500,6 +6351,56 @@ index 5ebc801..29e78d4 100644
  }
  
  // ActiveWorkers gives the number of active workers on the Pool.
+diff --git a/internal/execution/cleanup_deadline_unix_test.go b/internal/execution/cleanup_deadline_unix_test.go
+new file mode 100644
+index 0000000..7bb0095
+--- /dev/null
++++ b/internal/execution/cleanup_deadline_unix_test.go
+@@ -0,0 +1,44 @@
++//go:build darwin || linux
++
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"context"
++	"errors"
++	"testing"
++	"time"
++)
++
++// This models the interval after a context's fixed deadline and before its timer
++// callback has published cancellation. Deadline is authoritative during that gap.
++type deadlineWithoutCancellationContext struct {
++	context.Context
++	deadline time.Time
++}
++
++func (c deadlineWithoutCancellationContext) Deadline() (time.Time, bool) {
++	return c.deadline, true
++}
++
++func TestProcessCleanupDeadlineDoesNotDependOnTimerDelivery(t *testing.T) {
++	cancelled, cancel := context.WithCancel(context.Background())
++	cancel()
++	for _, test := range []struct {
++		name string
++		ctx  context.Context
++		want error
++	}{
++		{"overdue-without-timer", deadlineWithoutCancellationContext{context.Background(), time.Now().Add(-time.Second)}, context.DeadlineExceeded},
++		{"future", deadlineWithoutCancellationContext{context.Background(), time.Now().Add(time.Hour)}, nil},
++		{"no-deadline", context.Background(), nil},
++		{"cancelled", cancelled, context.Canceled},
++		{"cancelled-and-overdue", deadlineWithoutCancellationContext{cancelled, time.Now().Add(-time.Second)}, context.Canceled},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			if got := processCleanupContextError(test.ctx); !errors.Is(got, test.want) {
++				t.Fatalf("cleanup deadline: got %v, want %v", got, test.want)
++			}
++		})
++	}
++}
 diff --git a/internal/execution/cleanup_ownership.go b/internal/execution/cleanup_ownership.go
 new file mode 100644
 index 0000000..181c83f
@@ -5523,12 +6424,120 @@ index 0000000..181c83f
 +var ErrCleanupOwnership = errors.New("owned directory cleanup could not be completed safely")
 +
 +const goCommandCleanupBudget = 5 * time.Second
+diff --git a/internal/execution/compiler_diagnostic_test.go b/internal/execution/compiler_diagnostic_test.go
+new file mode 100644
+index 0000000..74a2454
+--- /dev/null
++++ b/internal/execution/compiler_diagnostic_test.go
+@@ -0,0 +1,102 @@
++// Copyright 2026. Licensed under the Apache License, Version 2.0.
++package execution
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++func TestCoverageCompilerDiagnosticRequiresMatchingOwnedSource(t *testing.T) {
++	root := t.TempDir()
++	source := filepath.Join(root, "value.go")
++	other := filepath.Join(root, "other.go")
++	for _, p := range []string{source, other} {
++		if err := os.WriteFile(p, []byte("package fixture\n"), 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	prefix := "2026/10/10 06:01:11 cover: "
++	cases := []struct {
++		line string
++		want bool
++	}{
++		{source + ":52:14: expected operand, found '|'", true},
++		{prefix + source + ": " + source + ":52:14: expected operand, found '|'", true},
++		{prefix + source + ": " + other + ":52:14: expected operand, found '|'", false},
++		{prefix + source + ": open " + source + ": permission denied", false},
++		{prefix + source + ": no space left on device", false},
++		{prefix + source + ": " + source + ": note without a source location", false},
++		{"unexpected wrapper: " + source + ":52:14: expected operand", false},
++		{prefix + filepath.Join(root, "missing.go") + ": " + filepath.Join(root, "missing.go") + ":1:2: expected operand", false},
++	}
++	for _, c := range cases {
++		if got := ownedCompilerDiagnostic(c.line, root); got != c.want {
++			t.Fatalf("diagnostic %q: got %t want %t", c.line, got, c.want)
++		}
++	}
++	foreign := filepath.Join(t.TempDir(), "foreign.go")
++	if err := os.WriteFile(foreign, []byte("package fixture\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if ownedCompilerDiagnostic(prefix+foreign+": "+foreign+":1:2: expected operand", root) {
++		t.Fatal("foreign source accepted")
++	}
++}
++
++type diagnosticExitCode int
++
++func (e diagnosticExitCode) Error() string { return fmt.Sprintf("exit status %d", e) }
++func (e diagnosticExitCode) ExitCode() int { return int(e) }
++
++func TestCoverageCompilerReceiptRejectsAmbiguousFailure(t *testing.T) {
++	root := t.TempDir()
++	source := filepath.Join(root, "value.go")
++	other := filepath.Join(root, "other.go")
++	foreign := filepath.Join(t.TempDir(), "foreign.go")
++	for _, path := range []string{source, other, foreign} {
++		if err := os.WriteFile(path, []byte("package fixture\n"), 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	prefix := "2026/10/10 06:01:11 cover: "
++	location := ":2:3: expected operand, found '}'"
++	for _, test := range []struct {
++		name, line string
++		runErr     error
++		status     mutator.Status
++	}{
++		{"owned", prefix + source + ": " + source + location, diagnosticExitCode(1), mutator.NotViable},
++		{"foreign", prefix + foreign + ": " + foreign + location, diagnosticExitCode(1), mutator.ExecutionError},
++		{"conflicting-paths", prefix + source + ": " + other + location, diagnosticExitCode(1), mutator.ExecutionError},
++		{"resource", prefix + source + ": " + source + location + " runtime: out of memory", diagnosticExitCode(1), mutator.ExecutionError},
++		{"unknown-exit", prefix + source + ": " + source + location, diagnosticExitCode(2), mutator.ExecutionError},
++		{"successful-exit", prefix + source + ": " + source + location, nil, mutator.ExecutionError},
++		{"cancelled", prefix + source + ": " + source + location, context.Canceled, mutator.ExecutionError},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			var raw bytes.Buffer
++			encoder := json.NewEncoder(&raw)
++			for _, event := range []testEvent{
++				{Action: "build-output", ImportPath: "fixture [fixture.test]", Output: test.line + "\n"},
++				{Action: "build-fail", ImportPath: "fixture [fixture.test]"},
++				{Action: "start", Package: "fixture"},
++				{Action: "fail", Package: "fixture", FailedBuild: "fixture [fixture.test]"},
++			} {
++				if err := encoder.Encode(event); err != nil {
++					t.Fatal(err)
++				}
++			}
++			judgment, err := JudgeTestStream(&raw, root, test.runErr, false, nil)
++			if judgment.Status != test.status || (err == nil) != (test.status == mutator.NotViable) {
++				t.Fatalf("diagnostic receipt accepted ambiguously: status=%s error=%v", judgment.Status, err)
++			}
++		})
++	}
++}
 diff --git a/internal/execution/compiler_physical_path_unix_test.go b/internal/execution/compiler_physical_path_unix_test.go
 new file mode 100644
-index 0000000..8fd8426
+index 0000000..d01d0b4
 --- /dev/null
 +++ b/internal/execution/compiler_physical_path_unix_test.go
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,83 @@
 +//go:build darwin || linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -5599,7 +6608,11 @@ index 0000000..8fd8426
 +		path  string
 +		owned bool
 +	}{
-+		{source, true}, {"owned.go", true}, {escaped, false}, {foreign, false},
++		{source, true}, {"owned.go", true},
++		// Go may shorten a physical source path using parent traversal. Joining
++		// this through the alias before resolving it points at a different file.
++		{filepath.Join("..", filepath.Base(root), "owned.go"), true},
++		{escaped, false}, {foreign, false},
 +		{filepath.Join(root, "missing.go"), false}, {directory, false},
 +	} {
 +		diagnostic := fixture.path + ":2:3: expected operand"
@@ -5607,33 +6620,6 @@ index 0000000..8fd8426
 +			t.Errorf("source=%q ownership=%t want %t", fixture.path, got, fixture.owned)
 +		}
 +	}
-+}
-diff --git a/internal/execution/cover_diagnostic_test.go b/internal/execution/cover_diagnostic_test.go
-new file mode 100644
-index 0000000..47da238
---- /dev/null
-+++ b/internal/execution/cover_diagnostic_test.go
-@@ -0,0 +1,21 @@
-+// Copyright 2026. Licensed under the Apache License, Version 2.0.
-+package execution
-+import("os";"path/filepath";"testing")
-+func TestCoverageCompilerDiagnosticRequiresMatchingOwnedSource(t *testing.T){
-+ root:=t.TempDir();source:=filepath.Join(root,"value.go");other:=filepath.Join(root,"other.go")
-+ for _,p:=range []string{source,other}{if err:=os.WriteFile(p,[]byte("package fixture\n"),0600);err!=nil{t.Fatal(err)}}
-+ prefix:="2026/10/10 06:01:11 cover: "
-+ cases:=[]struct{line string;want bool}{
-+ {source+":52:14: expected operand, found '|'",true},
-+ {prefix+source+": "+source+":52:14: expected operand, found '|'",true},
-+ {prefix+source+": "+other+":52:14: expected operand, found '|'",false},
-+ {prefix+source+": open "+source+": permission denied",false},
-+ {prefix+source+": no space left on device",false},
-+ {prefix+source+": "+source+": note without a source location",false},
-+ {"unexpected wrapper: "+source+":52:14: expected operand",false},
-+ {prefix+filepath.Join(root,"missing.go")+": "+filepath.Join(root,"missing.go")+":1:2: expected operand",false},
-+ }
-+ for _,c:=range cases{if got:=ownedCompilerDiagnostic(c.line,root);got!=c.want{t.Fatalf("diagnostic %q: got %t want %t",c.line,got,c.want)}}
-+ foreign:=filepath.Join(t.TempDir(),"foreign.go");if err:=os.WriteFile(foreign,[]byte("package fixture\n"),0600);err!=nil{t.Fatal(err)}
-+ if ownedCompilerDiagnostic(prefix+foreign+": "+foreign+":1:2: expected operand",root){t.Fatal("foreign source accepted")}
 +}
 diff --git a/internal/execution/directory_lease_unix.go b/internal/execution/directory_lease_unix.go
 new file mode 100644
@@ -6356,10 +7342,10 @@ index 0000000..fbda586
 +}
 diff --git a/internal/execution/go_process_unix.go b/internal/execution/go_process_unix.go
 new file mode 100644
-index 0000000..12c7c1e
+index 0000000..094cebe
 --- /dev/null
 +++ b/internal/execution/go_process_unix.go
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,141 @@
 +//go:build darwin || linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -6377,6 +7363,19 @@ index 0000000..12c7c1e
 +
 +	"golang.org/x/sys/unix"
 +)
++
++// processCleanupContextError checks the absolute deadline as well as cancellation.
++// A context timer can be delivered after the deadline; that scheduling delay must
++// not permit a process-group proof to complete outside its cleanup allowance.
++func processCleanupContextError(ctx context.Context) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	if deadline, present := ctx.Deadline(); present && !time.Now().Before(deadline) {
++		return context.DeadlineExceeded
++	}
++	return nil
++}
 +
 +// RunGoCommand owns the private process group until all signalling finishes,
 +// before Wait reaps its leader and permits numeric PID reuse.
@@ -7750,7 +8749,7 @@ index 0000000..c2850dc
 +}
 diff --git a/internal/execution/process_group_darwin.go b/internal/execution/process_group_darwin.go
 new file mode 100644
-index 0000000..0cfe3f9
+index 0000000..76a2dfd
 --- /dev/null
 +++ b/internal/execution/process_group_darwin.go
 @@ -0,0 +1,119 @@
@@ -7796,7 +8795,7 @@ index 0000000..0cfe3f9
 +		return errors.Join(signalErr, fmt.Errorf("owned zombie proof after %d queries in %s (members=%d sample=%s): %w", attempts, time.Since(started), len(last), boundedGroupState(last), cause))
 +	}
 +	for {
-+		if err := ctx.Err(); err != nil {
++		if err := processCleanupContextError(ctx); err != nil {
 +			return failure(err)
 +		}
 +		group, err := query()
@@ -7809,7 +8808,7 @@ index 0000000..0cfe3f9
 +		if err != nil {
 +			return failure(err)
 +		}
-+		if err := ctx.Err(); err != nil {
++		if err := processCleanupContextError(ctx); err != nil {
 +			return failure(err)
 +		}
 +		if zombie {
@@ -7985,10 +8984,10 @@ index 0000000..7068198
 +}
 diff --git a/internal/execution/process_group_linux.go b/internal/execution/process_group_linux.go
 new file mode 100644
-index 0000000..6fea887
+index 0000000..733ff2d
 --- /dev/null
 +++ b/internal/execution/process_group_linux.go
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,129 @@
 +//go:build linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -8016,7 +9015,7 @@ index 0000000..6fea887
 +	defer cancel()
 +	var previous map[int]byte
 +	for {
-+		if err := ctx.Err(); err != nil {
++		if err := processCleanupContextError(ctx); err != nil {
 +			return fmt.Errorf("owned process group did not terminate: %w", err)
 +		}
 +		group, err := readLinuxProcessGroup(pid)
@@ -8036,7 +9035,7 @@ index 0000000..6fea887
 +				return fmt.Errorf("owned process %d has unknown state %q", member, state)
 +			}
 +		}
-+		if err := ctx.Err(); err != nil {
++		if err := processCleanupContextError(ctx); err != nil {
 +			return fmt.Errorf("owned process group did not terminate: %w", err)
 +		}
 +		// /proc enumeration is not atomic. A repeated terminal membership census
@@ -8103,8 +9102,12 @@ index 0000000..6fea887
 +		return 0, 0, 0, errors.New("malformed process stat state/group")
 +	}
 +	group, err = strconv.Atoi(fields[2])
-+	if err != nil || group < 0 {
-+		return 0, 0, 0, errors.New("invalid process stat group")
++	// Linux do_task_stat samples state before locking the signal handlers.
++	// __exit_signal unhashes a task before clearing sighand; a failed lock can
++	// therefore leave the exact pgid=-1 sentinel even with an earlier R/S state.
++	// It cannot identify a live member of any positive owned process group.
++	if err != nil || group < 0 && fields[2] != "-1" {
++		return 0, 0, 0, fmt.Errorf("invalid process stat group %.64q", fields[2])
 +	}
 +	return pid, group, fields[0][0], nil
 +}
@@ -8116,18 +9119,23 @@ index 0000000..6fea887
 +}
 diff --git a/internal/execution/process_group_linux_test.go b/internal/execution/process_group_linux_test.go
 new file mode 100644
-index 0000000..05d4561
+index 0000000..88ad3d3
 --- /dev/null
 +++ b/internal/execution/process_group_linux_test.go
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,92 @@
 +//go:build linux
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
 +import (
++	"context"
 +	"errors"
++	"fmt"
 +	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
 +	"syscall"
 +	"testing"
 +)
@@ -8140,13 +9148,18 @@ index 0000000..05d4561
 +	}{
 +		{"123 (worker) Z 12 123 0", 123, 123, 'Z'},
 +		{"124 (worker ) name) S 123 123 0", 124, 123, 'S'},
++		{"125 (detached) R 0 -1 -1 0", 125, -1, 'R'},
++		{"126 (detached) S 0 -1 -1 0", 126, -1, 'S'},
++		{"127 (detached) Z 0 -1 -1 0", 127, -1, 'Z'},
++		{"128 (detached) X 0 -1 -1 0", 128, -1, 'X'},
++		{"129 (kernel) I 0 0 0 0", 129, 0, 'I'},
 +	} {
 +		pid, group, state, err := linuxProcessIdentity([]byte(fixture.stat))
 +		if err != nil || pid != fixture.pid || group != fixture.group || state != fixture.state {
 +			t.Fatalf("stat=%q got=%d/%d/%q err=%v", fixture.stat, pid, group, state, err)
 +		}
 +	}
-+	for _, stat := range []string{"", "not-a-pid (worker) Z 0 123", "123 worker Z 0 123", "123 (worker) Z", "123 (worker) Z 0 unknown", "123 (worker) ZZ 0 123"} {
++	for _, stat := range []string{"", "not-a-pid (worker) Z 0 123", "123 worker Z 0 123", "123 (worker) Z", "123 (worker) Z 0 unknown", "123 (worker) ZZ 0 123", "123 (worker) R 0 -2", "123 (worker) R 0 -01", "0 (detached) S 0 -1", "invalid (detached) S 0 -1"} {
 +		if _, _, _, err := linuxProcessIdentity([]byte(stat)); err == nil {
 +			t.Fatalf("malformed process identity accepted: %q", stat)
 +		}
@@ -8166,6 +9179,41 @@ index 0000000..05d4561
 +			t.Fatalf("%v: got %t, want %t", fixture.err, got, fixture.gone)
 +		}
 +	}
++}
++
++func TestLinuxProcessGroupDiagnosticBoundsTheRejectedToken(t *testing.T) {
++	for _, token := range []string{"broken-group", strings.Repeat("9", 65536)} {
++		_, _, _, err := linuxProcessIdentity([]byte("123 (worker) S 0 " + token))
++		if err == nil || !strings.Contains(err.Error(), token[:min(len(token), 16)]) || len(err.Error()) > 400 {
++			t.Fatalf("group diagnostic missing or unbounded: length=%d error=%v", len(fmt.Sprint(err)), err)
++		}
++	}
++}
++
++func TestLinuxOwnedFastExitsKeepTheirLeaderUntilGroupProof(t *testing.T) {
++	directory := t.TempDir()
++	for index := range 32 {
++		ctx, cancel := context.WithCancel(t.Context())
++		command := exec.CommandContext(ctx, "/bin/true")
++		stdout, err := os.Create(filepath.Join(directory, fmt.Sprintf("%d.stdout", index)))
++		if err != nil {
++			cancel()
++			t.Fatal(err)
++		}
++		stderr, err := os.Create(filepath.Join(directory, fmt.Sprintf("%d.stderr", index)))
++		if err != nil {
++			cancel()
++			_ = stdout.Close()
++			t.Fatal(err)
++		}
++		runErr, cleanupErr, started, settled := RunGoCommand(ctx, command, stdout, stderr)
++		closeErr := errors.Join(stdout.Close(), stderr.Close())
++		cancel()
++		if !started || !settled || runErr != nil || cleanupErr != nil || closeErr != nil || command.ProcessState == nil || !command.ProcessState.Success() {
++			t.Fatalf("owned fast exit %d lost process-group proof: started=%t settled=%t run=%v cleanup=%v close=%v", index, started, settled, runErr, cleanupErr, closeErr)
++		}
++	}
++	t.Log("verified 32 distinct native fast exits with retained group leaders")
 +}
 diff --git a/internal/execution/sparse_unix_test.go b/internal/execution/sparse_unix_test.go
 new file mode 100644
@@ -8306,10 +9354,10 @@ index 0000000..a8bce09
 +}
 diff --git a/internal/execution/test_judgment.go b/internal/execution/test_judgment.go
 new file mode 100644
-index 0000000..f0cb940
+index 0000000..9650f3c
 --- /dev/null
 +++ b/internal/execution/test_judgment.go
-@@ -0,0 +1,342 @@
+@@ -0,0 +1,344 @@
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
 +package execution
 +
@@ -8573,14 +9621,16 @@ index 0000000..f0cb940
 +	if match == nil {
 +		return false
 +	}
-+	path := match[1]
-+	if !filepath.IsAbs(path) {
-+		path = filepath.Join(root, path)
-+	}
-+	// Go's coverage compiler reports physical paths even when the worker root is an alias.
++	// Go reports paths relative to its physical working directory, even when
++	// the worker root is an alias. Resolve that root before cleaning any ".."
++	// components; lexical traversal through the alias can name another path.
 +	physicalRoot, err := filepath.EvalSymlinks(root)
 +	if err != nil {
 +		return false
++	}
++	path := match[1]
++	if !filepath.IsAbs(path) {
++		path = filepath.Join(physicalRoot, path)
 +	}
 +	physicalSource, err := filepath.EvalSymlinks(path)
 +	if err != nil {
@@ -8654,10 +9704,10 @@ index 0000000..f0cb940
 +}
 diff --git a/internal/execution/zombie_wait_darwin_test.go b/internal/execution/zombie_wait_darwin_test.go
 new file mode 100644
-index 0000000..a24ea18
+index 0000000..81cb988
 --- /dev/null
 +++ b/internal/execution/zombie_wait_darwin_test.go
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,202 @@
 +//go:build darwin
 +
 +// Copyright 2026. Licensed under the Apache License, Version 2.0.
@@ -8821,6 +9871,43 @@ index 0000000..a24ea18
 +	})
 +	if err != nil || !observedExiting || !observedZombie {
 +		t.Fatalf("owned terminal transition: %v exiting%t zombie%t", err, observedExiting, observedZombie)
++	}
++}
++
++func TestZombieProofRejectsOverdueDeadlineBeforeTimerDelivery(t *testing.T) {
++	ctx := deadlineWithoutCancellationContext{Context: context.Background(), deadline: time.Now().Add(-time.Second)}
++	calls := 0
++	err := waitForZombieGroup(ctx, 123, unix.EPERM, func() ([]unix.KinfoProc, error) {
++		calls++
++		leader := unix.KinfoProc{}
++		leader.Proc.P_pid = 123
++		leader.Eproc.Pgid = 123
++		leader.Proc.P_stat = darwinZombieState
++		return []unix.KinfoProc{leader}, nil
++	})
++	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, unix.EPERM) || calls != 0 {
++		t.Fatalf("overdue proof accepted before timer delivery: calls=%d error=%v", calls, err)
++	}
++}
++
++func TestZombieProofRejectsLateQueryBeforeTimerDelivery(t *testing.T) {
++	ctx := deadlineWithoutCancellationContext{Context: context.Background(), deadline: time.Now().Add(time.Second)}
++	calls := 0
++	err := waitForZombieGroup(ctx, 123, unix.EPERM, func() ([]unix.KinfoProc, error) {
++		calls++
++		// Deliver a valid proof only after the fixed deadline. The modeled timer
++		// callback remains unpublished, so Err still returns nil on completion.
++		timer := time.NewTimer(time.Until(ctx.deadline))
++		defer timer.Stop()
++		<-timer.C
++		leader := unix.KinfoProc{}
++		leader.Proc.P_pid = 123
++		leader.Eproc.Pgid = 123
++		leader.Proc.P_stat = darwinZombieState
++		return []unix.KinfoProc{leader}, nil
++	})
++	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, unix.EPERM) || calls != 1 || ctx.Err() != nil {
++		t.Fatalf("late proof accepted before timer delivery: calls=%d context=%v error=%v", calls, ctx.Err(), err)
 +	}
 +}
 diff --git a/internal/mutator/mutator.go b/internal/mutator/mutator.go

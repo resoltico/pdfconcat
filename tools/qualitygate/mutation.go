@@ -64,7 +64,18 @@ func runMutation(ctx context.Context, args []string) (resultErr error) {
 		return err
 	}
 
-	snapshot, err := snapshotTree(ctx, root)
+	scratch, err := newCampaignScratch(root, "qualitygate-mutation-")
+	if err != nil {
+		return err
+	}
+	watch := newMutationStorageWatch(ctx, scratch, options.workers)
+	options.storage = watch
+	defer func() { finishMutationStorage(&resultErr, scratch, watch, options.keep && options.snapshot != "") }()
+	ctx = watch.ctx
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	snapshot, err := snapshotTreeAt(ctx, root, scratch.path)
 	if err != nil {
 		return err
 	}
@@ -73,9 +84,8 @@ func runMutation(ctx context.Context, args []string) (resultErr error) {
 
 	if options.keep {
 		log.Printf("mutation: snapshot kept at %s", snapshot)
-	} else {
-		defer cleanupMutationSnapshot(&resultErr, snapshot)
 	}
+	watch.setSnapshot(snapshot)
 
 	registry, err := repopolicy.LoadRegistry(filepath.Join(snapshot, registryName))
 	if err != nil {
@@ -96,17 +106,6 @@ func runMutation(ctx context.Context, args []string) (resultErr error) {
 		result.Problems,
 		fmt.Sprintf("%d mutants judged, none unkilled beyond %d registry-accepted", result.Evaluated, result.Accepted),
 	)
-}
-
-// cleanupMutationSnapshot preserves the campaign verdict and makes unsettled owned cleanup fail.
-func cleanupMutationSnapshot(result *error, snapshot string) {
-	if errors.Is(*result, errMutationCleanupUncertain) {
-		*result = errors.Join(*result, fmt.Errorf("retain mutation snapshot %s: cleanup ownership was not proved", snapshot))
-		return
-	}
-	if err := os.RemoveAll(snapshot); err != nil {
-		*result = errors.Join(*result, fmt.Errorf("remove owned mutation snapshot %s: %w", snapshot, err))
-	}
 }
 
 // mutateSnapshot runs gremlins in the snapshot and judges its report.
@@ -134,6 +133,11 @@ func mutateSnapshot(ctx context.Context, options *mutationOptions, registry *rep
 	reportFile := options.report
 	if reportFile == "" {
 		reportFile = filepath.Join(snapshot, "mutation-report.json")
+	}
+	if options.storage != nil {
+		if err = options.storage.setReport(reportFile, options.report == ""); err != nil {
+			return nil, err
+		}
 	}
 	scope, err = partitionMutationScope(ctx, scope, options, reportFile)
 	if err != nil {
@@ -330,6 +334,9 @@ func executeMutation(
 	if envErr != nil {
 		return mutationEvidence{}, envErr
 	}
+	if options.storage != nil {
+		env = append(env, options.storage.environment()...)
+	}
 
 	discoveryArgs := append(gremlinsArguments(discoveryFile, options, excludes), "--dry-run", ".")
 
@@ -338,9 +345,18 @@ func executeMutation(
 		env: env,
 	}).runMutation(ctx, options.maxDuration)
 	if err != nil {
-		return mutationEvidence{}, fmt.Errorf("mutation discovery failed: %w", mutationCommandFailure(discoveryFile, err))
+		failure := mutationCommandFailure(discoveryFile, err)
+		if options.storage != nil {
+			failure = errors.Join(failure, options.storage.checkpoint(failure))
+		}
+		return mutationEvidence{}, fmt.Errorf("mutation discovery failed: %w", failure)
 	}
 
+	if options.storage != nil {
+		if err = options.storage.checkpoint(nil); err != nil {
+			return mutationEvidence{}, err
+		}
+	}
 	discovery, err := readMutationDiscovery(ctx, discoveryFile, hostFiles)
 	if err != nil {
 		return mutationEvidence{}, err
@@ -352,9 +368,18 @@ func executeMutation(
 		env: env,
 	}).runMutation(ctx, options.maxDuration)
 	if err != nil {
-		return mutationEvidence{}, fmt.Errorf("mutation tool failure (infrastructure, not a pass): %w", mutationCommandFailure(reportFile, err))
+		failure := mutationCommandFailure(reportFile, err)
+		if options.storage != nil {
+			failure = errors.Join(failure, options.storage.checkpoint(failure))
+		}
+		return mutationEvidence{}, fmt.Errorf("mutation tool failure (infrastructure, not a pass): %w", failure)
 	}
 
+	if options.storage != nil {
+		if err = options.storage.checkpoint(nil); err != nil {
+			return mutationEvidence{}, err
+		}
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return mutationEvidence{}, fmt.Errorf("mutation campaign canceled: %w", ctxErr)
 	}

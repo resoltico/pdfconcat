@@ -298,7 +298,7 @@ func TestReadFailuresAndInterruption(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = report.Decode(ctx, savedReport, report.ReaderRequiringStorage(strings.NewReader(completeCheck)))
+	_, err = report.Decode(report.DecoderTestContext(ctx, t), savedReport, report.ReaderRequiringStorage(strings.NewReader(completeCheck)))
 
 	found, _ = report.AsError(err)
 	if found.Diagnostic.Code != report.CodeInterrupted || found.Status().ExitCode() != 130 || !errors.Is(err, context.Canceled) {
@@ -307,7 +307,7 @@ func TestReadFailuresAndInterruption(t *testing.T) {
 
 	// A reader that cancels while delivering the last bytes: the token pass notices it.
 	ctx, cancel = context.WithCancel(context.Background())
-	_, err = report.Decode(ctx, savedReport, report.ReaderRequiringStorage(&cancelAfterRead{cancel: cancel, data: []byte(completeCheck)}))
+	_, err = report.Decode(report.DecoderTestContext(ctx, t), savedReport, report.ReaderRequiringStorage(&cancelAfterRead{cancel: cancel, data: []byte(completeCheck)}))
 
 	if errorCode(err) != report.CodeInterrupted {
 		t.Errorf("cancel during read: %v", err)

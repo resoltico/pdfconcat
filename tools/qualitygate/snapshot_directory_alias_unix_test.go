@@ -33,7 +33,7 @@ func TestSnapshotCompilerDirectoryAliasesPreservePhysicalContainment(t *testing.
 	}
 
 	pkg := &discoveredPackage{Dir: alias, EmbedFiles: []string{snapshotDataFile}}
-	if err := validatePackageEmbeds(source, snapshot, resolved, pkg, map[string]bool{}); err != nil {
+	if err := validatePackageEmbeds(t.Context(), source, snapshot, resolved, pkg, map[string]bool{}); err != nil {
 		t.Fatalf("same physical compiler directory rejected: %v", err)
 	}
 
@@ -43,13 +43,13 @@ func TestSnapshotCompilerDirectoryAliasesPreservePhysicalContainment(t *testing.
 	}
 
 	pkg.Dir = outsideAlias
-	if err := validatePackageEmbeds(source, snapshot, resolved, pkg, map[string]bool{}); err == nil ||
+	if err := validatePackageEmbeds(t.Context(), source, snapshot, resolved, pkg, map[string]bool{}); err == nil ||
 		!strings.Contains(err.Error(), "compiler asset outside snapshot source") {
 		t.Fatalf("outside compiler directory alias accepted: %v", err)
 	}
 
 	pkg.Dir = filepath.Join(source, "missing-directory")
-	if err := validatePackageEmbeds(source, snapshot, resolved, pkg, map[string]bool{}); err == nil ||
+	if err := validatePackageEmbeds(t.Context(), source, snapshot, resolved, pkg, map[string]bool{}); err == nil ||
 		!strings.Contains(err.Error(), "resolve compiler asset package directory") {
 		t.Fatalf("unresolved compiler directory accepted: %v", err)
 	}

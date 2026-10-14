@@ -55,6 +55,8 @@ commands:
   ci-required   reject omitted, failed, cancelled or skipped mandatory CI dependencies
   coverage      run unit and executable-subprocess coverage, merge, report raw statement coverage
   fuzz          run every fuzz target on macOS/Linux (-time duration|Nx)
+  record-mutation-tools record verified native tool delivery for this workflow run
+  verify-mutation-tools verify the trusted native tool delivery before execution
   mutation      run mutation testing in a clean snapshot and judge it against the registry
   controls      prove the tests detect deliberate mutations listed in tools/mutation-controls.yml
   secrets       scan current source and reachable history for credentials
@@ -154,6 +156,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return runCoverage(ctx, rest)
 	case fuzzCommand:
 		return runFuzz(ctx, rest)
+	case "record-mutation-tools", "verify-mutation-tools":
+		return runPreparedMutationTools(ctx, rest, command == "record-mutation-tools")
 	case mutationCommand:
 		return runMutation(ctx, rest)
 	case controlsCommand:

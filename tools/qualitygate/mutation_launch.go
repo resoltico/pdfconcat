@@ -72,6 +72,9 @@ func (c *command) runMutation(ctx context.Context, duration time.Duration) error
 	process.WaitDelay = mutationGracePeriod
 	process.Cancel = func() error {
 		if runtime.GOOS == windowsOS {
+			if errors.Is(context.Cause(ctx), errCampaignResourceStop) {
+				return process.Process.Kill()
+			}
 			return fmt.Errorf("mutation cancellation cannot forward Interrupt on Windows: %w", errors.ErrUnsupported)
 		}
 

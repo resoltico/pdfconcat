@@ -88,7 +88,13 @@ func (w *mutationStorageWatch) setReport(path string, defaultReport bool) error 
 		return err
 	}
 	parent := capture.NativeParent(bound)
-	relative, relErr := filepath.Rel(w.scratch.path, parent)
+	owned, err := capture.NativeArtifactPath(w.scratch.path + string(filepath.Separator) + "campaign-directory-anchor")
+	if err != nil {
+		return err
+	}
+	// Go workspace paths may use ordinary Windows spelling; containment compares
+	// both parents in the native namespace without changing external report paths.
+	relative, relErr := filepath.Rel(capture.NativeParent(owned), parent)
 	if relErr == nil && filepath.IsLocal(relative) {
 		w.mutex.Lock()
 		w.reportDefault = defaultReport

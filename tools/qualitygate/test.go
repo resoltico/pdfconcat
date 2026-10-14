@@ -247,9 +247,7 @@ func runTests(ctx context.Context, args []string) (result error) {
 		stage.compilerEquivalent(ctx, root, patterns, options),
 	)
 	judged = errors.Join(judged, rejectForeignSkips(outcome, stage.sources))
-	evidence.finish(judged)
-
-	return judged
+	return errors.Join(judged, evidence.finish(judged))
 }
 
 // executeWithEvidence runs go test -json and collects its events.
@@ -460,9 +458,7 @@ func runFuzzTarget(ctx context.Context, root string, target fuzzTarget, duration
 		testOptions{run: "^$", require: []string{target.name}},
 		errors.Join(runErr, evidence.closeFiles()),
 	)
-	evidence.finish(judged)
-
-	return errors.Join(judged, runErr)
+	return errors.Join(judged, runErr, evidence.finish(judged))
 }
 
 // recordLifecycle verifies each terminal event against its preceding start/run event.

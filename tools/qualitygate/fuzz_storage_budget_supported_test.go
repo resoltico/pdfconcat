@@ -274,7 +274,9 @@ func TestFuzzStorageBudgetCancelsJoinsAndRetainsEvidence(t *testing.T) {
 			runErr := run.run(watch.ctx)
 			watchErr := watch.finish(runErr)
 			result := errors.Join(runErr, watchErr, evidence.closeFiles())
-			evidence.finish(result)
+			if err = evidence.finish(result); err != nil {
+				t.Fatal(err)
+			}
 			if size > 1024 {
 				if !errors.Is(watchErr, errGate) || runErr == nil || ctx.Err() != nil {
 					t.Fatalf("resource threshold did not independently fail child: %v/%v/%v", runErr, watchErr, ctx.Err())

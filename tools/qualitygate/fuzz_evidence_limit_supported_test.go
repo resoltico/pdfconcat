@@ -72,7 +72,9 @@ func TestFuzzEvidenceBudgetCancelsAndJoinsRealChildRetainingPartialOutput(t *tes
 		t.Fatal(err)
 	}
 	requireFuzzWorkerExited(t, pid)
-	evidence.finish(runErr)
+	if err = evidence.finish(runErr); err != nil {
+		t.Fatal(err)
+	}
 	var retained int64
 	for _, name := range []string{evidence.path, evidence.path + ".stderr"} {
 		info, statErr := os.Stat(name)

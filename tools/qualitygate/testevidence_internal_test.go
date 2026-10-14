@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,7 +71,9 @@ func TestEventEvidenceSurvivesMalformedOversizedOutputAndReapsChild(t *testing.T
 	}
 
 	assertRawEventEvidence(t, file)
-	evidence.finish(runErr)
+	if err = evidence.finish(runErr); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err = os.Stat(file); err != nil {
 		t.Fatal("failed evidence removed")
@@ -93,12 +96,100 @@ func TestTemporaryEvidenceRemovedOnlyAfterPassingGate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	evidence.finish(nil)
+	if err = evidence.finish(nil); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, file := range []string{evidence.path, evidence.path + ".stderr"} {
 		if _, err = os.Stat(file); !os.IsNotExist(err) {
 			t.Fatalf("passing temporary evidence retained: %v", err)
 		}
+	}
+}
+
+func TestEvidenceCompanionFailureRemovesOnlyNewStdout(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	const retained = "existing stderr evidence"
+	if err := os.WriteFile(path+".stderr", []byte(retained), fileMode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openTestEvidence(path); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("occupied stderr accepted: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty stdout orphan retained: %v", err)
+	}
+	if data, err := readInRoot(filepath.Dir(path), filepath.Base(path)+".stderr"); err != nil || string(data) != retained {
+		t.Fatalf("existing stderr changed: %q/%v", data, err)
+	}
+}
+
+func TestEvidenceCleanupRejectsNonemptyDirectoryWithoutRemovingData(t *testing.T) {
+	t.Parallel()
+	evidence, err := openTestEvidence("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { removeAll(evidence.path) })
+	t.Cleanup(func() { removeAll(evidence.path + ".stderr") })
+	if err = evidence.closeFiles(); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(evidence.path); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Mkdir(evidence.path, dirMode); err != nil {
+		t.Fatal(err)
+	}
+	retained := filepath.Join(evidence.path, "retained")
+	if err = os.WriteFile(retained, []byte("preserve substituted directory data"), fileMode); err != nil {
+		t.Fatal(err)
+	}
+	if err = evidence.finish(nil); err == nil || !strings.Contains(err.Error(), evidence.path) {
+		t.Fatalf("cleanup failure lacks exact path: %v", err)
+	}
+	if data, readErr := readInRoot(evidence.path, filepath.Base(retained)); readErr != nil || string(data) != "preserve substituted directory data" {
+		t.Fatalf("cleanup recursively removed unrelated data: %q/%v", data, readErr)
+	}
+}
+
+func TestEvidenceKeepsExplicitSuccessAndImplicitFailure(t *testing.T) {
+	t.Parallel()
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			t.Parallel()
+			requested := ""
+			var failure error
+			if explicit {
+				requested = filepath.Join(t.TempDir(), "events.jsonl")
+			} else {
+				failure = errors.New("failed target")
+			}
+			evidence, err := openTestEvidence(requested)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { removeAll(evidence.path) })
+			t.Cleanup(func() { removeAll(evidence.path + ".stderr") })
+			if _, err = evidence.stdout.WriteString("stdout evidence"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = evidence.stderr.WriteString("stderr evidence"); err != nil {
+				t.Fatal(err)
+			}
+			if err = evidence.closeFiles(); err != nil {
+				t.Fatal(err)
+			}
+			if err = evidence.finish(failure); err != nil {
+				t.Fatal(err)
+			}
+			for path, want := range map[string]string{evidence.path: "stdout evidence", evidence.path + ".stderr": "stderr evidence"} {
+				if data, readErr := readInRoot(filepath.Dir(path), filepath.Base(path)); readErr != nil || string(data) != want {
+					t.Fatalf("evidence lost: %s: %q/%v", path, data, readErr)
+				}
+			}
+		})
 	}
 }
 

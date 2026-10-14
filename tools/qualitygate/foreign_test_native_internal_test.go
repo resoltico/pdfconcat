@@ -68,9 +68,7 @@ func runForeignGrayFixture(t *testing.T, root string, patterns []string, stage *
 	}
 
 	judged := errors.Join(judgeTests(outcome, patterns, options, runErr), rejectForeignSkips(outcome, stage.sources))
-	evidence.finish(judged)
-
-	return outcome, judged
+	return outcome, errors.Join(judged, evidence.finish(judged))
 }
 
 func exerciseForeignFixtureControls(t *testing.T, root string, stage *foreignTestStage, patterns []string) {

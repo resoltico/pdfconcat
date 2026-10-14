@@ -182,7 +182,7 @@ func executeNativeProgress(
 		judgeTests(outcome, []string{module + "/cmd/pdfconcat"}, options, runErr),
 		nativeProgressCases(outcome, module),
 	)
-	evidence.finish(judged)
+	judged = errors.Join(judged, evidence.finish(judged))
 
 	if judged != nil {
 		return nil, judged

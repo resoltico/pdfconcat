@@ -42,7 +42,7 @@ func openTestEvidence(requested string) (*testEvidence, error) {
 
 	stderr, err := os.OpenFile(file.Name()+".stderr", os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("create test stderr evidence: %w", err), file.Close())
+		return nil, errors.Join(fmt.Errorf("create test stderr evidence: %w", err), file.Close(), os.Remove(file.Name()))
 	}
 
 	return &testEvidence{stdout: file, stderr: stderr, path: file.Name(), explicit: requested != ""}, nil
@@ -52,14 +52,16 @@ func (e *testEvidence) closeFiles() error {
 	return errors.Join(e.stdout.Close(), e.stderr.Close())
 }
 
-func (e *testEvidence) finish(result error) {
+func (e *testEvidence) finish(result error) error {
 	if e.explicit || result != nil {
 		log.Printf("test: JSON event evidence: %s; process stderr: %s.stderr", e.path, e.path)
-		return
+		return nil
 	}
 
-	removeAll(e.path)
-	removeAll(e.path + ".stderr")
+	if err := errors.Join(os.Remove(e.path), os.Remove(e.path+".stderr")); err != nil {
+		return fmt.Errorf("remove implicit test evidence: %w", err)
+	}
+	return nil
 }
 
 // createEvidenceFile confines creation to the selected evidence directory without overwriting files.

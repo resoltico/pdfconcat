@@ -11,6 +11,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// Publication identity and rename handles permit concurrent data access and deletion.
+const publicationFileShareMode = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
+
 // A metadata-only handle shares deletion so rename remains legal after the writer closes.
 func openReportLease(path string) (*os.File, error) {
 	name, err := windows.UTF16PtrFromString(path)
@@ -18,7 +21,7 @@ func openReportLease(path string) (*os.File, error) {
 		return nil, fmt.Errorf("encode report pin path: %w", err)
 	}
 
-	handle, err := windows.CreateFile(name, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+	handle, err := windows.CreateFile(name, 0, publicationFileShareMode,
 		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open report identity pin: %w", err)
@@ -37,8 +40,8 @@ func checkReportNamespace(live, _ os.FileInfo, path string) error {
 	info, statErr := current.Stat()
 
 	closeErr := current.Close()
-	if statErr != nil || closeErr != nil {
-		return fmt.Errorf("identify current report namespace: %w", errors.Join(statErr, closeErr))
+	if joinedErr := errors.Join(statErr, closeErr); joinedErr != nil {
+		return fmt.Errorf("identify current report namespace: %w", joinedErr)
 	}
 
 	return compareReportObjects(live, info, path)

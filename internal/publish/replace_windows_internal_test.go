@@ -8,11 +8,13 @@ package publish
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -58,12 +60,19 @@ func checkPinnedReplacement(t *testing.T, destination string) {
 	}
 
 	sourceLease := staged.owner.file
+	concurrent := openConcurrentReportOwner(t, staged.Path(), windows.GENERIC_READ|windows.GENERIC_WRITE)
 	if err := staged.Publish(t.Context(), Policy{Overwrite: true}); err != nil {
 		t.Fatal(err)
 	}
 
 	if get(t, destination) != replacementContent {
 		t.Fatal("replacement bytes were not published")
+	}
+	currentOwner := openConcurrentReportOwner(t, destination, windows.GENERIC_READ|windows.GENERIC_WRITE)
+	current, currentErr := currentOwner.Stat()
+	concurrentInfo, concurrentErr := concurrent.Stat()
+	if currentErr != nil || concurrentErr != nil || !os.SameFile(current, concurrentInfo) {
+		t.Fatalf("concurrent staged owner lost published identity: %v / %v", currentErr, concurrentErr)
 	}
 
 	pinned, pinErr := lease.Stat()
@@ -76,6 +85,27 @@ func checkPinnedReplacement(t *testing.T, destination string) {
 	}
 
 	requireLeaseClosed(t, sourceLease)
+}
+
+func openConcurrentReportOwner(t *testing.T, path string, access uint32) *os.File {
+	t.Helper()
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(name, access,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := os.NewFile(uintptr(handle), path)
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return file
 }
 
 func TestNoClobberPreservesPinnedDestination(t *testing.T) {
@@ -129,35 +159,81 @@ func TestRenameInformationPreservesUTF16NameAndNativeAlignment(t *testing.T) {
 func checkRenameBuffer(t *testing.T, destination string) {
 	t.Helper()
 
-	buffer, bufferErr := renameInformationBuffer(destination)
+	buffer, bufferSize, bufferErr := renameInformationBuffer(destination)
 	if bufferErr != nil {
 		t.Fatal(bufferErr)
+	}
+	if uint64(len(buffer)) != uint64(bufferSize) {
+		t.Fatalf("native buffer count = %d, allocated %d bytes", bufferSize, len(buffer))
 	}
 
 	var header renameInformation
 
 	offset := int(unsafe.Offsetof(header.FileName))
+	// FILE_RENAME_INFO uses the Windows 64-bit HANDLE alignment on both supported targets.
+	if offset != 20 || unsafe.Offsetof(header.RootDirectory) != 8 ||
+		unsafe.Offsetof(header.FileNameLength) != 16 || unsafe.Sizeof(header) != 24 {
+		t.Fatal("rename information no longer matches the native FILE_RENAME_INFO layout")
+	}
 	nameBytes := int(binary.LittleEndian.Uint32(buffer[unsafe.Offsetof(header.FileNameLength):]))
+	absolute, absoluteErr := filepath.Abs(destination)
+	if absoluteErr != nil {
+		t.Fatal(absoluteErr)
+	}
+	wantUnits := utf16.Encode([]rune(absolute))
+	if nameBytes != 2*len(wantUnits) {
+		t.Fatalf("native name byte count = %d, want %d without the terminating NUL", nameBytes, 2*len(wantUnits))
+	}
+	if len(buffer) != offset+nameBytes+2 {
+		t.Fatalf("rename buffer has %d bytes, want %d through the terminating NUL", len(buffer), offset+nameBytes+2)
+	}
 
-	if len(buffer) < offset+nameBytes+2 || binary.LittleEndian.Uint16(buffer[offset+nameBytes:]) != 0 {
+	if binary.LittleEndian.Uint16(buffer[offset+nameBytes:]) != 0 {
 		t.Fatal("native path has no in-buffer terminating NUL")
 	}
 
-	units := make([]uint16, nameBytes/2)
-	for index := range units {
-		units[index] = binary.LittleEndian.Uint16(buffer[offset+index*2:])
-	}
-
-	if windows.UTF16ToString(units) != destination {
-		t.Fatalf("incorrect UTF16 destination: %q", windows.UTF16ToString(units))
+	for index, unit := range wantUnits {
+		if actual := binary.LittleEndian.Uint16(buffer[offset+index*2:]); actual != unit {
+			t.Fatalf("UTF16 unit %d = %04x, want %04x", index, actual, unit)
+		}
 	}
 
 	if binary.LittleEndian.Uint32(buffer) != 3 {
 		t.Fatal("rename flags do not preserve open target handles")
 	}
 
-	if _, err := renameInformationBuffer("rename\x00target"); err == nil {
+	if _, _, err := renameInformationBuffer("rename\x00target"); err == nil {
 		t.Fatal("NUL path accepted")
+	}
+}
+
+func TestRenameInformationSizesRespectNativeAndAllocationBounds(t *testing.T) {
+	t.Parallel()
+
+	// Win64 FILE_RENAME_INFO has a 20-byte name offset and a 24-byte header.
+	// The DWORD buffer count must also include the two-byte terminating NUL.
+	for _, item := range []struct {
+		units     uint64
+		nameBytes uint32
+		buffer    uint32
+	}{
+		{0, 0, 24},
+		{1, 2, 24},
+		{2, 4, 26},
+		{2_147_483_635, 4_294_967_270, 4_294_967_292},
+		{2_147_483_636, 4_294_967_272, 4_294_967_294},
+	} {
+		nameBytes, bufferSize, err := renameInformationSizes(item.units)
+		if err != nil || nameBytes != item.nameBytes || bufferSize != item.buffer {
+			t.Fatalf("%d UTF16 units: got %d/%d/%v, want %d/%d", item.units,
+				nameBytes, bufferSize, err, item.nameBytes, item.buffer)
+		}
+	}
+	for _, units := range []uint64{2_147_483_637, math.MaxUint64} {
+		nameBytes, bufferSize, err := renameInformationSizes(units)
+		if !errors.Is(err, errRenameInformationTooLarge) || nameBytes != 0 || bufferSize != 0 {
+			t.Fatalf("unrepresentable %d UTF16 units accepted: %d/%d/%v", units, nameBytes, bufferSize, err)
+		}
 	}
 }
 

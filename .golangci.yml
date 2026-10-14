@@ -284,6 +284,12 @@ linters:
           - gosec
         path: ^tools/qualitygate/process_fuzz\.go$
         text: 'G204: Subprocess launched with a potential tainted input or cmd arguments'
+      # These read-only native/ordinary directory observations prove identical
+      # Windows workspace identity before selecting the Go-compatible spelling.
+      - linters:
+          - gosec
+        path: ^tools/qualitygate/campaign_scratch\.go$
+        text: 'G703: Path traversal via taint analysis'
       # Campaign resource guards query the native volume; the Windows control
       # independently witnesses that its real owned producer exited.
       - linters:

@@ -182,6 +182,8 @@ func TestToolVersionIssuesRejectsDrift(t *testing.T) {
 	good := map[string]string{
 		versionEnv: "v2.14.0", "GORELEASER_VERSION": "v2.18.2", "GOVULNCHECK_VERSION": "v1.8.0",
 		gremlinsVersionEnv: "v0.6.0", "GITLEAKS_VERSION": "v8.30.1", "ACTIONLINT_VERSION": "v1.7.12",
+		"QPDF_WINDOWS_VERSION": "12.4.2", "POPPLER_WINDOWS_RELEASE": "26.09.0-0",
+		"QPDF_WINDOWS_SHA256": strings.Repeat("a", 64), "POPPLER_WINDOWS_SHA256": strings.Repeat("b", 64),
 	}
 	config := "# yaml-language-server: $schema=https://raw.githubusercontent.com/goreleaser/goreleaser/v2.18.2/www/static/schema.json\n"
 

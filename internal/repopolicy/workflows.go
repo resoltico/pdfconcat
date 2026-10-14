@@ -21,6 +21,8 @@ var (
 	commitPin          = regexp.MustCompile(`^[^@\s]+@[0-9a-f]{40}$`)
 	literalVersion     = regexp.MustCompile(`@v\d+\.\d+`)
 	exactVersion       = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	windowsRelease     = regexp.MustCompile(`^\d+\.\d+\.\d+-\d+$`)
+	lowerSHA256        = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	toolEnvironmentKey = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 )
 
@@ -219,6 +221,17 @@ func ToolVersionIssues(versions map[string]string, goreleaserConfig string) []st
 	} {
 		if !exactVersion.MatchString(versions[key]) {
 			problems = append(problems, fmt.Sprintf("tools/versions.env: %s=%q is not an exact vX.Y.Z version", key, versions[key]))
+		}
+	}
+
+	if !exactVersion.MatchString("v"+versions["QPDF_WINDOWS_VERSION"]) ||
+		!windowsRelease.MatchString(versions["POPPLER_WINDOWS_RELEASE"]) {
+		problems = append(problems, "tools/versions.env: Windows oracle archives require exact releases")
+	}
+
+	for _, key := range []string{"QPDF_WINDOWS_SHA256", "POPPLER_WINDOWS_SHA256"} {
+		if !lowerSHA256.MatchString(versions[key]) {
+			problems = append(problems, "tools/versions.env: "+key+" must be a lower-case SHA256 digest")
 		}
 	}
 

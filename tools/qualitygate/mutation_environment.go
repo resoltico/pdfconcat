@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/repopolicy"
 )
@@ -37,5 +39,29 @@ func mutationCheckerEnvironment(binary string) ([]string, error) {
 		return nil, fmt.Errorf("resolve mutation checker path: %w", err)
 	}
 
-	return []string{readonlyGoFlags, "PATH=" + filepath.Dir(absolute) + string(os.PathListSeparator) + os.Getenv("PATH")}, nil
+	paths := []string{filepath.Dir(absolute)}
+	if runtime.GOOS == windowsOS {
+		qpdf, poppler := os.Getenv("PDFCONCAT_QPDF_BIN"), os.Getenv("PDFCONCAT_POPPLER_BIN")
+		if (qpdf == "") != (poppler == "") {
+			return nil, fmt.Errorf("%w: Windows oracle directories must be provided together", errGate)
+		}
+		if qpdf != "" {
+			for _, directory := range []string{qpdf, poppler} {
+				if !filepath.IsAbs(directory) {
+					return nil, fmt.Errorf("%w: Windows oracle directory must be absolute: %q", errGate, directory)
+				}
+				root, openErr := os.OpenRoot(directory)
+				if openErr != nil {
+					return nil, fmt.Errorf("%w: open Windows oracle directory: %w", errGate, openErr)
+				}
+				if closeErr := root.Close(); closeErr != nil {
+					return nil, fmt.Errorf("%w: close Windows oracle directory: %w", errGate, closeErr)
+				}
+			}
+			paths = append(paths, qpdf, poppler)
+		}
+	}
+	paths = append(paths, os.Getenv("PATH"))
+
+	return []string{readonlyGoFlags, "PATH=" + strings.Join(paths, string(os.PathListSeparator))}, nil
 }

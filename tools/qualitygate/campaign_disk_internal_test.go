@@ -267,8 +267,13 @@ func TestMutationStorageHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeLogged(root)
-	for range 20 {
+	for {
 		if err = root.WriteFile("heartbeat", []byte("producer active"), fileMode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := root.Lstat("release"); err == nil {
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
 		}
 		time.Sleep(5 * time.Millisecond)

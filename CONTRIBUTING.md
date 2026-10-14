@@ -2,7 +2,9 @@
 
 ## Get started
 
-Prerequisites: Go (the version in the `go` directive of `go.mod`, the one source of the toolchain version), Git, a native C compiler for the Darwin descriptor sampler, Unix capped scale launcher and patched development-tool tests on race-supported platforms, and Python 3 (a documentation test byte-compiles the documented Python recipe and fails without it). For the independent PDF checks, qpdf and Poppler are optional locally: tests that need them skip when they are missing and fail when `PDFCONCAT_REQUIRE_QA_TOOLS=1` is set, as CI does; `tools/versions.env` states the minimum versions.
+Prerequisites: Go (the version in the `go` directive of `go.mod`, the one source of the toolchain version), Git, a native C compiler for the Darwin descriptor sampler, Unix capped scale launcher and patched development-tool tests on race-supported platforms, and Python 3 (a documentation test byte-compiles the documented Python recipe and fails without it). Windows contributor tests also require Git Bash and PowerShell (`pwsh`). For the independent PDF checks, qpdf and Poppler are optional locally: tests that need them skip when they are missing and fail when `PDFCONCAT_REQUIRE_QA_TOOLS=1` is set, as CI does; `tools/versions.env` states the minimum versions.
+
+Windows CI downloads the exact qpdf project ZIP and the conda-forge Poppler Windows distribution with dependencies, verifies their pinned SHA256 before extraction, and checks all four oracle executables and exact versions. Each archive download is capped at 64 MiB and 120 seconds; this is a download bound, not a runner disk quota.
 
 ```text
 git clone https://github.com/resoltico/pdfconcat

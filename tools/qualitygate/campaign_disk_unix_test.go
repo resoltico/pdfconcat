@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -104,7 +105,22 @@ func TestMutationOpaqueLiveSampleKeepsCapacityObservationsAndRequiresFinalAccess
 	if err = scratch.root.Chmod("snapshot/opaque", 0); err != nil {
 		t.Fatal(err)
 	}
-	watch := startMutationStorageWatch(t.Context(), scratch, campaignDiskUsage{4096, 100}, 0, 2*time.Millisecond, time.Hour)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	watch := startMutationStorageWatch(ctx, scratch, campaignDiskUsage{4096, 100}, 0, 2*time.Millisecond, time.Hour)
+	finished := false
+	defer func() {
+		if !finished {
+			if err := scratch.root.Chmod("snapshot/opaque", dirMode); err != nil {
+				t.Error(err)
+			}
+			var cleanupErr error
+			finishMutationStorage(&cleanupErr, scratch, watch, false)
+			if cleanupErr != nil {
+				t.Error(cleanupErr)
+			}
+		}
+	}()
 	watch.setSnapshot(filepath.Join(scratch.path, "snapshot"))
 	// Observe real native capacity while a separate inheriting producer completes.
 	executable, err := os.Executable()
@@ -117,20 +133,61 @@ func TestMutationOpaqueLiveSampleKeepsCapacityObservationsAndRequiresFinalAccess
 	}
 	defer closeLogged(stdout)
 	run := &command{name: executable, args: []string{"-test.run=^TestMutationStorageHeartbeat$"}, env: []string{"PDFCONCAT_MUTATION_STORAGE_HEARTBEAT=" + filepath.Join(scratch.path, "snapshot")}, stdout: stdout, stderr: stdout}
-	if err = run.run(watch.ctx); err != nil {
+	// Hold the actual producer until the periodic observer has completed another
+	// capacity query after its heartbeat. Scheduling cannot shorten this boundary.
+	observed := make(chan error, 1)
+	go func() {
+		progress := func() error {
+			ticker := time.NewTicker(2 * time.Millisecond)
+			defer ticker.Stop()
+			baseline := -1
+			for {
+				select {
+				case <-watch.ctx.Done():
+					return context.Cause(watch.ctx)
+				case <-ticker.C:
+					if _, err := scratch.root.Lstat("snapshot/heartbeat"); errors.Is(err, os.ErrNotExist) {
+						continue
+					} else if err != nil {
+						return err
+					}
+					watch.mutex.Lock()
+					queries := watch.volumeSamples
+					watch.mutex.Unlock()
+					if baseline < 0 {
+						baseline = queries
+					} else if queries > baseline {
+						return scratch.root.WriteFile("snapshot/release", []byte("observation complete"), fileMode)
+					}
+				}
+			}
+		}
+		err := progress()
+		if err != nil {
+			cancel()
+		}
+		observed <- err
+	}()
+	runErr := run.run(watch.ctx)
+	cancel()
+	if err := errors.Join(runErr, <-observed); err != nil {
 		t.Fatalf("opaque live fixture aborted healthy producer: %v", err)
 	}
 	watch.mutex.Lock()
-	partials, queries := watch.partialSamples, watch.volumeSamples
+	partials := watch.partialSamples
+	// Exercise the actual settled predicate without recording a production
+	// watcher failure; the independent restored-access finish must stay healthy.
+	finalErr := watch.inspect(true, true)
 	watch.mutex.Unlock()
-	if partials == 0 || queries < 2 {
-		t.Fatalf("opacity or continuing native capacity observation absent: %d/%d", partials, queries)
+	if partials == 0 || !errors.Is(finalErr, os.ErrPermission) || !errors.Is(finalErr, errGate) {
+		t.Fatalf("opaque final inspection was not rejected: %d/%v", partials, finalErr)
 	}
 	if err = scratch.root.Chmod("snapshot/opaque", dirMode); err != nil {
 		t.Fatal(err)
 	}
 	var result error
 	finishMutationStorage(&result, scratch, watch, false)
+	finished = true
 	if result != nil {
 		t.Fatalf("complete settled inspection rejected: %v", result)
 	}

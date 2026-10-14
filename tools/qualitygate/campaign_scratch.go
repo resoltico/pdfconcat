@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/capture"
@@ -83,7 +84,12 @@ func (s *campaignScratch) close() (result error) {
 		return nil
 	}
 	s.closed = true
-	defer func() { result = errors.Join(result, s.root.Close()) }()
+	closeRootOnReturn := true
+	defer func() {
+		if closeRootOnReturn {
+			result = errors.Join(result, s.root.Close())
+		}
+	}()
 	parent, err := os.OpenRoot(filepath.Dir(s.path))
 	if err != nil {
 		return fmt.Errorf("open campaign scratch parent: %w", err)
@@ -118,6 +124,14 @@ func (s *campaignScratch) close() (result error) {
 			return fmt.Errorf("clean owned campaign scratch %q: %w", s.path, result)
 		}
 	}
+	// Windows OpenRoot retains a directory handle without delete sharing.
+	// Close our settled producer's own lease before the final name check and
+	// removal; keep the parent lease and original identity for that check.
+	closeErr := s.root.Close()
+	closeRootOnReturn = false
+	if closeErr != nil {
+		return fmt.Errorf("close owned campaign scratch %q before removal: %w", s.path, closeErr)
+	}
 	if err := s.verifyNamespace(parent); err != nil {
 		return err
 	}
@@ -149,5 +163,26 @@ func nativeCampaignDirectory(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return capture.NativeParent(bound), nil
+	qualified := capture.NativeParent(bound)
+	if runtime.GOOS != windowsOS {
+		return qualified, nil
+	}
+	// Go's embed loader quotes the '?' in the extended Windows prefix as a
+	// glob metacharacter. Select the native directory first, then qualify an
+	// ordinary DOS/UNC spelling against its actual filesystem identity.
+	ordinary := qualified
+	switch {
+	case len(qualified) >= 8 && strings.EqualFold(qualified[:8], `\\?\UNC\`):
+		ordinary = `\\` + qualified[8:]
+	case strings.HasPrefix(qualified, `\\?\`) && len(qualified) >= 7 && qualified[5] == ':' && qualified[6] == '\\':
+		ordinary = qualified[4:]
+	case strings.HasPrefix(qualified, `\\?\`):
+		return "", fmt.Errorf("%w: native directory %q has no qualified Go workspace spelling", errGate, qualified)
+	}
+	selected, selectErr := os.Stat(qualified)
+	candidate, candidateErr := os.Stat(ordinary)
+	if selectErr != nil || candidateErr != nil || !selected.IsDir() || !candidate.IsDir() || !os.SameFile(selected, candidate) {
+		return "", errors.Join(fmt.Errorf("%w: ordinary Go workspace spelling %q does not identify native directory %q", errGate, ordinary, qualified), selectErr, candidateErr)
+	}
+	return ordinary, nil
 }

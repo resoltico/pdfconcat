@@ -12,6 +12,8 @@ import (
 )
 
 func TestMutationSnapshotFindsIgnoredParentCheckerThroughPath(t *testing.T) {
+	t.Setenv("PDFCONCAT_QPDF_BIN", "")
+	t.Setenv("PDFCONCAT_POPPLER_BIN", "")
 	root, err := repoRoot()
 	if err != nil {
 		t.Fatal(err)

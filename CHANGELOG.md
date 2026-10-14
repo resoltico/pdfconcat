@@ -6,6 +6,7 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Changed
 
+- Windows CI installs the pinned qpdf mingw64 and conda-forge Poppler distributions from checksum-verified release ZIPs. Windows contributor tests require Git Bash and PowerShell (`pwsh`); CI acquisition additionally requires curl 8.4 or later and limits each download to 64 MiB and 120 seconds; all four independent QA executables are checked before tests.
 - Contributor source staging for mutation, deliberate-defect controls and foreign test overlays now rejects copies exceeding 512 MiB or 65,536 new file/directory entries; Git source listings are limited to 32 MiB. Keep unrelated generated files outside the source inventory. These limits do not restrict PDF inputs.
 - Contributor coverage commands now require `-evidence DIRECTORY` naming a new attempt directory; replace the removed success-only profile argument. Raw data and complete/incomplete manifests survive failed runs and are uploaded by CI.
 - Embedded pdfcpu is updated to 0.16.2 with exact reconstructed local source. Mixed PDF 2.0 assemblies materialize required variable-widget appearances without changing occurrence resources; raw null-reference and stream-metadata rejection contracts remain enforced.
@@ -16,7 +17,7 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Fixed
 
-- Saved-report queries whose required summary facts exceed 2 KiB now return `response_too_large` with exit status 1 before writing a partial response. This changes the result for affected queries; use `report FILE --expect-attempt ID --view diagnostics --details` to retrieve full diagnostics. Saved reports remain unchanged.
+- Saved-report summaries compact truncation metadata before refusing a response that exceeds 2 KiB. Queries whose required summary facts still cannot fit now return `response_too_large` with exit status 1 before writing a partial response. This changes the result for affected queries; use `report FILE --expect-attempt ID --view diagnostics --details` to retrieve full diagnostics. Saved reports remain unchanged.
 - Native Unix progress cleanup preserves standard streams when initialization returns invalid, duplicate or unrepresentable descriptor values.
 - Fitting accepts exact Type 3 geometry with a zero-valued box endpoint that a conservative precision guard previously rejected.
 - Plans reject decimal leading and point lengths mathematically outside their limits even when floating-point conversion rounds them back to a boundary; correct such near-boundary values in plans. Report finalization faults preserve the fact that a check/failure report was already written.

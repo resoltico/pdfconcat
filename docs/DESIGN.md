@@ -491,3 +491,52 @@ reports no errors. Indirect policy/action values, unsigned null signatures,
 readable-refusal byte facts and version-selected validation rules pass their
 regressions. No real signal/console fault campaign, fuzz campaign or scale run
 was performed. Linux/Windows execution remains pending replacement CI.
+
+## Independent verification and scale (WP7)
+
+The oracle uses qpdf for structure/targets and Poppler for extraction, pixels,
+font embedding and byte-string destination lookup (pdftohtml). All are optional
+locally unless PDFCONCAT_REQUIRE_ORACLE=1; Linux CI requires them. Removed the
+unused MuPDF raster adapter after tracing its sole old consumer to the deleted
+custom fitting tests. Poppler pixel controls now cover that fitting property;
+the optional local MuPDF/Poppler probes remain external investigation evidence.
+No additional native test toolchain is required.
+
+The opt-in TestScale contains the two authorized workloads in one execution:
+2000 two-page sources interleaved with 2000 distinct text pages (6000 output
+pages), then one plain generated item with count 100000. Independent qpdf page
+counts must match. Fixture generation is timed separately. Build timings include
+inspection, layout, pruning, assembly, verification and publication. An external
+/usr/bin/time measurement of the precompiled test binary records peak RSS for
+the combined run, excluding compilation; it is not a per-workload RSS estimate.
+BenchmarkBuild is a small opt-in benchmark and is not run by normal CI tests.
+
+Measured once on macOS 27.0 (26A428), Mac16,10, arm64, 10 logical CPUs, 32 GiB
+RAM, Go 1.27.2 and pdfcpu v0.16.2:
+
+| Workload | Fixture time | Build/verify/publish | Source bytes | Output bytes | Pages |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2000 two-page sources + 2000 distinct generated text pages | 0.273 s | 3.037 s | 1784000 | 1001831 | 6000 |
+| One plain generated item, count 100000 | 0.001 s | 3.819 s | 0 | 1195430 | 100000 |
+
+The precompiled test process took 7.67 s wall time including fixture generation,
+independent counts and cleanup. Maximum resident set size was 478101504 bytes
+(455.95 MiB) for the combined run; macOS getrusage documents this field in bytes.
+This is not a per-case measurement. The command was `PDFCONCAT_SCALE=1
+PDFCONCAT_REQUIRE_ORACLE=1 /usr/bin/time -l <pipeline-test-binary> -test.run
+'^TestScale$' -test.v -test.timeout=10m`, after `go test -c` outside the timer.
+Both qpdf counts matched. No second scale run or benchmark campaign was run.
+
+These are observations on this workload/machine, not a universal time or memory
+bound. Memory includes imported PDF object graphs and generated pages, not only
+compressed source bytes; small-input/many-page jobs can use hundreds of MiB.
+The implementation is in-memory. Image-heavy/compressed inputs and complicated
+forms can need substantially more memory. Use OS resource limits for untrusted
+or unusually large jobs; no hostile-input exhaustion guarantee is made.
+
+WP7 verification: build/vet and `PDFCONCAT_REQUIRE_ORACLE=1 go test -race ./...`
+pass on macOS arm64, including the complete independent oracle set and the exact
+one-source/one-Unicode-separator extraction, embedding and <30000-byte growth
+case. TestScale ran exactly once as recorded above; both workloads passed. Normal
+and CI test runs skip it explicitly. BenchmarkBuild was compiled, not executed.
+Native hosted oracle/test results remain pending WP8 CI.

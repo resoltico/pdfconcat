@@ -80,6 +80,16 @@ that dependency through the actual library boundary.
 The peer audit supplies executable counterexamples outside this repository.
 The following corrections must be reproduced before their affected changes.
 
+WP2 reproduction: reran contract-evidence/json.go and nullguard.go with Go
+1.27.2; their outputs in the external implementation evidence confirm null
+acceptance, pre-scan precedence failure, lexical-integer rejection and the
+integrated guard's ordering. The decoder uses jsontext's grammar/duplicate
+checking and json/v2 scalar decoding, with domain-specific object dispatch and
+immediate value validation. It never scans ahead for null. A well-formed v1 plan
+has a deliberate version-diagnostic exception so member order cannot hide the
+actionable migration message. Offsets are zero-based; lines/columns are one-based
+bytes in the original input, including an accepted leading BOM.
+
 - Integrate null rejection with strict decoding; a blanket null scan masks
   earlier faults. Accept one leading BOM and count its bytes in offsets. Detect
   v1 deliberately and explain both `version: 2` and `blank` → `page`.
@@ -143,3 +153,14 @@ WP1 verification: `go build ./...`, `go vet ./...`, and `go test ./...` passed
 on macOS arm64. All four salvaged package test suites ran; no tests were trimmed.
 No replace directives remain. The forbidden-reference search is empty outside
 history and documentation scheduled for WP9. Protected owner artifacts remain.
+
+WP2 verification: `go build ./...`, `go vet ./...`, and `go test ./...` passed
+on macOS arm64. Plan tests cover first-fault ordering, duplicate/null/unknown
+members, escaped pointers, BOM rebasing, v1 member ordering, required/empty
+members, lexical counts, schema-expressible negative cases, decoder-only count
+lexemes, 64/65 group depth, 100000/100001 entries/counts, aggregate counts and
+10000/10001 text length. All five example plans decode and validate against the
+schema. Job tests cover lexical paths, units/colors, layering origins, inherited
+first/last sizes, explicit sizes under fitting and int64 page ranges. Fuzz seeds
+ran as ordinary tests; no fuzz campaign ran. Plan I/O/cancellation criteria belong
+to the WP5/WP6 pipeline and remain pending there.

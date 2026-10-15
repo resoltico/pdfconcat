@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
           go-version-file: go.mod
       - name: Release notes from CHANGELOG.md

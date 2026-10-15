@@ -157,7 +157,8 @@ fractional digits and cannot preserve arbitrary finite real bits. Legal comment-
 separated indirect-reference spellings are inconsistently supported.
 Expected: document/diagnose repair and preserve valid-input identity. Exact probe
 commands/results remain in the local implementation evidence. These are disclosed
-limitations; final issue splitting and duplicate searches belong to WP10.
+limitations. Split any public reports by the valid-input or repair-policy topic
+and recheck the related issues above before posting.
 
 ## Owner rollout
 

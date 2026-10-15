@@ -486,3 +486,16 @@ Latest upstream remained v0.16.2. Duplicate searches and short repros finalized
 the owner-only issue drafts. No issue was posted and no tag/release/settings/main
 push or remote branch deletion occurred. Owner artifacts dist/, bin/, .tools/,
 pdfconcat and plan.test remain present and untouched by cleanup/snapshot commands.
+
+## Immutable setup-go archive repair
+
+Final CI at c3cd20f failed before checkout: GitHub returned HTTP 404 for the
+setup-go v7.0.0 commit archive, despite the official tag resolving to that SHA.
+The v6.5.0 commit archive was also unavailable. CI and release now pin official
+upstream commit `90ad2b35f69faf97585ad74d28fa006d2739b7af` from
+[setup-go #794](https://github.com/actions/setup-go/pull/794), whose SHA archive
+is available and whose upstream checks passed across the supported runner OSes.
+It retains Node 24 and the version-file/cache inputs used here, and includes the
+upstream cache 6.3.0 temporary-file isolation fix. This is an immutable upstream
+pin, without a fork, mutable tag, alternate downloader or skipped check. Exact-head
+product acceptance still requires all six CI jobs, including native macOS.

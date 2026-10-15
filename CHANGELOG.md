@@ -4,6 +4,10 @@ Notable changes to this project are documented in this file. The format is based
 
 ## [Unreleased]
 
+### Fixed
+
+- Release automation honors supplied `--release-notes` files instead of publishing empty GitHub release notes.
+
 ## [0.3.0] - 2026-10-15
 
 ### Changed

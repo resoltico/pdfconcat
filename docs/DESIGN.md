@@ -457,3 +457,32 @@ changelog sections are byte-for-byte unchanged, including their historical
 references. The repaired comparison and its one-off failure control pass.
 No additional scale or fuzz campaign ran. Hosted checks for these documentation
 changes will be observed on the updated PR head during final verification.
+
+## Delivered-state verification (WP10)
+
+Fresh-clone checks at 1f1aec024f1274822c213d378c48cb75f18891eb passed:
+`go build ./...`, `go vet ./...`, oracle-required `go test -race ./...`, root/tools
+module tidy diffs, pinned native lint for Linux/macOS/Windows targets, isolated
+pinned actionlint, govulncheck, GoReleaser check/snapshot, archive content/checksum
+inspection and the repaired comparison. A module install by that published branch
+commit succeeded into an isolated GOBIN and its version command ran. This proves
+source-module consumption; it does not change what @latest selects.
+
+Hosted run https://github.com/resoltico/pdfconcat/actions/runs/38684560479 passed
+all six jobs including Required CI for that commit. Final documentation/draft
+record changes are checked again on the final PR head; the PR's checks and final
+implementation report identify that last run rather than treating this earlier
+run as proof of a later commit.
+
+Owned Go at the delivered-code checkpoint: 6672 product lines, 2346 test-support
+lines (fixtures/oracle), and 9513 test lines. Product code is within the expected
+6–9k range; even including test support it remains below the 12k review threshold.
+The single WP7 scale run was not repeated after tooling/diagnostic/documentation
+changes. No mutation campaign, long CI scale run, fuzz campaign, native ACL or
+console fault campaign ran. Additional CPU targets were cross-built, not natively
+executed; network-share and hostile-exhaustion limits remain untested/unsupported.
+
+Latest upstream remained v0.16.2. Duplicate searches and short repros finalized
+the owner-only issue drafts. No issue was posted and no tag/release/settings/main
+push or remote branch deletion occurred. Owner artifacts dist/, bin/, .tools/,
+pdfconcat and plan.test remain present and untouched by cleanup/snapshot commands.

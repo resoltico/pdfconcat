@@ -48,6 +48,33 @@ observes its CI, then comments on and closes PR #1 as superseded. WP10 updates
 that same PR and verifies the delivered state. All GoReleaser snapshots using
 `--clean` run in isolated clones, preserving the owner's `dist/`.
 
+## Deletion review (WP1)
+
+Reviewed package responsibilities, exported boundaries, relevant tests, workflows
+and release hooks against the approved deletion inventory. Git history retains
+the removed implementations and regression sources for WP4 individual triage.
+
+| Group removed | Protected property and replacement |
+| --- | --- |
+| Dependency forks, base archives and patches | Cancellation uses upstream context APIs; small PDF refusals/adapters and WP4 end-to-end regressions preserve relevant fidelity. Fork-specific resource budgets are explicitly retired. Licenses remain for WP9 review. |
+| Capture and publish | Inspected/assembled byte identity becomes SHA-256 comparison; regular input checks and SameFile roles remain. Atomic publication retains no-clobber and durability. Native private ACLs, recovery copies, namespace-race and identity bookkeeping guarantees are intentionally removed. |
+| Report | Stable outcomes and bounded stdout become result v3 plus a full report. Query language, continuations and retention machinery are removed. Report alias safety and late publication-state truth remain required. |
+| App, assembly, plan, layout and CLI | Product contracts move to job, plan, pipeline and CLI. Path layering, origin pointers, first-fault locations, overflow and refusal behavior remain explicit acceptance cases. Worker scheduling and inline plans are removed. |
+| PDF engine | Upstream merge/resize replaces the object pool, fitting parser and appearance engine. Named destinations, damage/signature/encryption refusals and catalog policy remain WP4 obligations; form and coordinate limitations require evidence and disclosure. |
+| Progress, observation, native progress fixtures and command transport | Progress and its native console/backpressure guarantees are removed by D6. The executable uses ordinary streams and signal context. |
+| Repository policy, documentation contract machinery and permission/subprocess helpers | Stock lint/depguard replaces repository policy. Small product documentation checks return in WP9; in-process CLI checks and two binary smoke tests replace subprocess coverage machinery. ACL fault guarantees are removed by D4. |
+| Quality tools, mutation registry, installer and scale harness | Stock Go tooling replaces test discovery/supervision. Fuzz seeds remain ordinary tests; campaigns and mutation/coverage gates are removed. WP7 owns one opt-in measured scale case. |
+| Workflows, composite actions, scripts, lint and release configuration | Their deleted dependencies make them obsolete. WP8 installs six-job CI, native tool invocation and isolated release snapshots. Required CI keeps its context. |
+| Verification/closeout documents | Their verification-platform contracts are obsolete; CONTRIBUTING and delivered-state evidence replace them. Published changelog history remains. |
+
+All generated-page writer tests were moved with the writer, rather than discarded.
+All fixture, oracle and typesetting tests remain; the two oracle subprocess helper
+calls use exec.CommandContext directly. Package names/imports follow the new
+responsibilities. The minimal command intentionally refuses work until WP6.
+Upstream pdfcpu v0.16.2 is still the latest stable module (requeried in WP1), so
+there is no intervening changelog to reconcile. The initial configuration pins
+that dependency through the actual library boundary.
+
 ## Contract decisions to verify before implementation
 
 The peer audit supplies executable counterexamples outside this repository.
@@ -111,3 +138,8 @@ case. Release readiness does not create tagged binaries or change @latest.
 Changelog outcomes are relative to published v0.2.0: repeated named destinations
 and damaged-tree refusal already shipped; repeated legacy Dests support is new.
 Review actual linked licenses, NOTICE files and archive contents.
+
+WP1 verification: `go build ./...`, `go vet ./...`, and `go test ./...` passed
+on macOS arm64. All four salvaged package test suites ran; no tests were trimmed.
+No replace directives remain. The forbidden-reference search is empty outside
+history and documentation scheduled for WP9. Protected owner artifacts remain.

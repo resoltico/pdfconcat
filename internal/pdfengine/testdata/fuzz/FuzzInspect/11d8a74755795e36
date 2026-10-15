@@ -1,2 +1,0 @@
-go test fuzz v1
-[]byte("%PDF-1.0\n1 0 obj<</Type/Catalog/AcroForm<</Fields[0 0 R]>>00\nendobj")

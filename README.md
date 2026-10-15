@@ -69,8 +69,9 @@ form-name mappings. `check` writes no PDF; it can write its requested report.
 ## PDFConcat and the pdfcpu CLI
 
 These observations use pdfcpu v0.16.2 and the rebuilt executable. The small
-[same-input comparison](scripts/run-comparison.sh) uses fresh fixtures and checks
-command exits, results and outputs. Broader fidelity cases use qpdf and Poppler
+[same-input comparison](https://github.com/resoltico/pdfconcat/blob/rebuild/upstream-pdfcpu/scripts/run-comparison.sh)
+requires a source checkout, uses fresh fixtures and checks command exits, results
+and outputs. Broader fidelity cases use qpdf and Poppler
 in the [product tests](CONTRIBUTING.md#what-we-test-and-what-we-do-not).
 
 | Need | pdfcpu CLI | PDFConcat |
@@ -102,7 +103,9 @@ an observation, not a size bound; fonts that prohibit subsetting remain whole.
   content, damaged page trees and specific unsafe/unsupported shapes. Upstream
   relaxed parsing may accept other malformed syntax or repairs.
 - Fitting refuses widgets and does not transform destination scroll coordinates.
-  Static forms require compatible defaults/resources. [DESIGN](docs/DESIGN.md)
+  Static forms require compatible defaults/resources. A form without widget
+  appearances cannot be assembled into PDF 2.0, including when another source
+  raises the output version. [DESIGN](docs/DESIGN.md)
   lists the full policy and fidelity limits.
 - Assembly is in memory. PDF object graphs and generated pages can cost much more
   RAM than compressed input bytes. The local measured scale cases are in DESIGN.

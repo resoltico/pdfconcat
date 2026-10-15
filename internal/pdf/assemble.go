@@ -159,10 +159,30 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 	if err = api.ValidateContext(c, dest); err != nil {
 		return result, err
 	}
-	if err = api.WriteContext(c, dest, w); err != nil {
-		return result, &policyError{code: "output_write_failed", err: err}
+	output := &outputWriter{writer: w}
+	err = api.WriteContext(c, dest, output)
+	if output.err != nil {
+		return result, &policyError{code: "output_write_failed", err: output.err}
 	}
-	return result, nil
+	return result, err
+}
+
+// outputWriter distinguishes destination I/O failures from backend serialization
+// errors returned by the same WriteContext call.
+type outputWriter struct {
+	writer io.Writer
+	err    error
+}
+
+func (w *outputWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if w.err == nil {
+		w.err = err
+	}
+	return n, err
 }
 
 var catalogKeys = map[string]bool{"Type": true, "Pages": true, "AcroForm": true, "Names": true, "Dests": true, "Outlines": true, "Version": true}

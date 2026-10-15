@@ -125,6 +125,14 @@ from merged parent chains; check only predicts possible namespacing. An empty
 form is replaced by the next nonempty form in upstream, including its resources;
 qpdf/resource and rendering tests cover conflicting unused defaults.
 
+The backend requires widget appearance dictionaries when writing PDF 2.0. A valid
+PDF 1.7 form using viewer-regenerated appearances can therefore fail assembly
+when another source raises the output to 2.0. PDFConcat does not generate those
+appearances: provide sources with complete appearances or assemble the form
+separately. This backend limitation produces `assembly_failed`, not the
+`output_write_failed` reserved for actual destination I/O failures. `check` does
+not serialize a merged document and may not detect this mixed-version limitation.
+
 Fitting uses upstream proportional resize with forced target orientation and no
 extra rotation. Widgets are refused. After resizing, local UserUnit is removed
 so the physical sheet has unit 1. qpdf box/annotation geometry and exact Poppler

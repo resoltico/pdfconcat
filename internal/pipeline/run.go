@@ -71,17 +71,21 @@ func Run(c context.Context, command cli.Command, cwd string, stdin io.Reader) re
 		if command.Plan == "-" {
 			if command.BaseDir != "" {
 				base, err = job.Path(cwd, command.BaseDir)
+				if err != nil {
+					r.Diagnostics = append(r.Diagnostics, diag.New("path_invalid", err.Error()))
+					return finishRun()
+				}
 			}
-			if err == nil {
-				data, err = readStdin(c, stdin)
-			}
+			data, err = readStdin(c, stdin)
 		} else {
 			file, err = job.Path(cwd, command.Plan)
-			if err == nil {
-				roles.Inputs = append(roles.Inputs, file)
-				base = filepath.Dir(file)
-				data, err = inputfile.Read(c, file, plan.MaxBytes)
+			if err != nil {
+				r.Diagnostics = append(r.Diagnostics, diag.New("path_invalid", err.Error()))
+				return finishRun()
 			}
+			roles.Inputs = append(roles.Inputs, file)
+			base = filepath.Dir(file)
+			data, err = inputfile.Read(c, file, plan.MaxBytes)
 		}
 		if err != nil {
 			code := diag.Code("plan_unreadable")

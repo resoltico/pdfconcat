@@ -25,6 +25,8 @@ Notable changes to this project are documented in this file. The format is based
   default-resource and DA/Q representations. Conflicting defaults are refused
   instead of using the former owned appearance/resource engine. Viewer-requested
   regeneration is retained with warnings; widgets remain unsupported for fitting.
+  Widgets without appearance dictionaries can fail assembly when any source
+  raises the output to PDF 2.0; provide complete appearances or assemble separately.
 - **Breaking fidelity boundary:** fitting uses upstream resize. Destination page
   targets survive, but scroll coordinates are not transformed; former print-box,
   content-analysis and appearance guarantees are removed. UserUnit is normalized

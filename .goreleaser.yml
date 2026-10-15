@@ -48,8 +48,6 @@ archives:
 checksum:
   name_template: checksums.txt
 
-changelog:
-  disable: true   # notes come from CHANGELOG.md via --release-notes
-
+# Keep notes loading enabled; the workflow supplies --release-notes from CHANGELOG.md.
 release:
   prerelease: auto

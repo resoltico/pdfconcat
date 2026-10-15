@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json/v2"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func validate(t *testing.T, value any) {
 func TestCapsCoalescingAndFullReport(t *testing.T) {
 	r := result.New("check")
 	for i := range 25 {
-		r.Diagnostics = append(r.Diagnostics, diag.New("text_overflow_allowed", fmt.Sprint(i), fmt.Sprintf("/items/%d", i)))
+		r.Diagnostics = append(r.Diagnostics, diag.New("text_overflow_allowed", strconv.Itoa(i), fmt.Sprintf("/items/%d", i)))
 	}
 	var items []string
 	for i := range 100 {

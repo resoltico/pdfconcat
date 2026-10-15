@@ -1,0 +1,53 @@
+version: 2
+
+project_name: pdfconcat
+
+builds:
+  - id: pdfconcat
+    main: ./cmd/pdfconcat
+    binary: pdfconcat
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - THIRD_PARTY_NOTICES.md
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - docs/DESIGN.md
+      - docs/PLAN.md
+      - docs/CLI.md
+      - src: third_party/licenses/*
+        dst: third_party/licenses
+        strip_parent: true
+      - src: internal/plan/plan.schema.json
+        dst: schemas
+        strip_parent: true
+      - src: internal/result/result.schema.json
+        dst: schemas
+        strip_parent: true
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true   # notes come from CHANGELOG.md via --release-notes
+
+release:
+  prerelease: auto

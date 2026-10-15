@@ -1,0 +1,141 @@
+# No inline lint suppressions. Every exception is a commented rule below.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - depguard
+    - dupword
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - iface
+    - intrange
+    - misspell
+    - nilerr
+    - nilnil
+    - perfsprint
+    - predeclared
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+
+  settings:
+    depguard:
+      rules:
+        pdfcpu-boundary:
+          files: ["$all", "!**/internal/pdf/**"]
+          deny:
+            - pkg: github.com/pdfcpu/pdfcpu
+              desc: only internal/pdf may use pdfcpu
+        typesetting-boundary:
+          files: ["$all", "!**/internal/typeset/**"]
+          deny:
+            - pkg: github.com/go-text/typesetting
+              desc: only internal/typeset shapes text
+        native-boundary:
+          files: ["$all", "!**/internal/atomicfile/**"]
+          deny:
+            - pkg: golang.org/x/sys
+              desc: only internal/atomicfile makes native calls
+        internal-leaves:
+          list-mode: lax
+          files: ["**/internal/diag/**", "**/internal/inputfile/**", "!$test"]
+          deny:
+            - pkg: github.com/resoltico/pdfconcat/internal
+              desc: diagnostic and input-reader leaves cannot import internal packages
+        pure-domain:
+          list-mode: lax
+          files: ["**/internal/job/**", "**/internal/typeset/**", "!$test"]
+          allow:
+            - github.com/resoltico/pdfconcat/internal/diag$
+          deny:
+            - pkg: github.com/resoltico/pdfconcat/internal
+              desc: job and typeset may import only diag internally
+        test-support:
+          files: ["$all", "!$test"]
+          deny:
+            - pkg: github.com/resoltico/pdfconcat/internal/pdffixture
+              desc: test fixtures must not reach production code
+            - pkg: github.com/resoltico/pdfconcat/internal/oracle
+              desc: independent PDF oracle is test-only
+
+  exclusions:
+    # Central exception registry. Each entry: what, why, and when it can be removed.
+    rules:
+      # Repetition is the input in this tab/character aggregation regression.
+      - path: internal/typeset/internal_test.go
+        text: "Duplicate words"
+        linters: [dupword]
+      # stderr is the last best-effort error channel; recursively reporting its own error cannot help.
+      - path: cmd/pdfconcat/main.go
+        text: "Error return value of `fmt.Fprintln`"
+        linters: [errcheck]
+      # Read-only input close errors do not change the captured bytes; no write durability is claimed.
+      - path: internal/inputfile/read.go
+        text: "Error return value of `f.Close`"
+        linters: [errcheck]
+      # Abort only retries owned temporary-name cleanup; primary outcomes and publication state are already recorded.
+      - path: internal/pipeline/run.go
+        text: "Error return value of `staged.Abort`"
+        linters: [errcheck]
+      # This subprocess deliberately exits before testing.T cleanup; its private directory is explicitly removed.
+      - path: internal/pdf/silence_test.go
+        text: "Error return value of `os.RemoveAll`|os.MkdirTemp"
+        linters: [errcheck, usetesting]
+      # Pipe handles may already be closed by cancellation; cleanup is intentionally idempotent.
+      - path: internal/pipeline/run_test.go
+        text: "Error return value of `(reader|writer).Close`"
+        linters: [errcheck]
+      # No background fill is a successful nil color, rather than an exceptional condition.
+      - path: internal/job/values.go
+        linters: [nilnil]
+      # Conventional permissions are D4; exclusive random sibling creation in the chosen directory is intentional.
+      - path: internal/atomicfile/file.go
+        text: "G(302|304):"
+        linters: [gosec]
+      # Named regular inputs are the program's purpose; Stat and descriptor checks enforce the supported boundary.
+      - path: internal/inputfile/read.go
+        text: "G304:"
+        linters: [gosec]
+      # The owned target's parent directory is opened only for fsync, not for arbitrary content inclusion.
+      - path: internal/atomicfile/sync_unix.go
+        text: "G304:"
+        linters: [gosec]
+      # Oracle executables are discovered programs with fixed argument arrays; this is test-only infrastructure.
+      - path: internal/oracle/tools.go
+        text: "G204:"
+        linters: [gosec]
+      # Product tests intentionally read/write temporary fixtures and execute native tools; no shell commands are constructed.
+      - path: _test\.go$
+        text: "G(204|302|304|306|703):"
+        linters: [gosec]
+      # sfnt table/search header values derive from <=128 tables and 16-byte records; these uint16 casts cannot overflow.
+      - path: internal/typeset/prune.go
+        text: "G115: integer overflow conversion int -> uint16"
+        linters: [gosec]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

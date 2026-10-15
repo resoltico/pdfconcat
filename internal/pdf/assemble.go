@@ -23,6 +23,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
+// Assembly records changes and warnings from the actual merge.
 type Assembly struct {
 	FieldsRenamed map[int][]job.FieldRename
 	Diagnostics   []diag.Diagnostic

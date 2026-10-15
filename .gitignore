@@ -22,7 +22,7 @@ Thumbs.db
 *.swp
 *.test
 
-# Locally installed development tools (go run ./tools/installtools)
+# Local tool binaries
 /.tools/
 
 # Local credentials; example templates remain reviewable and secret-scanned.

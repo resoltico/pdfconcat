@@ -341,11 +341,12 @@ func (d *document) writePage(index int, page Page) error {
 	}
 	d.begin(obj)
 	d.out.textf("<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %s %s] ", d.parents[obj], number(page.Width), number(page.Height))
-	if d.repeated {
+	switch {
+	case d.repeated:
 		d.out.textf("/Resources %d 0 R ", d.resources)
-	} else if font >= 0 {
+	case font >= 0:
 		d.out.textf("/Resources << /Font << /F1 %d 0 R >> >> ", firstFontObject+fontObjects*font)
-	} else {
+	default:
 		d.out.textf("/Resources << >> ")
 	}
 	d.out.textf("/Contents %d 0 R >>\nendobj\n", contentObject)

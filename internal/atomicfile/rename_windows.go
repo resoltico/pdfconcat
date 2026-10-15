@@ -5,6 +5,7 @@ package atomicfile
 
 import (
 	"errors"
+
 	"golang.org/x/sys/windows"
 )
 

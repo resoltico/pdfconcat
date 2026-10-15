@@ -13,6 +13,7 @@ import (
 	"os"
 )
 
+// ErrTooLarge reports an input that exceeds its caller-supplied byte budget.
 var ErrTooLarge = errors.New("input exceeds its byte limit")
 
 // Read follows input symlinks. A positive limit bounds bytes retained; zero is

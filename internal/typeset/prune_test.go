@@ -68,7 +68,7 @@ func TestPrunedGlyphsMetricsAndChecksums(t *testing.T) {
 		if !bytes.HasPrefix(after, before) || bytes.Count(after[len(before):], []byte{0}) != len(after)-len(before) {
 			t.Fatalf("glyph %d outline changed", g)
 		}
-		if len(before) < 10 || int16(binary.BigEndian.Uint16(before)) >= 0 {
+		if len(before) < 10 || binary.BigEndian.Uint16(before) < 0x8000 {
 			return
 		}
 		composites++

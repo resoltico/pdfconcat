@@ -4,10 +4,11 @@
 package cli_test
 
 import (
-	"github.com/resoltico/pdfconcat/internal/cli"
-	"github.com/resoltico/pdfconcat/internal/diag"
 	"strings"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/cli"
+	"github.com/resoltico/pdfconcat/internal/diag"
 )
 
 func TestInterleavedOperandsAndDelimiter(t *testing.T) {

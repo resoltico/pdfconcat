@@ -20,8 +20,11 @@ import (
 	"github.com/resoltico/pdfconcat/internal/job"
 )
 
+// MaxBytes bounds the original UTF-8 plan, including an optional BOM.
 const MaxBytes = 64 << 20
 
+// Schema is the editor-facing plan v2 JSON Schema.
+//
 //go:embed plan.schema.json
 var Schema []byte
 
@@ -213,10 +216,10 @@ func (p *decoder) document(base string) (job.Job, error) {
 			var token jsontext.Token
 			token, err = p.d.ReadToken()
 			if err == nil {
-				switch token.Kind() {
-				case 'n':
+				switch {
+				case token.Kind() == 'n':
 					err = &fault{code: "plan_null", message: "null is not allowed.", pointer: "/version", offset: start}
-				case '0':
+				case token.Kind() == '0':
 					if token.String() != "2" {
 						err = p.fail("plan_version_unsupported", "Use version: 2 and rename blank to page.")
 					}
@@ -329,7 +332,9 @@ func (p *decoder) item(depth int) (node, error) {
 	if err != nil {
 		return n, err
 	}
-	if !(seenPage && !seenDir && !seenItems || !seenPage && !seenCount && seenDir && seenItems) {
+	isPage := seenPage && !seenDir && !seenItems
+	isGroup := !seenPage && !seenCount && seenDir && seenItems
+	if !isPage && !isGroup {
 		return n, p.fail("plan_item_shape", "An item must have page (and optional count), or dir and items.")
 	}
 	if seenPage {

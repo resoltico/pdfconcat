@@ -22,6 +22,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/job"
 )
 
+// SourceFacts is the inspected identity, geometry and policy state of one source.
 type SourceFacts struct {
 	job.SourceFacts
 	SHA256                                 [32]byte

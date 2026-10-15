@@ -4,15 +4,23 @@
 // Package diag defines product diagnostics and outcome classes.
 package diag
 
+// Code is a stable diagnostic identifier.
 type Code string
+
+// Severity distinguishes errors from warnings.
 type Severity string
+
+// Class determines an error outcome; warnings have no class.
 type Class string
 
+// Definition is the authoritative meaning and outcome of one code.
 type Definition struct {
 	Severity    Severity
 	Class       Class
 	Description string
 }
+
+// Location identifies a zero-based byte offset and one-based byte line/column.
 type Location struct {
 	File    string `json:"file"`
 	Line    int    `json:"line"`
@@ -20,6 +28,8 @@ type Location struct {
 	Offset  int64  `json:"offset"`
 	Pointer string `json:"pointer"`
 }
+
+// Diagnostic is a located error or warning with its consuming plan entries.
 type Diagnostic struct {
 	Severity     Severity  `json:"severity"`
 	Code         Code      `json:"code"`
@@ -101,6 +111,7 @@ func Registry() map[Code]Definition {
 
 var definitions = Registry()
 
+// New constructs a diagnostic using its fixed registry severity.
 func New(code Code, message string, items ...string) Diagnostic {
 	definition, ok := definitions[code]
 	if !ok {

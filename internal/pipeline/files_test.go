@@ -91,15 +91,15 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 
 func TestReportRoleRecheckFindsInitiallyAbsentParentAlias(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real")
+	realDir := filepath.Join(dir, "realDir")
 	alias := filepath.Join(dir, "alias")
-	if err := os.Mkdir(real, 0700); err != nil {
+	if err := os.Mkdir(realDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(real, alias); err != nil {
+	if err := os.Symlink(realDir, alias); err != nil {
 		t.Skipf("directory symlinks unavailable: %v", err)
 	}
-	output := filepath.Join(real, "packet.pdf")
+	output := filepath.Join(realDir, "packet.pdf")
 	report := filepath.Join(alias, "packet.pdf")
 	f := pipeline.Files{Output: output, Report: report, Overwrite: true, InputsKnown: true}
 	if ds := f.Check(); len(ds) > 0 {

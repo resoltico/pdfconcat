@@ -4,6 +4,7 @@
 package oracle
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -28,7 +29,7 @@ func (d *Document) target(dest any) (int, error) {
 
 func (d *Document) actionTargets(action any, depth int) ([]int, error) {
 	if depth > maxOutlineDepth {
-		return nil, fmt.Errorf("action chain exceeds oracle depth")
+		return nil, errors.New("action chain exceeds oracle depth")
 	}
 	if list, ok := d.deref(action).([]any); ok {
 		var result []int
@@ -65,12 +66,12 @@ func (d *Document) OutlineTargets() ([]int, error) {
 	var walk func(any, int) ([]int, error)
 	walk = func(node any, depth int) ([]int, error) {
 		if depth > maxOutlineDepth {
-			return nil, fmt.Errorf("outline exceeds oracle depth")
+			return nil, errors.New("outline exceeds oracle depth")
 		}
 		var result []int
 		for count := 0; node != nil; count++ {
 			if count > len(d.objects) {
-				return nil, fmt.Errorf("outline sibling cycle")
+				return nil, errors.New("outline sibling cycle")
 			}
 			item := d.dict(node)
 			if dest, ok := item["/Dest"]; ok {
@@ -104,7 +105,7 @@ func (d *Document) OutlineTargets() ([]int, error) {
 // ActionTargets returns GoTo targets in annotations and page additional actions.
 func (d *Document) ActionTargets(page int) ([]int, error) {
 	if page < 1 || page > len(d.pages) {
-		return nil, fmt.Errorf("page out of range")
+		return nil, errors.New("page out of range")
 	}
 	p := d.dict(d.pages[page-1])
 	var result []int
@@ -147,19 +148,19 @@ func (d *Document) FormDefaultFontNames() []string {
 // AnnotationRects returns page annotation rectangles without inferring geometry from the PDF engine.
 func (d *Document) AnnotationRects(page int) ([][4]float64, error) {
 	if page < 1 || page > len(d.pages) {
-		return nil, fmt.Errorf("page out of range")
+		return nil, errors.New("page out of range")
 	}
 	var rects [][4]float64
 	for _, annotation := range d.annotationsOf(d.dict(d.pages[page-1])) {
 		values := d.list(d.dict(annotation)["/Rect"])
 		if len(values) != 4 {
-			return nil, fmt.Errorf("annotation Rect does not have four coordinates")
+			return nil, errors.New("annotation Rect does not have four coordinates")
 		}
 		var rect [4]float64
 		for i, value := range values {
 			n, ok := value.(float64)
 			if !ok {
-				return nil, fmt.Errorf("annotation coordinate is not numeric")
+				return nil, errors.New("annotation coordinate is not numeric")
 			}
 			rect[i] = n
 		}

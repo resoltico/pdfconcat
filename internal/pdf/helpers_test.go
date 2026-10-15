@@ -12,10 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"os/exec"
+
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/typeset"
-	"os/exec"
 )
 
 type (

@@ -4,8 +4,9 @@
 package diag_test
 
 import (
-	"github.com/resoltico/pdfconcat/internal/diag"
 	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/diag"
 )
 
 func TestOutcomePrecedence(t *testing.T) {

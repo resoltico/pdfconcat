@@ -6,6 +6,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -267,7 +268,7 @@ func Run(c context.Context, command cli.Command, cwd string, stdin io.Reader) re
 	published, err := staged.Commit(command.Overwrite)
 	r.Output.Published = published
 	if published {
-		r.Output.SHA256 = fmt.Sprintf("%x", hash.Sum(nil))
+		r.Output.SHA256 = hex.EncodeToString(hash.Sum(nil))
 		r.Output.Bytes = knownCount(counter.n)
 	}
 	if err != nil {

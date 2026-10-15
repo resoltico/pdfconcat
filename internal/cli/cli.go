@@ -13,11 +13,14 @@ import (
 	"github.com/resoltico/pdfconcat/internal/job"
 )
 
+// Operand is a source path or a plain generated page at an argv position.
 type Operand struct {
 	Path  string
 	Blank bool
 	Index int
 }
+
+// Command is a parsed request; parsing performs no filesystem I/O.
 type Command struct {
 	Name, Plan, Output, BaseDir, FitTo, Report, Format, Schema string
 	Overwrite, Help                                            bool
@@ -36,6 +39,7 @@ var options = []option{
 	{"--help", "-h", "", "Show help."},
 }
 
+// Parse validates commands, interleaved options and operands.
 func Parse(args []string) (Command, []diag.Diagnostic) {
 	c := Command{Format: "json"}
 	failure := func(code diag.Code, message string, index int) (Command, []diag.Diagnostic) {

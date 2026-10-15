@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"os/exec"
+
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
-	"os/exec"
 )
 
 // defect corrupts one thing in a known-good document, or in the expectation, and names the check that

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -162,7 +163,7 @@ func qualifiedName(s *model.Context, d types.Dict) (string, error) {
 	seen := map[types.IndirectRef]bool{}
 	for depth := 0; ; depth++ {
 		if depth > 64 {
-			return "", fmt.Errorf("merged field parent chain exceeds depth 64")
+			return "", errors.New("merged field parent chain exceeds depth 64")
 		}
 		name, err := textValue(s, d["T"])
 		if err != nil {
@@ -177,7 +178,7 @@ func qualifiedName(s *model.Context, d types.Dict) (string, error) {
 		}
 		if ref, ok := parent.(types.IndirectRef); ok {
 			if seen[ref] {
-				return "", fmt.Errorf("merged field parent cycle")
+				return "", errors.New("merged field parent cycle")
 			}
 			seen[ref] = true
 		}

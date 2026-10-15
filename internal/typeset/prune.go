@@ -6,6 +6,7 @@ package typeset
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 )
 
@@ -135,7 +136,11 @@ func (f *Font) Prune(glyphs []uint16) ([]byte, error) {
 	glyf := make([]byte, 0, len(tables["glyf"]))
 	loca := make([]byte, 4*(f.glyphs+1))
 	for g := range f.glyphs {
-		binary.BigEndian.PutUint32(loca[4*g:], uint32(len(glyf)))
+		offset := len(glyf)
+		if offset > math.MaxUint32 {
+			return nil, fmt.Errorf("%w: glyf exceeds the sfnt offset range", ErrMalformedFont)
+		}
+		binary.BigEndian.PutUint32(loca[4*g:], uint32(offset))
 		if keep[g] {
 			glyf = append(glyf, tables["glyf"][location(g):location(g+1)]...)
 			for len(glyf)%4 != 0 {
@@ -143,7 +148,11 @@ func (f *Font) Prune(glyphs []uint16) ([]byte, error) {
 			}
 		}
 	}
-	binary.BigEndian.PutUint32(loca[4*f.glyphs:], uint32(len(glyf)))
+	lastOffset := len(glyf)
+	if lastOffset > math.MaxUint32 {
+		return nil, fmt.Errorf("%w: glyf exceeds the sfnt offset range", ErrMalformedFont)
+	}
+	binary.BigEndian.PutUint32(loca[4*f.glyphs:], uint32(lastOffset))
 	selected := map[string][]byte{}
 	for _, tag := range []string{"head", "hhea", "maxp", "OS/2", "name", "hmtx", "cvt ", "fpgm", "prep"} {
 		if table, ok := tables[tag]; ok {
@@ -157,7 +166,7 @@ func (f *Font) Prune(glyphs []uint16) ([]byte, error) {
 	selected["post"] = post
 	binary.BigEndian.PutUint16(selected["head"][headLocaFormat:], locaFormatLong)
 	binary.BigEndian.PutUint32(selected["head"][8:], 0)
-	return encodeSFNT(selected), nil
+	return encodeSFNT(selected)
 }
 
 func fontChecksum(data []byte) uint32 {
@@ -171,7 +180,7 @@ func fontChecksum(data []byte) uint32 {
 	return sum + binary.BigEndian.Uint32(tail[:])
 }
 
-func encodeSFNT(tables map[string][]byte) []byte {
+func encodeSFNT(tables map[string][]byte) ([]byte, error) {
 	tags := make([]string, 0, len(tables))
 	for tag := range tables {
 		tags = append(tags, tag)
@@ -191,11 +200,19 @@ func encodeSFNT(tables map[string][]byte) []byte {
 	headOffset := 0
 	for i, tag := range tags {
 		table := tables[tag]
+		tableLength := len(table)
+		if tableLength > math.MaxUint32 {
+			return nil, fmt.Errorf("%w: table exceeds the sfnt length range", ErrMalformedFont)
+		}
+		offset := len(out)
+		if offset > math.MaxUint32 || uint64(offset)+uint64(len(table))+3 > math.MaxUint32 {
+			return nil, fmt.Errorf("%w: font exceeds the sfnt offset range", ErrMalformedFont)
+		}
 		record := out[directoryHeader+directoryRecord*i:]
 		copy(record, tag)
 		binary.BigEndian.PutUint32(record[4:], fontChecksum(table))
-		binary.BigEndian.PutUint32(record[8:], uint32(len(out)))
-		binary.BigEndian.PutUint32(record[12:], uint32(len(table)))
+		binary.BigEndian.PutUint32(record[8:], uint32(offset))
+		binary.BigEndian.PutUint32(record[12:], uint32(tableLength))
 		if tag == "head" {
 			headOffset = len(out)
 		}
@@ -205,5 +222,5 @@ func encodeSFNT(tables map[string][]byte) []byte {
 		}
 	}
 	binary.BigEndian.PutUint32(out[headOffset+8:], 0xb1b0afba-fontChecksum(out))
-	return out
+	return out, nil
 }

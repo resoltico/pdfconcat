@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"sync"
@@ -85,7 +86,7 @@ func TestStdinOutcomeDoesNotWaitForBlockingClose(t *testing.T) {
 	cancel()
 	select {
 	case err := <-completed:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):

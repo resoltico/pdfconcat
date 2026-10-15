@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -575,7 +576,7 @@ func TestFitPhysicalGeometryAndPixels(t *testing.T) {
 		var pixels [][]byte
 		for i, path := range []string{a, b} {
 			prefix := filepath.Join(dir, fmt.Sprintf("render-%d-%d", page, i))
-			out, err := exec.CommandContext(t.Context(), tools.PDFToPPM, "-f", fmt.Sprint(page), "-l", fmt.Sprint(page), "-singlefile", "-cropbox", "-r", "30", path, prefix).CombinedOutput()
+			out, err := exec.CommandContext(t.Context(), tools.PDFToPPM, "-f", strconv.Itoa(page), "-l", strconv.Itoa(page), "-singlefile", "-cropbox", "-r", "30", path, prefix).CombinedOutput()
 			if err != nil {
 				t.Fatalf("fit rendering %v %s", err, out)
 			}

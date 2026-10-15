@@ -15,24 +15,33 @@ import (
 	"github.com/resoltico/pdfconcat/internal/job"
 )
 
+// Schema covers result v3, full reports and version objects.
+//
 //go:embed result.schema.json
 var Schema []byte
 
+// Output records publication separately from trailing errors.
 type Output struct {
 	Path      string `json:"path"`
 	Published bool   `json:"published"`
 	SHA256    string `json:"sha256,omitempty"`
 	Bytes     *int64 `json:"bytes,omitempty"`
 }
+
+// Pages keeps counts null until the corresponding facts are known.
 type Pages struct {
 	Source    *int64 `json:"source"`
 	Generated *int64 `json:"generated"`
 	Total     *int64 `json:"total"`
 }
+
+// Report records actual report-path publication.
 type Report struct {
 	Path    string `json:"path"`
 	Written bool   `json:"written"`
 }
+
+// Text records authored text layout and measured overflow.
 type Text struct {
 	Font      string      `json:"font"`
 	FontSize  float64     `json:"font_size"`
@@ -40,6 +49,8 @@ type Text struct {
 	InkBounds *[4]float64 `json:"ink_bounds"`
 	Overflow  bool        `json:"overflow"`
 }
+
+// Part is the full-report entry for one flattened item.
 type Part struct {
 	Item          string            `json:"item"`
 	Kind          string            `json:"kind"`
@@ -53,6 +64,8 @@ type Part struct {
 	Text          *Text             `json:"text"`
 	FieldsRenamed []job.FieldRename `json:"fields_renamed,omitzero"`
 }
+
+// Result is the complete run outcome before stdout caps.
 type Result struct {
 	FormatVersion      int               `json:"format_version"`
 	Command            string            `json:"command"`
@@ -65,6 +78,8 @@ type Result struct {
 	Report             *Report           `json:"report"`
 	Parts              []Part            `json:"parts,omitzero"`
 }
+
+// Version identifies the executable and its build environment.
 type Version struct {
 	FormatVersion int    `json:"format_version"`
 	Command       string `json:"command"`
@@ -74,6 +89,7 @@ type Version struct {
 	Platform      string `json:"platform"`
 }
 
+// New starts a result with unknown facts and no diagnostics.
 func New(command string) Result {
 	return Result{FormatVersion: 3, Command: command, Status: "ok", Diagnostics: []diag.Diagnostic{}}
 }
@@ -156,6 +172,7 @@ func JSON(w io.Writer, value any) error {
 	return err
 }
 
+// Render writes the capped JSON or text stdout view.
 func Render(w io.Writer, r Result, format string) error {
 	r = r.Summary()
 	if format != "text" {

@@ -540,3 +540,33 @@ one-source/one-Unicode-separator extraction, embedding and <30000-byte growth
 case. TestScale ran exactly once as recorded above; both workloads passed. Normal
 and CI test runs skip it explicitly. BenchmarkBuild was compiled, not executed.
 Native hosted oracle/test results remain pending WP8 CI.
+
+## Stock-tool graph compatibility (WP8)
+
+The combined tools module selects go.yaml.in/yaml/v4 rc.6 through gosec v2.29.0,
+but actionlint v1.7.12 uses the incompatible rc.3 API. Its module-tool build fails
+with TypeError/ParserError compile errors. An isolated `go run ...@v1.7.12`
+builds and runs successfully. Keep the version in tools/go.mod, derive it with
+go list, and invoke only actionlint with stock Go's @version isolation. This
+avoids a fork, replace directive, dependency downgrade, installer or extra tool
+module. The selected actionlint module manifest defines its isolated dependency
+graph; the combined tools graph is used for the other tools. CI and contributor
+commands must use this invocation rather than the demonstrated failing one.
+
+WP8 packaging prerequisite: reconcile runtime notices/licenses before the snapshot
+rather than package the obsolete fork/tool inventory until WP9. WP9 still adds
+the module-set/document checks and reviews the final documentation. The six
+supported target graphs define the linked module set; versions remain in module
+files. Module-only advisory GO-2026-5932 concerns x/crypto/openpgp, which is neither
+imported nor called here; govulncheck reports zero affected symbols/packages.
+
+WP8 local tooling checkpoint: build/vet and all oracle-required tests pass;
+the native pinned linter reports zero issues under GOOS darwin, linux and
+windows; isolated pinned actionlint passes; both modules are tidy; GoReleaser
+v2.18.3 validates the config. A temporary forbidden job→inputfile import was
+rejected by stock depguard and removed. Central commented exclusions record
+intentional conventional permissions, trusted-path fixture/oracle I/O, bounded
+sfnt casts and best-effort cleanup/error-channel behavior. Real sfnt offset/length
+overflow checks preserve the binary format instead of suppressing those findings.
+The existing ruleset still requires Required CI from integration 15368; no
+settings change is needed. Snapshot archives and hosted checks are pending next.

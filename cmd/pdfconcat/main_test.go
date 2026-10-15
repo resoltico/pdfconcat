@@ -263,19 +263,19 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 
 func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real")
+	realDir := filepath.Join(dir, "realDir")
 	alias := filepath.Join(dir, "alias")
-	if err := os.Mkdir(real, 0700); err != nil {
+	if err := os.Mkdir(realDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(real, alias); err != nil {
+	if err := os.Symlink(realDir, alias); err != nil {
 		t.Skipf("directory symlinks unavailable: %v", err)
 	}
 	source := filepath.Join(dir, "source.pdf")
 	if err := pdffixture.Plain("source").WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	out := filepath.Join(real, "packet.pdf")
+	out := filepath.Join(realDir, "packet.pdf")
 	report := filepath.Join(alias, "packet.pdf")
 	r, exit, _ := invoke(t, []string{"build", "-o", out, source, "--report", report, "--overwrite"}, "")
 	if exit != 2 || !r.Output.Published || r.Report.Written || !hasDiagnostic(r, "report_is_output") || hasDiagnostic(r, "report_write_failed") {

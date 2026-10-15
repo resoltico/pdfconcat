@@ -5,6 +5,7 @@ package job
 
 import "github.com/resoltico/pdfconcat/internal/diag"
 
+// TextStyle is the effective generated text declaration in points.
 type TextStyle struct {
 	Value, Font          string
 	Size                 float64
@@ -14,6 +15,7 @@ type TextStyle struct {
 	Align, Overflow      string
 }
 
+// PageStyle combines an authored canvas, fill, text and declaration origins.
 type PageStyle struct {
 	Size       Size // zero means inherit
 	Background *Color
@@ -21,6 +23,7 @@ type PageStyle struct {
 	Origins    map[string]string
 }
 
+// Part is one flattened source occurrence or generated item.
 type Part struct {
 	Pointer string
 	Source  string
@@ -28,6 +31,7 @@ type Part struct {
 	Count   int
 }
 
+// Job is an ordered packet with absolute input/output paths.
 type Job struct {
 	Output  string
 	FitTo   *Size
@@ -35,11 +39,13 @@ type Job struct {
 	BaseDir string
 }
 
+// SourceFacts contains inspected page counts and displayed boundary sizes.
 type SourceFacts struct {
 	Pages               int
 	FirstSize, LastSize Size
 }
 
+// PlacedPart has its resolved canvas and inclusive output range.
 type PlacedPart struct {
 	Part
 	Pages               int
@@ -47,11 +53,13 @@ type PlacedPart struct {
 	Size                Size
 }
 
+// Layout is the resolved ordered packet and its page totals.
 type Layout struct {
 	Parts                                   []PlacedPart
 	SourcePages, GeneratedPages, TotalPages int64
 }
 
+// Defaults returns the built-in generated-page style.
 func Defaults() PageStyle {
 	return PageStyle{Text: TextStyle{Font: "default", Size: 12, Anchor: "center", Align: "center", Leading: 1.2, Overflow: "error"}, Origins: map[string]string{}}
 }

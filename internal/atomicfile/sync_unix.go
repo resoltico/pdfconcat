@@ -7,8 +7,9 @@ package atomicfile
 
 import (
 	"errors"
-	"golang.org/x/sys/unix"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 func unsupportedRename(err error) bool {

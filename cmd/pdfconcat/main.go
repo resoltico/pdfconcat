@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
+// Command pdfconcat checks and builds reviewed PDF packets.
 package main
 
 import (

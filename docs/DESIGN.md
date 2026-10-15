@@ -164,3 +164,34 @@ schema. Job tests cover lexical paths, units/colors, layering origins, inherited
 first/last sizes, explicit sizes under fitting and int64 page ranges. Fuzz seeds
 ran as ordinary tests; no fuzz campaign ran. Plan I/O/cancellation criteria belong
 to the WP5/WP6 pipeline and remain pending there.
+
+## Font embedding decision (WP3)
+
+Keep the existing pure text layout, font validation, script policy and shaping
+code. Its measured bounds support product overflow diagnostics rather than a
+removed report-retention subsystem. Bitmap-only embedding refusal and
+no-subsetting permissions remain required; glyph aliases and clusters still
+require the salvaged ActualText logic in the PDF writer.
+
+A small stable-GID pruner owns only glyf/loca rebuilding, composite closure,
+selected-table copying, post format 3 and sfnt checksums. The existing go-text
+parser remains the shaping source. The inspected alternative
+[tdewolff/font Subset](https://github.com/tdewolff/font/blob/master/sfnt_subset.go)
+renumbers the supplied glyphs and offers table selection but no stable-GID
+pruning option. Passing every GID would retain the unwanted outlines. Adapting
+that mechanism would add mapping/dependency complexity, so the narrow owned
+pruner follows the accepted design. It never shapes the reduced font; layout
+uses the original. fsType 0x0100 returns original bytes unchanged. Composite
+closure preserves the outlines of components without adding text mappings for
+components that the text itself does not use. One job-wide glyph union supplies
+all PDF widths, ToUnicode and program bytes. Rendering/dedup/size acceptance
+remains pending WP4/WP7; structural checks alone do not establish visual fidelity.
+
+WP3 verification: build, vet and the full test suite pass on macOS arm64.
+Pruning tests independently read table directories and loca offsets, compare
+retained outline bytes and composite components, require unused outlines empty,
+retain maxp/hmtx, check every table checksum and the whole-font 0xB1B0AFBA sum,
+exercise invalid GID rejection, preserve no-subsetting bytes, and verify the
+job-wide union is independent of page order/repetition. Existing text-policy,
+wrap/alignment/anchor/overflow, glyph coverage and font-permission cases all
+remain passing. No fuzz or scale campaign ran.

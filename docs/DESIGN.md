@@ -195,3 +195,168 @@ exercise invalid GID rejection, preserve no-subsetting bytes, and verify the
 job-wide union is independent of page order/repetition. Existing text-policy,
 wrap/alignment/anchor/overflow, glyph coverage and font-permission cases all
 remain passing. No fuzz or scale campaign ran.
+
+## PDF correction experiments and boundary (WP4 design pass)
+
+Reran the audit's small upstream probes before implementing the affected code.
+The raw Page/Kids fixture validates without a notice; the two different form DRs
+merge successfully; removing catalog EmbeddedFiles leaves its cache populated;
+setting catalog Version alone leaves effective cached version 1.7; resizing the
+private Cr#6fpBox key fixture produces no extracted text. Outputs and exact
+commands are retained in external evidence/pdf-probes/observed.log. These
+reproduce the peer findings; none is dismissed as hostile-only.
+
+The form boundary will allow multiple nonempty forms only when their complete
+resolved DR dictionaries and form-level DA/Q defaults are structurally identical
+(including stream bytes); absent resources/defaults must agree too. A single
+form retains its own resources. This conservative compatibility check permits
+repeated ordinary forms without implementing resource/appearance merging. Other
+combinations receive source_form_unsupported with an actionable explanation.
+Check warns that later nonempty forms may be namespaced, and build reads actual
+field names before/after each merge for exact mappings. Distinct resources under
+the same name and distinct names both require refusal. This narrows v0.2.0's form
+support and must have a breaking note. Unsigned signature fields remain allowed.
+Canonical names containing a literal hash followed by two hex digits receive a
+narrow source_invalid refusal before validation; their identity cannot safely
+survive upstream dictionary lookup. Ordinary literal hashes remain accepted.
+
+The salvaged hostile fixture now fails the required raw tree precheck before
+reaching upstream's panic: its root page-tree Type is malformed. Its specific
+outcome is therefore source_damaged, rather than a recovered source_invalid.
+This was observed in the WP4 regression run. The panic boundary remains in place;
+a structurally valid page-tree fixture with a malformed widget rectangle tests
+a narrow refusal separately. Upstream accepts that short rectangle in relaxed
+mode, so the precheck rejects it before later consumers can index four entries.
+The original panic is prevented before the backend, rather than reproduced
+inside the guarded product. Recovery remains defense in depth. Generated-page tests that asserted
+one flat Kids array now assert bounded fan-out and each leaf reference exactly
+once; the old flat shape is intentionally replaced by the required balanced tree.
+The producer boundary reflects the accepted 100000-page limit.
+
+Fitting experiment: Resize preserves a source CropBox's lower-left origin in
+its output MediaBox/CropBox (e.g. [10 20 310 520] for a 300×500-point target).
+The target's physical width/height are the contract; fitted sources have no
+clean-origin guarantee. Tests therefore assert the known origin, target side
+lengths and UserUnit 1, then compare rendering with a physically equivalent
+scaled-coordinate reference. Generated canvases retain their clean origin.
+
+## Known limitations and individual fork-fix triage
+
+The fork regression sources were reviewed from the foundation commit, including
+ambiguous parser/free-list/resource cases. The table below assigns every one of
+the inventory's 45 behaviors. No dependency test suite or campaign was run.
+Short product probes are in the external implementation evidence logs
+`fork-triage-observations.log`, `fork-packed-freehead-observations.log`,
+`wp4-valid-fork-regressions.log` and `wp4-fidelity-regressions.log`.
+
+**Breaking parser/fidelity boundary:** upstream relaxed parsing may accept
+material suffixes, malformed/overflow/underflow numeric tokens, decoded duplicate
+keys (including null omissions), and normalize malformed free-head entries.
+The small ordinary and packed-object probes demonstrated acceptance; acceptance
+is not evidence of fidelity. We no longer promise the fork's strict lexical
+refusal contract. Sources must be trusted local documents. Raw page-tree checks,
+canonical-name refusals, resource-role refusals and policy checks remain explicit;
+PDFConcat is neither a general repair detector nor a sanitizer. Finite PDF reals
+are serialized by upstream to at most twelve fractional digits; bitwise numeric
+round trips are not promised. Content streams are handled by upstream and fitting
+may change them. Valid comment-separated references are accepted where upstream
+supports them, or refused with source_invalid (one tested legal spelling is
+unsupported). Upstream issue drafts must include these remaining limitations.
+
+| Fork regression | Disposition / evidence |
+| --- | --- |
+| TestContextDecodedCopyInterruptsBufferedExpansionAndCapsWork | Retire fork-specific buffered-expansion work caps; context API cancellation remains. No hostile decompression guarantee. |
+| TestContextCopyNChecksCancellationAtExactReadBoundary | Retire exact inner-read boundary guarantee; cancellation is passed to upstream and checked between parts. |
+| TestContextPredictorReadFullChecksExactBoundaryCancellation | Retire predictor-loop checkpoint guarantee under trusted-input scope. |
+| TestContextChecksASCIIAndRunLengthMaterializedScans | Retire materialized-scan work checkpoints; no hostile-input CPU budget. |
+| TestContextTIFFChecksLargeInnerColorLoops | Retire inner-color-loop budget; no promise to interrupt every decoder iteration. |
+| TestContextPaethWorkCounterChecksStridedInnerLoop | Retire Paeth work-count policy; upstream decoder owns this algorithm. |
+| TestPredictorExactOutputCapExcludesPNGPrefixAndRejectsNextRowBeforeAppend | Retire fork-specific decoded-byte caps, including PNG predictor accounting. |
+| TestCompleteSourceBodiesRejectMaterialSuffixAcrossPackedAndOrdinaryReaders | Short ordinary/packed probes accept suffixes; strict lexical refusal is explicitly retired and needs upstream follow-up. |
+| TestCompleteSourceBodiesRetainCommentSeparatedReferencesAndCommentTails | Product regression preserves visible content for the supported split; the second split is source_invalid. Packed probe accepted the comment case. |
+| TestPackedDictionaryPolicyMatchesStrictRefusalAndClassifiedRelaxedNotice | Product has one relaxed upstream mode, not the fork's strict/notice pair. Packed malformed suffix probe accepted without diagnostics; disclosed above. |
+| TestMaintainedPrefixParserStillReturnsRemainingMaterial | Internal fork parser API has no product consumer after fitting/parser removal; no compatibility wrapper. |
+| TestContextTypedEntryResolversRetainActualLazyParserLifetime | Fork-specific lazy-parser lifetime guarantee removed. Product materialization uses upstream context APIs; ordinary cancellation remains tested. |
+| TestHexStringIgnoresPDFWhitespaceBetweenNibbles | Repeated-form product regression retains Hello World; qpdf independently reads the field value. |
+| TestHexStringLargeCanonicalAndFormattedValues | Upstream handles the valid encoding; malformed/large-input work guarantees are outside scope. Whitespace/odd-nibble product cases retain field values. |
+| TestHexLiteralRetainsCallerRemainderAndInvalidSkip | Prefix/remainder API is unused. Valid odd nibble preserves A@ in repeated-form output; malformed hex may follow upstream relaxed policy. |
+| TestCanceledHexObjectRetainsContextRefusal | Cancellation now belongs to upstream context APIs, not the removed prefix parser; no per-token deadline guarantee. |
+| TestNativeParserAndWriterPreserveCanonicalDictionaryIdentity | Refuse canonical literal-hash-plus-hex keys before validation; private CropBox counterexample reproduced. Ordinary hash control accepted. |
+| TestDictionaryDecodedKeyUniquenessBeforeNullOmission | Upstream accepts tested decoded duplicates/null omission; malformed lexical refusal is explicitly retired. No second PDF parser added. |
+| TestFiniteRealNativeRoundTripPreservesTypeAndBits | Product test records twelve-fraction-digit serialization and preserved visible text; bit identity is a documented breaking limitation. |
+| TestNumericInstructionsNeverBecomeFabricatedZeroOrAbsentValue | Short malformed/overflow/underflow object probes are accepted upstream; no strict lexical guarantee. Raw page counts/physical geometry are checked separately. |
+| TestParseObjectRejectsNonPDFNumbers | Same measured upstream policy, individually retired as a strict malformed-token refusal. |
+| TestParseObjectBoundsIncompleteArray | Fork parser work/depth budget retired; raw page and field graph bounds remain. Panic recovery does not cover exhaustion/fatal runtime failures. |
+| TestReadRejectsRetainedInUseFreeHeadAcrossClassicAndStreamEntries | Short classic in-use head probe was accepted/normalized upstream. Strict original-head rejection is retired; no raw xref parser is introduced. |
+| TestReadPreservesKnownClassicFreeHeadNormalizationAndRepairs | Generation/offset/zero-head normalization probes accepted. Ordinary valid output is independently checked by qpdf. |
+| TestReadPreservesActualRecycledFreeObjectInsertion | Product regression supplies a genuine free-list slot and rebuilds destinations, then checks qpdf and exact link targets. |
+| TestProcessObjectRejectsMalformedNumericTokenStrict | Strict reader mode is no longer a public contract; the measured upstream relaxed numeric boundary applies. |
+| TestHistoricalOCSPFixtureRejectsUnsignedTimeChange | Signature authentication is outside product scope; signed/certified/timestamped inputs are refused, unsigned signature fields remain accepted. |
+| TestDictionaryCanonicalBytesGovernEveryOperation | Product avoids ambiguous canonical identities through the same pre-validation refusal, including name values. No fork dictionary API is exposed. |
+| TestCanonicalNamesPreserveLiteralHashesInSerializationAndDiagnostics | Ambiguous hash-plus-hex shapes are refused rather than double-decoded; ordinary literal hashes remain supported. |
+| TestContextFullDecodeBoundsCachedRawAndOpaqueResults | Retire fork-specific decoded/raw/opaque cache budgets; trusted inputs and OS limits are the documented boundary. |
+| TestContextFullDecodeBoundsFilterChainAndPreservedTerminalStage | Retire custom filter-chain work/output limits; upstream owns filter decoding. |
+| TestContextFullDecodeCancelsBufferedFlateWithoutPublishingContent | Retire buffered-flate inner checkpoint guarantee; product publication occurs only after complete verification. |
+| TestContextPartialPrefixCannotExceedConfiguredCap | Removed content parser's bounded-prefix API has no consumer; no equivalent product option. |
+| TestInfoPropertiesPreserveCanonicalPrivateNameBytes | Source Info is intentionally removed/replaced by catalog policy. Ambiguous canonical keys are refused before validation rather than promoted. |
+| TestResourceValidationPreservesOtherDictionaryRoles | Shared annotation/field resource dictionaries are refused before upstream role pruning. Product regression exercises a shared resource/annotation object. |
+| TestBoundedInlineBinaryIsNotTokenized | Removed benoitkugler parser has no consumer; source content/inline image handling belongs to upstream, with independent render acceptance. |
+| TestBoundedFlateExpansionAndBoundary | Removed decoder's byte-cap API has no consumer; custom hostile-input decompression budgets are retired. |
+| TestBoundedContainerOperandsTokensAndCancellation | Removed token/operand/depth/work configuration is not replaced. Product retains explicit page/field/name graph bounds and API cancellation. |
+| TestBoundedNumericOriginalFloat64 | Old fitting analyser's original-number span API is unused. Upstream fitting is the accepted contract; exact numeric identity limitation is disclosed. |
+| TestBoundedInlineMaintainedFilterMatrix | Removed inline-parser API is not exposed; valid source rendering uses upstream. No second image tokenizer/decoder is added. |
+| TestBoundedInlineAggregateWorkAndRowOverflow | Custom aggregate inline-image budgets retired; trusted-input memory/CPU limits are external. |
+| TestASCII85CapturedInvalidPrefixBeforeEOD | Removed skipper is unused. Malformed stream lexical refusal follows upstream, not the former tokenizer's EOD policy. |
+| TestASCIIHexRejectsInvalidPrefixAndKeepsOddNibble | Removed skipper is unused; valid odd-nibble semantics have a product form-value regression. Invalid stream prefixes are not given a new sanitizer guarantee. |
+| TestBoundedTokenizerConstructorLookaheadAndCancellation | Removed tokenizer constructor has no consumer. No lookahead-token work guarantee is carried forward. |
+| TestBoundedTokenizerTokenProgramAndCountBoundaries | Removed tokenizer limits/options are retired rather than recreated around upstream. |
+
+Additional published behaviors outside those 45 names have product regressions
+for indirect DecodeParms and valid nonzero object generations. Source bookmarks,
+named/direct links and action chains are tested per occurrence. Relative URI
+links lose catalog Base with a per-source warning; action bytes remain intact.
+Named destinations outside their source are omitted and dangling actions/links
+are removed. Fitted destination coordinates are not transformed: page targets
+remain correct, but scroll positions can be wrong. Form support is the narrow
+resource/default-equivalence boundary above, with no owned appearance engine.
+
+The trusted-input boundary does not guarantee recovery from memory exhaustion,
+fatal stack overflow, every hostile decoder loop or concurrent namespace swaps.
+It does not turn a successful validation into a claim that every source feature
+survived. The feature policy and independent regression cases define that claim.
+
+WP4 superseded writer cleanup: removed the old exported sequential Producer and
+WriteProduced API, declared-font registry and producer-only tests. The product
+now renders one already-laid-out item with shared resources. Inclusive geometry,
+font boundaries, empty text, cancellation and the page limit remain tested via
+WriteRepeated; missing job-wide resources are rejected. Font sharing/extraction
+properties are covered by generated-item and cross-item deduplication oracles.
+Producer callback failure/one-page-at-a-time shaping guarantees have no caller
+in the accepted per-item pipeline and are intentionally retired. Original-font
+Write remains for pixel comparison and the salvaged extraction/bounds tests.
+
+The empty-form challenge passed without another adapter: upstream
+`destinationFormFields` replaces an empty Fields form with the later nonempty
+form, including its resources. The qpdf resource-key check and Poppler rendering
+confirm this for conflicting unused defaults. Keep that regression; do not add
+empty-form cleanup or another compatibility state. Name-tree output keys are
+UTF-16BE, so their ordering uses those encoded bytes rather than UTF-8 ordering;
+non-BMP/BMP destination names have a repeated-source oracle case.
+
+WP4 verification: `go build ./...`, `go vet ./...`, and
+`PDFCONCAT_REQUIRE_ORACLE=1 go test ./...` pass on macOS arm64. Independent
+checks cover repeated/distinct name-tree and legacy destinations, direct/named
+outlines and GoTo/Next chains, 140 colliding names across balanced leaves,
+Unicode destination names, outside-source destination omission, actual field
+mappings (including distinct names), compatible/incompatible resources and
+inherited defaults, empty-form replacement, catalog/name-cache cleanup after
+serialization, XFA removal, relative/absolute URI controls, PDF 2.0 in either
+source position, byte-change detection, raw tree/canonical/resource-role refusals,
+unsigned signatures, both password cases, and library standard-stream silence.
+Pruned/original glyph pixels match; distinct generated items share one embedded
+font program and add less than 30000 bytes in the tested short-text job. Fitting
+uses qpdf physical boxes, normalized UserUnit, annotation rectangle comparisons,
+and exact Poppler pixels against independent scaled-coordinate controls with
+crop/rotation and mixed units. Widget fitting is refused. Fuzz seeds ran as
+ordinary tests; no fuzzing or scale campaign ran. Full command/publication
+acceptance and native Linux/Windows results remain pending subsequent WPs/CI.

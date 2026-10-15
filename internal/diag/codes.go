@@ -33,6 +33,8 @@ type Diagnostic struct {
 // Registry returns a copy so callers cannot change the public code definitions.
 func Registry() map[Code]Definition {
 	return map[Code]Definition{
+		"source_form_unsupported":         {Severity: "error", Class: "invalid", Description: "form default resources or defaults differ between nonempty source forms"},
+		"source_uri_base_removed":         {Severity: "warning", Description: "relative URI actions lose their source catalog Base"},
 		"usage_unknown_command":           {Severity: "error", Class: "invalid", Description: "first argument is not a command"},
 		"usage_unknown_option":            {Severity: "error", Class: "invalid", Description: "option not defined for the command"},
 		"usage_missing_value":             {Severity: "error", Class: "invalid", Description: "option needs a value"},
@@ -84,7 +86,7 @@ func Registry() map[Code]Definition {
 		"report_write_failed":             {Severity: "error", Class: "failed", Description: "the report could not be written"},
 		"interrupted":                     {Severity: "error", Class: "interrupted", Description: "cancelled by a signal"},
 		"text_overflow_allowed":           {Severity: "warning", Class: "", Description: "`overflow: allow` and measured text extends past the page or block"},
-		"form_fields_renamed":             {Severity: "warning", Class: "", Description: "colliding fully-qualified field names; pdfcpu renamed later occurrences"},
+		"form_fields_renamed":             {Severity: "warning", Class: "", Description: "pdfcpu namespaces later nonempty forms even without collisions; build reports actual names"},
 		"form_appearances_regenerated":    {Severity: "warning", Class: "", Description: "a source requests `NeedAppearances`; viewers may redraw all fields"},
 		"destinations_renamed":            {Severity: "warning", Class: "", Description: "colliding named destinations were renamed for later occurrences"},
 		"destinations_dropped":            {Severity: "warning", Class: "", Description: "named destinations whose target is not a page of the same document were omitted"},

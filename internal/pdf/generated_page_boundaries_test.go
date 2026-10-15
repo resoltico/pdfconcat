@@ -28,11 +28,15 @@ func boundaryPageBytes(t *testing.T, mode string, page pdf.Page) ([]byte, error)
 		_, err := pdf.Write(t.Context(), &data, []pdf.Page{page})
 		return data.Bytes(), err
 	}
-	var fonts []*typeset.Font
+	prepared := map[typeset.Digest]typeset.EmbeddedFont{}
 	if page.Text != nil && page.Text.Font != nil {
-		fonts = []*typeset.Font{page.Text.Font}
+		var err error
+		prepared, err = typeset.PrepareFonts([]*typeset.Placed{page.Text})
+		if err != nil {
+			return nil, err
+		}
 	}
-	_, err := pdf.WriteProduced(t.Context(), &data, 1, fonts, func(int) (pdf.Page, error) { return page, nil })
+	_, err := pdf.WriteRepeated(t.Context(), &data, page, 1, prepared)
 	return data.Bytes(), err
 }
 
@@ -59,7 +63,7 @@ func checkBoundaryPage(t *testing.T, data []byte, width, height float64, text st
 func TestPageWriterAcceptsInclusiveGeometryAndFontBoundaries(t *testing.T) {
 	t.Parallel()
 	font := defaultFont(t)
-	for _, mode := range []string{"slice", "produced"} {
+	for _, mode := range []string{"slice", "repeated"} {
 		for _, dimensions := range [][2]float64{{1, 200}, {14400, 200}, {300, 1}, {300, 14400}} {
 			t.Run(fmt.Sprintf("%s/page-%gx%g", mode, dimensions[0], dimensions[1]), func(t *testing.T) {
 				page := pdf.Page{Width: dimensions[0], Height: dimensions[1]}
@@ -91,7 +95,7 @@ func TestPageWriterRejectsImmediateOutOfRangeNeighbors(t *testing.T) {
 	t.Parallel()
 	font := defaultFont(t)
 	valid := textPage(t, font, "A")
-	for _, mode := range []string{"slice", "produced"} {
+	for _, mode := range []string{"slice", "repeated"} {
 		for _, dimension := range []string{"width", "height"} {
 			for _, value := range []float64{math.Nextafter(1, 0), math.Nextafter(14400, math.Inf(1))} {
 				page := pdf.Page{Width: 300, Height: 200}
@@ -119,7 +123,7 @@ func TestPageWriterRejectsImmediateOutOfRangeNeighbors(t *testing.T) {
 
 func TestPageWriterEmptyTextDoesNotRequireUnusedFont(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"slice", "produced"} {
+	for _, mode := range []string{"slice", "repeated"} {
 		for _, block := range []*typeset.Placed{nil, {}} {
 			page := pdf.Page{Width: 300, Height: 200, Text: block}
 			data, err := boundaryPageBytes(t, mode, page)
@@ -131,26 +135,22 @@ func TestPageWriterEmptyTextDoesNotRequireUnusedFont(t *testing.T) {
 	}
 }
 
-func TestProducedPageLimitReachesFirstProducerWithoutCompletingDocument(t *testing.T) {
-	t.Parallel()
+func TestRepeatedPageLimitAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	stopped := errors.New("first producer deliberately stopped")
-	for _, count := range []int{1000000, 1000001} {
-		calls := 0
-		_, err := pdf.WriteProduced(ctx, io.Discard, count, nil, func(index int) (pdf.Page, error) {
-			calls++
-			if index != 0 {
-				t.Fatal("producer advanced beyond its first refusal")
-			}
-			return pdf.Page{}, stopped
-		})
-		if count == 1000000 {
-			if !errors.Is(err, stopped) || calls != 1 {
-				t.Fatalf("accepted count did not reach its first producer: calls=%d err=%v", calls, err)
-			}
-		} else if !errors.Is(err, pdf.ErrTooManyPages) || calls != 0 {
-			t.Fatalf("over-limit count reached a producer: calls=%d err=%v", calls, err)
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	for _, count := range []int{100000, 100001} {
+		_, err := pdf.WriteRepeated(canceled, io.Discard, pdf.Page{Width: 100, Height: 100}, count, nil)
+		if count == 100000 && !errors.Is(err, context.Canceled) {
+			t.Fatalf("accepted count lost cancellation: %v", err)
 		}
+		if count == 100001 && !errors.Is(err, pdf.ErrTooManyPages) {
+			t.Fatalf("over-limit count accepted: %v", err)
+		}
+	}
+	page := textPage(t, defaultFont(t), "font")
+	if _, err := pdf.WriteRepeated(t.Context(), io.Discard, page, 1, nil); !errors.Is(err, pdf.ErrInvalidPage) {
+		t.Fatalf("missing job-wide font accepted: %v", err)
 	}
 }

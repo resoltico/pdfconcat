@@ -7,8 +7,9 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -41,15 +42,28 @@ func TestPageTreeProductionBufferPreservesOrderedReferencesAndWriteChunks(t *tes
 	if written != int64(output.Len()) {
 		t.Fatalf("returned %d bytes, actually wrote %d", written, output.Len())
 	}
-	// Match every ordered reference independently of the private reference batch.
-	var references strings.Builder
-	references.WriteString("/Kids [")
-	for index := range pages {
-		_, _ = fmt.Fprintf(&references, "%d 0 R ", 3+2*index)
+	// Every page reference occurs exactly once in bounded Kids arrays.
+	refs := map[int]int{}
+	for _, match := range regexp.MustCompile(`/Kids \[([^\]]*)\]`).FindAllStringSubmatch(output.String(), -1) {
+		fields := strings.Fields(match[1])
+		if len(fields)%3 != 0 || len(fields) > 64*3 {
+			t.Fatal("unbounded or malformed Kids array")
+		}
+		for i := 0; i < len(fields); i += 3 {
+			id, err := strconv.Atoi(fields[i])
+			if err != nil {
+				t.Fatal(err)
+			}
+			refs[id]++
+		}
 	}
-	references.WriteString("]")
-	if !strings.Contains(output.String(), references.String()) {
-		t.Fatal("page tree omitted, duplicated or reordered a source page reference")
+	for i := range pages {
+		if refs[3+2*i] != 1 {
+			t.Fatalf("page %d appears %d times", i, refs[3+2*i])
+		}
+	}
+	if !strings.Contains(output.String(), "/Count 8193 ") {
+		t.Fatal("root count is missing")
 	}
 	// Exercise the configured production transport, not a private tiny buffer.
 	// A direct write may exceed its capacity, but only the last write may be

@@ -607,32 +607,9 @@ func (d *Document) checkVersion(exp Expectation, fail failFunc) {
 	}
 }
 
-func (d *Document) checkOutlines(pageIndex map[string]int, fail failFunc) {
-	root := d.catalog()
-	if root["/Outlines"] == nil {
-		return
-	}
-
-	bad := 0
-
-	var walk func(node any, depth int)
-
-	walk = func(node any, depth int) {
-		for current := d.dict(node); current != nil && depth < maxOutlineDepth; current = d.dict(current["/Next"]) {
-			if dest, found := current["/Dest"]; found && d.destinationPage(dest, pageIndex).kind != "ok" {
-				bad++
-			}
-
-			if first, found := current["/First"]; found {
-				walk(first, depth+1)
-			}
-		}
-	}
-
-	walk(root["/Outlines"], 0)
-
-	if bad > 0 {
-		fail(CheckOutlines, "%d outline items dangling or orphaned", bad)
+func (d *Document) checkOutlines(_ map[string]int, fail failFunc) {
+	if _, err := d.OutlineTargets(); err != nil {
+		fail(CheckOutlines, "%v", err)
 	}
 }
 

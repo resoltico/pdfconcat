@@ -1,0 +1,281 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Ervins Strauhmanis
+
+package pdf
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/job"
+	"github.com/resoltico/pdfconcat/internal/typeset"
+)
+
+type Assembly struct {
+	FieldsRenamed map[int][]FieldRename
+	Diagnostics   []diag.Diagnostic
+}
+
+// ReadSource follows symlinks to regular files, rejecting named streams before open.
+func ReadSource(c context.Context, path string) ([]byte, error) {
+	if err := c.Err(); err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err = f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	var b bytes.Buffer
+	chunk := make([]byte, 256<<10)
+	for {
+		if err = c.Err(); err != nil {
+			return nil, err
+		}
+		n, e := f.Read(chunk)
+		b.Write(chunk[:n])
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			return nil, e
+		}
+	}
+	return b.Bytes(), nil
+}
+
+// Assemble imports each occurrence independently and writes only after final validation.
+func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts, pages map[int]Page, fit *job.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, w io.Writer) (result Assembly, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = refuse("assembly_failed", fmt.Sprintf("PDF backend panic: %v", value))
+		}
+	}()
+	result.FieldsRenamed = map[int][]FieldRename{}
+	var dest *model.Context
+	allDests := map[string]destination{}
+	usedNames := map[string]bool{}
+	version := model.V17
+	formBoundary := ""
+	needAppearances := false
+	add := func(code diag.Code, message string, index int) {
+		d := diag.New(code, message, layout.Parts[index].Pointer)
+		d.File = layout.Parts[index].Source
+		result.Diagnostics = append(result.Diagnostics, d)
+	}
+	for index, part := range layout.Parts {
+		if err = c.Err(); err != nil {
+			return result, err
+		}
+		var s *model.Context
+		if part.Page == nil {
+			data, e := ReadSource(c, part.Source)
+			if e != nil {
+				return result, &policyError{code: "source_unreadable", err: e}
+			}
+			inspected, ok := facts[part.Source]
+			if !ok || sha256.Sum256(data) != inspected.SHA256 {
+				return result, refuse("source_changed", "Source bytes changed after inspection: "+part.Source)
+			}
+			s, err = read(c, data)
+			if err != nil {
+				return result, err
+			}
+			if len(inspected.FieldNames) > 0 {
+				if formBoundary != "" && formBoundary != inspected.FormBoundary {
+					return result, refuse("source_form_unsupported", "Nonempty forms have different default resources or DA/Q defaults; assemble them separately or flatten them with a suitable PDF tool.")
+				}
+				formBoundary = inspected.FormBoundary
+			}
+			needAppearances = needAppearances || inspected.NeedAppearances
+			if fit != nil && inspected.HasWidgets {
+				return result, refuse("fit_form_unsupported", "Fitting form widgets is unsupported.")
+			}
+		} else {
+			var b bytes.Buffer
+			_, err = WriteRepeated(c, &b, pages[index], part.Count, fonts)
+			if err != nil {
+				return result, err
+			}
+			s, err = read(c, b.Bytes())
+			if err != nil {
+				return result, err
+			}
+		}
+		if s.XRefTable.Version() > version {
+			version = s.XRefTable.Version()
+		}
+		if fit != nil {
+			err = pdfcpu.Resize(c, s, nil, &model.Resize{PageDim: &types.Dim{Width: fit.Width, Height: fit.Height}, UserDim: true, EnforceOrient: true, DisableContentRotation: true})
+			if err != nil {
+				return result, err
+			}
+			resized, e := rawPages(c, s)
+			if e != nil {
+				return result, e
+			}
+			for _, p := range resized {
+				delete(p.dict, "UserUnit")
+			}
+		}
+		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage)
+		if e != nil {
+			return result, e
+		}
+		for name, d := range detached {
+			allDests[name] = d
+		}
+		if renamed {
+			add("destinations_renamed", "Colliding destination names were renamed for this occurrence.", index)
+		}
+		records, e := fields(c, s)
+		if e != nil {
+			return result, e
+		}
+		if dest == nil {
+			dest = s
+		} else {
+			if err = pdfcpu.MergeXRefTables(c, filepath.Base(part.Source), s, dest, false, false); err != nil {
+				return result, err
+			}
+		}
+		for _, record := range records {
+			actual, e := qualifiedName(dest, record.dict)
+			if e != nil {
+				return result, e
+			}
+			if actual != record.name {
+				result.FieldsRenamed[index] = append(result.FieldsRenamed[index], FieldRename{From: record.name, To: actual})
+			}
+		}
+		if len(result.FieldsRenamed[index]) > 0 {
+			add("form_fields_renamed", "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", index)
+		}
+	}
+	if dest == nil {
+		return result, errors.New("no parts to assemble")
+	}
+	if err = rebuildDestinations(c, dest, allDests); err != nil {
+		return result, err
+	}
+	if err = cleanCatalog(dest, version, needAppearances); err != nil {
+		return result, err
+	}
+	if err = api.OptimizeContext(c, dest); err != nil {
+		return result, err
+	}
+	if err = api.ValidateContext(c, dest); err != nil {
+		return result, err
+	}
+	if err = api.WriteContext(c, dest, w); err != nil {
+		return result, &policyError{code: "output_write_failed", err: err}
+	}
+	return result, nil
+}
+
+var catalogKeys = map[string]bool{"Type": true, "Pages": true, "AcroForm": true, "Names": true, "Dests": true, "Outlines": true, "Version": true}
+
+func cleanCatalog(s *model.Context, version model.Version, needAppearances bool) error {
+	cat, err := s.Catalog()
+	if err != nil {
+		return err
+	}
+	for key := range cat {
+		if !catalogKeys[key] {
+			delete(cat, key)
+		}
+	}
+	for key := range s.Names {
+		if key != "Dests" {
+			delete(s.Names, key)
+		}
+	}
+	form, err := s.DereferenceDict(cat["AcroForm"])
+	if err != nil {
+		return err
+	}
+	delete(form, "XFA")
+	if len(form) > 0 && needAppearances {
+		form["NeedAppearances"] = types.Boolean(true)
+	}
+	cat["Version"] = types.Name(version.String())
+	s.HeaderVersion = &version
+	s.RootVersion = &version
+	// These caches would otherwise restore removed catalog structures at write time.
+	s.Info = nil
+	return nil
+}
+
+// Verify reopens the serialized output, checking page count and final catalog policy.
+func Verify(c context.Context, path string, expected int64) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = refuse("output_invalid", fmt.Sprintf("Output parser panic: %v", value))
+		}
+	}()
+	data, err := ReadSource(c, path)
+	if err != nil {
+		return &policyError{code: "output_invalid", err: err}
+	}
+	s, err := read(c, data)
+	if err != nil {
+		return &policyError{code: "output_invalid", err: err}
+	}
+	if int64(s.PageCount) != expected {
+		return refuse("output_page_count_mismatch", fmt.Sprintf("Expected %d output pages; found %d.", expected, s.PageCount))
+	}
+	cat, err := s.Catalog()
+	if err != nil {
+		return &policyError{code: "output_invalid", err: err}
+	}
+	for key := range cat {
+		if !catalogKeys[key] {
+			return refuse("output_invalid", "Unexpected output catalog key: "+key)
+		}
+	}
+	names, err := s.DereferenceDict(cat["Names"])
+	if err != nil {
+		return err
+	}
+	for key := range names {
+		if key != "Dests" {
+			return refuse("output_invalid", "Unexpected output name tree: "+key)
+		}
+	}
+	form, err := s.DereferenceDict(cat["AcroForm"])
+	if err != nil {
+		return err
+	}
+	if form["XFA"] != nil {
+		return refuse("output_invalid", "XFA remains in output.")
+	}
+	return nil
+}
+
+// Diagnostic preserves typed product failures at the pipeline boundary.
+func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, "assembly_failed") }

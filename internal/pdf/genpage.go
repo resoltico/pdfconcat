@@ -20,8 +20,6 @@ import (
 )
 
 type (
-	// Producer supplies the next sequential page, whose shaped data is released after writing.
-	Producer func(int) (Page, error)
 	// Color is an sRGB color.
 	Color struct {
 		R, G, B uint8
@@ -48,13 +46,20 @@ type (
 	}
 
 	document struct {
-		out     *sink
-		fonts   *fontSet
-		flate   *zlib.Writer
-		offsets []int64 // offsets[n] is the byte offset of object n
-		content []byte
-		packed  bytes.Buffer
-		firstPg int
+		out           *sink
+		fonts         *fontSet
+		flate         *zlib.Writer
+		offsets       []int64 // offsets[n] is the byte offset of object n
+		content       []byte
+		packed        bytes.Buffer
+		firstPg       int
+		pageObjects   []int
+		parents       map[int]int
+		tree          []pageTreeNode
+		repeated      bool
+		resources     int
+		contentObject int
+		prepared      map[typeset.Digest]typeset.EmbeddedFont
 	}
 
 	// sink counts bytes and keeps the first write error.
@@ -83,7 +88,7 @@ type (
 
 const (
 	// MaxPages is the largest number of pages in one resource document, the generated-page limit of a job.
-	MaxPages = 1_000_000
+	MaxPages = 100_000
 
 	fontObjects      = 5 // Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode
 	cidFontObject    = 1 // object offsets from a font's first object
@@ -99,7 +104,6 @@ const (
 	thousandthsPerEm = 1000.0
 	bfCharChunk      = 100
 	writeBufferSize  = 1 << 16
-	refsBufferSize   = 1 << 12
 	objectsPerPage   = 2 // the page and its content stream
 	hexDigitsPerUnit = 4 // UTF-16 code unit in hexadecimal
 	minPageSide      = typeset.MinPageSide
@@ -146,7 +150,7 @@ func Write(ctx context.Context, w io.Writer, pages []Page) (int64, error) {
 		fonts:   fonts,
 		firstPg: firstFontObject + fontObjects*len(fonts.list),
 	}
-	doc.offsets = make([]int64, doc.firstPg+objectsPerPage*len(pages))
+	doc.initialize(len(pages), false)
 
 	return doc.write(ctx, len(pages), func(index int) (Page, error) { return pages[index], nil })
 }
@@ -225,7 +229,7 @@ func (d *document) deflate(data []byte) []byte {
 	return d.packed.Bytes()
 }
 
-func (d *document) write(ctx context.Context, count int, produce Producer) (int64, error) {
+func (d *document) write(ctx context.Context, count int, produce func(int) (Page, error)) (int64, error) {
 	d.out.write([]byte("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n"))
 	d.begin(1)
 	d.out.textf("<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
@@ -258,47 +262,129 @@ func (d *document) write(ctx context.Context, count int, produce Producer) (int6
 	return d.finish()
 }
 
-func (d *document) writePageTree(count int) {
-	d.begin(2)
-	d.out.textf("<< /Type /Pages /Count %d /Kids [", count)
+type pageTreeNode struct {
+	object int
+	kids   []int
+	count  int
+}
 
-	var refs []byte
-
-	for index := range count {
-		refs = strconv.AppendInt(refs, int64(d.firstPg+objectsPerPage*index), decimalBase)
-		refs = append(refs, " 0 R "...)
-
-		if len(refs) > refsBufferSize {
-			d.out.write(refs)
-			refs = refs[:0]
-		}
+func (d *document) initialize(count int, repeated bool) {
+	d.repeated = repeated
+	d.parents = map[int]int{}
+	d.pageObjects = make([]int, count)
+	stride := objectsPerPage
+	if repeated {
+		stride = 1
 	}
+	for i := range count {
+		d.pageObjects[i] = d.firstPg + stride*i
+	}
+	next := d.firstPg + stride*count
+	if repeated {
+		d.contentObject = next
+		d.resources = next + 1
+		next += 2
+	}
+	level := make([]pageTreeNode, count)
+	for i, obj := range d.pageObjects {
+		level[i] = pageTreeNode{object: obj, count: 1}
+	}
+	for len(level) > 64 {
+		var upper []pageTreeNode
+		for start := 0; start < len(level); start += 64 {
+			node := pageTreeNode{object: next}
+			next++
+			for _, child := range level[start:min(start+64, len(level))] {
+				node.kids = append(node.kids, child.object)
+				node.count += child.count
+				d.parents[child.object] = node.object
+			}
+			d.tree = append(d.tree, node)
+			upper = append(upper, node)
+		}
+		level = upper
+	}
+	root := pageTreeNode{object: 2, count: count}
+	for _, child := range level {
+		root.kids = append(root.kids, child.object)
+		d.parents[child.object] = 2
+	}
+	d.tree = append(d.tree, root)
+	d.offsets = make([]int64, next)
+}
 
-	d.out.write(refs)
-	d.out.write([]byte("] >>\nendobj\n"))
+func (d *document) writePageTree(_ int) {
+	for _, node := range d.tree {
+		d.begin(node.object)
+		d.out.textf("<< /Type /Pages /Count %d /Kids [", node.count)
+		for _, kid := range node.kids {
+			d.out.textf("%d 0 R ", kid)
+		}
+		d.out.write([]byte("]"))
+		if node.object != 2 {
+			d.out.textf(" /Parent %d 0 R", d.parents[node.object])
+		}
+		d.out.write([]byte(" >>\nendobj\n"))
+	}
 }
 
 func (d *document) writePage(index int, page Page) error {
-	obj := d.firstPg + objectsPerPage*index
-
-	d.content = d.content[:0]
-	font := d.appendContent(page)
-
-	data := d.deflate(d.content)
-
+	obj := d.pageObjects[index]
+	contentObject := obj + 1
+	if d.repeated {
+		contentObject = d.contentObject
+	}
+	font := -1
+	if !d.repeated || index == 0 {
+		d.content = d.content[:0]
+		font = d.appendContent(page)
+	}
 	d.begin(obj)
-	d.out.textf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %s %s] ", number(page.Width), number(page.Height))
-
-	if font >= 0 {
+	d.out.textf("<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %s %s] ", d.parents[obj], number(page.Width), number(page.Height))
+	if d.repeated {
+		d.out.textf("/Resources %d 0 R ", d.resources)
+	} else if font >= 0 {
 		d.out.textf("/Resources << /Font << /F1 %d 0 R >> >> ", firstFontObject+fontObjects*font)
 	} else {
 		d.out.textf("/Resources << >> ")
 	}
-
-	d.out.textf("/Contents %d 0 R >>\nendobj\n", obj+1)
-	d.stream(obj+1, "/Filter /FlateDecode", data)
-
+	d.out.textf("/Contents %d 0 R >>\nendobj\n", contentObject)
+	if !d.repeated || index == 0 {
+		data := d.deflate(d.content)
+		d.stream(contentObject, "/Filter /FlateDecode", data)
+		if d.repeated {
+			d.begin(d.resources)
+			if font >= 0 {
+				d.out.textf("<< /Font << /F1 %d 0 R >> >>\nendobj\n", firstFontObject+fontObjects*font)
+			} else {
+				d.out.textf("<< >>\nendobj\n")
+			}
+		}
+	}
 	return d.out.err
+}
+
+// WriteRepeated writes one generated item with shared content and resources.
+// Prepared fonts are the authoritative union for the whole job.
+func WriteRepeated(ctx context.Context, w io.Writer, page Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont) (int64, error) {
+	if count < 1 {
+		return 0, ErrNoPages
+	}
+	if count > MaxPages {
+		return 0, ErrTooManyPages
+	}
+	fonts, err := collectFonts([]Page{page})
+	if err != nil {
+		return 0, err
+	}
+	for _, font := range fonts.list {
+		if _, ok := prepared[font.Identity()]; !ok {
+			return 0, ErrInvalidPage
+		}
+	}
+	doc := &document{out: &sink{w: bufio.NewWriterSize(w, writeBufferSize)}, fonts: fonts, firstPg: firstFontObject + fontObjects*len(fonts.list), prepared: prepared}
+	doc.initialize(count, true)
+	return doc.write(ctx, count, func(int) (Page, error) { return page, nil })
 }
 
 // appendContent writes the page's content stream into d.content and returns the used font index, or -1.
@@ -502,6 +588,11 @@ func (d *document) writeFont(index int) error {
 	font := d.fonts.list[index]
 	base := firstFontObject + fontObjects*index
 	glyphs := d.usedGlyphs(index)
+	program := font.Bytes()
+	if prepared, ok := d.prepared[font.Identity()]; ok {
+		glyphs = prepared.Glyphs
+		program = prepared.Program
+	}
 	perEm := thousandthsPerEm / float64(font.UnitsPerEm())
 
 	var widths []byte
@@ -530,9 +621,9 @@ func (d *document) writeFont(index int) error {
 	d.out.textf("<< /Type /FontDescriptor /FontName /%s /Flags 4 %s /ItalicAngle 0 %s /StemV 80 /FontFile2 %d 0 R >>\nendobj\n",
 		name, fontBox(font, perEm), fontHeights(font, perEm), base+fontFileObject)
 
-	packed := d.deflate(font.Bytes())
+	packed := d.deflate(program)
 
-	d.stream(base+fontFileObject, fmt.Sprintf("/Filter /FlateDecode /Length1 %d", len(font.Bytes())), packed)
+	d.stream(base+fontFileObject, fmt.Sprintf("/Filter /FlateDecode /Length1 %d", len(program)), packed)
 
 	packed = d.deflate(toUnicodeCMap(font, glyphs))
 
@@ -609,78 +700,4 @@ func (d *document) finish() (int64, error) {
 	}
 
 	return d.out.n, nil
-}
-
-// WriteProduced shapes and writes one page at a time through produce. Font resources are shared
-// job-wide; only used-glyph bitsets survive a page. The producer may release its lines after return.
-func WriteProduced(ctx context.Context, w io.Writer, count int, fonts []*typeset.Font, produce Producer) (int64, error) {
-	if count < 1 {
-		return 0, ErrNoPages
-	}
-
-	if count > MaxPages {
-		return 0, ErrTooManyPages
-	}
-
-	set, err := declaredFonts(fonts)
-	if err != nil {
-		return 0, err
-	}
-
-	doc := &document{
-		out:     &sink{w: bufio.NewWriterSize(w, writeBufferSize)},
-		fonts:   set,
-		firstPg: firstFontObject + fontObjects*len(set.list),
-	}
-	doc.offsets = make([]int64, doc.firstPg+objectsPerPage*count)
-
-	return doc.write(ctx, count, func(index int) (Page, error) {
-		page, produceErr := produce(index)
-		if produceErr != nil {
-			return Page{}, produceErr
-		}
-
-		if failure := validateProducedPage(page, set); failure != nil {
-			return Page{}, failure
-		}
-
-		return page, nil
-	})
-}
-
-func declaredFonts(fonts []*typeset.Font) (*fontSet, error) {
-	set := &fontSet{index: map[typeset.Digest]int{}}
-
-	for _, font := range fonts {
-		if font == nil {
-			return nil, ErrInvalidPage
-		}
-
-		if _, found := set.index[font.Identity()]; !found {
-			set.index[font.Identity()] = len(set.list)
-			set.list = append(set.list, font)
-		}
-	}
-
-	set.used = make([][glyphSetWords]uint64, len(set.list))
-
-	return set, nil
-}
-
-func validateProducedPage(page Page, set *fontSet) error {
-	if !(page.Width >= minPageSide && page.Width <= maxPageSide && page.Height >= minPageSide && page.Height <= maxPageSide) {
-		return ErrInvalidPage
-	}
-
-	if page.Text != nil && len(page.Text.Lines) > 0 {
-		if page.Text.Font == nil || !(page.Text.Size >= typeset.MinFontSize && page.Text.Size <= typeset.MaxFontSize) {
-			return ErrInvalidPage
-		}
-
-		if _, found := set.index[page.Text.Font.Identity()]; !found {
-			return ErrInvalidPage
-		}
-	}
-
-	return nil
 }

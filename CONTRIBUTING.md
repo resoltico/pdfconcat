@@ -73,16 +73,13 @@ check mainly to satisfy another check.
 The comparison uses the pdfcpu CLI matching the runtime module pin, Python 3.9+
 and the oracle tools. It creates a fresh child directory, checks expected
 success/refusal exits and preserves stdout/stderr for failures. It exports only
-small fixtures from `internal/pdffixture`, without a copied fixture module or
-unused 100000-page generation.
+small fixtures from `internal/pdffixture`.
 
 ```sh
 scripts/run-comparison.sh /absolute/path/to/pdfconcat /tmp/pdfconcat-comparisons
 ```
 
-Scale is opt-in and must not run in CI. The rebuild's one authorized local run
-is recorded in DESIGN; it is not repeated by ordinary checks. To run a future
-owner-approved measurement:
+Scale measurements are opt-in and do not run in CI or ordinary tests. They build 2,000 sources interleaved with 2,000 generated items, then one item with 100,000 generated pages. Run this only when investigating a concrete scale question:
 
 ```sh
 go test -c -o /tmp/pdfconcat-scale.test ./internal/pipeline
@@ -95,18 +92,14 @@ optional benchmark; no timing threshold gates builds.
 
 ## Release
 
-The owner controls tags/releases. Before tagging, run the delivered-state checks
-from a fresh clone, inspect `Required CI` for the PR's current commit, reconcile actual
-linked licenses/NOTICE files, move the intended changelog outcome to a dated
-version section, and review installation availability wording.
+Release publication requires maintainer authorization. Review the intended commit, pending changelog outcomes, linked licenses/NOTICE files and installation instructions. The tag's version must have a matching nonempty changelog section. The release workflow runs the reusable CI before publication; keep `Required CI` intact.
 
 Validate GoReleaser at the exact version in `.github/workflows/release.yml`.
 Run every `goreleaser release --snapshot --clean` in an isolated clone: `--clean`
-deletes its dist directory. Never use it against an owner's shared dist/artifacts.
+deletes its dist directory. Preserve existing artifacts by using a separate clone.
 Inspect six archives, both schemas, documentation/licenses, checksums and a native
 version invocation. Snapshot success is not release publication.
 
 A `v*` tag runs the reusable CI, extracts the matching nonempty changelog section,
 builds six binaries with GoReleaser and publishes archives/checksums with provenance.
-Do not create tags, releases or upstream issues without the owner's authorization.
-The next intended owner tag for this rebuild is `v0.3.0`.
+Do not create tags, releases or upstream issues without maintainer authorization.

@@ -73,14 +73,14 @@ a fill; `value: ""` clears text. Empty text still validates its selected font.
 pages use the first page of the first following source. Displayed size means
 CropBox intersected with MediaBox, rotation applied, multiplied by UserUnit.
 Generated pages never change the neighbor used by later inheritance. With
-`fit_to`, inherited pages use the target size. Without any source, give an
+`fit_to`, inherited pages use the target size. Without a source or `fit_to`, give an
 explicit size. Inherited generated sides must be 1–14,400 pt; source-only pages
 are not subject to that generated-size limit.
 
 Paper names are portrait: `A3`, `A4`, `A5`, `B4`, `B5`, `Letter`, `Legal`,
 `Tabloid`. Use dimensions such as `297x210mm` for landscape. Each generated side
-is 1–14,400 pt. Lengths are JSON numbers in points or decimal strings with
-`pt`, `mm`, `cm`, `in`; no spaces/exponents in strings. Offsets stay within
+is 1–14,400 pt. Lengths are JSON numbers in points or decimal strings with an optional
+`pt`, `mm`, `cm`, `in` suffix; omitted units mean points. Strings contain no spaces or exponents. Offsets stay within
 ±14,400 pt. `fit_to` accepts the same sizes except `inherit`.
 
 ## Text placement
@@ -90,7 +90,7 @@ The anchor is `top-left`, `top`, `top-right`, `left`, `center`, `right`,
 logical text block to the page. Offsets move that block. Alignment positions
 individual lines inside it, independently of the anchor.
 
-The block keeps its configured width, even for a short word. Its height uses
+For nonempty text, the logical block is at least its configured width, even for a short word; an overflowing line can make it wider. Its height uses
 font ascent/descent plus `leading × size` per additional baseline. Ink bounds
 also account for bearings and shaped mark offsets. Moving a full-width block
 sideways can overflow even when its text looks short; give an appropriate width.

@@ -21,7 +21,7 @@ including the command but excluding the executable.
 | `--fit-to SIZE` | Overrides plan fitting; paper name or dimensions |
 | `--report FILE` | Full JSON report, relative to cwd |
 | `--overwrite` | Permit replacement of existing regular output/report files |
-| `--format json|text` | Stdout format, default JSON |
+| `--format json\|text` | Stdout format, default JSON |
 | `--help`, `-h` | Help |
 
 Values accept `--option=value` or separate arguments. Each ordinary option is

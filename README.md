@@ -11,11 +11,10 @@ static forms are retained. It is a CLI for trusted local documents.
 
 ## Build from source
 
-This README describes the rebuild on `rebuild/upstream-pdfcpu`. Use a checkout
-containing these changes:
+Build the current code from `main`:
 
 ```sh
-git clone --branch rebuild/upstream-pdfcpu https://github.com/resoltico/pdfconcat.git
+git clone --branch main https://github.com/resoltico/pdfconcat.git
 cd pdfconcat
 go build -o bin/pdfconcat ./cmd/pdfconcat
 bin/pdfconcat version
@@ -25,14 +24,7 @@ Install Go at the version declared in [go.mod](go.mod). The source build needs n
 PDF CLI, system font installation or runtime configuration directory. Windows
 builds use `bin/pdfconcat.exe`.
 
-Tagged releases are configured to publish macOS, Linux and Windows executables
-for amd64/arm64, with checksums and provenance. Those assets appear only when the
-owner tags a release containing this rebuild. Until then, `@latest` still selects
-the older published version. After that release, module installation is:
-
-```sh
-go install github.com/resoltico/pdfconcat/cmd/pdfconcat@latest
-```
+The [release workflow](https://github.com/resoltico/pdfconcat/blob/main/.github/workflows/release.yml) publishes macOS, Linux and Windows archives for amd64/arm64, with checksums and provenance, when a release is tagged. Check [published releases](https://github.com/resoltico/pdfconcat/releases) for available artifacts and use the documentation supplied with the selected version. Building `main` uses the code and contracts documented here; `@latest` selects the latest published module tag.
 
 ## First packet
 
@@ -51,7 +43,7 @@ For a separator with text, save this as `packet.json` next to the source PDFs:
 ```json
 {
   "version": 2,
-  "output": "packet.pdf",
+  "output": "packet-with-separator.pdf",
   "page": { "text": { "value": "Pielikums Ā ļ ķ — Ελληνικά", "size": 18 } },
   "items": ["cover.pdf", { "page": {} }, "appendix.pdf"]
 }
@@ -59,7 +51,7 @@ For a separator with text, save this as `packet.json` next to the source PDFs:
 
 ```sh
 bin/pdfconcat check --plan packet.json
-bin/pdfconcat build --plan packet.json --report packet.report.json
+bin/pdfconcat build --plan packet.json --report packet-with-separator.report.json
 ```
 
 Results are JSON by default. Use `--format text` for a human-readable result.
@@ -68,32 +60,31 @@ form-name mappings. `check` writes no PDF; it can write its requested report.
 
 ## PDFConcat and the pdfcpu CLI
 
-These observations use pdfcpu v0.16.2 and the rebuilt executable. The small
-[same-input comparison](https://github.com/resoltico/pdfconcat/blob/rebuild/upstream-pdfcpu/scripts/run-comparison.sh)
+The comparison uses the pdfcpu version selected in [go.mod](go.mod). The small
+[same-input comparison](https://github.com/resoltico/pdfconcat/blob/main/scripts/run-comparison.sh)
 requires a source checkout, uses fresh fixtures and checks command exits, results
 and outputs. Broader fidelity cases use qpdf and Poppler
 in the [product tests](CONTRIBUTING.md#what-we-test-and-what-we-do-not).
 
 | Need | pdfcpu CLI | PDFConcat |
 | --- | --- | --- |
-| Join existing sources in order | `pdfcpu merge`; tested packet has 17 pages | Same 17-page packet from operands or a plan |
+| Join existing sources in order | `pdfcpu merge` | Ordered operands or one plan |
 | One reviewed packet description | Merge filenames; separate `create` JSON for a generated document | One plan with sources, groups, generated pages and defaults |
-| Latvian, Greek and Cyrillic separator text | The tested Helvetica core-font example silently kept `Pielikums` and the dash, dropping the tested letters/words | Built-in Noto Sans shapes and extracts the complete tested text |
-| Repeated sources with named destinations | First-copy named links jumped into the later copy in the tested merge | Each copy's links stay within that copy |
-| Repeated legacy `/Dests` | Later definitions redirected earlier links | Per-occurrence destinations are rebuilt correctly |
+| Latvian, Greek and Cyrillic separator text | The Helvetica comparison fixture retains `Pielikums` and the dash but drops the tested letters/words | Built-in Noto Sans shapes and extracts the complete tested text |
+| Repeated sources with named destinations | First-copy named links target the later copy in the comparison fixture | Each copy's links stay within that copy |
+| Repeated legacy `/Dests` | Later definitions redirect earlier links | Per-occurrence destinations are rebuilt correctly |
 | Dry run of a packet and its text layout | `validate` checks existing PDFs | `check` predicts ranges and layout; optional report only |
 | Forms from multiple sources | Backend namespaces later fields | Same namespacing, with actual mappings; differing resolved `/DR` or `/DA`/`/Q` representations are refused |
-| Signature values | The tested source was merged without refusal | Refused before assembly; no signature authentication is performed |
-| Damaged page tree | The tested empty page dictionary was accepted and repaired into a three-page result | Refused as `source_damaged` |
+| Signature values | Merges the signed comparison fixture without refusal | Refused before assembly; no signature authentication is performed |
+| Damaged page tree | Accepts and repairs the empty page dictionary in the comparison fixture | Refused as `source_damaged` |
 | Uniform sheet size | Separate `resize` operation | `fit_to`/`--fit-to` uses upstream resize with unit normalization |
 | Program-readable outcome | Human command output | Result v3, stable codes, source hashes and a full optional report |
 
-The short Unicode separator added about 11.3 kB in the comparison fixture. This is
-an observation, not a size bound; fonts that prohibit subsetting remain whole.
+Generated text uses glyph-pruned fonts shared across generated items. Fonts that prohibit subsetting remain whole; output size depends on the inputs and font permissions.
 
 ## Limits and behavior
 
-- Plan v2; result v3. Old plans need `version: 2` and `blank` renamed to `page`.
+- Plan v2 declares `version: 2` and generated items with `page`; output uses result v3.
 - At most 64 MiB of plan JSON, 64 group levels, 100,000 entries and 100,000
   generated pages. Each text value holds at most 10,000 characters.
 - Generated text supports left-to-right Latin, Greek and Cyrillic with a static
@@ -108,7 +99,7 @@ an observation, not a size bound; fonts that prohibit subsetting remain whole.
   raises the output version. [DESIGN](docs/DESIGN.md)
   lists the full policy and fidelity limits.
 - Assembly is in memory. PDF object graphs and generated pages can cost much more
-  RAM than compressed input bytes. The local measured scale cases are in DESIGN.
+  RAM than compressed input bytes. There is no universal memory or time bound.
 - This is not a sanitizer: retained page/annotation actions can contain active
   content. No hostile-input memory/CPU sandbox is provided.
 

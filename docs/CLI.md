@@ -1,217 +1,170 @@
-# CLI contract
-
-This document defines PDFConcat's public command-line language: commands, options, what they print, exit statuses, and how to produce large jobs from a shell. Changes to this grammar are product changes. The plan format has its own contract in [`PLAN.md`](PLAN.md); how generated pages look is in [`BLANK_PAGES.md`](BLANK_PAGES.md). `pdfconcat --help` and `pdfconcat help COMMAND` print the same options as structured data, and tests keep the two in agreement with this document.
-
-## Commands
+# Command line and result v3
 
 ```text
-pdfconcat build  --plan FILE|- [-o FILE] [options]
-pdfconcat build  --plan-json JSON [-o FILE] [options]
-pdfconcat build  -o FILE [options] [--] PDF|--blank ...
-pdfconcat check  (the same three forms as build)
-pdfconcat report FILE [--part ID | --page N | --view parts|diagnostics] [--offset N] [--limit N] [--details]
-pdfconcat schema plan|report|response
-pdfconcat version
+pdfconcat build [options] (--plan FILE|- | PDF... [--blank]...)
+pdfconcat check [options] (--plan FILE|- | PDF... [--blank]...)
+pdfconcat schema plan|result
+pdfconcat version [--format json|text]
 pdfconcat help [COMMAND]
 ```
 
-| Command | Does |
+`COMMAND --help`, `-h`, root `--help` and `--version` are also accepted. Help is
+plain text. Options interleave with operands; `--` ends option parsing. A path
+such as `./--blank` is always a source. Operand pointers are `argv:N`, zero-based
+including the command but excluding the executable.
+
+| Option | Meaning |
 | --- | --- |
-| `build` | Assembles the PDF and publishes it. |
-| `check` | Does everything `build` does short of creating a PDF: validates and snapshots the inputs, resolves every generated page's size and style, and reports resolved layout and known policy consequences. It needs no output; when an output is named, by `-o` or by the plan's `output`, it also checks the destination, so a plan whose `output` exists fails `check` unless `--overwrite` is given. |
-| `report` | Reads a report saved by `--report` and answers one question about it. It never reopens a PDF. |
-| `schema` | Prints the JSON Schema of a plan, complete report, or structured response. |
-| `version` | Prints the version, commit, and commit date. `pdfconcat --version` is the same. |
-| `help` | Prints help. `pdfconcat help build`, `pdfconcat build --help`, and `pdfconcat build -h` are the same. |
+| `--plan FILE`, `--plan -` | Named plan or stdin; excludes source/blank operands |
+| `-o FILE`, `--output FILE` | Output PDF; overrides plan output, relative to cwd |
+| `--base-dir DIR` | Base for stdin plans only |
+| `--fit-to SIZE` | Overrides plan fitting; paper name or dimensions |
+| `--report FILE` | Full JSON report, relative to cwd |
+| `--overwrite` | Permit replacement of existing regular output/report files |
+| `--format json\|text` | Stdout format, default JSON |
+| `--help`, `-h` | Help |
 
-The command is the first argument. Options before it are not accepted, except `--help`, `--version`, and `--format` (`pdfconcat --version`, `pdfconcat --format text --help`).
+Values accept `--option=value` or separate arguments. Each ordinary option is
+single-use; repeated `--blank` operands are allowed. There is no progress output,
+worker-count option, report-query command or inline-plan JSON option.
 
-A typical agent workflow: write a plan, `check --plan job.json --report job.report.json`, read the summary, fetch failures or selected parts with `report`, edit the plan, `check` again, then `build`.
+## Build, check and fitting
 
-## Options
+`build` needs output from `-o` or the plan. `check` does not need an output path;
+when one is provided it also checks its role/existence. Both load and validate
+fonts, inspect every distinct source, resolve sizes/ranges and lay out text.
+`check` writes no PDF but may write its requested report. Passing check predicts
+assembly; merge, pruning, fitting, I/O or publication can still fail later.
 
-An option applies to specific commands; the parser rejects an option that does not apply to the selected command and names the options that do. `root` is the position before a command.
-
-| Option | Applies to | Meaning |
-| --- | --- | --- |
-| `--plan FILE\|-` | build, check | Read the plan from `FILE`, or from standard input with `-`. |
-| `--plan-json JSON` | build, check | Take the whole plan as one inline JSON argument, decoded exactly like a file. For small jobs. |
-| `--blank` | build, check | Direct operands only: insert one generated page at this position. Repeat for several. It takes no value. |
-| `--base-dir DIR` | build, check | Base directory for relative paths of a plan from `-` or `--plan-json`. |
-| `-o FILE`, `--output FILE` | build, check | Output PDF, relative to the working directory. Overrides the plan's `output`. |
-| `--fit-to A4\|Legal` | build, check | Proportionally fit every page to the portrait target; overrides plan `fit_to`. |
-| `--progress auto\|json\|none` | build, check | Optional stderr observations: interactive text by default, requested NDJSON, or disabled. |
-| `--overwrite` | build, check | Permit replacing an existing output or report file. |
-| `--report FILE` | build, check | Save the complete result to `FILE`, relative to the working directory. |
-| `--jobs N` | build, check | Concurrent source inspections, at least 1. Default: the smaller of 4 and the CPU count. |
-| `--details` | build, check, report | For `build` and `check`: print the complete result instead of the summary. For `report`: expand the selected records (`--part`, `--page`, or `--view`) to full resolved values; without a selection it is an error, so a query never prints a whole saved report. |
-| `--expect-attempt ID` | report | Reject a saved report from a different attempt; correlation only, not integrity or current PDF validity. |
-| `--part ID` | report | Show one contribution by id: a JSON pointer such as `/items/42/items/3`, or `argv:N`. |
-| `--page N` | report | Show the contribution covering output page `N` (1-based). |
-| `--view parts\|diagnostics` | report | List contributions or diagnostics, paged and in report order. |
-| `--offset N` | report | First record of a `--view` (default 0). |
-| `--limit N` | report | Records per `--view` page, 1 to 100 (default 20). |
-| `--format json\|text` | root, build, check, report, version, help | Standard output as compact JSON (default) or human-readable text. |
-| `--version` | root | Same as the `version` command. |
-| `-h`, `--help` | all | Show help for the command. |
-
-### How values are written
-
-- A value follows its option (`-o out.pdf`) or is attached (`--output=out.pdf`). `-o` has no attached form.
-- A separate value may not start with `-`: `-o --blank a.pdf` is an error, not an output file named `--blank`, and a misspelled option is never swallowed as a file name. The one exception is `--plan -`, where `-` means standard input. A value that does start with `-` is attached: `--output=-draft.pdf`, `--limit=-1` (which is then rejected as negative).
-- Paths and ids must not be empty. `--plan-json=` may be: the plan decoder rejects empty input with its own located diagnostic.
-- Each option may appear once, under either spelling. Options without a value (`--overwrite`, `--details`, `--help`, `--version`, `--blank`) reject an attached one: `--overwrite=yes` is an error.
-- Numbers are plain decimal digits that fit 64 bits. `--page` is at least 1, `--offset` and `--limit` are not negative, and `--jobs` is at least 1. Semantic selector/paging ranges have one pure report-request validator and are rejected before saved-file access; the CLI preserves token and argv provenance.
-- Only the documented long and short option forms are accepted; unknown options, abbreviations and extra aliases are errors. There is no `--dry-run`, `--json`, `--print-schema`, or `--blank-*`: use `check`, the default JSON output, `schema plan`, and plan files.
-
-### Help and errors
-
-Grammar and numeric tokens are checked left to right; their first fault ends parsing. Shared report-request semantics, including selector conflicts and numeric ranges, are checked after all options are known. An invalid value or conflicting selector still fails when `--help` is present: `pdfconcat build --bogus --help` and `pdfconcat build --help --bogus` both fail with `usage_unknown_option`. Help skips missing requirements: a plan source, a report `FILE`, or a selection/view required by details/paging. After `--`, `--help` is a file name. `--help` and `--version` cannot be combined. A valid `--format text` read before an immediate grammar/token fault makes that error text; an option after that fault is never read. A later format option does apply to a deferred semantic rejection: `pdfconcat report absent.json --view parts --limit 0 --format text` rejects the limit as text before accessing the file.
-
-## Plan sources
-
-`build` and `check` take instructions from exactly one of three sources. They are mutually exclusive, and the error names both sides of the conflict.
-
-| Source | Use |
-| --- | --- |
-| `--plan FILE` | A [plan file](PLAN.md). Relative paths in it resolve against the plan file's directory. The supported transport for large jobs. |
-| `--plan -` | The plan on standard input. Relative paths resolve against `--base-dir`, or the working directory. |
-| `--plan-json JSON` | The plan as one argument, for small jobs. Same decoder, same limits, same errors as a file; every per-page appearance, count, group, and font is available. Relative paths resolve against `--base-dir`, or the working directory. |
-| Direct operands | PDF paths and `--blank` in output order, for simple jobs. Relative paths resolve against the working directory. |
-
-### Direct operands
-
-```console
-pdfconcat build -o out.pdf a.pdf --blank b.pdf        # blank between documents
-pdfconcat build -o out.pdf --blank a.pdf b.pdf        # leading blank
-pdfconcat build -o out.pdf a.pdf b.pdf --blank        # trailing blank
-pdfconcat build -o out.pdf a.pdf --blank --blank b.pdf
-```
-
-The position of `--blank` is the position of a generated page, which inherits its size from a neighboring source page. `--blank` takes no value: there is no `--blank=TEXT` and no styling option. Text, background, size, fonts, and counts belong in a plan (`pdfconcat schema plan`), including an inline `--plan-json` plan. A path may appear more than once; each occurrence is assembled at its position. PDFConcat never expands wildcards, so `a*.pdf` is passed to the program as the shell expanded it, or literally.
-
-Paths and arguments must be valid UTF-8. Raw byte filenames outside Unicode are unsupported; invalid argv is rejected before any file operation. Path-resolving commands also require a UTF-8 working directory (`working_directory_invalid_utf8`, exit 1); change to a Unicode working directory before retrying.
-
-Operands must not be empty. A lone `-` is not an operand: standard input is only `--plan -`.
-
-### Literal names: `--` and `./--blank`
-
-`--` ends option parsing: every later argument is a literal operand, including `--blank`, `--help`, `-`, and a second `--`.
-
-```console
-pdfconcat build -o out.pdf -- --blank          # a PDF file named --blank
-pdfconcat build -o out.pdf ./--blank           # the same file, without --
-pdfconcat build -o out.pdf --blank ./--blank   # a generated page, then that file
-```
-
-`./--blank` (or `.\--blank` on Windows) is the portable spelling because it works anywhere in the line. After `--` an operand is only a path, so no further `--blank` pages can be requested on that line; mix the two with `./` instead. The same holds for `report -- --saved.json`.
-
-### `--base-dir`, `-o`, and plan `output`
-
-| Path | Resolves against |
-| --- | --- |
-| Item paths, `dir`, `output`, and root font files of a named plan file | The plan file's directory (a font declared inside a group resolves against that group; see [`PLAN.md`](PLAN.md#where-a-font-file-is-resolved)). |
-| The same for `--plan -` and `--plan-json` | `--base-dir DIR`, or the working directory. |
-| Direct operands | The working directory. |
-| `-o`, `--output` and `--report` | Always the working directory. |
-
-`--base-dir` only chooses where a plan from standard input or an inline plan starts; it does not change the working directory. It is rejected with a named plan file (whose own directory is the base) and with direct operands. `-o` overrides the plan's `output`, and `-o` is never resolved against `--base-dir`: with `--plan - --base-dir /project -o out.pdf` the file is `out.pdf` in the working directory, while the same plan's `"output": "out.pdf"` would be `/project/out.pdf`.
+Fitting scales proportionally onto the declared sheet, preserving displayed
+orientation without an extra best-fit rotation. Source widget forms are refused.
+Explicit generated canvases retain their authored layout/overflow checks, then
+resize; inherited canvases use the fit target. Link rectangles scale, while
+coordinate destination scroll positions are not transformed. See the complete
+[PDF policy and limits](DESIGN.md).
 
 ## Output
 
-Standard output is compact JSON by default, for help, version, results, and failures alike; scripts never need `--format text`. `--format text` renders summaries as concise lines; explicit `--details` payloads use indented JSON so every value remains available. JSON is the stable interface to parse. Nothing else is printed to standard output: no banners, no progress. Automatic progress uses an interactive stderr terminal; requested `--progress json` uses compact NDJSON on stderr, including ordinary redirected pipes. `--progress none` disables it.
+Stdout contains one result JSON object, text result, version object, help text or
+schema. Stderr is quiet in normal operation. `schema result` covers result,
+report and version. JSON member order is stable in the implementation but is not
+a consumer contract.
 
-- `build` and `check` print a small summary: status, whether the PDF was published, source, generated, and total page counts, diagnostic/error/warning record counts, and at most five diagnostic previews. The summary says it is a summary. Default summaries and structured command failures fit within 2 KiB including the newline. With `--report FILE` they give the exact next command when it fits; otherwise `next_omitted: true` directs callers to their original report argument. `truncated_fields` marks path/location previews, which must not be used as complete filenames. The diagnostic preview may show fewer than five records to stay within the byte budget.
-- `--details` prints the complete result on standard output instead, in the chosen format.
-- `--report FILE` saves the complete result: every contribution with its source location, output page range, and resolved appearance, and every diagnostic with mandatory `severity: error|warning`, stage, stable code, location, message and consumer references. Complete reports include producing tool/version/commit/toolchain/platform identity; a verified output records its SHA-256 `output_digest`, computed while writing. These identify the captured run and bytes; queries do not establish current file validity. JSON object member order is unspecified. The saved file is a regular JSON document that standard tools can read. See `pdfconcat schema report`.
-- `schema plan`, `schema report`, and `schema response` print the raw JSON Schema, with no wrapper. `schema` has no `--format`.
-- Command errors omit job lifecycle fields; job failures retain known lifecycle and publication facts. Both share diagnostic stage/code/location/recovery vocabulary. Messages are for reading; `code` is the stable identifier to match. Separate `cause` retains report I/O details when the message leads with a safe repair.
-
-A late publication failure retains a report describing the PDF commit and the failed original report target. `recovery_state: "current"` means the retained report metadata was refreshed atomically. If refresh I/O fails, `publication_pending` marks complete layout data whose publication metadata still describes the planned success; use the outer committed state for the actual outcome. `unavailable` means its owned identity was lost: preserve the unknown file and do not copy it as a report. Manual recovery does not change the captured run’s publication history. On a copied report query, a long historical recovery path is referenced through `complete_report.publication.recovery_report`, because its directory cannot be derived from the current report operand.
-
-If standard output fails after a file is committed, the bounded stderr backstop has `kind: committed_state`, `status: failed` and one current `severity: error` diagnostic (`stdout_write_failed`, stage `write`). Its operation counts are one error and no warnings. Nested `saved_run` retains the captured job's status, publication and diagnostic/error/warning counts; it does not predict later cleanup results or claim rollback. Publication/recovery facts remain available within the same 2 KiB limit.
-
-When a late report failure has an overlong recovery path, the bounded result gives the lossless `recovery_basename` and `recovery_directory_from: "original_report_argument"`: combine that basename with the directory of the original `--report` path. Complete details preserve full paths. Never use a truncated preview as a recovery command. Recovery instructions use POSIX `cp -n` or, on Windows, PowerShell `[System.IO.File]::Copy` with literal quoted paths and overwrite disabled; choose a distinct unused report target when the original target is unsafe. Named plan/report/font/source inputs must be regular files; FIFOs and devices are rejected without waiting for a writer. Stdin plan pipes remain supported.
-
-### Querying a saved report
-
-```console
-pdfconcat report job.report.json                                # summary
-pdfconcat report job.report.json --view diagnostics             # first 20 diagnostics
-pdfconcat report job.report.json --view diagnostics --offset 20 --limit 20
-pdfconcat report job.report.json --view parts --limit 100       # contributions in order
-pdfconcat report job.report.json --part /items/42               # one contribution
-pdfconcat report job.report.json --part argv:3 --details        # its full resolved values
-pdfconcat report job.report.json --page 5001                    # the contribution covering output page 5001
+```json
+{
+  "format_version": 3,
+  "command": "build",
+  "status": "ok",
+  "output": {
+    "path": "/abs/packet.pdf",
+    "published": true,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 11039
+  },
+  "pages": { "source": 1, "generated": 1, "total": 2 },
+  "fit_to": null,
+  "diagnostics": [],
+  "diagnostics_omitted": 0,
+  "report": null
+}
 ```
 
-`--part`, `--page`, and `--view` are mutually exclusive. `--offset` and `--limit` page a `--view` and are errors without one. Limits are 1–100, offsets are nonnegative, and page numbers are at least 1, including an explicitly supplied `--page 0`, which is rejected. Pure request errors are rejected before the report file is accessed. Paged responses state the total, how many records were returned, and the next offset, which is null after the last record. A page outside a complete layout, an unknown part id, and an incomplete layout are structured errors, never empty successes.
+The digest above is illustrative. Real digests are lowercase SHA-256 hex.
+`output` is null until a path is known. `published` records actual namespace
+publication; digest/bytes appear only when true. Page counts are null until
+established by the corresponding completed stages. An error never invents zero
+pages. Warnings do not make an outcome invalid.
 
-### What `--overwrite` covers
+| Status | Exit | Meaning |
+| --- | ---: | --- |
+| `ok` | 0 | No errors; warnings possible |
+| `invalid` | 2 | Usage, plan, policy, overflow or destination refusal |
+| `failed` | 1 | Environment, backend, verification or publication failure |
+| `interrupted` | 130 | Cancelled |
 
-PDFs, reports and recovery files are created privately before sensitive bytes are written: owner-only POSIX permissions, with inherited macOS access ACLs removed, and a protected current-user DACL on Windows. Replacing a shared artifact narrows its access; change permissions separately when sharing is intended. Literal paths follow the host filesystem, including symbolic-link parent traversal; see [path semantics](PLAN.md).
+Interrupted takes precedence over failed, then invalid. Errors precede warnings
+in stdout, in stage order. Stdout shows at most 20 diagnostics, with
+`diagnostics_omitted` for the rest. Each diagnostic shows at most 20 consumer
+pointers, with `items_omitted`. A full report has no such caps.
 
-`--overwrite` permits replacing an existing file at the explicitly named output artifacts: the PDF (`-o` or the plan's `output`) and the `--report` file. Without it, either existing file is an error and publication uses the operating system's no-clobber primitive. It never permits replacing a source PDF, the plan file, a font file, or any file the job reads: an output that is also an input is refused with or without `--overwrite`. Symbolic-link and non-regular targets are always refused. New PDF/report basenames in the same filesystem directory are conservatively compared after Unicode normalization and case folding, even on case-sensitive filesystems. Choose clearly distinct names; actual filesystem identities are rechecked at publication, including before report replacement after PDF commit. `check` creates no PDF; an output it is given (`-o` or the plan's `output`) only checks what `build` would be allowed to do. A failure report written before the instructions were fully understood is only created at a new path, whatever `--overwrite` says.
+Diagnostics include severity, stable code, free-English message and, when known,
+file, consumer pointers and plan location. Locations have zero-based byte offset,
+one-based byte line/column and JSON pointer. Stdin uses a virtual file label.
+Messages may change; branch on code/status rather than matching their prose.
 
-### A failed PDF target and its report
+## Reports and committed state
 
-A PDF output directory, symbolic link or other unusable target is an output error. A genuinely distinct safe fresh `--report` file can still record that error. Fix the named PDF target rather than changing an unrelated report operand. Report publication independently enforces input/output aliases, target regularity, no-clobber and the incomplete-inventory overwrite restriction; its own failure carries its actual cause. The primary output error remains visible even when saving the failure report also fails.
+A requested report is attempted once after either check/build success or failure.
+No report follows argv parse failure. Targets cannot alias any plan/font/source
+input or the output; existing targets must be regular files. Symlink targets,
+directories and devices are refused. Input symlinks to regular files are allowed.
+Roles are checked again before report publication, including an output that did
+not exist initially.
 
-## Exit status
+When the plan could not be decoded, its inputs are unknown. Report publication
+then always uses no-replace, even with `--overwrite`, so it cannot replace an
+input hidden in a malformed plan. Refusals use `report_exists`,
+`report_not_regular`, `report_is_input` or `report_is_output`; they do not invent
+an environmental `report_write_failed` error.
 
-| Status | Meaning |
-| ---: | --- |
-| `0` | Successful operation. A captured check/build can carry warnings; a successful query retains historical errors/warnings from its saved run. |
-| `2` | Invalid instructions: a malformed command line, an invalid plan, a failed layout (including text that overflows or cannot be rendered), a font file that is not a usable font, a destination or file-role conflict (an existing output without `--overwrite`, an output that is also an input, a symbolic-link or non-regular target), a source that is not a regular file, a source-known unsupported signature/form/rendering policy, an invalid report query, and a saved report that is malformed or of an unsupported version. |
-| `1` | Operational failure: a file that cannot be read or found (source, font, plan, or saved report), a source the PDF engine cannot read (malformed, encrypted), a source that changed while it was being captured, scratch space, verification, or publication. |
-| `130` | Interrupted. Cancellation before the native PDF commit preserves the destination; an atomic publication that already completed is not undone. |
+Output/report files use ordinary umask permissions; replacements keep the old
+mode. Publication uses a sibling temp, sync, no-replace rename (link fallback
+when needed), and Unix directory sync. A trailing sync or temp-cleanup failure
+can coexist with `output.published: true` or `report.written: true`. A report
+failure never rolls back the PDF. The saved report cannot predict its own late
+failure; stdout is authoritative for that final outcome. There are no recovery
+copies or cross-file transaction guarantees.
 
-If the PDF was published and a later step, such as writing the report or standard output, fails, the exit status is `1` and the result says `"published": true`.
+A full report adds one part per flattened entry:
 
-## Usage errors
+```json
+{
+  "format_version": 3,
+  "command": "check",
+  "status": "ok",
+  "output": null,
+  "pages": { "source": 0, "generated": 2, "total": 2 },
+  "fit_to": null,
+  "diagnostics": [],
+  "diagnostics_omitted": 0,
+  "report": { "path": "/abs/report.json", "written": true },
+  "parts": [{
+    "item": "/items/0", "kind": "page", "pages": 2, "count": 2,
+    "output_pages": [1, 2], "size": { "width": 100, "height": 200 },
+    "text": null
+  }]
+}
+```
 
-A rejected command line is a diagnostic with stage `usage`, a stable code, an `argv_index` (the zero-based position of the argument in the arguments after the executable's name, so `build -o --blank` faults at `argv:1`), and a message that names the option and the expected value. Parsing stops at the first fault. Faults that concern the line as a whole, a missing plan source or file, have no location.
+Source parts include path, known byte hash/length, known pages and actual
+`fields_renamed` records. Readable refused sources retain byte facts; unestablished
+page counts/ranges remain null. Generated parts include authored size, count,
+text block/ink bounds and overflow when known. Under fitting, the sheet is top-
+level `fit_to`; generated size/text describe the authored layout.
 
-| Code | Raised when |
-| --- | --- |
-| `usage_invalid_utf8` | An argument contains invalid UTF-8; paths and arguments must use Unicode text. |
-| `usage_missing_command` | No command was given. |
-| `usage_unknown_command` | The first argument, or the operand of `help`, is not a command. |
-| `usage_command_not_first` | An operand appears before the command. |
-| `usage_unknown_option` | The option does not exist. |
-| `usage_inapplicable_option` | The option exists but not for this command. |
-| `usage_duplicate_option` | An option is given twice, under either spelling. |
-| `usage_missing_value` | A value option is last on the line. |
-| `usage_dash_value` | A separate value starts with `-`; attach it with `=`. |
-| `usage_unexpected_value` | An option that takes no value was given one, including `--blank=TEXT`. |
-| `usage_empty_value` | A path, id, format, or operand is empty. |
-| `usage_invalid_value` | `--format` is neither `json` nor `text`. |
-| `usage_invalid_jobs` | `--jobs` is not a whole number of at least 1. |
-| `usage_conflicting_actions` | `--help` and `--version` were both given. |
-| `usage_plan_source_conflict` | More than one of `--plan`, `--plan-json`, and direct operands. |
-| `usage_missing_plan_source` | `build` or `check` has no instructions. |
-| `usage_base_dir_conflict` | `--base-dir` with a named plan file or with direct operands. |
-| `usage_missing_operand` | `report` has no `FILE`, or `schema` no name. |
-| `usage_unexpected_operand` | An extra operand for `report`, `schema`, `version`, or `help`. |
-| `usage_stdin_operand` | `-` as an operand. |
-| `usage_unknown_schema` | `schema` was given a name other than `plan`, `report`, or `response`. |
-| `report_selection_conflict` | More than one of `--part`, `--page`, `--view`. |
-| `report_paging_needs_view` | `--offset` or `--limit` without `--view`. |
-| `report_details_need_selection` | `report --details` without `--part`, `--page`, or `--view`. |
-| `report_unknown_view` | `--view` is neither `parts` nor `diagnostics`. |
-| `report_invalid_number` | `--page`, `--offset`, or `--limit` is not a whole number that fits 64 bits, or `--page` is below 1. |
-| `report_invalid_paging` | `--offset` is negative or `--limit` is outside 1–100. |
-| `report_invalid_expectation` | `--expect-attempt` is not a 26-character uppercase base32 attempt identity. |
+Ranges are inclusive and 1-based. Check ranges and rename warnings are predictions.
+Only build records actual field-name mappings. The backend may namespace a later
+nonempty form even without a collision; check does not copy its private prefix
+algorithm. Check's empty mapping arrays mean no actual merge was performed.
 
-## Large jobs and shells
+```sh
+# Part covering output page 12 (for a successful/published packet).
+jq '.parts[] | select(.output_pages != null) | select(.output_pages[0] <= 12 and .output_pages[1] >= 12)' packet.report.json
+# Every warning and its source file.
+jq '.diagnostics[] | select(.severity == "warning") | {code,file,items}' packet.report.json
+# Source identities that were established by inspection.
+jq '.parts[] | select(.kind == "source") | {path,sha256,bytes}' packet.report.json
+```
 
-No command line can portably carry thousands of paths. Windows `CreateProcess` accepts at most 32,767 characters for the whole command line, and `cmd.exe` at most 8,191. Linux limits a single argument to 128 KiB (which bounds `--plan-json`) and all arguments together to about 2 MiB; macOS to about 1 MiB. Use a plan file, or standard input, for anything long or generated, and `--plan-json` or direct operands only for short jobs. Prefer a file for complex text containing quotes or newlines.
+## Generate a plan from a directory
 
-A plan lists exactly the files that are assembled, in exactly that order, so generating one means choosing and writing down an ordering. Generate it with a tool that sorts explicitly and writes UTF-8. Nothing here is portable between file systems beyond what they store: paths are literal, and a name that is not valid Unicode cannot be written in a JSON plan.
+Declare the sort order and preserve filenames as array elements. Do not split
+filenames on newlines. Plans require valid UTF-8 paths.
 
-### Python: the portable recipe
+### Python
 
-One deterministic recipe for every operating system. The ordering is stated in the code (code-point order of the `/`-separated path, independent of locale), the file is written as UTF-8 regardless of the console or locale, a name that cannot be encoded fails loudly instead of being replaced, zero files is an explicit error, and one file is still a JSON array.
+Run next to a `chapters` directory. This writes UTF-8 and returns PDFConcat's exit
+code. Replace `glob` with `rglob` for recursive input.
 
 ```python
 import json
@@ -221,104 +174,107 @@ import subprocess
 files = sorted(path.as_posix() for path in pathlib.Path("chapters").glob("*.pdf"))
 if not files:
     raise SystemExit("no PDF files in chapters/")
-plan = {"version": 1, "items": files}
+plan = {"version": 2, "items": files}
 pathlib.Path("job.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 raise SystemExit(subprocess.run(["pdfconcat", "build", "--plan", "job.json", "-o", "book.pdf"]).returncode)
 ```
 
-The plan's paths are relative to `job.json`, which is next to the working directory here. Replace `glob` with `rglob` to descend into subdirectories, or sort by another key; whatever the key, write it in the script. The script returns PDFConcat's own exit status.
-
 ### bash and zsh
 
-Globs expand in sorted order, but the order follows the locale, so fix it with `LC_ALL=C` (byte order, which is code-point order for UTF-8). `jq --args` carries any name, including quotes and newlines, as an array element. `nullglob` makes a pattern with no match expand to nothing in bash, so an empty list reaches PDFConcat and is rejected as an empty `items`; without it bash passes the pattern text itself, and zsh stops with `no matches found`.
+Globs plus `jq --args` preserve quotes/newlines as arguments. `LC_ALL=C` fixes byte
+order; bash `nullglob` avoids treating an unmatched pattern as a filename. In
+zsh omit `shopt` (or use its `NULL_GLOB` option). Use Python for lists beyond OS
+argument limits.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 1, items: $ARGS.positional}' --args chapters/*.pdf > job.json )
+  jq -n '{version: 2, items: $ARGS.positional}' --args chapters/*.pdf > job.json )
 pdfconcat build --plan job.json -o book.pdf
 ```
-
-In zsh omit `shopt`. The list is limited by the argument limits above; for more files use the Python recipe.
-
-Inline JSON is quoted with single quotes: `pdfconcat build --plan-json '{"version":1,"items":["a.pdf","b.pdf"]}' -o out.pdf`.
 
 ### PowerShell
 
-State the order explicitly with an ordinal sort (UTF-16 code-unit order, which equals code-point order for names in the Basic Multilingual Plane), and force an array with `@(...)` and a `[string[]]` cast so zero or one file still becomes a JSON array. Write a file with an explicit encoding: piping text to a native program uses `$OutputEncoding`, which in Windows PowerShell 5.1 is ASCII and would replace non-ASCII characters in names. A leading byte order mark, which Windows PowerShell 5.1's `utf8` adds, is accepted. `.pdf` is matched without regard to case, as Windows does.
+Ordinal sorting makes the order explicit. Force a string array even for one
+file, and write an explicit UTF-8 file rather than relying on console pipeline
+encoding. A leading BOM is accepted.
 
 ```powershell
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
+if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 1; items = $items } | ConvertTo-Json -Depth 3 | Set-Content job.json -Encoding utf8
+@{ version = 2; items = $items } | ConvertTo-Json -Depth 3 | Set-Content job.json -Encoding utf8
 pdfconcat build --plan job.json -o book.pdf
 ```
 
-`--blank` is an ordinary argument in PowerShell. Quote values that contain spaces, commas, semicolons, `$`, or parentheses. A word starting with `@` is PowerShell syntax (splatting, array expressions), which is why PDFConcat does not use `@blank`. Inline JSON is written with single quotes in PowerShell 7.3 and later; Windows PowerShell 5.1 and earlier versions drop embedded double quotes from native arguments, so use a file.
+## Diagnostic registry
 
-### cmd.exe
+The registry in `internal/diag/codes.go` is authoritative. Warning class is empty
+(shown as —); warnings never select an error outcome.
 
-`cmd.exe` has no way to build a plan from a directory listing worth recommending; generate the plan with PowerShell or Python and then run it. Quote any path with spaces in double quotes. The program receives standard Windows command-line parsing, so inside an argument a double quote is written `\"`:
+<!-- codes -->
 
-```bat
-pdfconcat build -o "Annual Report.pdf" "chapters\01 Intro.pdf" --blank "chapters\02 Body.pdf"
-pdfconcat build --plan-json "{\"version\":1,\"items\":[\"a.pdf\",\"b.pdf\"]}" -o out.pdf
-pdfconcat build -o out.pdf .\--blank
-```
-
-`cmd.exe` expands `%NAME%` even inside double quotes, so a name containing `%`, and a text with `^`, `&`, or `!` under delayed expansion, cannot be written reliably on the command line: use a plan file.
-
-### Why not `find | sort | jq -R`?
-
-Newline-delimited text is a lossy transport for file names: a name containing a newline becomes two items, a locale-dependent `sort` makes the order differ between machines, `jq -R` silently replaces bytes that are not valid UTF-8 with U+FFFD so the plan names a different file, and without `pipefail` the pipeline reports the exit status of its last command even when `find` failed or found nothing. A plan is the one place that fixes the order and the exact file names, so generate it from a list that is never split on a delimiter: shell globs with `--args`, or the Python recipe.
-
-## Response and report format 2
-
-All structured responses and complete saved reports carry `format_version: 2`. Input plans remain version 1. Command errors (`kind: error`) have no build lifecycle fields. Help gives labeled argv templates whose input/output filenames must be replaced, and a concrete executable continuation when it fits. Omitted help continuations expose `executable_from` and exact `next_args`, so callers need not parse a shell example.
-
-Every build/check execution has one opaque `attempt_id`, including failed decoding and preflight. The same identity is retained in its saved or recovery report and broken-stdout committed-state receipt. This identifies an attempt; it is neither authentication nor proof that a current PDF or source still matches captured evidence.
-
-A successful report query has `kind: report_query`, `command: report`, `status: ok`, and exit 0. `saved_run` gives the captured attempt's identity, command, status and diagnostic/error/warning counts; `result` carries its summary or selected records. Publication targets inside `result` are historical. Summary queries label them with `publication_context: historical_target`. Queries never reread PDFs or rerun preflight. A successful read of failed-job diagnostics is still a successful query. Its own top-level diagnostic/error/warning counts are zero; historical error records retain severity `error`. `selection_counts` describes unique captured diagnostic records relevant to the returned selection, independently of saved-run totals. A diagnostic page counts its returned records; part/page/parts selections use the union of referenced consumers. A summary selects all captured records.
-
-`diagnostic_count = error_count + warning_count` counts aggregated records rather than pages or inputs. A captured successful check/build contains warnings or no diagnostics, never its own errors. Error previews precede warnings deterministically; warning-only success retains an actionable representative warning. Omitted diagnostic previews are explicit and full records remain pageable. A selected part/page carries `warning_count`; generated text previews expose `has_findings`, and an attempt-bound `diagnostics_reference` retrieves complete saved diagnostics. The reference remains available whenever the saved run has warnings, even when the selected part has none; `selection_counts` and the part's own count retain that distinction.
-
-Warnings record `consequence_context: predicted|committed`. A check or unpublished build predicts measured clipping or policy effects; committed output records effects of that build. Historical queries retain the saved distinction. `generated_text_overflow` groups findings for a shared resolved style with exact consumers. Material source-feature warnings distinguish dropped catalog indices/actions/structure from retained page-local actions/attachment payloads. Ordinary supported links/forms and in-bounds allowed text do not create warnings. A retained relative URI action using an omitted nonempty catalog `/URI /Base` warns with `source_uri_base_removed`; use absolute targets when stable external resolution is required. Keeping URI action bytes does not guarantee external resolution, including document-location-dependent relative targets.
-
-Concrete `next` arrays use the currently invoking executable and absolute path of the report actually selected, including a copied/renamed/symlinked report. Execute arrays unchanged under the same environment. Job follow-ups include `--expect-attempt ID`; a replaced report is rejected as `report_attempt_mismatch`. No suggestion executes automatically.
-
-An attempt expectation must be a 26-character uppercase base32 identifier (`A`–`Z`, `2`–`7`), as emitted by the tool. Invalid syntax is rejected as `report_invalid_expectation` before the saved file is accessed; a valid identifier that differs from the saved attempt is an artifact-dependent mismatch.
-
-If an exact continuation cannot fit, `next` is null, `next_omitted` is true, and `next_reference` states the action/view/expected attempt. Reconstruct argv from the current invoking executable and the caller-owned `original_argv.--report` value (jobs) or `original_argv.report_operand` (queries). Resolve a relative original argument in that invocation's working directory, not a later query directory. Preview paths must never be used as executable paths. Full diagnostic values remain available through `--details` or the saved current report; `location_from` references the exact recovery location in `complete_report.diagnostics/N/recovery/location` when a preview cannot carry it.
-
-Requested-report publication facts separately say `report_write: written|not_written` and `report_target_observation: unknown`. If the working directory cannot resolve a target, `report_from: original_argv.--report` identifies the caller-owned request while the target path remains absent. No file is opened or written in that case. They make no global unchanged-file promise during concurrency. An existing target can contain historical evidence. Until complete resource/alias inventory, even `--overwrite` permits a failure report only at an unused target. Repair the input and choose a new report target; do not treat an older target as evidence for the new attempt.
-
-Diagnostic recovery actions are a finite vocabulary: `open_help`, `edit_input`, `choose_new_report`, `inspect_report`, `recover_report`. They are guidance with declaration or invocation references, not shell commands. Late report-publication failure retains the existing no-rebuild recovery procedure and owned recovery metadata.
-
-Only complete format-2 reports are read. Unsupported formats are rejected non-destructively; their files remain unchanged. Inspect unsupported evidence as raw JSON with ordinary tools. A fresh `check` of the current job to a NEW report target creates current evidence; it cannot reconstruct a historical run. Never rebuild/overwrite merely to upgrade a report.
-
-
-## Fitting every sheet
-
-Build/check accept `--fit-to A4|Legal` and optional top-level plan `"fit_to": "A4"|"Legal"`. CLI overrides the plan and the effective declaration location is captured. Both targets are portrait: A4 is 210×297mm; Legal is 612×1008pt. Fitting enlarges or shrinks proportionally, centers unused space and preserves the source's displayed orientation without adding a landscape rotation. Every output sheet has target MediaBox/CropBox at (0,0), Rotate 0 and UserUnit 1.
-
-Every source page is inspected. Its original MediaBox/CropBox intersection stays clipped inside an ordinary Form; original content bytes, resource scopes and page blending context are retained. Explicit consistent print boxes and supported unpainted links use the same captured transform. Links require finite inside-visible Rect/QuadPoints, effectively zero painted border, ordinary zoom/rotation behavior and absolute nonmapped URI or source-local coordinate-free Fit destinations. Every material action in a Next graph must satisfy that subset. URI bytes and source-page occurrence identity remain unchanged. Forms requiring editing, painted/unsupported annotations, coordinate destinations, active unsupported coordinate metadata, actual executable cycles, exceeded resource limits and unproven numeric or active resource contexts refuse before PDF publication. Unused ownership/resource cycles alone are not executable cycles.
-
-
-A source declared `/Page` with an effective non-null `/Kids` entry is refused in both ordinary and fitted assembly: supported readers disagree on its role and can discard its content. Empty arrays also refuse. Absent, direct-null and valid indirect-null entries remain supported. Repair the source page tree/remove the conflicting entry deliberately, then recheck; retrying without fitting does not resolve this ambiguity. Raw checks and defensive imports use the captured source values before validator or writer side effects.
-
-Implicit/inherit generated canvases resolve directly to the target, even before a source or in a generated-only job. Explicit canvases are authored and checked at their declared size before fitting; fitting does not rescue authored overflow. Captured `size`/`text` remain authored values, geometry references describe the original canvas/source, `fit` is the final target and `final_text` records final physical bounds/font size. Selected queries materialize the captured shared facts without reopening PDFs. Absent print boxes acquire target defaults; hidden artwork remains clipped, so preserving explicit print boxes does not preserve every source bleed/imposition workflow.
-
-Raw PDF dictionaries must have unique decoded name keys, including null-valued entries. Native lookup, inheritance and cloning preserve those canonical bytes exactly: a private literal-hash name never acquires the meaning of a reserved key through another decode. Unsupported integer values and malformed/nonfinite/unrepresentable numeric instructions reject instead of becoming zero or absent values. Finite real dictionary numbers use exponent-free binary64 roundtrip decimals. The precision guard uses a declared unfused binary64 model and a 1 micro-point absolute bound with a 1e-9 relative constraint on the applicable fitted-page axis. Independent rendering tests establish their tested viewer cases; the guard does not promise identical colors or arithmetic in every output device/viewer.
-
-Indirect PDF references are identified by both object number and generation. Undefined, free and explicit-null source targets keep their null meaning when reading or assembly inserts and renumbers objects. Matching live references remain intact. Optional decoding parameters and catalog version overrides follow the same null rules; required entries and the raw source-policy refusals above still apply.
-
-## Live progress records
-
-`--progress auto|json|none` applies only to build/check. JSON records have format 2, kind `progress`, one attempt ID, increasing sequence, phase, elapsed/phase-age milliseconds and nullable work age and completed/total counts. Counter units distinguish successfully captured sources, returned source attempts including errors, returned generated-spec attempts, actual successful source imports (including required reimports), and actual output-page placements. A generated-spec count is not an output-page count. Unknown totals stay null.
-
-Phases follow actual work: preparation, input inspection, layout, assembly, optimization, output writing, output verification, publication and finalization. Check omits PDF assembly/write/verification. Capture and inspection overlap within one phase; import and placement share assembly. Updates coalesce at bounded frequency without a cumulative redraw cutoff. Requested JSON mode emits ten-second liveness records during silent work; a heartbeat does not establish advancement or reset work age. No paths, text, per-file logs, global percentage or ETA appear in telemetry.
-
-Main owns the native stderr transport. Worker observations do not wait on sink I/O; shutdown joins presentation before final stdout and retains the idle owner for structured `cleanup_warning` and `committed_state` fallback records. These exceptions preserve actual full publication/recovery facts. A failed/aborted in-flight native write may leave one unterminated terminal suffix; it is not a delivered record. That run's channel is then permanently disabled and no later bytes are appended. Healthy partial writes resume the remaining bytes. Cancellation before admission does not poison a healthy channel. Delivery into an unavailable sink is not promised.
-
-Windows progress accepts output consoles and synchronous byte pipes on a local named-pipe backend. Sockets, asynchronous or message pipes, remote backends and handles whose admission queries fail disable requested progress; the final response records observed unavailability. Admission requires idle stderr and preserves its I/O configuration. Backend locality does not establish peer locality. Native cancellation requests interruption and waits for actual writer completion; its request deadline is not a universal return-time guarantee for arbitrary drivers.
-
-`progress_interrupted` is an optional known report/summary boolean recording observed loss of requested progress. Final details annotate a copy; a requested report staged earlier stays unchanged. Saved stdout details remain queryable within ordinary report byte/node limits, and queries retain the historical observation. Absent/false is not proof of healthy or fully delivered telemetry. Work status, counts and publication remain authoritative. When stdout also fails, any available machine stderr receives exact committed-state facts; if both sinks are unavailable there can be no promised receipt.
+| Code | Severity | Class | Meaning |
+| --- | --- | --- | --- |
+| `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
+| `fit_form_unsupported` | error | invalid | `fit_to` with a source that has form widgets |
+| `font_invalid` | error | invalid | not a static TrueType (`glyf`) font, a collection, variable, or damaged |
+| `font_not_embeddable` | error | invalid | `OS/2.fsType` forbids embedding |
+| `font_unreadable` | error | failed | font file could not be read |
+| `interrupted` | error | interrupted | cancelled by a signal |
+| `output_exists` | error | invalid | output exists and `--overwrite` not given |
+| `output_invalid` | error | failed | the written output did not validate |
+| `output_is_input` | error | invalid | output is (or aliases) a plan, font or source file |
+| `output_not_regular` | error | invalid | output exists and is not a regular file (directory, symlink, device) |
+| `output_page_count_mismatch` | error | failed | written page count ≠ expected |
+| `output_publish_failed` | error | failed | the final rename failed (incl. no-replace unsupported and link fallback failed) |
+| `output_write_failed` | error | failed | writing the temporary output failed (disk full, permissions) |
+| `page_size_required` | error | invalid | `inherit` with no source page to inherit from |
+| `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
+| `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
+| `plan_duplicate_member` | error | invalid | member repeated in one object |
+| `plan_item_shape` | error | invalid | an item object that is neither a generated page nor a group |
+| `plan_limit` | error | invalid | nesting, entries, count or total generated pages over the limit |
+| `plan_null` | error | invalid | `null` anywhere |
+| `plan_syntax` | error | invalid | not one valid JSON object in UTF-8 (incl. trailing data, invalid UTF-8, comments) |
+| `plan_too_large` | error | invalid | plan exceeds 64 MiB |
+| `plan_type` | error | invalid | wrong JSON type |
+| `plan_unknown_member` | error | invalid | member not defined at that place (case-sensitive) |
+| `plan_unreadable` | error | failed | plan file or stdin could not be read |
+| `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
+| `plan_version_unsupported` | error | invalid | `version` is not 2 (message explains v1 → v2 renames) |
+| `report_exists` | error | invalid | report exists and `--overwrite` not given (or inputs unknown, see CLI.md) |
+| `report_is_input` | error | invalid | report is (or aliases) an input |
+| `report_is_output` | error | invalid | report and output are the same file |
+| `report_not_regular` | error | invalid | same for the report |
+| `report_write_failed` | error | failed | the report could not be written |
+| `source_changed` | error | failed | source bytes at merge time differ from the inspected bytes |
+| `source_damaged` | error | invalid | broken page tree (missing/empty kid, wrong count) or content-replacing repair |
+| `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
+| `source_encrypted` | error | invalid | encrypted, including empty-password encryption |
+| `source_form_unsupported` | error | invalid | nonempty forms require identical resolved DR/DA/Q representations |
+| `source_invalid` | error | invalid | unsupported unsafe PDF shape or parse/validation failure (including recovered panics) |
+| `source_optional_content` | error | invalid | `/OCProperties` present |
+| `source_signed` | error | invalid | signature value, certification (`/Perms`) or document timestamp |
+| `source_unreadable` | error | failed | source file could not be read |
+| `text_glyph_missing` | error | invalid | the font cannot render a character sequence |
+| `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
+| `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
+| `usage_conflict` | error | invalid | `--plan` with PDF operands; `--base-dir` without `--plan -`; repeated single-use option |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--format`, `--fit-to`, `schema` name, …) |
+| `usage_missing_input` | error | invalid | neither `--plan` nor PDF operands |
+| `usage_missing_output` | error | invalid | `build` without `-o` and without plan `output` |
+| `usage_missing_value` | error | invalid | option needs a value |
+| `usage_unknown_command` | error | invalid | first argument is not a command |
+| `usage_unknown_option` | error | invalid | option not defined for the command |
+| `destinations_dropped` | warning | — | named destinations whose target is not a page of the same document were omitted |
+| `destinations_renamed` | warning | — | colliding named destinations were renamed for later occurrences |
+| `form_appearances_regenerated` | warning | — | a source requests `NeedAppearances`; viewers may redraw all fields |
+| `form_fields_renamed` | warning | — | pdfcpu namespaces later nonempty forms even without collisions; build reports actual names |
+| `source_attachments_removed` | warning | — | embedded-files name tree or catalog `/AF` removed (page attachments remain) |
+| `source_document_actions_removed` | warning | — | `/OpenAction`, catalog `/AA` or document JavaScript removed |
+| `source_output_intents_removed` | warning | — | output intents removed; output makes no PDF/A or PDF/X claim |
+| `source_page_labels_removed` | warning | — | page labels removed |
+| `source_structure_removed` | warning | — | tagged-PDF structure removed; output is not tagged |
+| `source_uri_base_removed` | warning | — | source URI Base is removed; retained relative actions may resolve differently |
+| `source_xfa_removed` | warning | — | XFA removed; the static AcroForm remains |
+| `text_overflow_allowed` | warning | — | `overflow: allow` and measured text extends past the page or block |

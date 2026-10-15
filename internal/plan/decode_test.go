@@ -4,290 +4,252 @@
 package plan_test
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"io"
+	"encoding/json/v2"
+	"os"
+	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/resoltico/pdfconcat/internal/assembly"
+	"github.com/resoltico/pdfconcat/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/plan"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-type (
-	// oneByteReader returns one byte per Read.
-	oneByteReader struct{ reader *bytes.Reader }
-
-	// failingReader fails every Read with err.
-	failingReader struct{ err error }
-
-	// flippingContext is a context that reports cancellation once Err has been called flipAfter times, which
-	// lets a sweep land a cancellation at every kind of checkpoint the decoder has.
-	flippingContext struct {
-		calls     atomic.Int64
-		flipAfter int64
+func TestLocatedFirstFaults(t *testing.T) {
+	cases := []struct {
+		input   string
+		code    diag.Code
+		pointer string
+	}{
+		{`{"version":2,"unknown":1,"items":[null]}`, "plan_unknown_member", "/unknown"},
+		{`{"version":2,"a~/b":1}`, "plan_unknown_member", "/a~0~1b"},
+		{`{"version":2,"items":[{"page":{},"count":3.0},null]}`, "plan_value", "/items/0/count"},
+		{`{"version":2,"items":[{"page":{},"count":3e0}]}`, "plan_value", "/items/0/count"},
+		{`{"version":2,"items":[{"page":{},"count":0}]}`, "plan_value", "/items/0/count"},
+		{`{"version":2,"items":[{"page":{},"count":100001}]}`, "plan_limit", "/items/0/count"},
+		{`{"version":2,"items":[{"page":{},"count":9223372036854775808}]}`, "plan_limit", "/items/0/count"},
+		{`{"version":2,"items":[{"page":{},"count":"3"}]}`, "plan_type", "/items/0/count"},
+		{`{"version":2,"items":[{"page":{},"count":null}]}`, "plan_null", "/items/0/count"},
+		{`{"version":2,"items":[null],"items":[]}`, "plan_null", "/items/0"},
+		{`{"version":2,"version":2,"items":[null]}`, "plan_duplicate_member", "/version"},
+		{`{"version":2,"items":[{"page":{"text":{"size":null}}}]}`, "plan_null", "/items/0/page/text/size"},
+		{`{"version":2,"items":[{"page":{"text":{"width":0}}}]}`, "plan_value", "/items/0/page/text/width"},
+		{`{"version":2,"items":[{"page":{"text":{"font":{}}}}]}`, "plan_type", "/items/0/page/text/font"},
+		{`{"version":2,"items":[{"page":{},"dir":"x"}]}`, "plan_item_shape", "/items/0"},
+		{`{"version":2,"items":[{"items":["a.pdf"]}]}`, "plan_item_shape", "/items/0"},
+		{`{"version":2,"items":[{"dir":"x","items":[]}]}`, "plan_value", "/items/0/items"},
+		{`{"version":2,"items":[]}`, "plan_value", "/items"},
+		{`{"version":2,"items":"x"}`, "plan_type", "/items"},
+		{`{"version":2,"items":["\u0000"]}`, "path_invalid", "/items/0"},
+		{`{"version":2,"items":[{"page":{"size":"0x10"}}]}`, "plan_value", "/items/0/page/size"},
+		{`{"version":2,"items":["\ud800"]}`, "plan_syntax", "/items/0"},
+		{`{"version":2,"items":["a.pdf"]} null`, "plan_syntax", ""},
+		{`{"version":2`, "plan_syntax", ""},
+		{`{}`, "plan_version_unsupported", ""},
+		{`{"version":2}`, "plan_type", ""},
+		{`{"version":3}`, "plan_version_unsupported", "/version"},
+		{`{"Version":2}`, "plan_unknown_member", "/Version"},
 	}
-)
-
-var errBoom = errors.New("boom")
-
-func checkAccepted(tb testing.TB, row *corpusCase, job *assembly.Job) {
-	tb.Helper()
-
-	err := job.Validate()
-	if err != nil {
-		tb.Fatalf("%s: accepted job violates the domain invariants: %v", row.Name, err)
-	}
-}
-
-func checkRejected(tb testing.TB, row *corpusCase, err error) {
-	tb.Helper()
-
-	planErr := codedError(tb, err, row.Code)
-
-	if row.Pointer != "" && planErr.Location.Pointer != row.Pointer {
-		tb.Fatalf("%s: pointer = %q, want %q", row.Name, planErr.Location.Pointer, row.Pointer)
-	}
-
-	if planErr.Stage == plan.StageRead || planErr.Location.Line < 1 || planErr.Location.Column < 1 {
-		tb.Fatalf("%s: diagnostic is not located: %+v", row.Name, planErr.Location)
-	}
-
-	if planErr.Location.Source != inputName || planErr.Message == "" || planErr.Error() == "" || planErr.Unwrap() != nil {
-		tb.Fatalf("%s: malformed diagnostic %+v", row.Name, planErr)
-	}
-}
-
-func TestCorpusDecoder(t *testing.T) {
-	t.Parallel()
-
-	rows := corpus()
-	if len(rows) < 80 {
-		t.Fatalf("the shared corpus has %d cases; want at least 80", len(rows))
-	}
-
-	for _, row := range rows {
-		t.Run(row.Name, func(t *testing.T) {
-			t.Parallel()
-
-			job, err := decodeString(t, row.Doc)
-			if row.Code == "" {
-				if err != nil {
-					t.Fatalf("want accept, got %v", err)
-				}
-
-				checkAccepted(t, &row, job)
-
-				return
+	for _, tc := range cases {
+		t.Run(string(tc.code)+tc.pointer+tc.input, func(t *testing.T) {
+			_, ds := plan.Decode([]byte(tc.input), "plan.json", t.TempDir())
+			if len(ds) != 1 {
+				t.Fatalf("expected one error, got %+v", ds)
 			}
-
-			checkRejected(t, &row, err)
+			d := ds[0]
+			if d.Code != tc.code || d.Location == nil || d.Location.Pointer != tc.pointer {
+				t.Fatalf("got %+v location %+v; want %s %s", d, d.Location, tc.code, tc.pointer)
+			}
+			l := d.Location
+			before := tc.input[:l.Offset]
+			wantLine := strings.Count(before, "\n") + 1
+			wantColumn := len(before) - strings.LastIndex(before, "\n")
+			if l.Line != wantLine || l.Column != wantColumn || l.File != "plan.json" {
+				t.Fatalf("location %+v", l)
+			}
 		})
 	}
 }
 
-// Read returns one byte per call, to prove that no verdict or location depends on chunking.
-func (o oneByteReader) Read(buffer []byte) (int, error) {
-	length, err := o.reader.Read(buffer[:min(1, len(buffer))])
+func TestBOMOffsetsAndV1(t *testing.T) {
+	plain := "{\n  \"version\":2,\n  \"items\":[null]}"
+	_, a := plan.Decode([]byte(plain), "p", ".")
+	_, b := plan.Decode([]byte("\xef\xbb\xbf"+plain), "p", ".")
+	if a[0].Location.Offset+3 != b[0].Location.Offset || a[0].Location.Line != b[0].Location.Line || a[0].Location.Column != b[0].Location.Column {
+		t.Fatalf("BOM offsets: %+v %+v", a, b)
+	}
+	for _, input := range []string{`{"blank":{},"items":[],"version":1}`, `{"version":1,"blank":{},"items":[]}`} {
+		_, ds := plan.Decode([]byte(input), "p", ".")
+		if ds[0].Code != "plan_version_unsupported" || !strings.Contains(ds[0].Message, "blank") || !strings.Contains(ds[0].Message, "page") || !strings.Contains(ds[0].Message, "2") {
+			t.Fatalf("v1 migration: %+v", ds)
+		}
+	}
+}
+
+func TestLayeringOriginsAndPaths(t *testing.T) {
+	base := t.TempDir()
+	input := `{"version":2,"output":"packet.pdf","dir":"sources","page":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm"},"background":"#abc"},"items":[{"dir":"chapters","items":["a.pdf",{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":""}}}]},{"page":{"text":{"font":"default"}}}]}`
+	j, ds := plan.Decode([]byte(input), "p", base)
+	if len(ds) > 0 {
+		t.Fatal(ds)
+	}
+	if len(j.Parts) != 3 || j.Output != filepath.Join(base, "packet.pdf") || j.Parts[0].Source != filepath.Join(base, "sources/chapters/a.pdf") {
+		t.Fatalf("job %+v", j)
+	}
+	a, b := j.Parts[1].Page, j.Parts[2].Page
+	if a.Background != nil || a.Text.Value != "" || a.Text.Font != filepath.Join(base, "sources/chapters/local.ttf") || b.Text.Font != "default" || b.Text.Value != "default" || b.Background == nil {
+		t.Fatalf("layered: %+v %+v", a, b)
+	}
+	if a.Origins["font"] != "/items/0/items/1/page/text/font" || a.Origins["width"] != "/page/text/width" || b.Origins["background"] != "/page/background" {
+		t.Fatalf("origins %+v %+v", a.Origins, b.Origins)
+	}
+	top, ds := plan.Decode([]byte(`{"version":2,"page":{"text":{"font":{"file":"top.ttf"}}},"items":[{"dir":"elsewhere","items":[{"page":{}}]}]}`), "p", base)
+	if len(ds) > 0 || top.Parts[0].Page.Text.Font != filepath.Join(base, "top.ttf") {
+		t.Fatalf("top font scope %+v %+v", top, ds)
+	}
+}
+
+func TestLimits(t *testing.T) {
+	for _, n := range []int{100000, 100001} {
+		input := `{"version":2,"items":[` + strings.Repeat(`"a",`, n-1) + `"a"]}`
+		j, ds := plan.Decode([]byte(input), "p", ".")
+		if n == 100000 && (len(ds) > 0 || len(j.Parts) != n) || n == 100001 && (len(ds) != 1 || ds[0].Code != "plan_limit") {
+			t.Fatalf("entry boundary %d: %d %+v", n, len(j.Parts), ds)
+		}
+	}
+	for _, count := range []string{"100000", "100001"} {
+		_, ds := plan.Decode([]byte(`{"version":2,"items":[{"page":{},"count":`+count+`}]}`), "p", ".")
+		if count == "100000" && len(ds) > 0 || count == "100001" && len(ds) == 0 {
+			t.Fatalf("count %s: %+v", count, ds)
+		}
+	}
+	_, ds := plan.Decode([]byte(`{"version":2,"items":[{"page":{},"count":100000},{"page":{}}]}`), "p", ".")
+	if len(ds) != 1 || ds[0].Code != "plan_limit" {
+		t.Fatal(ds)
+	}
+	for _, n := range []int{64, 65} {
+		input := `"a"`
+		for range n {
+			input = `{"dir":"x","items":[` + input + `]}`
+		}
+		_, ds := plan.Decode([]byte(`{"version":2,"items":[`+input+`]}`), "p", ".")
+		if n == 64 && len(ds) > 0 || n == 65 && (len(ds) != 1 || ds[0].Code != "plan_limit") {
+			t.Fatalf("depth %d: %+v", n, ds)
+		}
+	}
+	for _, n := range []int{10000, 10001} {
+		_, ds := plan.Decode([]byte(`{"version":2,"items":[{"page":{"text":{"value":"`+strings.Repeat("a", n)+`"}}}]}`), "p", ".")
+		if n == 10000 && len(ds) > 0 || n == 10001 && (len(ds) != 1 || ds[0].Code != "plan_limit") {
+			t.Fatalf("text %d: %+v", n, ds)
+		}
+	}
+	input := append([]byte(`{"version":2,"items":["a"]}`), []byte(strings.Repeat(" ", plan.MaxBytes))...)
+	_, ds = plan.Decode(input, "p", ".")
+	if len(ds) != 1 || ds[0].Code != "plan_too_large" {
+		t.Fatal(ds)
+	}
+}
+
+func compileSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	var instance any
+	if err := json.Unmarshal(plan.Schema, &instance); err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("plan.json", instance); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("plan.json")
 	if err != nil {
-		return length, io.EOF // a bytes.Reader fails only at the end of its data
+		t.Fatal(err)
 	}
-
-	return length, nil
+	return schema
 }
 
-func TestVerdictsDoNotDependOnReadChunking(t *testing.T) {
-	t.Parallel()
-
-	for _, row := range corpus() {
-		_, whole := decodeString(t, row.Doc)
-		_, split := plan.Decode(context.Background(), inputFor(), oneByteReader{bytes.NewReader([]byte(row.Doc))})
-
-		if (whole == nil) != (split == nil) {
-			t.Fatalf("%s: %v vs %v", row.Name, whole, split)
+func TestSchemaAndExamples(t *testing.T) {
+	schema := compileSchema(t)
+	paths, err := filepath.Glob("../../examples/plans/*.json")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("examples not found: %v", err)
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
 		}
-
-		if whole == nil {
-			continue
+		_, ds := plan.Decode(data, path, filepath.Dir(path))
+		if len(ds) > 0 {
+			t.Fatalf("%s: %+v", path, ds)
 		}
-
-		wholeErr, wholeOK := errors.AsType[*plan.Error](whole)
-		splitErr, splitOK := errors.AsType[*plan.Error](split)
-
-		if !wholeOK || !splitOK || *wholeErr != *splitErr {
-			t.Fatalf("%s: %+v vs %+v", row.Name, whole, split)
+		var instance any
+		if err = json.Unmarshal(data, &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err = schema.Validate(instance); err != nil {
+			t.Fatalf("%s schema: %v", path, err)
 		}
 	}
-}
-
-func TestBOMEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	for document, want := range map[string]plan.Code{
-		"\xef\xbb\xbf":          plan.CodeEmpty,
-		"\xef\xbb":              plan.CodeSyntax,
-		"\xef\xbb\xbf \n":       plan.CodeEmpty,
-		"\xef\xbb\xbf[1]":       plan.CodeNotObject,
-		"\xef\xbb\xbf{\"x\":1}": plan.CodeUnknownMember,
-		"\xef":                  plan.CodeSyntax,
+	for _, input := range []string{
+		`{"version":2,"items":[]}`, `{"version":2,"items":[{"page":{},"count":0}]}`,
+		`{"version":2,"items":[{"page":{"text":{"size":-1}}}]}`, `{"version":2,"items":[{"page":{"text":{"width":0}}}]}`,
+		`{"version":2,"items":[{"items":["a"]}]}`, `{"version":2,"items":[null]}`,
 	} {
-		_, err := decodeString(t, document)
-		wantCode(t, err, want)
+		var instance any
+		if err := json.Unmarshal([]byte(input), &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(instance); err == nil {
+			t.Fatalf("schema accepted %s", input)
+		}
 	}
-}
-
-func TestTrailingDataIsLocatedAfterABOM(t *testing.T) {
-	t.Parallel()
-
-	for _, tail := range []string{" xyz", ` "`, ` }`, " {}", "\n\n  x", "\x00", "// comment", ","} {
-		prefix := "\xef\xbb\xbf" + minimalPlan + "\n"
-		_, err := decodeString(t, prefix+tail)
-		planErr := codedError(t, err, plan.CodeTrailingData)
-
-		want := int64(len(prefix) + len(tail) - len(strings.TrimLeft(tail, " \n")))
-		if planErr.Location.Offset != want {
-			t.Fatalf("%q: offset %d, want %d", tail, planErr.Location.Offset, want)
+	// Standard schema integer semantics cannot enforce lexical integer tokens.
+	for _, count := range []string{"3.0", "3e0"} {
+		input := []byte(`{"version":2,"items":[{"page":{},"count":` + count + `}]}`)
+		var instance any
+		if err := json.Unmarshal(input, &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(instance); err != nil {
+			t.Fatal(err)
+		}
+		if _, ds := plan.Decode(input, "p", "."); len(ds) != 1 || ds[0].Code != "plan_value" {
+			t.Fatalf("lexical rejection: %+v", ds)
 		}
 	}
 }
 
-func TestDuplicateMemberLocation(t *testing.T) {
-	t.Parallel()
-
-	_, err := decodeString(t, "\xef\xbb\xbf{\"version\":1,\n \"items\":[\"a\"],\n \"vers\\u0069on\":1}")
-	planErr := codedError(t, err, plan.CodeDuplicateMember)
-
-	if planErr.Location.Line != 3 || planErr.Location.Pointer != "/version" || planErr.Stage != plan.StageSyntax {
-		t.Fatalf(diagnosticFormat, planErr)
+func FuzzPlanDecode(f *testing.F) {
+	for _, seed := range []string{`{"version":2,"items":["a.pdf"]}`, `{"version":2,"items":[{"page":{}}]}`, `{"version":2,"items":[null]}`, `{"version":1,"blank":{}}`, `{`, "\xef\xbb\xbf{}"} {
+		f.Add([]byte(seed))
 	}
+	f.Fuzz(func(t *testing.T, input []byte) {
+		_, ds := plan.Decode(input, "p", ".")
+		if len(ds) > 1 {
+			t.Fatal("decoder returned multiple faults")
+		}
+	})
 }
 
-func TestSyntaxErrorLocationAndStableMessage(t *testing.T) {
-	t.Parallel()
-
-	_, err := decodeString(t, "{\n\"version\":1,\n\"items\":[\"a\",]}")
-	planErr := codedError(t, err, plan.CodeSyntax)
-
-	if planErr.Location.Line != 3 || strings.Contains(planErr.Message, "`") {
-		t.Fatalf(diagnosticFormat, planErr)
-	}
-}
-
-func TestUnknownMemberHintsCase(t *testing.T) {
-	t.Parallel()
-
-	_, err := decodeString(t, `{"VERSION":1}`)
-	planErr := codedError(t, err, plan.CodeUnknownMember)
-
-	if !strings.Contains(planErr.Message, `did you mean "version"`) {
-		t.Fatal(planErr.Message)
-	}
-}
-
-func (f failingReader) Read([]byte) (int, error) { return 0, f.err }
-
-func TestDecodeReportsReadFailures(t *testing.T) {
-	t.Parallel()
-
-	partial := io.MultiReader(strings.NewReader(`{"version":1,`), failingReader{errBoom})
-
-	_, err := plan.Decode(context.Background(), plan.Input{Name: "r"}, partial)
-	planErr := codedError(t, err, plan.CodeReadFailed)
-
-	if !errors.Is(err, errBoom) || planErr.Stage != plan.StageRead {
-		t.Fatalf(diagnosticFormat, planErr)
-	}
-
-	_, err = plan.Decode(context.Background(), plan.Input{Name: "r"}, failingReader{errBoom})
-	wantCode(t, err, plan.CodeReadFailed)
-
-	// A failure while scanning for trailing data is a read failure too.
-	_, err = plan.Decode(
-		context.Background(),
-		plan.Input{Name: "r"},
-		io.MultiReader(strings.NewReader(minimalPlan+"  "), failingReader{errBoom}),
-	)
-	wantCode(t, err, plan.CodeReadFailed)
-}
-
-func TestCancelledContextStopsDecoding(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := plan.Decode(ctx, plan.Input{Name: "c"}, strings.NewReader(minimalPlan))
-	wantCode(t, err, plan.CodeInterrupted)
-
-	if !errors.Is(err, context.Canceled) {
-		t.Fatal("the cause is lost")
-	}
-}
-
-// everyMemberPlan uses every member the format has.
-func everyMemberPlan() string {
-	return `{"$schema":"s","version":1,"output":"o.pdf","dir":"d","blank":{"size":"A4","background":"#fff","text":{"value":"v",` +
-		`"font":{"file":"f.ttf"},"size":1,"color":"#000","anchor":"top","x":1,"y":2,"width":3,` +
-		`"align":"left","leading":1.5,"overflow":"allow"}},` +
-		`"items":["a",{"blank":{"text":{"font":"default"}},"count":2},{"dir":"g","items":["b"]}]}`
-}
-
-// TestEveryTruncationIsRejected decodes every proper prefix of a document that uses every member: none may be
-// accepted, and none may panic. This walks the end-of-input path of every reader in the decoder.
-func TestEveryTruncationIsRejected(t *testing.T) {
-	t.Parallel()
-
-	document := everyMemberPlan()
-	mustDecode(t, document)
-
-	for length := range len(document) {
-		_, err := decodeString(t, document[:length])
-
-		planErr, ok := errors.AsType[*plan.Error](err)
-		if !ok || planErr == nil {
-			t.Fatalf("prefix of %d bytes: %v is not a *plan.Error", length, err)
+func TestNumericVersionAndLengthFaultClasses(t *testing.T) {
+	for _, tc := range []struct {
+		input   string
+		code    diag.Code
+		pointer string
+	}{
+		{`{"version":2.0,"items":["a"]}`, "plan_version_unsupported", "/version"},
+		{`{"version":999999999999999999999999,"items":["a"]}`, "plan_version_unsupported", "/version"},
+		{`{"version":2,"items":[{"page":{"text":{"size":1e999}}}]}`, "plan_value", "/items/0/page/text/size"},
+		{`{"version":2,"items":[{"page":{"text":{"leading":1e999}}}]}`, "plan_value", "/items/0/page/text/leading"},
+	} {
+		_, ds := plan.Decode([]byte(tc.input), "p", ".")
+		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Pointer != tc.pointer {
+			t.Fatalf("numeric fault %s: %+v", tc.input, ds)
 		}
 	}
-}
-
-func (*flippingContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-
-func (*flippingContext) Done() <-chan struct{} { return nil }
-
-func (*flippingContext) Value(any) any { return nil }
-
-func (f *flippingContext) Err() error {
-	if f.calls.Add(1) > f.flipAfter {
-		return context.Canceled
-	}
-
-	return nil
-}
-
-func TestCancellationAtEveryCheckpointIsReported(t *testing.T) {
-	t.Parallel()
-
-	document := repeated(sourceStringJSON, 20000)
-
-	interrupted, completed := 0, 0
-
-	for flipAfter := range int64(60) {
-		_, err := plan.Decode(&flippingContext{flipAfter: flipAfter}, plan.Input{Name: "c"}, strings.NewReader(document))
-		if err == nil {
-			completed++
-
-			continue
-		}
-
-		wantCode(t, err, plan.CodeInterrupted)
-
-		interrupted++
-	}
-
-	if interrupted == 0 || completed == 0 {
-		t.Fatalf("the sweep interrupted %d and completed %d decodes; it must cross the end of the work", interrupted, completed)
+	input := `{"blank":{},"items":[],"version":1}`
+	_, ds := plan.Decode([]byte(input), "p", ".")
+	if ds[0].Location.Offset != int64(strings.LastIndex(input, "1")) {
+		t.Fatalf("v1 location points away from its value: %+v", ds[0].Location)
 	}
 }

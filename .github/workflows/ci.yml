@@ -1,330 +1,121 @@
 name: CI
 
-# Every job below is a required check. Tool versions come from tools/versions.env and the Go
-# toolchain from go.mod, through the prepare action; no version is repeated in this file.
-#
-# A workflow file is configuration, not evidence: nothing here has been executed on GitHub-hosted
-# runners until a run exists. CONTRIBUTING.md lists what each job proves and how to run it locally.
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_call:
 
-env:
-  PDFCONCAT_REQUIRE_QA_TOOLS: "1"
-
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  secrets:
-    name: Source and history secrets scan
-    uses: ./.github/workflows/secrets.yml
-    permissions:
-      contents: read
-
-  # Fast gate for the rules no compiler or linter checks: the exception registry, directives,
-  # notices, workflow pins, documents, and the plan schema. Also part of every test job below.
-  policy:
-    name: Policy and schema tests
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
-          tools: golangci-lint
-      - run: >-
-          go run ./tools/qualitygate test -events "${{ runner.temp }}/test-events.json"
-          ./internal/repopolicy/... ./internal/doccontract/... ./internal/plan/... ./internal/exectest/... ./tools/...
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: Modules are tidy
+        run: |
+          go mod tidy -diff
+          (cd tools && go mod tidy -diff)
+      - name: No inline lint suppressions
+        run: |
+          if git grep -n -E '//[[:space:]]*nolint' -- '*.go'; then
+            echo "Inline //nolint is not allowed; add a commented exclusion to .golangci.yml instead."
+            exit 1
+          fi
+      - name: golangci-lint (linux, darwin, windows)
+        run: |
+          go build -modfile=tools/go.mod -o "$RUNNER_TEMP/golangci-lint" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+          for goos in linux darwin windows; do
+            echo "::group::GOOS=$goos"
+            GOOS=$goos "$RUNNER_TEMP/golangci-lint" run ./...
+            echo "::endgroup::"
+          done
+      - name: Workflow lint
+        run: |
+          actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
+          go run "github.com/rhysd/actionlint/cmd/actionlint@$actionlint_version"
+      - name: Known vulnerabilities
+        run: go tool -modfile=tools/go.mod govulncheck ./...
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: test-events-policy
-          path: |
-            ${{ runner.temp }}/test-events.json
-            ${{ runner.temp }}/test-events.json.stderr
-          if-no-files-found: error
-
-  # Native tests on every supported operating system and architecture that has a hosted runner,
-  # then a real executable built the way a release is built. darwin/amd64 runs natively
-  # Intel macOS is executed on macos-26-intel as well as cross-built.
   test:
     name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
-          tools: golangci-lint
-      - name: Assert native Intel target and record environment
-        if: matrix.os == 'macos-26-intel'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(go env GOOS)/$(go env GOARCH)" = darwin/amd64
-          test "$(uname -m)" = x86_64
-          go version
-          printf '%s\n' "$ImageOS" "$ImageVersion"
-      - uses: ./.github/actions/qa-tools
-      - run: go build ./...
-      - run: go vet ./...
-      - name: Tests with discovery checks
-        run: go run ./tools/qualitygate test -events "${{ runner.temp }}/test-events.json"
-      - name: Real disk-full recovery control
+          go-version-file: go.mod
+      - name: Install independent PDF tools (qpdf, Poppler)
         if: runner.os == 'Linux'
-        shell: bash
-        run: source .github/scripts/disk-full-recovery.sh
-      - name: Executable smoke test
-        shell: bash
         run: |
-          set -euo pipefail
-          exe="$RUNNER_TEMP/pdfconcat"
-          if [ "$RUNNER_OS" = Windows ]; then exe="$exe.exe"; fi
-          go build -ldflags "-s -w -X main.version=ci-smoke" -o "$exe" ./cmd/pdfconcat
-          "$exe" version | grep --fixed-strings ci-smoke
-          "$exe" schema plan > "$RUNNER_TEMP/plan.schema.json"
-          head -c 1 "$RUNNER_TEMP/plan.schema.json" | grep --fixed-strings '{'
-          "$exe" --help > /dev/null
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: test-events-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/test-events*.json
-            ${{ runner.temp }}/test-events*.json.stderr
-          if-no-files-found: error
-
-  # Among release targets, Go supports race on both Linux/macOS architectures and Windows/amd64.
-  # Windows/arm64 has no Go race detector.
-  race:
-    name: Race detector (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    env:
-      CGO_ENABLED: "1"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: golangci-lint
-      - name: Assert native Intel target and record environment
-        if: matrix.os == 'macos-26-intel'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(go env GOOS)/$(go env GOARCH)" = darwin/amd64
-          test "$(uname -m)" = x86_64
-          go version
-          printf '%s\n' "$ImageOS" "$ImageVersion"
-      - uses: ./.github/actions/qa-tools
-      - run: go run ./tools/qualitygate test -events "${{ runner.temp }}/test-events.json" -race
-      - name: Native progress signal and sandbox fault controls
-        if: runner.os == 'macOS'
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qpdf poppler-utils
+      - name: Test with race detector (oracle required on Linux)
+        if: runner.os != 'Windows'
         env:
-          CGO_ENABLED: "1"
-        run: go run ./tools/qualitygate test -native-progress -events "${{ runner.temp }}/native-progress-events.json"
+          PDFCONCAT_REQUIRE_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
+        run: go test -race ./...
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test ./...
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: test-events-race-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/test-events.json
-            ${{ runner.temp }}/test-events.json.stderr
-            ${{ runner.temp }}/native-progress-events.json*
-          if-no-files-found: error
-
-  # Lint natively on every operating system so that build-tagged files (internal/publish) are
-  # analyzed. The pinned stock tool is checked through native module metadata and real controls.
-  # The formatting gate is separate from lint and never rewrites files.
-  lint:
-    name: Lint (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: golangci-lint
-      - name: Configuration agrees with the exception registry
-        run: go run ./tools/qualitygate lint-config
-      - name: Architecture classification and real rejection controls
-        run: go run ./tools/qualitygate architecture
-      - name: Formatting gate (non-mutating)
-        run: go run ./tools/qualitygate format
-      - name: Lint
-        run: go run ./tools/qualitygate lint
-
-  cross-build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        goos: [darwin, linux, windows]
-        goarch: [amd64, arm64]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      CGO_ENABLED: "0"
-      GOOS: ${{ matrix.goos }}
-      GOARCH: ${{ matrix.goarch }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-      - run: go build -trimpath ./...
-      - run: go vet ./...
-
-  modules:
-    name: Module hygiene
+  build:
+    name: Build all release targets
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/prepare
-      - run: go mod verify
-      - name: go.mod and go.sum are tidy
-        run: go mod tidy -diff
-
-  vulnerability:
-    name: Known vulnerability scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: govulncheck
-      - run: govulncheck ./...
-
-  # Raw unit and executable-subprocess coverage, merged without exclusions or a percentage gate.
-  # Native on each operating system: a Linux run says nothing about the Windows or macOS files.
-  coverage:
-    name: Coverage (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, macos-26-intel, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: golangci-lint
-      - name: Assert native Intel target and record environment
-        if: matrix.os == 'macos-26-intel'
-        shell: bash
+          go-version-file: go.mod
+      - name: Cross-compile
+        env:
+          CGO_ENABLED: "0"
         run: |
-          set -euo pipefail
-          test "$(go env GOOS)/$(go env GOARCH)" = darwin/amd64
-          test "$(uname -m)" = x86_64
-          go version
-          printf '%s\n' "$ImageOS" "$ImageVersion"
-      - uses: ./.github/actions/qa-tools
-      - run: go run ./tools/qualitygate coverage -profile "${{ runner.temp }}/coverage.out"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: coverage-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/coverage.out
-            ${{ runner.temp }}/coverage.out.func.txt
-          if-no-files-found: error
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            echo "$target"
+            GOOS=${target%/*} GOARCH=${target#*/} go build -trimpath -o /dev/null ./cmd/pdfconcat
+          done
 
-  workflows:
-    name: Workflow syntax
+  required:
+    name: Required CI
+    if: always()
+    needs: [lint, test, build]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: actionlint
-      - run: |
-          command -v shellcheck >/dev/null
-          actionlint -shellcheck 'shellcheck --check-sourced'
-
-  # GoReleaser needs a Git remote and tag/ref data. This job validates the configuration, builds a
-  # snapshot of all six targets, and inspects the real archives. Nothing is published.
-  release-config:
-    name: Release snapshot
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          tools: goreleaser
-          cache: "false"
-      - run: goreleaser check
-      - run: goreleaser release --snapshot --clean
-      - run: go run ./tools/qualitygate archives dist
-
-  fuzz:
-    name: Required discovered-target fuzz smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/prepare
-        with:
-          cache: "false"
-      - uses: ./.github/actions/qa-tools
-      - name: Run every discovered fuzz target
-        shell: bash
+      - name: Every required job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          go run ./tools/qualitygate fuzz -time 30s 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: pr-fuzz-${{ github.sha }}
-          path: ${{ runner.temp }}/fuzz.log
-          if-no-files-found: error
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "A required job ended with: $result"
+              exit 1
+            fi
+          done

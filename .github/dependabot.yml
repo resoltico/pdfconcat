@@ -1,23 +1,16 @@
 version: 2
 updates:
   - package-ecosystem: gomod
+    directories: ["/", "/tools"]
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     groups:
-      go-dependencies:
-        patterns:
-          - "*"
-
-  # Covers the workflows and the composite actions under .github/actions. Dependabot proposes a
-  # new commit SHA and updates the release-tag comment beside it.
-  - package-ecosystem: github-actions
-    directories:
-      - /
-      - /.github/actions/*
-    schedule:
-      interval: weekly
-    groups:
       github-actions:
-        patterns:
-          - "*"
+        patterns: ["*"]

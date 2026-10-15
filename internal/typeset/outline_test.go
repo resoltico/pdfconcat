@@ -5,6 +5,7 @@ package typeset_test
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -131,5 +132,65 @@ func TestIntactOutlinesPassOnRepeatedPlacement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestRepeatedStaticValidationChecksLaterInvalidNominalGlyphs(t *testing.T) {
+	t.Parallel()
+	font, err := fontWithCmap(t, cmapOf(t, [3]uint32{'A', 'A', uint32(glyphOf(t, "A"))}, [3]uint32{'B', 'B', 65535}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shaper typeset.Shaper
+	if err := shaper.ValidateText(font, "A"); err != nil {
+		t.Fatalf("intact first glyph refused: %v", err)
+	}
+	if err := shaper.ValidateText(font, "AB"); !errors.Is(err, typeset.ErrMalformedFont) {
+		t.Fatalf("previously checked glyph hid later invalid nominal glyph: %v", err)
+	}
+}
+
+func TestStaticValidationRejectsNominalNotdefGlyph(t *testing.T) {
+	t.Parallel()
+	font, err := fontWithCmap(t, cmapOf(t, [3]uint32{'A', 'A', 0}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shaper typeset.Shaper
+	err = shaper.ValidateText(font, "A")
+	var unsupported *typeset.TextError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("nominal .notdef glyph accepted as renderable text: %v", err)
+	}
+}
+
+func TestStaticValidationRejectsNominalCorruptionBeforeSubstitution(t *testing.T) {
+	t.Parallel()
+	// Minimal DFLT/ccmp GSUB with a single substitution from glyph 65535 to A.
+	// Substitution can paint A, but preliminary nominal-outline validation must
+	// still report the out-of-range cmap entry as a malformed font.
+	substitution, err := hex.DecodeString(
+		"00010000000a001e002c000144464c540008000400000000ffff000100000001" +
+			"63636d70000800000001000000010004000100000001000800010006002500010001ffff",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The format-one substitution's delta wraps the 16-bit source glyph to A.
+	binary.BigEndian.PutUint16(substitution[60:], glyphOf(t, "A")+1)
+	font, err := typeset.LoadFont(mutatedFont(t, func(tables map[string][]byte) {
+		tables["cmap"] = cmapOf(t, [3]uint32{'A', 'A', 65535})
+		tables["GSUB"] = substitution
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shaper typeset.Shaper
+	if _, err := shaper.Place(font, baseParams("A")); err != nil {
+		t.Fatalf("substitution control failed: %v", err)
+	}
+	var preliminary typeset.Shaper
+	if err := preliminary.ValidateText(font, "A"); !errors.Is(err, typeset.ErrMalformedFont) {
+		t.Fatalf("nominal glyph corruption hidden by substitution: %v", err)
 	}
 }

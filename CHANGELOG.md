@@ -6,25 +6,25 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Changed
 
-- Literal file paths now follow native filesystem traversal through symbolic-link parents. A path such as `link/../document.pdf` can select a different file than earlier lexical cleanup; review plans that depended on that cleanup. Relative entries in a symlinked plan remain anchored at its supplied location.
-- Published PDFs are private by default, including replacements of existing shared files. Reports and recovery files use the same policy; macOS inherited access ACLs are cleared before sensitive bytes are written. Deliberate sharing requires a separate permission change.
+- **Breaking:** plan v2 requires `version: 2` and renames top-level/item `blank` to `page`; migrate existing plans. Counts must use integer tokens from 1 to 100,000, so spell `3.0` or `3e0` as `3`; total generated pages are limited to 100,000 instead of 1,000,000. The CLI `--blank` operand remains supported. See [plan migration and limits](docs/PLAN.md).
+- **Breaking:** result/report v3 replaces the previous response/report contract. Stdout caps diagnostics at 20 and consumer pointers at 20 per diagnostic, with omission counts; `--report` retains full parts, ranges, known hashes/byte counts and actual field mappings. Update JSON consumers to the [result contract](docs/CLI.md#output) and use `schema result` instead of `schema response` or `schema report`.
+- **Breaking:** the `report` query command and its selectors, `--progress`, `--jobs` and `--plan-json` are removed. Use `--plan FILE` or `--plan -` for plans and consume the full `--report` JSON directly; source inspection and assembly are sequential.
+- **Breaking:** paths resolve lexically, and output/report permissions follow umask instead of private-by-default ACLs; replacements retain their permission bits. Private ACLs, captured source/font workspaces and report-recovery copies are removed; source bytes are re-read and digest-checked before assembly. Use stable, trusted local paths and inspect `output.published` before retrying after a late failure; network-filesystem durability is not guaranteed. See [file-safety limits](SECURITY.md).
+- **Breaking:** unmodified upstream pdfcpu v0.16.2 replaces the maintained forks and their strict malformed-token/duplicate-key/free-head refusals and parser work/resource budgets. Relaxed parsing can accept repairs or malformed syntax; finite dictionary reals may serialize to twelve fractional digits, and arbitrary numeric/dictionary identity is not promised. Specific unsafe canonical-name and shared resource/annotation shapes are refused. See [PDF policy and limits](docs/DESIGN.md#pdf-policy).
+- **Breaking:** multiple nonempty static forms require identical resolved `/DR`, `/DA` and `/Q` representations; conflicting defaults are refused instead of using the former appearance/resource engine. `NeedAppearances` remains a viewer-regeneration request with a warning, not a promise of generated appearances. Widgets without appearance dictionaries can fail assembly when any source raises the output to PDF 2.0; provide complete appearances or assemble separately. Widgets remain unsupported for fitting. See [form limits](docs/DESIGN.md#forms-fitting-and-catalog).
+- **Breaking fidelity boundary:** fitting uses upstream resize. Destination page targets survive, but scroll coordinates are not transformed; former print-box, content-analysis and appearance guarantees are removed. UserUnit is normalized to preserve physical target sheet dimensions. Coordinate destinations can now be accepted within the documented limitation; review [fitting limits](docs/CLI.md#build-check-and-fitting) before relying on print or imposition fidelity.
+- Fitting accepts the full sheet-size grammar, including explicit landscape dimensions, beyond the previous `A4`/`Legal` choices.
+- Generated PDFs normally embed glyph-pruned TrueType fonts with stable glyph IDs and shared job-wide resources. Embeddable fonts that prohibit subsetting retain their complete original programs.
 
-### Fixed
+### Added
 
-- Native Unix progress cleanup preserves standard streams when initialization returns invalid, duplicate or unrepresentable descriptor values.
-- Fitting accepts exact Type 3 geometry with a zero-valued box endpoint that a conservative precision guard previously rejected.
-- Plans reject decimal leading and point lengths mathematically outside their limits even when floating-point conversion rounds them back to a boundary; correct such near-boundary values in plans. Report finalization faults preserve the fact that a check/failure report was already written.
-- Font capture enforces the 64 MiB limit before scratch creation and while reading, including file growth, with owned partial-copy cleanup.
-- Physical source/font aliases share captured bytes and reusable inspection/parsed-font facts within a job. Repeated forms and links retain independent occurrence identities.
-- Failed PDF inspections retain completed capture digests and byte counts without inventing known pages or ranges. Font failure provenance uses one indexed traversal, and registration/report validation observes cancellation.
-- Saved reports reject publication claims inconsistent with command, status or verification. Preparing a success report preserves the live uncommitted outcome.
-- Runtime dependency notices contain one row per component/version and reject duplicate identities.
+- Source bookmarks are preserved, including occurrence-specific direct and named destinations.
+- Repeated legacy `/Dests` sources retain per-occurrence targets. Existing repeated named-destination and damaged-page-tree protections remain in place.
+- Release packaging includes executable archives for macOS, Linux and Windows on amd64 and arm64, documentation, schemas and third-party notices/licenses. Checksums and provenance are configured for tag-triggered publication; assets are not available until that publication succeeds. Runtime modules no longer use local replacements, enabling module-based installation of a compatible published tag; `v0.2.0` and earlier published releases contain source only.
 
 ### Internal
 
-- Contributor verification uses the pinned stock correctness linter profile and one formatter. Physical source guards and compiled import/error/security controls replace the linter variant and source-regex registry. Coverage reports all measured statements without exclusions or a global percentage gate; required invariant and campaign proof remains mandatory. See [Verification](docs/VERIFICATION.md).
-- Mutation judgments retain complete compiler/coverage diagnostics with owned-source attribution and matching baseline/worker instrumentation. Missing test evidence, process/resource failures and snapshot cleanup failures remain errors. Fuzz discovery joins package-initialization processes and verifies the complete compiler-recognized target inventory with package attribution. Mutation evidence paths preserve caller-side native traversal. Required native controls verify inactive/healthy progress and later transport failures.
-- Required CI includes native Intel macOS and discovered-target fuzz smoke. Source release verification depends on reusable exact-SHA campaigns; verification-only dispatch does not publish. These workflow changes require successful hosted candidate execution before foundation or release readiness can be claimed.
+- The bespoke verification platform is replaced by stock Go tests, curated lint/depguard, actionlint and govulncheck with pinned tooling. Six-job CI retains `Required CI`; independent qpdf/Poppler checks cover destinations, forms, font extraction/pruning, fitting and publication/report state.
 
 ## [0.2.0] - 2026-10-09
 

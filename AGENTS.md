@@ -104,3 +104,8 @@ Consolidate related pending work into its final outcome. Omit routine churn and 
 Use established categories consistently and omit empty ones. Internal is for noteworthy implementation, verification or release-process outcomes, not routine churn or concealed compatibility changes, new build requirements or user-visible effects. Keep technical method and protocol identifiers; omit development-phase labels.
 
 Retain Unreleased and release history. Preserve version attribution, dates, links and publication-status distinctions. Published entries may be clarified, consolidated or reclassified without changing what they say shipped; factual corrections require evidence. Do not prune or relocate history without an explicit policy or request, or alter tags or published artifacts when editing the working file.
+
+## This project
+
+Project-specific scope and the verification budget are in [CONTRIBUTING.md](CONTRIBUTING.md#what-we-test-and-what-we-do-not).
+Read it before adding a check, a CI job, a tool or a native-platform guarantee.

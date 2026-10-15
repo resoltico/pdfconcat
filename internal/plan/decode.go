@@ -1,679 +1,568 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package plan decodes plan files (format version 1) into the neutral assembly job tree, strictly and in
-// one pass over the JSON token stream, with provenance and declared resource limits.
+// Package plan decodes strict, located version 2 assembly plans.
 package plan
 
 import (
-	"context"
+	"bytes"
+	_ "embed"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"math"
-	"regexp"
-	"slices"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
-	"github.com/resoltico/pdfconcat/internal/assembly"
+	"github.com/resoltico/pdfconcat/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/job"
 )
 
-type (
-	// Input describes where a plan came from.
-	Input struct {
-		// Name is the source name used in diagnostics: the file path, "<stdin>", or "<inline>".
-		Name string
-		// BaseDir is the initial base directory: the plan file's directory, or --base-dir for standard input and
-		// inline plans, or the working directory. It is not interpreted here; it is recorded as Job.Base
-		// and as the base of fonts declared in the defaults.
-		BaseDir string
-	}
+// MaxBytes bounds the original UTF-8 plan, including an optional BOM.
+const MaxBytes = 64 << 20
 
-	// token is a JSON token with the absolute offset of its first byte.
-	token struct {
-		value jsontext.Token
-		start int64
-	}
+// Schema is the editor-facing plan v2 JSON Schema.
+//
+//go:embed plan.schema.json
+var Schema []byte
 
-	// parser reads one plan from the token stream and charges the declared limits as it goes.
-	parser struct {
-		source  *limitedSource
-		doc     *document
-		decoder *jsontext.Decoder
-		job     *assembly.Job
-		stop    cancellation
-
-		generated     int64
-		nodes         int
-		contributions int
-		ticks         int
-		// owner is the item whose style fields are being read; Ref 0 is the plan's defaults.
-		owner assembly.Ref
-	}
-
-	// seenMembers records which required root members were present.
-	seenMembers struct {
-		version, items bool
-	}
-
-	// itemMembers is what an object item turned out to hold.
-	itemMembers struct {
-		style                          assembly.BlankStyle
-		count                          assembly.Field[int64]
-		blank, hasCount, dir, hasItems bool
-	}
-)
-
-const (
-	wantedString  = "a string"
-	memberVersion = "version"
-	// Version is the plan format version this package reads.
-	Version = 1
-
-	// cancelCheckInterval is how many tokens pass between context checks.
-	cancelCheckInterval = 0xFFF
-	trailingBuffer      = 4096
-
-	memberBlank = "blank"
-	memberDir   = "dir"
-	memberItems = "items"
-	memberSize  = "size"
-	memberFitTo = "fit_to"
-)
-
-// Decode reads exactly one plan object from reader in a single pass over the jsontext token stream. reader
-// may block (standard input); ctx cancels the read. Errors are *Error values; decoding stops at the first fault.
-func Decode(ctx context.Context, input Input, reader io.Reader) (*assembly.Job, error) {
-	stop := cancellationOf(ctx)
-	source := newLimitedSource(stop, input.Name, reader)
-
-	reading := &parser{
-		stop:   stop,
-		source: source,
-		doc:    source.doc,
-		// AllowDuplicateNames and AllowInvalidUTF8 default to false; stated for the reader of this code.
-		decoder: jsontext.NewDecoder(source, jsontext.AllowDuplicateNames(false), jsontext.AllowInvalidUTF8(false)),
-		job:     &assembly.Job{Source: source.doc, Base: input.BaseDir},
-	}
-
-	err := reading.document()
-	if err != nil {
-		return nil, err
-	}
-
-	return reading.job, nil
+type fault struct {
+	code             diag.Code
+	message, pointer string
+	offset           int64
 }
 
-func (t token) kind() byte { return byte(t.value.Kind()) }
+func (e *fault) Error() string { return e.message }
 
-func kindName(kind byte) string {
-	switch kind {
-	case '"':
-		return wantedString
-	case '0':
-		return "a number"
-	case '{':
-		return "an object"
-	case '[':
-		return "an array"
-	default: // the remaining value kinds are true and false; null is reported before a kind is named
-		return "a boolean"
+type node struct {
+	pointer, source, dir string
+	page                 *job.PageStyle
+	count                int
+	children             []node
+}
+
+type decoder struct {
+	d                  *jsontext.Decoder
+	data               []byte
+	bom                int64
+	entries, generated int
+}
+
+// Decode charges the original input bytes, including an optional leading BOM.
+// The caller owns file/stream I/O and cancellation; this function reads no files.
+func Decode(data []byte, file, base string) (job.Job, []diag.Diagnostic) {
+	p := decoder{data: data}
+	if len(data) > MaxBytes {
+		return job.Job{}, []diag.Diagnostic{diag.New("plan_too_large", "Plan exceeds 64 MiB.")}
 	}
-}
-
-func (p *parser) absolute() int64 { return p.decoder.InputOffset() + int64(p.doc.bomLen) }
-
-func (p *parser) origin(value token) assembly.Origin {
-	return assembly.Origin{Ref: p.owner, Offset: value.start}
-}
-
-func (p *parser) fail(stage Stage, code Code, offset int64, pointer, format string, args ...any) *Error {
-	line, column := p.doc.Position(offset)
-
-	return &Error{
-		Code: code, Stage: stage, Message: fmt.Sprintf(format, args...),
-		Location: assembly.Location{Source: p.doc.name, Offset: offset, Line: line, Column: column, Pointer: pointer},
+	input := data
+	if bytes.HasPrefix(input, []byte{0xef, 0xbb, 0xbf}) {
+		p.bom = 3
+		input = input[3:]
 	}
-}
-
-// failHere reports at a just-read value; the pointer comes from the decoder and is valid only until its next read.
-func (p *parser) failHere(stage Stage, code Code, value token, format string, args ...any) *Error {
-	return p.fail(stage, code, value.start, string(p.decoder.StackPointer()), format, args...)
-}
-
-// failItem reports at an item.
-func (p *parser) failItem(stage Stage, code Code, item *assembly.Item, format string, args ...any) *Error {
-	return p.fail(stage, code, item.Origin.Offset, p.doc.Pointer(item.Origin.Ref, ""), format, args...)
-}
-
-// syntaxError converts a decoder or reader error.
-func (p *parser) syntaxError(err error) error {
-	if planErr, ok := errors.AsType[*Error](err); ok {
-		return planErr
+	p.d = jsontext.NewDecoder(bytes.NewReader(input))
+	// A complete, well-formed v1 document has an explicit migration diagnostic,
+	// independent of where its old members appear.
+	var probe struct {
+		Version int `json:"version"`
 	}
-
-	syntactic, ok := errors.AsType[*jsontext.SyntacticError](err)
-	if !ok {
-		return p.fail(StageRead, CodeReadFailed, p.absolute(), "", "cannot read the plan: %v", err)
+	if err := json.Unmarshal(input, &probe); err == nil && probe.Version == 1 {
+		location := &fault{code: "plan_version_unsupported", message: "Use version: 2 and rename blank to page (top-level defaults and items).", pointer: "/version"}
+		_ = p.object(func(name string) error {
+			if name == "version" {
+				location.offset = p.start()
+			}
+			return p.d.SkipValue()
+		})
+		return job.Job{}, []diag.Diagnostic{p.diagnostic(location, file)}
 	}
-
-	code := CodeSyntax
-	// jsontext quotes buffer-dependent snippets and characters of the input in some messages; drop them so
-	// diagnostics do not vary with how the reader chunks the bytes.
-	message := strings.Join(
-		strings.Fields(regexp.MustCompile("`[^`]*`|'(?:\\\\.|[^'\\\\])*'").ReplaceAllString(syntactic.Err.Error(), "")),
-		" ",
-	)
-
-	if errors.Is(err, jsontext.ErrDuplicateName) {
-		code = CodeDuplicateMember
-		message = "duplicate member name (names are compared after unescaping); remove one"
-	}
-
-	return p.fail(StageSyntax, code, syntactic.ByteOffset+int64(p.doc.bomLen), string(syntactic.JSONPointer), "%s", message)
-}
-
-func isJSONSpace(char byte) bool { return char == ' ' || char == '\t' || char == '\n' || char == '\r' }
-
-// next reads one token and returns it with the absolute offset of its first byte.
-func (p *parser) next() (token, error) {
-	previous := p.absolute()
-
-	value, err := p.decoder.ReadToken()
-	if err != nil {
+	result, err := p.document(base)
+	if err == nil {
+		_, err = p.d.ReadToken()
 		if errors.Is(err, io.EOF) {
-			return token{}, p.fail(StageSyntax, CodeEmpty, previous, "", "the plan is empty; want one JSON object")
-		}
-
-		return token{}, p.syntaxError(err)
-	}
-
-	start := previous
-	for start < int64(len(p.doc.data)) && (isJSONSpace(p.doc.data[start]) || p.doc.data[start] == ',' || p.doc.data[start] == ':') {
-		start++
-	}
-
-	p.ticks++
-	if p.ticks&cancelCheckInterval == 0 {
-		cause := p.stop.err()
-		if cause != nil {
-			return token{}, p.source.fail(cause)
+			err = nil
+		} else if err == nil {
+			err = p.fail("plan_syntax", "Expected one JSON object; trailing data is not allowed.")
 		}
 	}
-
-	return token{value: value, start: start}, nil
-}
-
-func (p *parser) want(value token, kind byte, what string) error {
-	switch value.kind() {
-	case kind:
-		return nil
-	case 'n':
-		return p.failHere(StageShape, CodeNull, value, "null is not allowed here; want %s, or omit the member", what)
-	default:
-		return p.failHere(StageShape, CodeWrongType, value, "want %s, found %s", what, kindName(value.kind()))
-	}
-}
-
-func (p *parser) readString(what string) (string, token, error) {
-	value, err := p.next()
 	if err != nil {
-		return "", value, err
+		return job.Job{}, []diag.Diagnostic{p.diagnostic(err, file)}
 	}
-
-	err = p.want(value, '"', what)
-	if err != nil {
-		return "", value, err
-	}
-
-	return value.value.String(), value, nil
+	return result, nil
 }
 
-// caseHint names the known member that differs from name only by case, if any.
-func caseHint(known []string, name string) string {
-	for _, candidate := range known {
-		if strings.EqualFold(candidate, name) {
-			return fmt.Sprintf("; member names are case-sensitive, did you mean %q", candidate)
-		}
-	}
-
-	return ""
-}
-
-// members iterates the members of an object whose '{' was just read. handle must consume exactly one
-// value. Unknown names are reported with a hint for wrongly cased spellings.
-func (p *parser) members(known []string, handle func(name string) error) error {
-	for {
-		value, err := p.next()
-		if err != nil {
-			return err
-		}
-
-		if value.kind() == '}' {
-			return nil
-		}
-
-		name := value.value.String()
-		if !slices.Contains(known, name) {
-			return p.failHere(StageShape, CodeUnknownMember, value, "unknown member %q%s (allowed: %s)",
-				name, caseHint(known, name), strings.Join(known, ", "))
-		}
-
-		err = handle(name)
-		if err != nil {
-			return err
-		}
-	}
-}
-
-func (p *parser) openObject(what string) (token, error) {
-	value, err := p.next()
-	if err != nil {
-		return value, err
-	}
-
-	return value, p.want(value, '{', what)
-}
-
-// countNode charges one structural node; call right after reading the node's first token.
-func (p *parser) countNode(value token) error {
-	p.nodes++
-	if p.nodes > assembly.MaxNodes {
-		return p.failHere(StageLimit, CodeLimitNodes, value,
-			"plan has more than %d structural nodes (items, blank objects, text objects and font objects); split it into several plans",
-			assembly.MaxNodes)
-	}
-
-	return nil
-}
-
-func (p *parser) document() error {
-	// PeekKind forces the first read, which sniffs the byte order mark; any error resurfaces from next.
-	p.decoder.PeekKind()
-
-	root, err := p.next()
-	if err != nil {
-		return err
-	}
-
-	if root.kind() != '{' {
-		return p.failHere(StageShape, CodeNotObject, root, "a plan must be one JSON object, found %s", kindName(root.kind()))
-	}
-
-	p.job.Origin = assembly.Origin{Offset: root.start}
-
-	var seen seenMembers
-
-	err = p.members(
-		[]string{"$schema", memberVersion, "output", memberFitTo, memberDir, memberBlank, memberItems},
-		func(name string) error {
-			return p.rootMember(name, &seen)
-		},
-	)
-	if err != nil {
-		return err
-	}
-
+func (p *decoder) diagnostic(err error, file string) diag.Diagnostic {
+	f := &fault{code: "plan_syntax", message: err.Error(), pointer: string(p.d.StackPointer()), offset: p.d.InputOffset()}
+	var own *fault
+	var syntax *jsontext.SyntacticError
+	var semantic *json.SemanticError
 	switch {
-	case !seen.version:
-		return p.fail(
-			StageShape,
-			CodeMissingMember,
-			root.start,
-			"",
-			"missing member %q; this build reads plan version %d",
-			memberVersion,
-			Version,
-		)
-	case !seen.items:
-		return p.fail(StageShape, CodeMissingMember, root.start, "", "missing member %q: the ordered sequence of PDFs and blanks", "items")
+	case errors.As(err, &own):
+		f = own
+	case errors.As(err, &syntax):
+		f.offset = syntax.ByteOffset
+		f.pointer = string(syntax.JSONPointer)
+		if errors.Is(err, jsontext.ErrDuplicateName) {
+			f.code = "plan_duplicate_member"
+		}
+	case errors.As(err, &semantic):
+		f.code = "plan_type"
+		f.offset = semantic.ByteOffset
+		f.pointer = string(semantic.JSONPointer)
 	}
+	offset := min(max(f.offset+p.bom, 0), int64(len(p.data)))
+	before := p.data[:offset]
+	line := bytes.Count(before, []byte{'\n'}) + 1
+	last := bytes.LastIndexByte(before, '\n')
+	d := diag.New(f.code, f.message)
+	d.File = file
+	d.Location = &diag.Location{File: file, Pointer: f.pointer, Offset: offset, Line: line, Column: int(offset) - last}
+	if f.pointer != "" {
+		d.Items = []string{f.pointer}
+	}
+	return d
+}
 
-	err = p.trailing()
+func (p *decoder) fail(code diag.Code, message string) error {
+	return &fault{code: code, message: message, pointer: string(p.d.StackPointer()), offset: p.d.InputOffset()}
+}
+
+// start is the next value's first byte, excluding commas, colons and whitespace.
+func (p *decoder) start() int64 {
+	n := p.d.InputOffset() + p.bom
+	for n < int64(len(p.data)) && strings.ContainsRune(" \r\n\t,:", rune(p.data[n])) {
+		n++
+	}
+	return n - p.bom
+}
+
+func (p *decoder) expect(kind jsontext.Kind) error {
+	start := p.start()
+	t, err := p.d.ReadToken()
 	if err != nil {
 		return err
 	}
-
-	p.resolveFontBases()
-
+	if t.Kind() == 'n' {
+		return &fault{code: "plan_null", message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+	}
+	if t.Kind() != kind {
+		return &fault{code: "plan_type", message: fmt.Sprintf("Expected %q, received %q.", kind, t.Kind()), pointer: string(p.d.StackPointer()), offset: start}
+	}
 	return nil
 }
 
-func (p *parser) rootMember(name string, seen *seenMembers) error {
-	var err error
-
-	p.owner = 0
-
-	switch name {
-	case "$schema":
-		_, _, err = p.readString(wantedString)
-	case memberVersion:
-		seen.version = true
-		err = p.version()
-	case "output":
-		err = p.output()
-	case memberFitTo:
-		err = p.fitTarget()
-	case memberDir:
-		p.job.Dir, err = p.readDir()
-	case memberBlank:
-		p.job.Defaults, err = p.blank()
-	default: // "items": members only yields the known names
-		seen.items = true
-		p.job.Items, err = p.items(0, 0)
+func (p *decoder) object(member func(string) error) error {
+	if err := p.expect('{'); err != nil {
+		return err
 	}
-
+	for p.d.PeekKind() != '}' {
+		t, err := p.d.ReadToken()
+		if err != nil {
+			return err
+		}
+		if t.Kind() != '"' {
+			return p.fail("plan_type", "Expected an object member.")
+		}
+		if err = member(t.String()); err != nil {
+			return err
+		}
+	}
+	_, err := p.d.ReadToken()
 	return err
 }
 
-func (p *parser) version() error {
-	number, err := p.readInteger(math.MinInt64, math.MaxInt64)
-	if err != nil {
-		return err
+func (p *decoder) scalar(target any) error {
+	if p.d.PeekKind() == 'n' {
+		return p.expect('"')
 	}
-
-	if number.Value != Version {
-		return p.fail(StageShape, CodeUnsupportedVer, number.Origin.Offset, "/version",
-			"version %d is not supported; this build reads plan version %d", number.Value, Version)
-	}
-
-	return nil
+	return json.UnmarshalDecode(p.d, target, json.RejectUnknownMembers(true))
 }
 
-func (p *parser) output() error {
-	text, value, err := p.readString("a non-empty path string")
+func (p *decoder) text() (string, error) {
+	var value string
+	err := p.scalar(&value)
+	return value, err
+}
+func (p *decoder) path() (string, error) {
+	s, err := p.text()
 	if err != nil {
-		return err
+		return "", err
 	}
-
-	if text == "" {
-		return p.fail(StageShape, CodeBadValue, value.start, "/output", "output must not be empty; omit it instead")
+	if err = job.ValidatePath(s); err != nil {
+		return "", p.fail("path_invalid", err.Error())
 	}
-
-	err = assembly.CheckPathText(text)
-	if err != nil {
-		return p.fail(StageShape, CodeBadValue, value.start, "/output", "output: %v", err)
-	}
-
-	p.job.Output = assembly.Set(text, p.origin(value))
-
-	return nil
+	return s, nil
+}
+func (p *decoder) unknown(name string) error {
+	return p.fail("plan_unknown_member", fmt.Sprintf("Unknown member %q (names are case-sensitive).", name))
 }
 
-func (p *parser) readDir() (assembly.Field[string], error) {
-	text, value, err := p.readString("a directory string")
-	if err != nil {
-		return assembly.Field[string]{}, err
-	}
-
-	err = assembly.CheckPathText(text)
-	if err != nil {
-		return assembly.Field[string]{}, p.failHere(StageShape, CodeBadValue, value, "dir: %v", err)
-	}
-
-	return assembly.Set(text, p.origin(value)), nil
-}
-
-// trailing requires that only JSON whitespace follows the root object.
-func (p *parser) trailing() error {
-	position := p.absolute()
-
-	var buffer [trailingBuffer]byte
-
-	for {
-		for position < int64(len(p.doc.data)) {
-			if !isJSONSpace(p.doc.data[position]) {
-				return p.fail(
-					StageSyntax,
-					CodeTrailingData,
-					position,
-					"",
-					"unexpected data after the top-level object; a plan is exactly one JSON object",
-				)
+func (p *decoder) document(base string) (job.Job, error) {
+	result := job.Job{BaseDir: base}
+	var defaults job.PageStyle
+	var nodes []node
+	var dir string
+	seenVersion, seenItems := false, false
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "$schema":
+			_, err = p.text()
+		case "version":
+			seenVersion = true
+			start := p.start()
+			var token jsontext.Token
+			token, err = p.d.ReadToken()
+			if err == nil {
+				switch {
+				case token.Kind() == 'n':
+					err = &fault{code: "plan_null", message: "null is not allowed.", pointer: "/version", offset: start}
+				case token.Kind() == '0':
+					if token.String() != "2" {
+						err = p.fail("plan_version_unsupported", "Use version: 2 and rename blank to page.")
+					}
+				default:
+					err = p.fail("plan_type", "version must be the JSON integer 2.")
+				}
 			}
-
-			position++
-		}
-
-		length, err := p.source.Read(buffer[:])
-		if length == 0 && errors.Is(err, io.EOF) {
-			return nil
-		}
-
-		if err != nil && !errors.Is(err, io.EOF) {
-			return p.syntaxError(err)
-		}
-	}
-}
-
-// items reads an "items" array. depth is the number of enclosing groups; parent is the item that owns the array.
-func (p *parser) items(parent assembly.Ref, depth int) ([]assembly.Item, error) {
-	open, err := p.next()
-	if err != nil {
-		return nil, err
-	}
-
-	err = p.want(open, '[', "an array of items")
-	if err != nil {
-		return nil, err
-	}
-
-	if depth > assembly.MaxGroupDepth {
-		return nil, p.failHere(
-			StageLimit,
-			CodeLimitDepth,
-			open,
-			"directory groups nest more than %d levels deep; flatten the plan",
-			assembly.MaxGroupDepth,
-		)
-	}
-
-	var out []assembly.Item
-
-	for index := int32(0); ; index++ {
-		value, nextErr := p.next()
-		if nextErr != nil {
-			return nil, nextErr
-		}
-
-		if value.kind() == ']' {
-			if len(out) == 0 {
-				return nil, p.fail(
-					StageShape,
-					CodeEmptyItems,
-					open.start,
-					p.doc.Pointer(parent, "/items"),
-					"items must contain at least one entry",
-				)
+		case "output":
+			result.Output, err = p.path()
+		case "dir":
+			dir, err = p.path()
+		case "fit_to":
+			var size job.Size
+			size, err = p.size(false)
+			if err == nil {
+				result.FitTo = &size
 			}
-
-			return out, nil
+		case "page":
+			defaults, err = p.style()
+		case "items":
+			seenItems = true
+			nodes, err = p.items(0)
+		default:
+			err = p.unknown(name)
 		}
-
-		item, itemErr := p.item(value, parent, index, depth)
-		if itemErr != nil {
-			return nil, itemErr
-		}
-
-		out = append(out, item)
-	}
-}
-
-// item reads one entry of an items array whose first token was just read.
-func (p *parser) item(value token, parent assembly.Ref, index int32, depth int) (assembly.Item, error) {
-	err := p.countNode(value)
-	if err != nil {
-		return assembly.Item{}, err
-	}
-
-	item := assembly.Item{Origin: assembly.Origin{Ref: p.doc.addItem(parent, index), Offset: value.start}}
-
-	switch value.kind() {
-	case '"':
-		item.Kind, item.Path = assembly.ItemPDF, value.value.String()
-
-		err = p.checkPDFPath(value, item.Path)
-		if err == nil {
-			err = p.contribute(&item)
-		}
-	case '{':
-		err = p.objectItem(&item, depth)
-	case 'n':
-		err = p.failHere(
-			StageShape,
-			CodeNull,
-			value,
-			"null is not allowed here; want a PDF path string or an object with \"blank\" or \"dir\"",
-		)
-	default:
-		err = p.failHere(StageShape, CodeWrongType, value,
-			"want a PDF path string or an object with \"blank\" or \"dir\", found %s", kindName(value.kind()))
-	}
-
-	return item, err
-}
-
-func (p *parser) checkPDFPath(value token, path string) error {
-	if path == "" {
-		return p.failHere(StageShape, CodeBadValue, value, "a PDF path must not be empty")
-	}
-
-	if assembly.CheckPathText(path) != nil {
-		return p.failHere(StageShape, CodeBadValue, value, "a PDF path must not contain a NUL character")
-	}
-
-	return nil
-}
-
-func (p *parser) contribute(item *assembly.Item) error {
-	p.contributions++
-	if p.contributions > assembly.MaxContributions {
-		return p.failItem(StageLimit, CodeLimitContribs, item,
-			"plan has more than %d PDF and blank entries after flattening groups; split it into several plans", assembly.MaxContributions)
-	}
-
-	return nil
-}
-
-// objectItem reads an object item: either {"blank": {...}, "count": N} or {"dir": "...", "items": [...]}.
-func (p *parser) objectItem(item *assembly.Item, depth int) error {
-	var found itemMembers
-
-	err := p.members([]string{memberBlank, "count", memberDir, memberItems}, func(name string) error {
-		return p.itemMember(name, item, depth, &found)
+		return err
 	})
 	if err != nil {
+		return result, err
+	}
+	if !seenVersion {
+		return result, p.fail("plan_version_unsupported", "Missing version; use version: 2 and page instead of blank.")
+	}
+	if !seenItems {
+		return result, p.fail("plan_type", "Required member items is missing.")
+	}
+	if result.Output != "" {
+		result.Output, _ = job.Path(base, result.Output)
+	}
+	if defaults.Text.Font != "" && defaults.Text.Font != "default" {
+		defaults.Text.Font, _ = job.Path(base, defaults.Text.Font)
+	}
+	defaults = job.Layer(job.Defaults(), defaults)
+	scope := base
+	if dir != "" {
+		scope, _ = job.Path(base, dir)
+	}
+	p.flatten(nodes, scope, defaults, &result.Parts)
+	return result, nil
+}
+
+func (p *decoder) items(depth int) ([]node, error) {
+	if depth > 64 {
+		return nil, p.fail("plan_limit", "Group nesting exceeds 64.")
+	}
+	if err := p.expect('['); err != nil {
+		return nil, err
+	}
+	var nodes []node
+	for p.d.PeekKind() != ']' {
+		n, err := p.item(depth)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n)
+	}
+	if len(nodes) == 0 {
+		return nil, p.fail("plan_value", "items must not be empty.")
+	}
+	_, err := p.d.ReadToken()
+	return nodes, err
+}
+
+func (p *decoder) item(depth int) (node, error) {
+	n := node{count: 1}
+	if p.d.PeekKind() == '"' {
+		source, err := p.path()
+		n.source = source
+		n.pointer = string(p.d.StackPointer())
+		if err == nil {
+			err = p.charge(n)
+		}
+		return n, err
+	}
+	// StackPointer identifies an element after its opening token is read.
+	seenPage, seenDir, seenItems, seenCount := false, false, false, false
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "page":
+			seenPage = true
+			var style job.PageStyle
+			style, err = p.style()
+			n.page = &style
+		case "dir":
+			seenDir = true
+			n.dir, err = p.path()
+		case "items":
+			seenItems = true
+			n.children, err = p.items(depth + 1)
+		case "count":
+			seenCount = true
+			n.count, err = p.count()
+		default:
+			err = p.unknown(name)
+		}
 		return err
-	}
-
-	kind := found.kind()
-	if kind == assembly.ItemBlank {
-		return p.finishBlank(item, &found)
-	}
-
-	if kind == assembly.ItemGroup {
-		item.Kind = kind
-
-		return nil
-	}
-
-	return p.itemShapeError(item, &found)
-}
-
-// kind classifies an object item by the members it holds; 0 means they fit no kind.
-func (f *itemMembers) kind() assembly.ItemKind {
-	switch {
-	case f.blank && !f.dir && !f.hasItems:
-		return assembly.ItemBlank
-	case f.dir && f.hasItems && !f.blank && !f.hasCount:
-		return assembly.ItemGroup
-	default:
-		return 0
-	}
-}
-
-func (p *parser) itemShapeError(item *assembly.Item, found *itemMembers) error {
-	if found.dir && !found.hasItems && !found.blank && !found.hasCount {
-		return p.failItem(StageShape, CodeMissingMember, item, `a directory group needs "items"`)
-	}
-
-	return p.failItem(StageShape, CodeAmbiguousItem, item,
-		`an object item is either {"blank": {...}, "count": N} or {"dir": "...", "items": [...]}`)
-}
-
-func (p *parser) itemMember(name string, item *assembly.Item, depth int, found *itemMembers) error {
-	var err error
-
-	p.owner = item.Origin.Ref
-
-	switch name {
-	case memberBlank:
-		found.blank = true
-		found.style, err = p.blank()
-	case "count":
-		found.hasCount = true
-		found.count, err = p.readInteger(1, assembly.MaxBlankCount)
-	case memberDir:
-		found.dir = true
-		item.Dir, err = p.readDir()
-	default: // "items": members only yields the known names
-		found.hasItems = true
-		item.Items, err = p.items(item.Origin.Ref, depth+1)
-	}
-
-	return err
-}
-
-func (p *parser) finishBlank(item *assembly.Item, found *itemMembers) error {
-	blank := &assembly.BlankItem{Style: found.style, Count: 1, CountOrigin: item.Origin}
-	if found.hasCount {
-		blank.Count, blank.CountOrigin = found.count.Value, found.count.Origin
-	}
-
-	item.Kind, item.Blank = assembly.ItemBlank, blank
-
-	var err error
-
-	p.generated, err = assembly.AddCounts(p.generated, blank.Count, assembly.MaxGeneratedPages)
+	})
+	n.pointer = string(p.d.StackPointer())
 	if err != nil {
-		return p.failItem(
-			StageLimit,
-			CodeLimitPages,
-			item,
-			"plan generates more than %d blank pages in total",
-			assembly.MaxGeneratedPages,
-		)
+		return n, err
 	}
-
-	return p.contribute(item)
+	isPage := seenPage && !seenDir && !seenItems
+	isGroup := !seenPage && !seenCount && seenDir && seenItems
+	if !isPage && !isGroup {
+		return n, p.fail("plan_item_shape", "An item must have page (and optional count), or dir and items.")
+	}
+	if seenPage {
+		err = p.charge(n)
+	}
+	return n, err
 }
 
-// resolveFontBases fixes the base directory of every file-backed font to the scope that declared it. A
-// scope's directory can be written after the members that use it, so this runs once the document is read.
-func (p *parser) resolveFontBases() {
-	p.job.Defaults.Text.Font = withBase(p.job.Defaults.Text.Font, p.job.Base)
-	resolveItemFonts(p.job.Items, p.job.ItemsBase())
-}
-
-func resolveItemFonts(items []assembly.Item, base string) {
-	for index := range items {
-		item := &items[index]
-
-		if item.Kind == assembly.ItemBlank {
-			item.Blank.Style.Text.Font = withBase(item.Blank.Style.Text.Font, base)
-		}
-
-		if item.Kind == assembly.ItemGroup {
-			resolveItemFonts(item.Items, assembly.JoinDir(base, item.Dir.Value))
+func (p *decoder) charge(n node) error {
+	p.entries++
+	if p.entries > job.MaxEntries {
+		return p.fail("plan_limit", "Plan exceeds 100000 flattened entries.")
+	}
+	if n.page != nil {
+		p.generated += n.count
+		if p.generated > job.MaxGeneratedPages {
+			return p.fail("plan_limit", "Plan generates more than 100000 pages.")
 		}
 	}
+	return nil
 }
 
-func withBase(field assembly.Field[assembly.Font], base string) assembly.Field[assembly.Font] {
-	if field.IsSet() && !field.Value.IsDefault() {
-		field.Value.Base = base
+func (p *decoder) count() (int, error) {
+	start := p.start()
+	t, err := p.d.ReadToken()
+	if err != nil {
+		return 0, err
 	}
+	if t.Kind() == 'n' {
+		return 0, &fault{code: "plan_null", message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+	}
+	if t.Kind() != '0' {
+		return 0, p.fail("plan_type", "count must be a JSON number.")
+	}
+	s := t.String()
+	if strings.ContainsAny(s, ".eE") {
+		return 0, p.fail("plan_value", "count must use an integer token, such as 3 (not 3.0 or 3e0).")
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n > job.MaxGeneratedPages {
+		return 0, p.fail("plan_limit", "count exceeds 100000.")
+	}
+	if n < 1 {
+		return 0, p.fail("plan_value", "count must be at least 1.")
+	}
+	return int(n), nil
+}
 
-	return field
+func (p *decoder) flatten(nodes []node, base string, defaults job.PageStyle, parts *[]job.Part) {
+	for _, n := range nodes {
+		switch {
+		case n.source != "":
+			source, _ := job.Path(base, n.source)
+			*parts = append(*parts, job.Part{Pointer: n.pointer, Source: source})
+		case n.page != nil:
+			style := *n.page
+			if style.Text.Font != "" && style.Text.Font != "default" {
+				style.Text.Font, _ = job.Path(base, style.Text.Font)
+			}
+			style = job.Layer(defaults, style)
+			*parts = append(*parts, job.Part{Pointer: n.pointer, Page: &style, Count: n.count})
+		default:
+			scope, _ := job.Path(base, n.dir)
+			p.flatten(n.children, scope, defaults, parts)
+		}
+	}
+}
+
+func (p *decoder) size(inherit bool) (job.Size, error) {
+	s, err := p.text()
+	if err != nil {
+		return job.Size{}, err
+	}
+	size, err := job.ParseSize(s, inherit)
+	if err != nil {
+		return job.Size{}, p.fail("plan_value", err.Error())
+	}
+	return size, nil
+}
+func (p *decoder) length(positive bool) (float64, error) {
+	var n float64
+	var err error
+	if p.d.PeekKind() == '"' {
+		var s string
+		s, err = p.text()
+		if err != nil {
+			return 0, err
+		}
+		n, err = job.Length(s)
+	} else {
+		n, err = p.number()
+	}
+	if err != nil {
+		var semantic *json.SemanticError
+		var own *fault
+		if errors.As(err, &own) {
+			return 0, err
+		}
+		if errors.As(err, &semantic) {
+			return 0, err
+		}
+		return 0, p.fail("plan_value", err.Error())
+	}
+	if n < -job.MaxSide || n > job.MaxSide || positive && n < 1 {
+		return 0, p.fail("plan_value", "Length is outside its point range (positive lengths must be at least 1).")
+	}
+	return n, nil
+}
+
+func (p *decoder) style() (job.PageStyle, error) {
+	s := job.PageStyle{Origins: map[string]string{}}
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "size":
+			s.Size, err = p.size(true)
+		case "background":
+			var value string
+			value, err = p.text()
+			if err == nil {
+				s.Background, err = job.ParseColor(value, true)
+				if err != nil {
+					err = p.fail("plan_value", err.Error())
+				}
+			}
+		case "text":
+			return p.textStyle(&s)
+		default:
+			return p.unknown(name)
+		}
+		if err == nil {
+			s.Origins[name] = string(p.d.StackPointer())
+		}
+		return err
+	})
+	return s, err
+}
+
+func (p *decoder) textStyle(s *job.PageStyle) error {
+	return p.object(func(name string) error {
+		var err error
+		originName := name
+		switch name {
+		case "value":
+			s.Text.Value, err = p.text()
+			if err == nil && utf8.RuneCountInString(s.Text.Value) > 10000 {
+				err = p.fail("plan_limit", "Text exceeds 10000 characters.")
+			}
+		case "font":
+			s.Text.Font, err = p.font()
+		case "size":
+			originName = "font_size"
+			s.Text.Size, err = p.length(true)
+		case "color":
+			var value string
+			value, err = p.text()
+			if err == nil {
+				var c *job.Color
+				c, err = job.ParseColor(value, false)
+				if err == nil {
+					s.Text.Color = *c
+				} else {
+					err = p.fail("plan_value", err.Error())
+				}
+			}
+		case "x":
+			s.Text.X, err = p.length(false)
+		case "y":
+			s.Text.Y, err = p.length(false)
+		case "width":
+			s.Text.Width, err = p.length(true)
+		case "leading":
+			s.Text.Leading, err = p.number()
+			if err == nil && (s.Text.Leading < 1 || s.Text.Leading > 10) {
+				err = p.fail("plan_value", "leading must be 1–10.")
+			}
+		case "anchor":
+			s.Text.Anchor, err = p.enum("top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right")
+		case "align":
+			s.Text.Align, err = p.enum("left", "center", "right", "justify")
+		case "overflow":
+			s.Text.Overflow, err = p.enum("error", "allow")
+		default:
+			return p.unknown(name)
+		}
+		if err == nil {
+			s.Origins[originName] = string(p.d.StackPointer())
+		}
+		return err
+	})
+}
+func (p *decoder) enum(values ...string) (string, error) {
+	s, err := p.text()
+	if err != nil {
+		return "", err
+	}
+	for _, v := range values {
+		if s == v {
+			return s, nil
+		}
+	}
+	return "", p.fail("plan_value", "Expected one of: "+strings.Join(values, ", "))
+}
+func (p *decoder) font() (string, error) {
+	if p.d.PeekKind() == '"' {
+		return p.enum("default")
+	}
+	var file string
+	err := p.object(func(name string) error {
+		if name != "file" {
+			return p.unknown(name)
+		}
+		var err error
+		file, err = p.path()
+		return err
+	})
+	if err == nil && file == "" {
+		err = p.fail("plan_type", "font requires a file member.")
+	}
+	return file, err
+}
+
+func (p *decoder) number() (float64, error) {
+	var n float64
+	err := p.scalar(&n)
+	var semantic *json.SemanticError
+	if errors.As(err, &semantic) && semantic.JSONKind == '0' {
+		return 0, p.fail("plan_value", "Number is outside the supported finite range.")
+	}
+	return n, err
 }

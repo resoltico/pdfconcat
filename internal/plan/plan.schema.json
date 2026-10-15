@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
   "title": "PDFConcat plan",
-  "description": "An ordered assembly of PDFs and generated blank pages (plan format version 1). Duplicate member names, invalid UTF-8, unpaired surrogate escapes, and unit-converted length bounds are enforced by the decoder, not by this schema.",
+  "description": "An ordered assembly of PDF files and generated pages (plan format version 2). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
   "type": "object",
   "required": [
     "version",
@@ -11,34 +11,33 @@
   "additionalProperties": false,
   "properties": {
     "$schema": {
-      "type": "string"
+      "type": "string",
+      "description": "Ignored by PDFConcat; for editors."
     },
     "version": {
-      "const": 1,
+      "const": 2,
       "description": "Plan format version."
     },
     "output": {
       "type": "string",
       "minLength": 1,
-      "description": "Output PDF path, relative to the plan's base directory. The command line -o overrides it."
+      "description": "Output PDF, relative to the base directory. -o overrides it."
     },
     "dir": {
       "type": "string",
-      "description": "Directory that relative item paths resolve against, relative to the plan's base directory. Default: the base directory itself."
+      "minLength": 1,
+      "description": "Directory for relative paths in the top-level items, relative to the base directory."
     },
-    "blank": {
-      "$ref": "#/$defs/blank",
-      "description": "Defaults for every generated blank. A default font file resolves against the plan's base directory, not against dir."
+    "fit_to": {
+      "$ref": "#/$defs/sheetSize",
+      "description": "Scale every output page proportionally, centred, onto this sheet. Paper names are portrait. --fit-to overrides it."
+    },
+    "page": {
+      "$ref": "#/$defs/page",
+      "description": "Default style of every generated page. Font files here resolve against the base directory."
     },
     "items": {
       "$ref": "#/$defs/items"
-    },
-    "fit_to": {
-      "enum": [
-        "A4",
-        "Legal"
-      ],
-      "description": "Global proportional centered fitting to portrait target; --fit-to overrides this declaration. Implicit/inherit generated canvases resolve directly to target."
     }
   },
   "$defs": {
@@ -50,24 +49,24 @@
           {
             "type": "string",
             "minLength": 1,
-            "description": "A PDF path."
+            "description": "A PDF path. Never interpreted: \"--blank\" is a file name."
           },
           {
             "type": "object",
             "required": [
-              "blank"
+              "page"
             ],
             "additionalProperties": false,
             "properties": {
-              "blank": {
-                "$ref": "#/$defs/blank"
+              "page": {
+                "$ref": "#/$defs/page"
               },
               "count": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 1000000,
+                "maximum": 100000,
                 "default": 1,
-                "description": "Number of consecutive blank pages."
+                "description": "Number of consecutive identical generated pages."
               }
             }
           },
@@ -81,7 +80,8 @@
             "properties": {
               "dir": {
                 "type": "string",
-                "description": "Directory for the nested items, relative to the enclosing directory. Fonts declared inside the group resolve against it."
+                "minLength": 1,
+                "description": "Directory for relative paths inside this group, relative to the enclosing directory."
               },
               "items": {
                 "$ref": "#/$defs/items"
@@ -102,7 +102,7 @@
         {
           "type": "string",
           "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$",
-          "description": "A number with optional unit: pt, mm, cm, in. No spaces."
+          "description": "Decimal number with optional unit pt, mm, cm, in; no spaces, no exponent."
         }
       ]
     },
@@ -110,31 +110,47 @@
       "type": "string",
       "pattern": "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$"
     },
-    "blank": {
+    "paperName": {
+      "enum": [
+        "A3",
+        "A4",
+        "A5",
+        "B4",
+        "B5",
+        "Letter",
+        "Legal",
+        "Tabloid"
+      ]
+    },
+    "dimensions": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?|\\.[0-9]+)x([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$",
+      "description": "WIDTHxHEIGHT with one optional shared unit, e.g. 297x210mm. Each side 1 to 14400 points."
+    },
+    "sheetSize": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/paperName"
+        },
+        {
+          "$ref": "#/$defs/dimensions"
+        }
+      ]
+    },
+    "page": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "size": {
           "oneOf": [
             {
-              "enum": [
-                "inherit",
-                "A3",
-                "A4",
-                "A5",
-                "B4",
-                "B5",
-                "Letter",
-                "Legal",
-                "Tabloid"
-              ]
+              "const": "inherit"
             },
             {
-              "type": "string",
-              "pattern": "^([0-9]+(\\.[0-9]+)?|\\.[0-9]+)x([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$"
+              "$ref": "#/$defs/sheetSize"
             }
           ],
-          "description": "inherit (default), a paper name (portrait), or WIDTHxHEIGHT[unit] such as 210x297mm. Each side is 1 to 14400 points."
+          "description": "inherit (default): the displayed size of the neighbouring source page; or a paper name (portrait); or WIDTHxHEIGHT[unit]."
         },
         "background": {
           "oneOf": [
@@ -145,106 +161,111 @@
               "const": "none"
             }
           ],
-          "description": "Page fill color, or none for an unpainted page (clears an inherited fill). Default: none."
+          "description": "Page fill, or none (default; also clears an inherited fill)."
         },
         "text": {
-          "$ref": "#/$defs/text"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string",
+              "maxLength": 10000,
+              "description": "The text; \\n starts a new line; empty means no text."
+            },
+            "font": {
+              "oneOf": [
+                {
+                  "const": "default",
+                  "description": "Embedded Noto Sans Regular."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Static TrueType font; resolves against the directory of the items array this style is written in (base directory for the top-level page)."
+                    }
+                  }
+                }
+              ]
+            },
+            "size": {
+              "$ref": "#/$defs/positiveLength",
+              "description": "Font size, 1 to 14400 points. Default 12."
+            },
+            "color": {
+              "$ref": "#/$defs/color",
+              "description": "Default #000000."
+            },
+            "anchor": {
+              "enum": [
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "center",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right"
+              ],
+              "description": "Default center."
+            },
+            "x": {
+              "$ref": "#/$defs/length",
+              "description": "Offset from the anchor, +x right. Default 0."
+            },
+            "y": {
+              "$ref": "#/$defs/length",
+              "description": "Offset from the anchor, +y up. Default 0."
+            },
+            "width": {
+              "$ref": "#/$defs/positiveLength",
+              "description": "Text block width, 1 to 14400 points. Default page width - 72pt."
+            },
+            "align": {
+              "enum": [
+                "left",
+                "center",
+                "right",
+                "justify"
+              ],
+              "description": "Line alignment inside the block. Default center."
+            },
+            "leading": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Baseline distance as a multiple of the font size. Default 1.2."
+            },
+            "overflow": {
+              "enum": [
+                "error",
+                "allow"
+              ],
+              "description": "Default error."
+            }
+          }
         }
       }
     },
-    "text": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "value": {
-          "type": "string",
-          "maxLength": 10000,
-          "description": "Text to print; an empty string means no text. \\n starts a new line."
-        },
-        "font": {
-          "oneOf": [
-            {
-              "const": "default"
-            },
-            {
-              "type": "object",
-              "required": [
-                "file"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "file": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Path of a TrueType font file, relative to the directory of the scope that declares it."
-                }
-              }
-            }
-          ],
-          "default": "default",
-          "description": "The built-in font, or a font file. One atomic choice."
-        },
-        "size": {
-          "$ref": "#/$defs/length",
-          "description": "Font size, 1 to 14400 points. Default 12pt."
-        },
-        "color": {
-          "$ref": "#/$defs/color",
-          "description": "Text color. Default #000000."
-        },
-        "anchor": {
-          "enum": [
-            "top-left",
-            "top",
-            "top-right",
-            "left",
-            "center",
-            "right",
-            "bottom-left",
-            "bottom",
-            "bottom-right"
-          ],
-          "default": "center",
-          "description": "Page point the text block attaches to."
-        },
-        "x": {
-          "$ref": "#/$defs/length",
-          "description": "Move the block right of its anchor (negative: left). Default 0."
-        },
-        "y": {
-          "$ref": "#/$defs/length",
-          "description": "Move the block up from its anchor (negative: down). Default 0."
-        },
-        "width": {
-          "$ref": "#/$defs/length",
-          "description": "Wrap width of the block, 1 to 14400 points. Default: page width minus 72pt."
-        },
-        "align": {
-          "enum": [
-            "left",
-            "center",
-            "right",
-            "justify"
-          ],
-          "default": "center",
-          "description": "Justification of lines within the block."
-        },
-        "leading": {
+    "positiveLength": {
+      "oneOf": [
+        {
           "type": "number",
           "minimum": 1,
-          "maximum": 10,
-          "default": 1.2,
-          "description": "Line height as a multiple of the font size."
+          "maximum": 14400
         },
-        "overflow": {
-          "enum": [
-            "error",
-            "allow"
-          ],
-          "default": "error",
-          "description": "error rejects text that does not fit its box or the page; allow places it as specified."
+        {
+          "type": "string",
+          "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$"
         }
-      }
+      ]
     }
   }
 }

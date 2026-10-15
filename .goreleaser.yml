@@ -1,16 +1,6 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/goreleaser/goreleaser/v2.18.2/www/static/schema.json
 version: 2
 
-project_name: PDFConcat
-
-report_sizes: true
-
-before:
-  hooks:
-    - go run ./tools/qualitygate release-version -tag={{ .Tag }} -snapshot={{ .IsSnapshot }}
-
-snapshot:
-  version_template: '{{ mustReadFile "internal/app/version.txt" | trim }}-SNAPSHOT-{{ .ShortCommit }}'
+project_name: pdfconcat
 
 builds:
   - id: pdfconcat
@@ -18,43 +8,40 @@ builds:
     binary: pdfconcat
     env:
       - CGO_ENABLED=0
-    goos:
-      - darwin
-      - linux
-      - windows
-    goarch:
-      - amd64
-      - arm64
+    flags:
+      - -trimpath
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
-      - >-
-        -s -w
-        -X main.version={{ .Version }}
+      - -s -w -X main.version={{ .Version }}
 
 archives:
   - id: default
-    formats:
-      - tar.gz
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
-        formats:
-          - zip
-    name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
+      - CHANGELOG.md
+      - go.mod
+      - go.sum
       - THIRD_PARTY_NOTICES.md
-      - src: third_party/licenses/*
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - docs/DESIGN.md
+      - docs/PLAN.md
+      - docs/CLI.md
+      - src: third_party/licenses/*.txt
         dst: third_party/licenses
         strip_parent: true
-      - src: docs/CLI.md
-        dst: docs/CLI.md
-      - src: docs/PLAN.md
-        dst: docs/PLAN.md
-      - src: docs/BLANK_PAGES.md
-        dst: docs/BLANK_PAGES.md
-      - src: internal/**/*.schema.json
+      - src: internal/plan/plan.schema.json
+        dst: schemas
+        strip_parent: true
+      - src: internal/result/result.schema.json
         dst: schemas
         strip_parent: true
 
@@ -62,13 +49,7 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  use: github-native
+  disable: true   # notes come from CHANGELOG.md via --release-notes
 
-# Retained configuration for future binary releases stages packages as a draft.
-# The current source-only release workflow publishes changelog notes without invoking GoReleaser.
 release:
-  draft: true
-  replace_existing_draft: true
   prerelease: auto
-  preflight:
-    fail_on_error: true

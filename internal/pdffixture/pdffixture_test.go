@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
-	"github.com/resoltico/pdfconcat/internal/pdforacle"
 )
 
 // fixtureCase is a fixture with the page count and the text its last page must show.
@@ -67,7 +67,7 @@ func fixtureCases() map[string]fixtureCase {
 func TestFixturesAreValidPDFsThatShowTheirMarkers(t *testing.T) {
 	t.Parallel()
 
-	tools := pdforacle.RequireTools(t)
+	tools := oracle.RequireTools(t)
 
 	for name, tc := range fixtureCases() {
 		t.Run(name, func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestFixturesAreValidPDFsThatShowTheirMarkers(t *testing.T) {
 
 // requireValidFixture writes the fixture and requires qpdf to accept it and Poppler to read its page count
 // and last-page marker.
-func requireValidFixture(t *testing.T, tools pdforacle.Tools, tc fixtureCase) {
+func requireValidFixture(t *testing.T, tools oracle.Tools, tc fixtureCase) {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "fixture.pdf")
@@ -88,7 +88,7 @@ func requireValidFixture(t *testing.T, tools pdforacle.Tools, tc fixtureCase) {
 		t.Fatal(err)
 	}
 
-	doc, err := pdforacle.Load(tools, path)
+	doc, err := oracle.Load(tools, path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,148 +1,163 @@
-# Plan-file contract
+# Plan v2
 
-A plan file describes a complete assembly: the output, how generated blank pages look, and the ordered sequence of PDFs and blanks. It is the one place appearance is written: there are no command-line style options, and the command-line shortcut for simple jobs compiles to the same job. Plans are the interface for large and generated jobs, for rebuildable bundles kept in version control, and for anything that needs per-blank text or styling.
-
-```text
-pdfconcat build --plan job.json
-pdfconcat check --plan job.json --report job.report.json
-pdfconcat build --plan - --base-dir /project -o out.pdf < generated-plan.json
-```
-
-## Format
-
-A plan is exactly one [JSON](https://www.rfc-editor.org/rfc/rfc8259) object in valid UTF-8. A leading byte order mark is accepted; only whitespace may follow the object. This format is plan format version `1`; any other `version` is rejected.
-
-The decoder is strict. It rejects, with a located error (source name, byte offset, line and column, JSON pointer such as `/items/41/blank/text/color`, a stable `plan_*`/`json_*` code, and the expected value):
-
-- unknown member names, and names with the wrong case (`Version`);
-- duplicate member names at any depth, including names that become identical after JSON escapes are decoded;
-- `null` anywhere (omit a member to leave it unset);
-- comments, trailing commas, single quotes, `NaN` and `Infinity`, leading zeros;
-- invalid UTF-8, and unpaired surrogate escapes such as `"\ud800"`;
-- wrong types, non-finite or out-of-range numbers, fractional counts, an empty `items` array at any level, and ambiguous item shapes.
-
-Parsing stops at the first structural fault, so a rejected plan reports the first problem found, not every problem. The machine-readable schema ships in the binary (`pdfconcat schema plan`); the source file is `internal/plan/plan.schema.json` in the repository. The schema states the structural rules; it cannot express duplicate members, Unicode and UTF-8 rules, NUL characters in paths, the per-side range of a `WIDTHxHEIGHT` size, unit-converted length bounds, or the aggregate limits below. Those are enforced by the decoder only. For editor completion, save the schema next to the plan with `pdfconcat schema plan > plan.schema.json` and add `"$schema": "./plan.schema.json"`; PDFConcat itself ignores the member and never fetches a schema from a network. Release archives also contain the schema as `schemas/plan.schema.json`.
+A plan is one UTF-8 JSON object. Version 1 is rejected with an explanation:
+write `version: 2` and rename top-level/item `blank` to `page`. The CLI's
+`--blank` operand still means a plain generated page.
 
 ```json
 {
-  "$schema": "./plan.schema.json",
-  "version": 1,
-  "output": "Annex.pdf",
-  "dir": "source",
-  "blank": {
-    "background": "#F4EFE6",
-    "text": {
-      "value": "This page intentionally left blank",
-      "font": { "file": "fonts/Example.ttf" },
-      "size": 14,
-      "color": "#555555",
-      "anchor": "bottom",
-      "y": "20mm"
-    }
-  },
+  "version": 2,
+  "output": "packet.pdf",
+  "dir": "sources",
+  "page": { "text": { "value": "Appendix", "size": 24 } },
   "items": [
     "cover.pdf",
-    { "blank": {} },
-    { "dir": "part-1", "items": ["01.pdf", "02.pdf"] },
-    {
-      "blank": {
-        "size": "A4",
-        "background": "none",
-        "text": { "value": "Part 2\nEvidence bundle", "font": "default", "size": "18pt", "anchor": "top-left", "x": "25mm", "y": "-30mm", "align": "left" }
-      },
-      "count": 2
-    },
-    { "dir": "part-2", "items": ["01.pdf", "02.pdf"] },
-    { "blank": { "text": { "value": "" } } }
+    { "page": {}, "count": 2 },
+    { "dir": "chapters", "items": ["01.pdf", "02.pdf"] },
+    { "page": { "background": "#F4EFE6", "text": { "value": "Pielikums Ā ļ ķ" } } }
   ]
 }
 ```
 
-Complete plans that the test suite builds with the real executable are in the repository's `examples/plans` directory: `basic.json`, `latvian-text.json`, `grouped-directories.json`, `font-file.json`, and `generated-only.json`.
+## Members and paths
 
-### Top level
+| Member | Meaning |
+| --- | --- |
+| `version` | Required integer token `2` |
+| `items` | Required nonempty array of source strings, generated items or groups |
+| `output` | Output PDF; CLI `-o` overrides it |
+| `dir` | Prefix for relative paths inside top-level items |
+| `page` | Default generated-page style |
+| `fit_to` | Fit every output page onto a paper name or explicit sheet size |
+| `$schema` | Optional editor schema URL; ignored string |
 
-| Member | Required | Meaning |
+A source is a literal path string. A generated item has `page` and optional
+`count` (default 1). A group has both `dir` and nonempty `items`. Unknown members
+are errors. Wrong combinations of known item members are `plan_item_shape`;
+unknown members take precedence when encountered.
+
+The base directory is the named plan file's supplied directory. For stdin it is
+`--base-dir`, or the working directory. Source paths and item font files resolve
+against their enclosing items directory, changed by top-level/group `dir`.
+Output and fonts declared in top-level `page` resolve against the base directory.
+CLI output/report paths resolve against the working directory.
+
+Paths are joined lexically: `a/link/../b.pdf` becomes `a/b.pdf`. Absolute paths
+remain absolute. Empty/NUL paths are invalid. Windows drive-relative `C:x` and
+rooted-without-drive `\x` are refused; ordinary relative, absolute and UNC paths
+use `filepath` conventions. Input symlinks to regular files are supported.
+
+## Generated pages and layering
+
+Each setting comes from item `page`, then top-level `page`, then built-ins. Text
+members merge individually. `font` is atomic: a file object replaces the whole
+choice; `default` explicitly selects the embedded font. `background: none` clears
+a fill; `value: ""` clears text. Empty text still validates its selected font.
+
+| Setting | Built-in | Values |
 | --- | --- | --- |
-| `$schema` | no | Any string; ignored by PDFConcat. For editors. |
-| `version` | yes | Must be `1` (`1.0` and `1e0` are the same integer). |
-| `output` | no | Destination PDF, non-empty, relative to the plan's base directory. `-o` on the command line overrides it. |
-| `dir` | no | Directory that relative item paths resolve against, relative to the plan's base directory. Default: the base directory itself. |
-| `blank` | no | Defaults for every generated blank. |
-| `items` | yes | The ordered sequence; at least one entry. |
+| `size` | `inherit` | Paper name or `WIDTHxHEIGHT[unit]` |
+| `background` | `none` | `#RGB`, `#RRGGBB`, `none` |
+| `text.value` | Empty | Up to 10,000 characters |
+| `text.font` | `default` | Built-in Noto Sans or object with `file` |
+| `text.size` | 12 pt | Length, 1–14,400 pt |
+| `text.color` | `#000000` | RGB hex color |
+| `text.anchor` | `center` | Nine-point anchor |
+| `text.x`, `text.y` | 0 | Offsets, +x right and +y up |
+| `text.width` | Page width minus 72 pt | Length, 1–14,400 pt |
+| `text.align` | `center` | `left`, `center`, `right`, `justify` |
+| `text.leading` | 1.2 | Baseline distance / font size, 1–10 |
+| `text.overflow` | `error` | `error`, `allow` |
 
-The plan's **base directory** is the directory of a named plan file; for a plan read from standard input or passed inline it is `--base-dir`, or the working directory when that is not given.
+`inherit` uses the last page of the nearest preceding source; leading generated
+pages use the first page of the first following source. Displayed size means
+CropBox intersected with MediaBox, rotation applied, multiplied by UserUnit.
+Generated pages never change the neighbor used by later inheritance. With
+`fit_to`, inherited pages use the target size. Without any source, give an
+explicit size. Inherited generated sides must be 1–14,400 pt; source-only pages
+are not subject to that generated-size limit.
 
-### Items
+Paper names are portrait: `A3`, `A4`, `A5`, `B4`, `B5`, `Letter`, `Legal`,
+`Tabloid`. Use dimensions such as `297x210mm` for landscape. Each generated side
+is 1–14,400 pt. Lengths are JSON numbers in points or decimal strings with
+`pt`, `mm`, `cm`, `in`; no spaces/exponents in strings. Offsets stay within
+±14,400 pt. `fit_to` accepts the same sizes except `inherit`.
 
-`items` is an array whose entries are one of:
+## Text placement
 
-| Entry | Meaning |
-| --- | --- |
-| `"path.pdf"` | A source PDF. A bare string is always a PDF path; nothing in a string is interpreted. A string such as `"--blank"` or `"@blank"` is just a file name. |
-| `{ "blank": { … }, "count": N }` | `N` consecutive generated blank pages (default 1, at most 1,000,000) sharing the style `blank`, which layers over the plan defaults. `{ "blank": {} }` is a plain blank. |
-| `{ "dir": "path", "items": [ … ] }` | A group. Relative paths in the nested items resolve against `dir`, which is itself relative to the enclosing directory. Groups exist only to avoid repeating a directory prefix; they have no other effect on the sequence. |
+The anchor is `top-left`, `top`, `top-right`, `left`, `center`, `right`,
+`bottom-left`, `bottom`, or `bottom-right`. It attaches the matching point of the
+logical text block to the page. Offsets move that block. Alignment positions
+individual lines inside it, independently of the anchor.
 
-`count` is an integer: `3`, `3.0` and `3e0` are accepted, `2.5` is not, and nothing is rounded.
+The block keeps its configured width, even for a short word. Its height uses
+font ascent/descent plus `leading × size` per additional baseline. Ink bounds
+also account for bearings and shaped mark offsets. Moving a full-width block
+sideways can overflow even when its text looks short; give an appropriate width.
 
-Paths are literal filesystem paths, not URLs or templates; there is no wildcard, glob, or directory scan. The plan lists exactly the files that are assembled, in exactly that order. `/` is the recommended separator; absolute paths are used as given and are platform-specific. A group is not a sandbox: `..` and absolute paths inside a group are allowed. Paths follow native filesystem traversal; unresolved `..` components are preserved until opening. For example, when `link` points to another directory, `link/../file.pdf` refers to that directory's native parent, not the lexical parent of `link`. A plan supplied through a file symlink anchors relative entries at the location used to supply it, rather than the target file's directory.
+```json
+{
+  "version": 2,
+  "output": "column.pdf",
+  "items": [{ "page": {
+    "size": "A4",
+    "text": {
+      "value": "Right-hand column that wraps",
+      "anchor": "top-right", "x": "-20mm", "y": "-20mm",
+      "width": "60mm", "align": "left"
+    }
+  }}]
+}
+```
 
-### Blank settings
+Wrapping is greedy at U+0020. Leading paragraph spaces and internal space runs
+are retained; spaces consumed by a wrap disappear at that break. Trailing spaces
+have no measured line width and are not justified. NBSP and other accepted spaces
+are glyphs, not break opportunities. Justification stretches interior ordinary
+spaces on wrapped lines, except the last line of a paragraph.
 
-A `blank` object (the plan defaults, or one item's own) accepts `size`, `background`, and a `text` object. Every member is optional, and an omitted member inherits. Appearance layers only as per-item, then plan defaults, then built-in defaults.
+CRLF, CR and LF are line breaks. One final line break adds nothing; adjacent
+breaks create an empty line. Letters/marks are not normalized. TAB, other controls,
+U+2028/U+2029 and format characters (joiners, bidi controls, soft hyphen) are
+refused. Supported scripts are left-to-right Latin, Greek, Cyrillic and suitable
+Common/Inherited characters. RTL/complex scripts are refused even if a font has
+their glyphs. Missing glyph sequences are errors.
 
-| Member | Values |
-| --- | --- |
-| `size` | `"inherit"` (default), a paper name (`A3`, `A4`, `A5`, `B4`, `B5`, `Letter`, `Legal`, `Tabloid`; portrait, exact case), or `"WIDTHxHEIGHT[unit]"`. Each side is 1 to 14400 points. |
-| `background` | `"#RRGGBB"`, `"#RGB"`, or `"none"` (no painting; also clears an inherited fill). |
-| `text.value` | A string of at most 10,000 characters. `""` means no text, and is preserved as an explicit value. |
-| `text.font` | `"default"` or `{ "file": "path/to/Font.ttf" }`. One atomic choice. |
-| `text.size` | A length; 1 to 14400 points. |
-| `text.color` | `"#RRGGBB"` or `"#RGB"`. |
-| `text.anchor` | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. |
-| `text.x`, `text.y` | Lengths, within ±14400 points. |
-| `text.width` | A length; 1 to 14400 points. |
-| `text.align` | `left`, `center`, `right`, `justify`. |
-| `text.leading` | A number from 1 to 10. |
-| `text.overflow` | `"error"` (default) or `"allow"`. |
+Default overflow refuses a word wider than the block or logical/ink bounds past
+a page edge. `allow` places measured overflow and warns; it does not shrink,
+truncate or normalize text. Empty text has no text geometry; whitespace can have
+logical bounds without ink. A nonempty value on a page whose default margins
+leave width below 1 pt is refused even with `allow`; specify a valid explicit
+width or a wider page. Explicit authored sizes are laid out before fitting.
 
-A length is a JSON number of points, or a string made of a decimal number and an optional unit `pt`, `mm`, `cm`, or `in`, with no spaces: `12`, `"12pt"`, `"25.4mm"`, `".5in"`. Exponents are accepted in JSON numbers (`1e2`) but not in strings. Every length is finite and within ±14400 points.
+## Fonts
 
-Meanings, defaults, placement and layering are in [`BLANK_PAGES.md`](BLANK_PAGES.md).
+`default` is embedded Noto Sans Regular, with mark shaping and ToUnicode/ActualText
+extraction. A file choice must be static TrueType with glyf outlines. Collections,
+variable/CFF fonts, damaged fonts, restricted embedding and bitmap-only embedding
+permissions are refused. No system-font lookup is performed.
 
-### Where a font file is resolved
+Used glyph outlines are pruned with stable IDs and composite closure; job-wide
+font resources are identical across generated items and deduplicated by the
+backend. A no-subsetting permission retains the full font program. To discard
+an unusable inherited font when clearing text, also set `font` to `default`.
+See [notices](../THIRD_PARTY_NOTICES.md).
 
-A font file is resolved against the directory of the scope that **declares** it, before any layering, so a font keeps its own base wherever it ends up being used:
+## Strictness and limits
 
-- a font in the plan's top-level `blank` defaults resolves against the plan's base directory. The top-level `dir` does not apply to it;
-- a font in a blank item resolves against the directory its items resolve against: the top-level `dir` for root-level items, or the group's directory for items in a group;
-- an absolute path is used as given.
+The decoder stops at the first encountered fault: unknown/wrong-case member,
+duplicate member, null, wrong JSON type, grammar/range error, trailing data,
+invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
+in offsets. Offsets are zero-based; line/column are one-based bytes. Well-formed
+v1 documents get the migration diagnostic regardless of member order.
 
-So a default font `fonts/A.ttf` stays relative to the plan even for a blank that sits inside a chapter group, while `{ "file": "fonts/B.ttf" }` written inside that group is relative to the group.
+Limits: 64 MiB original JSON, 64 group levels, 100,000 flattened items, count
+1–100,000 and 100,000 total generated pages. `count` needs an integer token:
+`3.0` and `3e0` are rejected. Missing/unsupported version is
+`plan_version_unsupported`; missing items is `plan_type`; empty arrays and low
+counts are `plan_value`; excessive/overflowing counts are `plan_limit`.
 
-## Provenance
-
-Every item, and every style value, remembers where it was written: the source name (file path, `<stdin>`, or `<inline>`), the absolute byte offset (a leading byte order mark counts as three bytes), line and column (columns count bytes), and the JSON pointer of the item, such as `/items/42/items/3`. Later stages report failures with these locations. Jobs compiled from command-line operands are located as `argv:N`, where N is the zero-based position of the operand, excluding the executable name.
-
-## Limits
-
-| Limit | Value |
-| --- | --- |
-| Plan size | 64 MiB, a byte order mark included |
-| Nested groups | 64 |
-| PDF and blank entries after groups are flattened | 100,000 |
-| Structural nodes: items, `blank`, `text` and font objects | 250,000 |
-| One blank item's `count` | 1,000,000 |
-| Generated pages in total | 1,000,000 |
-
-The limits are charged while the plan is read, so an oversized plan is rejected early with an error that names the limit and the location where it was crossed. They are declared resource bounds, not a promise that every job within them runs in bounded memory.
-
-After source inspection, both `check` and `build` also enforce the backend's total-page resource cap, declared by [`pdfengine.MaxOutputPages`](../internal/pdfengine/request.go), and its [source occurrence rules](ARCHITECTURE.md#pdf-backend-behavior). The domain's signed 32-bit page arithmetic is a separate representational bound, not the backend's capacity promise. A passing check validates the source-known policy without assembling millions of pages; build still performs output verification and can fail on later I/O or file changes.
-
-## Generating plans
-
-Plans are plain JSON, so any tool can write one. The list of files is the only thing that needs generating; the ordering rule is whatever the generating command sorts by, and writing it down in the plan lets it be reviewed and rerun. A plan on standard input has no directory, so pass `--base-dir` (or use absolute paths) to make relative paths independent of the working directory.
-
-[`CLI.md`](CLI.md#large-jobs-and-shells) has the tested recipes for Python, bash and zsh, PowerShell, and cmd.exe, and explains why newline-delimited text is not a safe transport for file names.
-
-Review before building: `pdfconcat check --plan plan.json --report plan.report.json`.
+`pdfconcat schema plan` prints the editor schema. Standard JSON Schema cannot
+distinguish integer lexemes such as `3` and `3.0`; encoding, duplicate members,
+converted unit bounds, platform paths and aggregate limits also require the
+decoder. Schema validity alone is not a successful check of a packet.

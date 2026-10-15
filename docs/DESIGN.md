@@ -1,9 +1,202 @@
-# Design and rebuild acceptance
+# Design and PDF policy
 
-PDFConcat assembles a declared packet of source PDFs and generated pages using
-unmodified upstream pdfcpu. The rebuild follows WP0–WP10 from the owner-approved
-2026-10-15 bundle, with the peer-review corrections. Acceptance below describes
-work actually run; pending work is not a passing check.
+PDFConcat is a sequential in-memory packet assembler on unmodified upstream
+pdfcpu. It owns plan/result contracts, generated text, raw source refusals,
+per-occurrence destination handling and publication. It does not own another
+PDF content parser, appearance engine, worker pool or verification platform.
+
+## Packages and boundaries
+
+| Package | Responsibility |
+| --- | --- |
+| cmd/pdfconcat | Signals, stdio, build identity and exit code |
+| cli | Pure interleaved argv grammar and help |
+| plan | Strict JSON v2 domain decoding, locations and editor schema |
+| job | Styles, paths, sizes, layering and page-range resolution |
+| typeset | Font validation, shaping, placement and stable-GID pruning |
+| pdf | The only pdfcpu importer: inspect, generate, fit, merge and verify |
+| inputfile | Named regular-file reads and bounded stream reads |
+| atomicfile | Sibling staging, native no-replace rename/link and durability |
+| result | Result/report v3, schema and capped stdout views |
+| pipeline | Staged check/build execution and safe reporting |
+
+Test-only pdffixture generates small PDFs; oracle reads them with qpdf/Poppler.
+Stock depguard limits go-text to typeset and x/sys to atomicfile, keeps the pure
+internal boundaries, and prevents fixture/oracle imports into product code.
+
+## Strict decoding
+
+The decoder uses jsontext grammar/duplicate checks and json/v2 scalar conversion
+with domain-specific dispatch and immediate null/value guards. A full null scan
+would mask an earlier unknown/type/value fault. One leading BOM is counted in
+original byte locations; a well-formed v1 document gets its migration diagnostic
+regardless of member order. Required/empty member and numeric-boundary mappings
+use the existing code registry. Standard schema integers cannot enforce lexical
+integer tokens, and unit/path/aggregate checks remain decoder responsibilities.
+No second general JSON parser or schema vocabulary is introduced.
+
+## Pipeline and input identity
+
+Load a plan/operands; check paths/roles; load every selected font and validate
+text policy before reading PDFs; inspect distinct sources in first-use order;
+resolve ranges/sizes and form/destination policy; lay out each distinct generated
+style/canvas. Check stops there, with an optional report.
+
+Build re-reads each source occurrence and compares SHA-256 with inspected bytes.
+It imports each occurrence separately, so links/widgets belong to their own
+copy. Readable refusals retain known byte hashes/lengths while unknown pages stay
+null. Named inputs are Stat-checked before open, then checked on the descriptor;
+regular-file symlinks remain supported. Stdin is the stream exception. Its
+closable read runs independently of cancellation, so the outcome does not wait
+for a blocked Windows console close/read. The CLI exits after rendering it.
+
+Every part is validated before upstream merge. Finalization rebuilds destinations,
+prunes catalog/name caches, synchronizes effective version, optimizes, validates
+and writes. Verification reopens the actual temp PDF and checks validation,
+exact page count and the serialized catalog policy before publication.
+
+Stages collect their diagnostics, then stop on errors. Interrupted wins over
+failed, which wins over invalid. Saved reports are attempted after failed runs
+too, but never after argv parse failure. Stdout caps diagnostics/consumers; reports
+retain details. See [CLI](CLI.md) for publication facts and safe-report rules.
+
+## PDF policy
+
+| Source feature | Behavior |
+| --- | --- |
+| Encryption, including empty password | Refuse source_encrypted, including known pre-context password errors |
+| Signature values, certification or document timestamp | Refuse source_signed; do not authenticate signatures |
+| Empty unsigned signature fields, including null values | Keep |
+| NeedsRendering true | Refuse source_dynamic_form |
+| OCProperties | Refuse source_optional_content |
+| Damaged page tree | Refuse source_damaged before validator repair |
+| Parse/validation failure, panic or specific unsafe shape | Refuse source_invalid |
+| Content, ordinary annotations and links | Keep through upstream merge, subject to the limits below |
+| Static AcroForm fields | Keep only compatible resolved DR/DA/Q representations; otherwise source_form_unsupported |
+| Later nonempty forms | Upstream may namespace them even without collisions; build reports actual mappings |
+| NeedAppearances true | Keep request and warn that viewers may regenerate appearances |
+| XFA alongside static fields | Remove XFA, retain static form, warn |
+| Named/legacy destinations | Detach, rename collisions per occurrence and rebuild |
+| Destination outside its source page tree | Omit with warning and remove unusable references/actions |
+| Source outlines | Preserve, including direct/named/GoTo/Next targets per occurrence |
+| Tags, page labels, output intents | Remove with a warning; no tagging/PDF/A/PDF/X claim |
+| Catalog OpenAction/AA and JavaScript name tree | Remove with warning |
+| Embedded-files index and catalog AF | Remove with warning; page FileAttachment annotations remain |
+| Source Info/XMP/viewer preferences/page mode/layout | Replace/remove |
+| Page/annotation actions and scripts | Keep; never execute, test network targets or sanitize |
+| Catalog URI Base | Remove; warn that retained relative actions may resolve differently |
+
+Raw walks check effective values, including indirect field/action names, flags
+and nulls. A Page must be a nonempty dictionary without effective non-null Kids
+(even an empty array is refused). Pages nodes need nonempty Kids and an exact
+leaf Count; repeated/cyclic/missing nodes are refused. Page, field and destination
+tree depth is bounded. Ordinary panic recovery is not an exhaustion sandbox.
+
+## Destination byte identity
+
+Named destinations are byte strings, not display text. Decode raw literal/hex
+bytes, preserve them, compare/sort bytewise, and emit hex without text transcoding.
+Collisions receive unique ASCII names. Rewrite local Dest and GoTo D references
+through annotations, outlines, actions and Next chains; JavaScript references
+are not rewritten. Detach both source structures/caches before merge, then map
+recorded page indexes in one output-tree traversal and build balanced name trees.
+This avoids upstream loss/misdirection and repeated root page lookups.
+
+A key occurring in both the name tree and legacy dictionary with conflicting
+resolved targets is refused rather than conflated. An omitted GoTo target also
+loses that action's own Next chain; valid sibling entries in a Next array remain.
+
+A real Poppler lookup caught a rebuild defect hidden by decoded qpdf JSON and
+MuPDF normalization: UTF-16 tree keys did not match untouched first-use ASCII
+link bytes. The corrected adapter preserves both encodings. Tests include byte
+keys with identical display text, collision trees, repeated/distinct documents
+and actual pdftohtml lookup alongside qpdf page-target checks. The external C++
+probe is evidence only, not a build/CI dependency. See [ISO 32000 byte-string
+destinations](https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf)
+and [Poppler's bytestring API note](https://poppler.freedesktop.org/api/glib/PopplerDocument.html).
+
+## Forms, fitting and catalog
+
+Upstream does not generally merge form DR. Comparing resolved resource/default
+representations is a conservative boundary that supports repeated/compatible
+forms without recreating appearance/resource machinery. Nonemptiness uses Fields,
+not the number of extracted nonempty names. Actual per-part mappings are read
+from merged parent chains; check only predicts possible namespacing. An empty
+form is replaced by the next nonempty form in upstream, including its resources;
+qpdf/resource and rendering tests cover conflicting unused defaults.
+
+Fitting uses upstream proportional resize with forced target orientation and no
+extra rotation. Widgets are refused. After resizing, local UserUnit is removed
+so the physical sheet has unit 1. qpdf box/annotation geometry and exact Poppler
+pixels match independently scaled-coordinate controls with crop, rotation and
+mixed units. Upstream may retain a nonzero box origin; target side lengths are
+the contract. Destination XYZ/FitH/FitV/FitR coordinates are not transformed.
+Print/bleed/imposition fidelity beyond this boundary is not guaranteed.
+
+The final catalog permits Type, Pages, AcroForm, Dests, Outlines, Version and Names
+with only its Dests tree. XFA is removed. Forbidden entries are removed from both
+catalog and context caches; reopening output verifies they were not recreated.
+Effective version caches are synchronized before writing/validation: at least 1.7,
+2.0 if any source is 2.0. A real version-selected validation rule is tested.
+
+## Text and pruning
+
+Existing shaping/wrapping/ink measurement and ActualText alias/cluster logic are
+retained. See [PLAN](PLAN.md). Static glyf fonts must allow outline embedding;
+bitmap-only/restricted permissions are refused, and no-subsetting retains original
+bytes. Empty text still validates the effective selected font, without embedding
+an unused font. Tiny plain pages work; unusable derived text width is refused.
+
+The stable-GID pruner keeps metrics/glyph count, composite closure and used outline
+bytes; rebuilds glyf/loca and checksums; reduces post to format 3; and drops layout
+and cmap tables after shaping. Job-wide glyph union supplies identical program,
+widths and ToUnicode to every generated item. One item shares content/resources
+across counted pages with a balanced tree. Tests cover checksums, extraction,
+embedding, deduplication, pixels and short-separator output growth.
+
+The inspected [tdewolff/font Subset API](https://github.com/tdewolff/font/blob/master/sfnt_subset.go)
+renumbers supplied glyphs without the required stable-GID pruning option. Passing
+all GIDs retains unwanted outlines. The narrow owned pruner avoids adding a
+mapping/dependency layer; it never shapes the reduced program.
+
+## Files, tools and delivery
+
+Targets follow umask; replacements retain their mode. Atomic publication records
+visibility immediately after rename/link, before cleanup/directory sync. Abort
+only removes its own temporary name. Report roles are rechecked after PDF
+publication; unsafe reports are invalid refusals, attempted I/O failures are failed.
+Unknown plan inputs force report no-replace even with overwrite. No private ACL,
+recovery-copy, adversarial namespace-race or network-share guarantee is made.
+
+Tool versions live in tools/go.mod. Build the pinned native linter once, then
+run it under each target GOOS. The combined graph selects YAML v4 rc.6 through
+gosec while actionlint needs incompatible rc.3; its demonstrated compile failure
+is avoided by stock @version isolation, deriving the pin from the same module.
+No fork/replace/installer or extra module is added. See [CONTRIBUTING](../CONTRIBUTING.md).
+
+CI has lint, three native tests, a six-target build and Required CI. That context
+remains bound to Actions integration 15368; no settings change was made. Snapshots
+run only in isolated clones and are inspected. Readiness does not publish release
+assets or change @latest; upstream drafts and the owner-controlled tag remain
+separate outward actions. Module-only advisory
+[GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) concerns unimported OpenPGP;
+local govulncheck found zero affected symbols/imported packages.
+
+## Published-baseline and process record
+
+The rebuild follows accepted D1–D10 and WP0–WP10. Obsolete workflow/release config
+was removed with its dependencies in WP1 and recreated in WP8. WP5 hosted native
+acceptance waited for replacement CI; the single draft PR opened in WP8, and PR #1
+was commented on and closed. The first six-job run, including Required CI, passed
+at https://github.com/resoltico/pdfconcat/actions/runs/38682084085 . Final exact-head
+checks still follow documentation changes.
+
+Compared with published v0.2.0, repeated named-destination correctness and damaged-
+tree refusal are preserved protections, not new fixes. Repeated legacy Dests is
+new support. Forms, parser strictness, numeric identity and fitting guarantees
+narrow as documented; source bookmarks and wider sheet grammar are additive.
+Detailed checkpoint logs remain in the owner's external implementation evidence;
+they are not runtime or clean-checkout dependencies.
 
 ## Preconditions (WP0)
 
@@ -35,18 +228,6 @@ arm64 (23 package results, including one package without tests). No campaign or
 opt-in scale test was requested. This local result does not resolve the existing
 hosted CI failure or establish native Linux/Windows behavior.
 
-## Sequencing decisions
-
-WP1 removes obsolete CI, release and GoReleaser configurations when their
-dependencies are removed; WP8 recreates them. Leaving broken configurations
-until WP8 would contradict WP1's acceptance and permit obsolete campaigns.
-Every WP still requires build, vet, tests and a commit.
-
-WP5 native Linux/Windows acceptance remains pending until replacement CI runs.
-WP8 opens the single authorized draft PR after committing replacement tooling,
-observes its CI, then comments on and closes PR #1 as superseded. WP10 updates
-that same PR and verifies the delivered state. All GoReleaser snapshots using
-`--clean` run in isolated clones, preserving the owner's `dist/`.
 
 ## Deletion review (WP1)
 
@@ -75,170 +256,6 @@ Upstream pdfcpu v0.16.2 is still the latest stable module (requeried in WP1), so
 there is no intervening changelog to reconcile. The initial configuration pins
 that dependency through the actual library boundary.
 
-## Contract decisions to verify before implementation
-
-The peer audit supplies executable counterexamples outside this repository.
-The following corrections must be reproduced before their affected changes.
-
-WP2 reproduction: reran contract-evidence/json.go and nullguard.go with Go
-1.27.2; their outputs in the external implementation evidence confirm null
-acceptance, pre-scan precedence failure, lexical-integer rejection and the
-integrated guard's ordering. The decoder uses jsontext's grammar/duplicate
-checking and json/v2 scalar decoding, with domain-specific object dispatch and
-immediate value validation. It never scans ahead for null. A well-formed v1 plan
-has a deliberate version-diagnostic exception so member order cannot hide the
-actionable migration message. Offsets are zero-based; lines/columns are one-based
-bytes in the original input, including an accepted leading BOM.
-
-- Integrate null rejection with strict decoding; a blanket null scan masks
-  earlier faults. Accept one leading BOM and count its bytes in offsets. Detect
-  v1 deliberately and explain both `version: 2` and `blank` → `page`.
-- Required version omission maps to `plan_version_unsupported`; missing items
-  to `plan_type`; empty items to `plan_value`. Wrong JSON types map to
-  `plan_type`; noninteger/low count to `plan_value`; excessive count (including
-  integer overflow) to `plan_limit`. Groups require dir and nonempty items.
-  Warning classes are empty and cannot change outcome status.
-- Standard JSON Schema cannot distinguish 3, 3.0 and 3e0. Lexical counts,
-  duplicate members, encoding, converted dimensions, paths and aggregate limits
-  remain decoder checks. Positive numeric font size/width bounds belong in
-  schema too. Complete documentation examples must validate.
-- Named plan/font/source inputs require Stat before open, then f.Stat before
-  read. Follow input symlinks to regular files; stdin is the stream exception.
-- Recheck report roles immediately before publication, including against an
-  output that was initially absent. Unsafe report refusal remains invalid;
-  attempted I/O failure is failed. Attempt safe reports after failed builds;
-  never recursively report a report failure.
-- Publication state is independent of Commit error. Set it after rename/link,
-  before cleanup or directory sync, retain published bytes on later failure,
-  and never let Abort undo publication.
-
-## PDF boundaries to verify before implementation
-
-- Walk raw page trees before validation, rejecting a Page with effective
-  non-null Kids, including an empty array. Keep canonical dictionary-name
-  identity protection with a narrow refusal where upstream double-decodes.
-- Triage every fork regression individually. Preserve valid-input fidelity
-  through small adapters/refusals; do not restore forks, appearance machinery
-  or the fitting parser. Resource-exhaustion budgets are outside the accepted
-  trusted-local-input threat model; ordinary API cancellation remains required.
-- Prune forbidden name trees from both catalog and context caches. Reopen the
-  serialized output and check its catalog. Close named/direct outlines, GoTo
-  chains, repeated/distinct name trees and legacy destinations with oracles.
-- Classify upstream password errors as source_encrypted even without a context.
-  Synchronize cached effective version before validation/writing. Retain a
-  warning for relative URI links whose catalog Base is removed.
-- Upstream does not generally merge AcroForm DR and namespaces later fields
-  even without collisions. Establish a narrow compatible boundary/refusal,
-  report actual mappings, document limitations, and draft an upstream issue.
-- Test minimal UserUnit normalization after Resize against physical geometry
-  and pixels; otherwise explicitly refuse the unsupported case. Destination
-  coordinates after fitting remain an explicit upstream limitation.
-- Preserve bitmap-only font refusal, no-subsetting restrictions, and ActualText
-  for glyph aliases and multi-glyph/multi-character clusters. Job-wide font
-  identity includes widths and ToUnicode, not only the font program.
-
-## Tooling and delivery boundaries
-
-Build the pinned linter for the host once and run that binary under each target
-GOOS; cross-building a module tool cannot execute it. Stock depguard also
-enforces diag/job/typeset leaf boundaries. Keep six CI jobs and Required CI.
-Compare fresh outputs with an evidence-preserving harness that asserts expected
-exits; do not generate unused scale fixtures. Run only the authorized WP7 scale
-case. Release readiness does not create tagged binaries or change @latest.
-Changelog outcomes are relative to published v0.2.0: repeated named destinations
-and damaged-tree refusal already shipped; repeated legacy Dests support is new.
-Review actual linked licenses, NOTICE files and archive contents.
-
-WP1 verification: `go build ./...`, `go vet ./...`, and `go test ./...` passed
-on macOS arm64. All four salvaged package test suites ran; no tests were trimmed.
-No replace directives remain. The forbidden-reference search is empty outside
-history and documentation scheduled for WP9. Protected owner artifacts remain.
-
-WP2 verification: `go build ./...`, `go vet ./...`, and `go test ./...` passed
-on macOS arm64. Plan tests cover first-fault ordering, duplicate/null/unknown
-members, escaped pointers, BOM rebasing, v1 member ordering, required/empty
-members, lexical counts, schema-expressible negative cases, decoder-only count
-lexemes, 64/65 group depth, 100000/100001 entries/counts, aggregate counts and
-10000/10001 text length. All five example plans decode and validate against the
-schema. Job tests cover lexical paths, units/colors, layering origins, inherited
-first/last sizes, explicit sizes under fitting and int64 page ranges. Fuzz seeds
-ran as ordinary tests; no fuzz campaign ran. Plan I/O/cancellation criteria belong
-to the WP5/WP6 pipeline and remain pending there.
-
-## Font embedding decision (WP3)
-
-Keep the existing pure text layout, font validation, script policy and shaping
-code. Its measured bounds support product overflow diagnostics rather than a
-removed report-retention subsystem. Bitmap-only embedding refusal and
-no-subsetting permissions remain required; glyph aliases and clusters still
-require the salvaged ActualText logic in the PDF writer.
-
-A small stable-GID pruner owns only glyf/loca rebuilding, composite closure,
-selected-table copying, post format 3 and sfnt checksums. The existing go-text
-parser remains the shaping source. The inspected alternative
-[tdewolff/font Subset](https://github.com/tdewolff/font/blob/master/sfnt_subset.go)
-renumbers the supplied glyphs and offers table selection but no stable-GID
-pruning option. Passing every GID would retain the unwanted outlines. Adapting
-that mechanism would add mapping/dependency complexity, so the narrow owned
-pruner follows the accepted design. It never shapes the reduced font; layout
-uses the original. fsType 0x0100 returns original bytes unchanged. Composite
-closure preserves the outlines of components without adding text mappings for
-components that the text itself does not use. One job-wide glyph union supplies
-all PDF widths, ToUnicode and program bytes. Rendering/dedup/size acceptance
-remains pending WP4/WP7; structural checks alone do not establish visual fidelity.
-
-WP3 verification: build, vet and the full test suite pass on macOS arm64.
-Pruning tests independently read table directories and loca offsets, compare
-retained outline bytes and composite components, require unused outlines empty,
-retain maxp/hmtx, check every table checksum and the whole-font 0xB1B0AFBA sum,
-exercise invalid GID rejection, preserve no-subsetting bytes, and verify the
-job-wide union is independent of page order/repetition. Existing text-policy,
-wrap/alignment/anchor/overflow, glyph coverage and font-permission cases all
-remain passing. No fuzz or scale campaign ran.
-
-## PDF correction experiments and boundary (WP4 design pass)
-
-Reran the audit's small upstream probes before implementing the affected code.
-The raw Page/Kids fixture validates without a notice; the two different form DRs
-merge successfully; removing catalog EmbeddedFiles leaves its cache populated;
-setting catalog Version alone leaves effective cached version 1.7; resizing the
-private Cr#6fpBox key fixture produces no extracted text. Outputs and exact
-commands are retained in external evidence/pdf-probes/observed.log. These
-reproduce the peer findings; none is dismissed as hostile-only.
-
-The form boundary will allow multiple nonempty forms only when their complete
-resolved DR dictionaries and form-level DA/Q defaults are structurally identical
-(including stream bytes); absent resources/defaults must agree too. A single
-form retains its own resources. This conservative compatibility check permits
-repeated ordinary forms without implementing resource/appearance merging. Other
-combinations receive source_form_unsupported with an actionable explanation.
-Check warns that later nonempty forms may be namespaced, and build reads actual
-field names before/after each merge for exact mappings. Distinct resources under
-the same name and distinct names both require refusal. This narrows v0.2.0's form
-support and must have a breaking note. Unsigned signature fields remain allowed.
-Canonical names containing a literal hash followed by two hex digits receive a
-narrow source_invalid refusal before validation; their identity cannot safely
-survive upstream dictionary lookup. Ordinary literal hashes remain accepted.
-
-The salvaged hostile fixture now fails the required raw tree precheck before
-reaching upstream's panic: its root page-tree Type is malformed. Its specific
-outcome is therefore source_damaged, rather than a recovered source_invalid.
-This was observed in the WP4 regression run. The panic boundary remains in place;
-a structurally valid page-tree fixture with a malformed widget rectangle tests
-a narrow refusal separately. Upstream accepts that short rectangle in relaxed
-mode, so the precheck rejects it before later consumers can index four entries.
-The original panic is prevented before the backend, rather than reproduced
-inside the guarded product. Recovery remains defense in depth. Generated-page tests that asserted
-one flat Kids array now assert bounded fan-out and each leaf reference exactly
-once; the old flat shape is intentionally replaced by the required balanced tree.
-The producer boundary reflects the accepted 100000-page limit.
-
-Fitting experiment: Resize preserves a source CropBox's lower-left origin in
-its output MediaBox/CropBox (e.g. [10 20 310 520] for a 300×500-point target).
-The target's physical width/height are the contract; fitted sources have no
-clean-origin guarantee. Tests therefore assert the known origin, target side
-lengths and UserUnit 1, then compare rendering with a physically equivalent
-scaled-coordinate reference. Generated canvases retain their clean origin.
 
 ## Known limitations and individual fork-fix triage
 
@@ -361,136 +378,6 @@ crop/rotation and mixed units. Widget fitting is refused. Fuzz seeds ran as
 ordinary tests; no fuzzing or scale campaign ran. Full command/publication
 acceptance and native Linux/Windows results remain pending subsequent WPs/CI.
 
-## Files and publication decisions (WP5)
-
-Reran the report-alias and regular-file probes: initially absent targets through
-symlinked parent directories compare unequal, then SameFile after PDF publication;
-an unchecked report rename replaces PDF bytes. Stat accepts a symlink to a
-regular input and identifies a FIFO before opening it. Role checks therefore run
-again immediately before report publication. Report refusal is invalid; an
-attempted environmental write/durability failure is failed. Commit returns
-publication state independently from error and records visibility before cleanup
-or directory sync. Abort only removes its own temporary name.
-
-A small inputfile leaf shares named regular-file reading between plan, font and
-PDF sources. This replaces the PDF package's reader rather than duplicating its
-Stat/open/f.Stat/cancellation loop in the pipeline. A byte limit serves the real
-64 MiB plan contract; fonts/PDFs use the existing unbounded trusted-input policy.
-Stdin remains a separate stream exception. This additional responsibility-specific
-package has no internal imports or native calls and adds no identity/race layer.
-
-WP5 local verification: build, vet and the full Go test suite pass on macOS
-arm64. Native publication tests cover late-target no-clobber, overwrite/mode,
-umask, abort cleanup, real no-replace publication and real hard-link fallback.
-Narrow state tests preserve published=true through post-link removal and
-post-publication sync failures. Role tests cover hard/symbolic/case aliases and
-the initially absent symlink-parent report alias; refusal stays invalid and PDF
-bytes remain unchanged. Input tests reject directories, a device and a FIFO,
-allow regular-file symlinks, and bound stream reading to the detection byte.
-Linux/amd64 and Windows/amd64 atomicfile test binaries and all packages cross-
-compile. Those binaries were not executed here. Native Linux/Windows acceptance
-is pending the three-runner replacement CI, as resolved in the sequencing section.
-The full failed-build/report/publication matrix remains pending WP6 integration.
-
-## Pipeline integration decisions (WP6)
-
-Safe reports are attempted once after either a successful or failed build/check;
-refusals retain their invalid codes, while attempted report I/O failures are
-failed. The final report role recheck happens after PDF publication. Both output
-published and report written follow actual rename/link state even if durability
-fails later; the saved report cannot predict its own trailing failure, so stdout
-is authoritative then. No report follows argv parse failure.
-
-For supported stdin (the process's os.File/pipe), cancellation closes the reader
-to unblock a pending read, then returns interrupted. Ordinary in-memory readers
-need no unblock action. Arbitrary nonclosable blocking Go readers are not a CLI
-input mode. Tiny plain pages remain valid; nonempty text with a derived block
-width below 1 point is text_overflow, even with overflow:allow. Give an explicit
-valid width or a wider page. This is unusable layout geometry rather than a
-measured overflow that allow can place.
-
-Stdin challenge: Go's Windows fd.Close cancels pipe I/O but waits for references
-held by a synchronous console ReadConsole call. Closing alone is therefore not
-a sufficient interruption design. For closable stdin, read on one goroutine and
-select completion versus context cancellation; request Close asynchronously on
-cancellation. The outcome path does not wait for a blocked console close/read.
-The CLI exits after rendering interrupted. Ordinary os.Pipe cancellation is a
-native product test; a blocked-close control checks the independent outcome
-path without console fault injection. No worker pool or native input API is added.
-
-Integration checks exposed numeric error-class edges: unsupported numeric version
-lexemes/overflow must be plan_version_unsupported; floating length/leading
-overflow is plan_value rather than a wrong-JSON-type error. Domain-specific token
-handling keeps that distinction without another parser. v1 diagnostics now locate
-the actual version value. Path grammar validation is pure and separate from
-resolution, avoiding a needless Getwd call for every parsed input path. Generated
-inheritance below the writer's 1-point minimum is plan_value with an explicit-size
-remedy; ordinary tiny source pages remain supported.
-
-Integration regressions found two effective-value gaps: an indirect null signature
-value was falsely classified as signed, and an indirect NeedsRendering=true was
-missed. Policy checks must dereference those values; unsigned null remains
-supported. A readable refused source also lost its already-known byte facts.
-Compute its digest before parsing and retain SHA/byte length through refusal or
-recovered panic; keep page counts null when they were not established. The new
-negative/positive tests first reproduced all three failures.
-
-The effective-value review reproduced further legal-indirection gaps: indirect
-FT /Sig with a signature value lacking optional Type was accepted; indirect
-Widget subtype and NeedAppearances were missed; indirect URI actions were not
-warned; and indirect GoTo actions could cross source occurrences after naming.
-The qpdf oracle was first taught to resolve action-type references so its GoTo
-negative control observed the wrong target rather than ignoring the action.
-Use ordinary context dereferencing for these values and text entries, retaining
-raw canonical-key checks. Form nonemptiness is determined by Fields, not by how
-many nonempty names happened to be extracted. This adds no PDF token parser,
-resource merger or appearance engine.
-
-When a destination points outside its source, its name and unusable references
-are omitted. A GoTo action removed for such a target also loses its own Next
-chain; sibling valid entries in a Next array remain. This narrow omission policy
-avoids publishing dangling references without inventing replacement actions.
-
-## Destination byte identity correction
-
-A real Poppler lookup exposed a defect that decoded qpdf JSON and MuPDF's text
-normalization did not detect: emitting every name-tree key as UTF-16 while leaving
-first-use link strings in PDFDocEncoding made those links dangling to Poppler.
-The short native Poppler probe and pdftohtml both resolved the source and failed
-the rebuilt first-copy names. Logs are retained as poppler-named-before.log and
-named-clickable-output-before.stderr in the external evidence.
-
-[ISO 32000 named destinations](https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf)
-use byte strings; [Poppler's API](https://poppler.freedesktop.org/api/glib/PopplerDocument.html)
-explicitly distinguishes them from display strings. Preserve raw string/name
-bytes, compare/sort bytewise, and write hex literals without text transcoding.
-Renamed destinations use unique ASCII names rather than appending ASCII to an
-opaque encoding. This also avoids repeated suffix searches. Conflicting targets
-for the same raw name in the name tree and legacy dictionary are refused rather
-than conflated. The qpdf target oracle remains useful for page membership/order;
-pdftohtml adds actual byte-name lookup checks using the already-required Poppler
-installation. The C++ probe remains external evidence, not a build/CI dependency.
-
-The corrected output resolves chap1→page 1 and chap2→page 2 with native Poppler,
-and pdftohtml produces no diagnostics. Raw ASCII and UTF-16BE keys that display
-the same text also remain distinct, with valid links. The complete destination
-fixture jobs now include real Poppler lookup checks alongside qpdf target checks.
-
-WP6 verification: build, vet and the complete oracle-required test suite pass on
-macOS arm64. In-process command tests cover JSON/text, every usage-code class,
-0/1/2/130 exits, schema-valid golden stdout/full reports, optional check reports
-without PDF writes, report refusals versus I/O failures, malformed/unreadable
-plans with new/existing reports under both overwrite choices, failed builds with
-safe reports, published PDF plus report failure, and the late symlink-parent
-alias regression. Font/text refusal precedes PDF reads; named nonregular input
-roles are rejected; regular source symlinks remain supported; tiny plain pages
-work and unusable derived text width is refused. Native pipe cancellation and a
-blocked-close control return interrupted. Two binary smoke tests execute version
-and a build. The rebuilt generated-only example publishes five pages; qpdf check
-reports no errors. Indirect policy/action values, unsigned null signatures,
-readable-refusal byte facts and version-selected validation rules pass their
-regressions. No real signal/console fault campaign, fuzz campaign or scale run
-was performed. Linux/Windows execution remains pending replacement CI.
 
 ## Independent verification and scale (WP7)
 
@@ -541,48 +428,32 @@ case. TestScale ran exactly once as recorded above; both workloads passed. Norma
 and CI test runs skip it explicitly. BenchmarkBuild was compiled, not executed.
 Native hosted oracle/test results remain pending WP8 CI.
 
-## Stock-tool graph compatibility (WP8)
 
-The combined tools module selects go.yaml.in/yaml/v4 rc.6 through gosec v2.29.0,
-but actionlint v1.7.12 uses the incompatible rc.3 API. Its module-tool build fails
-with TypeError/ParserError compile errors. An isolated `go run ...@v1.7.12`
-builds and runs successfully. Keep the version in tools/go.mod, derive it with
-go list, and invoke only actionlint with stock Go's @version isolation. This
-avoids a fork, replace directive, dependency downgrade, installer or extra tool
-module. The selected actionlint module manifest defines its isolated dependency
-graph; the combined tools graph is used for the other tools. CI and contributor
-commands must use this invocation rather than the demonstrated failing one.
+## Comparison evidence
 
-WP8 packaging prerequisite: reconcile runtime notices/licenses before the snapshot
-rather than package the obsolete fork/tool inventory until WP9. WP9 still adds
-the module-set/document checks and reviews the final documentation. The six
-supported target graphs define the linked module set; versions remain in module
-files. Module-only advisory GO-2026-5932 concerns x/crypto/openpgp, which is neither
-imported nor called here; govulncheck reports zero affected symbols/packages.
+The repaired scripts/run-comparison.sh creates fresh work, preserves command
+stdout/stderr and checks success/refusal codes, newly produced PDFs/reports,
+independent page targets, Poppler byte-name lookup and extraction. Its fixtures
+come from the authoritative pdffixture package via an explicit test export; no
+fixture fork or unused 100000-page generation is included. A deliberate executable
+exit 7 was preserved and rejected in a one-off control. The observed pinned CLI
+kept 17 source pages but redirected the first named/legacy copy into the later
+copy; PDFConcat kept each occurrence's targets. Helvetica core text kept only
+Pielikums and the dash from the tested Unicode string. The damaged empty page
+fixture was accepted by the CLI and returned three pages; it is not evidence
+that every damaged tree drops a page. PDFConcat refused it. The short Unicode
+separator grew output by approximately 11.3 kB; byte reproducibility is not a
+contract, so small per-run byte differences are expected.
 
-WP8 local tooling checkpoint: build/vet and all oracle-required tests pass;
-the native pinned linter reports zero issues under GOOS darwin, linux and
-windows; isolated pinned actionlint passes; both modules are tidy; GoReleaser
-v2.18.3 validates the config. A temporary forbidden job→inputfile import was
-rejected by stock depguard and removed. Central commented exclusions record
-intentional conventional permissions, trusted-path fixture/oracle I/O, bounded
-sfnt casts and best-effort cleanup/error-channel behavior. Real sfnt offset/length
-overflow checks preserve the binary format instead of suppressing those findings.
-The existing ruleset still requires Required CI from integration 15368; no
-settings change is needed. Snapshot archives and hosted checks are pending next.
+## Documentation checkpoint (WP9)
 
-Carry-over appearance review found that empty text must still validate the selected
-font, as specified by the released layering rules. A command regression first
-reproduced the bypass. Font loading now covers every selected generated-page font;
-only text-policy checks skip an empty value. The writer still emits no unused
-font for a plain page. Explicitly selecting default clears an unusable inherited
-font choice. This restores the stated contract rather than adding a new option.
-
-Hosted checkpoint: run https://github.com/resoltico/pdfconcat/actions/runs/38682084085
-has passed lint, Linux oracle/race tests, Windows tests and all-target builds.
-macOS is queued and Required CI is therefore pending, not green. WP9's independent
-documentation/comparison preparation proceeds while that runner waits; final
-hosted acceptance on the completed PR head remains required in WP10. PR #4 is
-open as draft and PR #1 was commented on and closed as superseded. The isolated
-WP8 snapshot passed, all six archive contents/checksums were inspected, and the
-native archive version command succeeded. No shared owner artifact was cleaned.
+Build, vet and the complete oracle-required tests pass locally. All README/docs
+JSON blocks decode as plan v2 or validate as result v3; the diagnostic table
+matches all 63 registry entries in both directions. The notice test compares
+the linked module union for six targets. The documented Python recipe executes
+an actual built CLI with ordered Unicode/space and platform-supported quote/
+newline filenames. Current relative documentation links resolve; published
+changelog sections are byte-for-byte unchanged, including their historical
+references. The repaired comparison and its one-off failure control pass.
+No additional scale or fuzz campaign ran. Hosted checks for these documentation
+changes will be observed on the updated PR head during final verification.

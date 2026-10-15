@@ -158,3 +158,20 @@ func TestLiteralHashFontResourceRetainsVisibleText(t *testing.T) {
 		t.Fatal("literal-hash resource lost visible text")
 	}
 }
+
+func TestWrongGenerationCannotExposeContent(t *testing.T) {
+	d := pdffixture.Plain("WRONG-GENERATION-CONTENT")
+	d.Objs[2] = bytes.ReplaceAll(d.Objs[2], []byte("/Contents 4 0 R"), []byte("/Contents 4 1 R"))
+	_, ds := pdf.Inspect(t.Context(), d.Bytes())
+	if status, _ := diag.Outcome(ds); status != "ok" {
+		return
+	}
+	path := assembleSourceBytes(t, d.Bytes())
+	document, err := oracle.Load(oracle.RequireTools(t), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document.FirstLine(1) != "" {
+		t.Fatalf("a wrong-generation reference exposed content: %q", document.FirstLine(1))
+	}
+}

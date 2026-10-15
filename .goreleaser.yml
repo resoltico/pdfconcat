@@ -27,13 +27,15 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
+      - go.mod
+      - go.sum
       - THIRD_PARTY_NOTICES.md
       - CONTRIBUTING.md
       - SECURITY.md
       - docs/DESIGN.md
       - docs/PLAN.md
       - docs/CLI.md
-      - src: third_party/licenses/*
+      - src: third_party/licenses/*.txt
         dst: third_party/licenses
         strip_parent: true
       - src: internal/plan/plan.schema.json

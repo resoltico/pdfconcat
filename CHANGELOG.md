@@ -6,38 +6,52 @@ Notable changes to this project are documented in this file. The format is based
 
 ### Changed
 
-- Windows CI installs the pinned qpdf mingw64 and conda-forge Poppler distributions from checksum-verified release ZIPs. Windows contributor tests require Git Bash and PowerShell (`pwsh`), with Go verification commands run from PowerShell; CI acquisition additionally requires curl 8.4 or later and limits each download to 64 MiB and 120 seconds; all four independent QA executables are checked before tests.
-- Contributor source staging for mutation, deliberate-defect controls and foreign test overlays now rejects copies exceeding 512 MiB or 65,536 new file/directory entries; Git source listings are limited to 32 MiB. Keep unrelated generated files outside the source inventory. These limits do not restrict PDF inputs.
-- Contributor coverage commands now require `-evidence DIRECTORY` naming a new attempt directory; replace the removed success-only profile argument. Raw data and complete/incomplete manifests survive failed runs and are uploaded by CI.
-- Embedded pdfcpu is updated to 0.16.2 with exact reconstructed local source. Mixed PDF 2.0 assemblies materialize required variable-widget appearances without changing occurrence resources; raw null-reference and stream-metadata rejection contracts remain enforced.
-- Every external path role uses one checked grammar. Ambiguous Windows drive-relative/root-only paths are rejected consistently; ordinary separators are represented as backslashes without collapsing traversal. Internal artifact registration now requires valid bound absolute paths, including report retirement.
+- **Breaking:** plan v2 uses `page` instead of top-level/item `blank` and requires
+  `version: 2`. Old plans receive an actionable rejection. Counts need integer
+  tokens from 1 to 100,000; total generated pages are limited to 100,000 (formerly
+  1,000,000).
+- **Breaking:** result v3 replaces the old bounded summary/query contract. Stdout
+  caps diagnostics/consumers; `--report` saves full parts, ranges, known byte
+  facts and actual field mappings. The report-query command, progress, jobs and
+  inline-plan JSON options are removed; `schema result` names the result schema.
+- **Breaking:** paths resolve lexically, and output/report permissions follow
+  umask instead of private-by-default ACLs. Replaced files retain their mode.
+- **Breaking:** unmodified upstream relaxed parsing replaces fork-specific strict
+  malformed-token/duplicate-key/free-head refusal and resource-work budgets.
+  Finite dictionary reals may serialize to twelve fractional digits. Specific
+  unsafe canonical-name and shared resource/annotation shapes are refused;
+  exact arbitrary numeric/dictionary identity is not promised. See DESIGN.
+- **Breaking:** multiple nonempty static forms require identical resolved
+  default-resource and DA/Q representations. Conflicting defaults are refused
+  instead of using the former owned appearance/resource engine. Viewer-requested
+  regeneration is retained with warnings; widgets remain unsupported for fitting.
+- **Breaking fidelity boundary:** fitting uses upstream resize. Destination page
+  targets survive, but scroll coordinates are not transformed; former print-box,
+  content-analysis and appearance guarantees are removed. UserUnit is normalized
+  to preserve physical target sheet dimensions. Coordinate destinations can now
+  be accepted within that documented limitation.
+- Source bookmarks are preserved. Fitting accepts the full sheet-size grammar,
+  including explicit landscape dimensions, beyond the previous A4/Legal choices.
+- Generated PDFs normally embed glyph-pruned fonts with stable IDs and shared
+  job-wide resources. Fonts prohibiting subsetting remain whole.
 
-- Literal file paths now follow native filesystem traversal through symbolic-link parents. A path such as `link/../document.pdf` can select a different file than earlier lexical cleanup; review plans that depended on that cleanup. Relative entries in a symlinked plan remain anchored at its supplied location.
-- Published PDFs are private by default, including replacements of existing shared files. Reports and recovery files use the same policy; macOS inherited access ACLs are cleared before sensitive bytes are written. Deliberate sharing requires a separate permission change.
+### Added
 
-### Fixed
-
-- Saved-report summaries compact truncation metadata before refusing a response that exceeds 2 KiB. Queries whose required summary facts still cannot fit now return `response_too_large` with exit status 1 before writing a partial response. This changes the result for affected queries; use `report FILE --expect-attempt ID --view diagnostics --details` to retrieve full diagnostics. Saved reports remain unchanged.
-- Native Unix progress cleanup preserves standard streams when initialization returns invalid, duplicate or unrepresentable descriptor values.
-- Fitting accepts exact Type 3 geometry with a zero-valued box endpoint that a conservative precision guard previously rejected.
-- Plans reject decimal leading and point lengths mathematically outside their limits even when floating-point conversion rounds them back to a boundary; correct such near-boundary values in plans. Report finalization faults preserve the fact that a check/failure report was already written.
-- Font capture enforces the 64 MiB limit before scratch creation and while reading, including file growth, with owned partial-copy cleanup.
-- Physical source/font aliases share captured bytes and reusable inspection/parsed-font facts within a job. Repeated forms and links retain independent occurrence identities.
-- Failed PDF inspections retain completed capture digests and byte counts without inventing known pages or ranges. Font failure provenance uses one indexed traversal, and registration/report validation observes cancellation.
-- Saved reports reject publication claims inconsistent with command, status or verification. Preparing a success report preserves the live uncommitted outcome.
-- Runtime dependency notices contain one row per component/version and reject duplicate identities.
+- Repeated legacy `/Dests` sources are supported with per-occurrence targets.
+  Existing repeated named-destination and damaged-page-tree protections remain.
+- Tag-triggered executable archives for six macOS/Linux/Windows targets,
+  checksums and provenance are configured. Assets and working new-tag `@latest`
+  installation remain pending the owner's release; no binaries are published by
+  this change alone. Source module installation no longer uses local replacements.
 
 ### Internal
 
-- Full mutation verification balances frozen source bytes across the complete native runtime-source inventory, retains whole-suite integration judging and source-selection receipts, and requires every partition to pass. A completed affected-package failure settles before later packages are built; survivors require the complete baseline census within the same mutation deadline. Mutation baseline and worker tests execute with `-count=1` so cached parent tests cannot conceal changed subprocess source; compiled build caching remains enabled. Campaigns prepare and test the pinned mutation SDK and linter once per native platform, then verify immutable same-run deliveries before each partition executes them. Output budgets stop runaway stdout/stderr with an execution error and retained partial evidence. Mutation and fuzz commands own temporary storage, clean it after proven process settlement, and retain source/cache/scratch paths when shutdown or directory ownership remains uncertain. Sampled storage, entry-count and native free-space guards cancel excessive growth; fuzz campaigns use disposable private build/corpus caches and preserve failing inputs. Successful implicit test/fuzz evidence cleanup failures also fail the gate, and failed evidence creation removes its empty stdout orphan. These controls do not impose a total filesystem quota; see [verification storage limits](CONTRIBUTING.md). Mutation SDK Windows denial controls isolate privilege bypass on a locked test thread; collector cancellation controls synchronize on retained events.
-- Covered executable invocations own separate metadata directories, with test-owned cleanup for commands that never launch. This prevents SDK metadata failures before main handles broken standard streams. Native cancellation tests synchronize on admitted writes; SDK Windows denial controls use owned token handles and verify access before denial and after restoration.
-- Capture uses job-owned path/identity promises without native I/O under the catalog mutex; closure joins producers before workspace removal. Native closed-stderr controls separate metadata setup, operation, cleanup and process exit deadlines and require reaping.
-- A fail-closed `Required CI` aggregate includes every mandatory workflow job. Hosted main/tag enforcement requires active settings and real check identity readback, separately from workflow source.
-
-- Contributor verification uses the pinned stock correctness linter profile and one formatter. Physical source guards and compiled import/error/security controls replace the linter variant and source-regex registry. Coverage reports all measured statements without exclusions or a global percentage gate; required invariant and campaign proof remains mandatory. See [Verification](docs/VERIFICATION.md).
-- Mutation judgments retain complete compiler/coverage diagnostics with owned-source attribution and matching baseline/worker instrumentation. Missing test evidence, process/resource failures and snapshot cleanup failures remain errors. Fuzz discovery joins package-initialization processes and verifies the complete compiler-recognized target inventory with package attribution. Mutation evidence paths preserve caller-side native traversal. Required native controls verify inactive/healthy progress and later transport failures.
-- Mutation-tool directory leases permit native Windows owned cleanup and substitution checks while retaining object identity. Cleanup verifies its SDK root after producers stop, and Windows permission controls use real deny ACLs. Application permission-denial fixtures run serially to keep unrelated parallel mutant panics from interrupting their cleanup. Native rename buffer sizing uses the signed allocation domain before conversion to DWORD lengths. Windows scratch cleanup shares a bounded retry allowance for access denials after process settlement; permanent failures retain owned paths, and work that expires during cleanup cannot count as a mutation kill. Predictor-byte-limit mutation controls target the current pre-append guard; redundant post-append enforcement is removed.
-- Required CI includes native Intel macOS and discovered-target fuzz smoke. Source release verification depends on reusable exact-SHA campaigns; verification-only dispatch does not publish. These workflow changes require successful hosted candidate execution before foundation or release readiness can be claimed.
+- Local PDF/parser forks and the bespoke verification platform are removed.
+  Stock Go tests, curated lint/depguard, actionlint and govulncheck are pinned
+  through the tool module; six-job CI retains Required CI.
+- Independent qpdf/Poppler checks cover byte-string destinations, forms, font
+  pruning/extraction, fitting and truthful publication/report state. The one
+  authorized local scale measurement and limits are recorded in DESIGN.
 
 ## [0.2.0] - 2026-10-09
 

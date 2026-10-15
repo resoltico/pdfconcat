@@ -230,3 +230,26 @@ func FuzzPlanDecode(f *testing.F) {
 		}
 	})
 }
+
+func TestNumericVersionAndLengthFaultClasses(t *testing.T) {
+	for _, tc := range []struct {
+		input   string
+		code    diag.Code
+		pointer string
+	}{
+		{`{"version":2.0,"items":["a"]}`, "plan_version_unsupported", "/version"},
+		{`{"version":999999999999999999999999,"items":["a"]}`, "plan_version_unsupported", "/version"},
+		{`{"version":2,"items":[{"page":{"text":{"size":1e999}}}]}`, "plan_value", "/items/0/page/text/size"},
+		{`{"version":2,"items":[{"page":{"text":{"leading":1e999}}}]}`, "plan_value", "/items/0/page/text/leading"},
+	} {
+		_, ds := plan.Decode([]byte(tc.input), "p", ".")
+		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Pointer != tc.pointer {
+			t.Fatalf("numeric fault %s: %+v", tc.input, ds)
+		}
+	}
+	input := `{"blank":{},"items":[],"version":1}`
+	_, ds := plan.Decode([]byte(input), "p", ".")
+	if ds[0].Location.Offset != int64(strings.LastIndex(input, "1")) {
+		t.Fatalf("v1 location points away from its value: %+v", ds[0].Location)
+	}
+}

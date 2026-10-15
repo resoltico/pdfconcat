@@ -15,10 +15,6 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
-type FieldRename struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-}
 type fieldRecord struct {
 	name string
 	dict types.Dict
@@ -39,6 +35,22 @@ func textOf(o types.Object) (string, error) {
 		return "", fmt.Errorf("expected a PDF text string, got %T", o)
 	}
 	return *text, nil
+}
+
+func textValue(s *model.Context, o types.Object) (string, error) {
+	value, err := s.Dereference(o)
+	if err != nil {
+		return "", err
+	}
+	return textOf(value)
+}
+func nameValue(s *model.Context, o types.Object) (types.Name, error) {
+	value, err := s.Dereference(o)
+	if err != nil {
+		return "", err
+	}
+	name, _ := value.(types.Name)
+	return name, nil
 }
 
 func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
@@ -74,7 +86,7 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 		if err != nil {
 			return err
 		}
-		own, err := textOf(d["T"])
+		own, err := textValue(s, d["T"])
 		if err != nil {
 			return err
 		}
@@ -85,8 +97,12 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			}
 			name += own
 		}
-		if d["FT"] != nil {
-			ft = d["FT"]
+		ownType, e := s.Dereference(d["FT"])
+		if e != nil {
+			return e
+		}
+		if ownType != nil {
+			ft = ownType
 		}
 		value, err := s.Dereference(d["V"])
 		if err != nil {
@@ -105,14 +121,18 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			if err != nil {
 				return err
 			}
-			if child["T"] != nil {
+			childName, e := textValue(s, child["T"])
+			if e != nil {
+				return e
+			}
+			if childName != "" {
 				hasFields = true
 			}
 			if err = visit(kid, name, ft, depth+1); err != nil {
 				return err
 			}
 		}
-		if own != "" && !hasFields {
+		if (own != "" || depth == 0 && ft != nil) && !hasFields {
 			result = append(result, fieldRecord{name: name, dict: d})
 		}
 		return nil
@@ -144,7 +164,7 @@ func qualifiedName(s *model.Context, d types.Dict) (string, error) {
 		if depth > 64 {
 			return "", fmt.Errorf("merged field parent chain exceeds depth 64")
 		}
-		name, err := textOf(d["T"])
+		name, err := textValue(s, d["T"])
 		if err != nil {
 			return "", err
 		}

@@ -16,7 +16,7 @@ import (
 
 // Tools are the independent QA programs: qpdf for structure, Poppler for text and geometry.
 type Tools struct {
-	QPDF, PDFToText, PDFInfo, PDFToPPM string
+	QPDF, PDFToText, PDFInfo, PDFToPPM, PDFFonts, PDFToHTML string
 }
 
 // RequireToolsEnv names the environment variable that turns missing QA tools from a skip into a failure.
@@ -30,7 +30,7 @@ func FindTools() (Tools, error) {
 	var tools Tools
 
 	for name, target := range map[string]*string{
-		"qpdf": &tools.QPDF, "pdftotext": &tools.PDFToText, "pdfinfo": &tools.PDFInfo, "pdftoppm": &tools.PDFToPPM,
+		"qpdf": &tools.QPDF, "pdftotext": &tools.PDFToText, "pdfinfo": &tools.PDFInfo, "pdftoppm": &tools.PDFToPPM, "pdffonts": &tools.PDFFonts, "pdftohtml": &tools.PDFToHTML,
 	} {
 		path, err := lookPath(name)
 		if err != nil {
@@ -134,4 +134,17 @@ func exitCode(err error) int {
 	}
 
 	return -1
+}
+
+// CheckLinks asks Poppler to resolve destination byte strings while converting
+// links. Decoded qpdf JSON alone cannot distinguish their original encodings.
+func (t Tools) CheckLinks(path string) error {
+	_, stderr, err := run(t.PDFToHTML, "-i", "-stdout", path)
+	if err != nil {
+		return fmt.Errorf("pdftohtml links: %w: %s", err, stderr)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		return fmt.Errorf("pdftohtml link diagnostics: %s", stderr)
+	}
+	return nil
 }

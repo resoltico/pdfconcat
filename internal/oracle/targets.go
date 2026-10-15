@@ -43,7 +43,7 @@ func (d *Document) actionTargets(action any, depth int) ([]int, error) {
 	}
 	a := d.dict(action)
 	var result []int
-	if a["/S"] == "/GoTo" {
+	if d.deref(a["/S"]) == "/GoTo" {
 		target, err := d.target(a["/D"])
 		if err != nil {
 			return nil, err

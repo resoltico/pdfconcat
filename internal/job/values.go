@@ -89,16 +89,24 @@ func ParseColor(text string, none bool) (*Color, error) {
 	return &Color{uint8(n >> 16), uint8(n >> 8), uint8(n)}, nil
 }
 
-// Path resolves lexically, following the host's path conventions.
-func Path(base, name string) (string, error) {
+// ValidatePath rejects empty/NUL paths and the two ambiguous Windows forms.
+func ValidatePath(name string) error {
 	if name == "" || strings.ContainsRune(name, 0) {
-		return "", fmt.Errorf("path must be nonempty and contain no NUL")
+		return fmt.Errorf("path must be nonempty and contain no NUL")
 	}
 	if runtime.GOOS == "windows" {
 		volume := filepath.VolumeName(name)
 		if volume != "" && !filepath.IsAbs(name) || volume == "" && (strings.HasPrefix(name, `\`) || strings.HasPrefix(name, "/")) {
-			return "", fmt.Errorf("use an absolute or ordinary relative path, not a drive-relative or rooted-without-drive path")
+			return fmt.Errorf("use an absolute or ordinary relative path, not a drive-relative or rooted-without-drive path")
 		}
+	}
+	return nil
+}
+
+// Path resolves lexically, following the host's path conventions.
+func Path(base, name string) (string, error) {
+	if err := ValidatePath(name); err != nil {
+		return "", err
 	}
 	if !filepath.IsAbs(name) {
 		name = filepath.Join(base, name)

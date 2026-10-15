@@ -240,7 +240,7 @@ func shapeRun(out shaping.Output, run shaping.Input, runes []rune, offset int) (
 		for _, glyph := range glyphs[first:next] {
 			if glyph.GlyphID == 0 || glyph.GlyphID > maxGlyphID {
 				problems = append(problems, Problem{
-					Offset: offset + start, Rune: runes[start], Reason: "the font has no glyph for this character",
+					Offset: offset + start, Rune: runes[start], Reason: "the font has no glyph for this character", missingGlyph: true,
 				})
 
 				continue

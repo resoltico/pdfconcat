@@ -137,6 +137,8 @@ func Resolve(j Job, facts map[string]SourceFacts) (Layout, []diag.Diagnostic) {
 				switch {
 				case placed.Size == (Size{}):
 					diagnostics = append(diagnostics, diag.New("page_size_required", "Give an explicit page size when no source is available.", part.Pointer))
+				case placed.Size.Width < 1 || placed.Size.Height < 1:
+					diagnostics = append(diagnostics, diag.New("plan_value", "Inherited generated-page sides must be at least 1 point; give an explicit size.", part.Pointer))
 				case placed.Size.Width > MaxSide || placed.Size.Height > MaxSide:
 					diagnostics = append(diagnostics, diag.New("page_size_too_large", "Inherited page exceeds 14400 points; give an explicit size.", part.Pointer))
 				}
@@ -149,4 +151,10 @@ func Resolve(j Job, facts map[string]SourceFacts) (Layout, []diag.Diagnostic) {
 	}
 	layout.TotalPages = total
 	return layout, diagnostics
+}
+
+// FieldRename records a fully-qualified form field name before and after merging.
+type FieldRename struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }

@@ -24,17 +24,19 @@ import (
 
 type SourceFacts struct {
 	job.SourceFacts
-	SHA256                      [32]byte
-	Bytes                       int64
-	Version                     string
-	FieldNames, DestNames       []string
-	FormDefaultsDigest          string
-	HasWidgets, NeedAppearances bool
+	SHA256                                 [32]byte
+	Bytes                                  int64
+	Version                                string
+	FieldNames, DestNames                  []string
+	FormDefaultsDigest                     string
+	HasFields, HasWidgets, NeedAppearances bool
 }
 
 type policyError struct {
-	code diag.Code
-	err  error
+	code  diag.Code
+	err   error
+	file  string
+	items []string
 }
 
 func (e *policyError) Error() string { return e.err.Error() }
@@ -52,16 +54,24 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		code = "interrupted"
 	}
-	return diag.New(code, err.Error())
+	d := diag.New(code, err.Error())
+	if policy != nil {
+		d.File = policy.file
+		d.Items = policy.items
+	}
+	return d
 }
 
-// Inspect parses without repair, then validates and records product-policy facts.
+// Inspect applies raw-tree/policy refusals before relaxed validation and records facts.
 func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagnostic) {
+	digest := sha256.Sum256(data)
 	defer func() {
 		if value := recover(); value != nil {
 			facts = SourceFacts{}
 			ds = []diag.Diagnostic{diag.New("source_invalid", fmt.Sprintf("PDF parser panic: %v", value))}
 		}
+		facts.SHA256 = digest
+		facts.Bytes = int64(len(data))
 	}()
 	s, err := read(c, data)
 	if err != nil {
@@ -72,8 +82,6 @@ func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagn
 		ds = append(ds, diagnostic(err, "source_invalid"))
 		return facts, ds
 	}
-	facts.SHA256 = sha256.Sum256(data)
-	facts.Bytes = int64(len(data))
 	return facts, ds
 }
 
@@ -101,17 +109,46 @@ func read(c context.Context, data []byte) (*model.Context, error) {
 			if e != nil {
 				return e
 			}
-			if resourceDict["Type"] == types.Name("Annot") || resourceDict["FT"] != nil {
+			resourceType, e := nameValue(s, resourceDict["Type"])
+			if e != nil {
+				return e
+			}
+			resourceFieldType, e := s.Dereference(resourceDict["FT"])
+			if e != nil {
+				return e
+			}
+			if resourceType == types.Name("Annot") || resourceFieldType != nil {
 				return refuse("source_invalid", "A resource dictionary shared with an annotation or field is unsupported; upstream validation would discard that role.")
 			}
 		}
-		if d["Subtype"] == types.Name("Widget") {
+		subtype, e := nameValue(s, d["Subtype"])
+		if e != nil {
+			return e
+		}
+		if subtype == types.Name("Widget") {
 			rect, e := s.DereferenceArray(d["Rect"])
 			if e != nil || len(rect) != 4 {
 				return refuse("source_invalid", "Widget Rect must contain four coordinates.")
 			}
 		}
-		if d["Type"] == types.Name("Sig") || d["Type"] == types.Name("DocTimeStamp") {
+		fieldType, e := nameValue(s, d["FT"])
+		if e != nil {
+			return e
+		}
+		if fieldType == types.Name("Sig") {
+			value, e := s.Dereference(d["V"])
+			if e != nil {
+				return e
+			}
+			if value != nil {
+				return refuse("source_signed", "Signature values are not supported; unsigned null fields are allowed.")
+			}
+		}
+		kind, e := nameValue(s, d["Type"])
+		if e != nil {
+			return e
+		}
+		if kind == types.Name("Sig") || kind == types.Name("DocTimeStamp") {
 			return refuse("source_signed", "Signature and timestamp values are not supported.")
 		}
 		for key := range d {
@@ -128,13 +165,28 @@ func read(c context.Context, data []byte) (*model.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cat["Perms"] != nil {
-		return nil, refuse("source_signed", "Certified sources are not supported.")
+	for _, policy := range []struct {
+		key     string
+		code    diag.Code
+		message string
+	}{
+		{"Perms", "source_signed", "Certified sources are not supported."},
+		{"DocTimeStamp", "source_signed", "Document timestamps are not supported."},
+		{"OCProperties", "source_optional_content", "Optional content is not supported."},
+	} {
+		value, e := s.Dereference(cat[policy.key])
+		if e != nil {
+			return nil, e
+		}
+		if value != nil {
+			return nil, refuse(policy.code, policy.message)
+		}
 	}
-	if cat["OCProperties"] != nil {
-		return nil, refuse("source_optional_content", "Optional content is not supported.")
+	rendering, e := s.Dereference(cat["NeedsRendering"])
+	if e != nil {
+		return nil, e
 	}
-	if cat["NeedsRendering"] == types.Boolean(true) {
+	if rendering == types.Boolean(true) {
 		return nil, refuse("source_dynamic_form", "Dynamic forms are not supported.")
 	}
 	if _, err = fields(c, s); err != nil {
@@ -290,17 +342,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		}
 		ds = append(ds, diag.New(code, message))
 	}
-	for _, key := range []string{"Perms", "DocTimeStamp"} {
-		if catalog[key] != nil {
-			add("source_signed", "Signed or certified sources are not supported.")
-		}
-	}
-	if catalog["OCProperties"] != nil {
-		add("source_optional_content", "Optional content is not supported.")
-	}
-	if catalog["NeedsRendering"] == types.Boolean(true) {
-		add("source_dynamic_form", "Dynamic forms requiring rendering are not supported.")
-	}
+
 	for _, entry := range []struct {
 		key  string
 		code diag.Code
@@ -326,16 +368,25 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	if form["XFA"] != nil {
 		add("source_xfa_removed", "XFA will be removed; static fields remain.")
 	}
-	facts.NeedAppearances = form["NeedAppearances"] == types.Boolean(true)
+	rendering, err := s.Dereference(form["NeedAppearances"])
+	if err != nil {
+		return facts, ds, err
+	}
+	facts.NeedAppearances = rendering == types.Boolean(true)
+	roots, err := s.DereferenceArray(form["Fields"])
+	if err != nil {
+		return facts, ds, err
+	}
+	facts.HasFields = len(roots) > 0
 	fields, err := fieldNames(c, s)
 	if err != nil {
 		return facts, ds, err
 	}
 	facts.FieldNames = fields
-	if facts.NeedAppearances && len(fields) > 0 {
+	if facts.NeedAppearances && facts.HasFields {
 		add("form_appearances_regenerated", "The source requests viewer-regenerated field appearances.")
 	}
-	if len(fields) > 0 {
+	if facts.HasFields {
 		signature := types.Dict{"DR": form["DR"], "DA": form["DA"], "Q": form["Q"]}
 		facts.FormDefaultsDigest, err = resourceIdentity(s, signature)
 		if err != nil {
@@ -346,21 +397,31 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	if err != nil {
 		return facts, ds, err
 	}
+	uriBase, err := s.Dereference(uri["Base"])
+	if err != nil {
+		return facts, ds, err
+	}
 	err = walkObjects(c, s, func(d types.Dict) error {
-		if d["Subtype"] == types.Name("Widget") {
+		subtype, e := nameValue(s, d["Subtype"])
+		if e != nil {
+			return e
+		}
+		if subtype == types.Name("Widget") {
 			facts.HasWidgets = true
 		}
-		if d["FT"] == types.Name("Sig") && d["V"] != nil || d["Type"] == types.Name("Sig") || d["Type"] == types.Name("DocTimeStamp") {
-			add("source_signed", "Signature values and document timestamps are not supported.")
+
+		action, e := nameValue(s, d["S"])
+		if e != nil {
+			return e
 		}
-		if uri["Base"] != nil && d["S"] == types.Name("URI") {
-			target, e := textOf(d["URI"])
+		if uriBase != nil && action == types.Name("URI") {
+			target, e := textValue(s, d["URI"])
 			if e != nil {
 				return e
 			}
 			u, e := url.Parse(target)
 			if e == nil && !u.IsAbs() {
-				add("source_uri_base_removed", "Relative URI actions retain their bytes but lose the source catalog URI Base.")
+				add("source_uri_base_removed", "Source URI Base is removed; retained relative URI actions may resolve differently.")
 			}
 		}
 		return nil

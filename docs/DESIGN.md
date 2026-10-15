@@ -339,9 +339,9 @@ The empty-form challenge passed without another adapter: upstream
 `destinationFormFields` replaces an empty Fields form with the later nonempty
 form, including its resources. The qpdf resource-key check and Poppler rendering
 confirm this for conflicting unused defaults. Keep that regression; do not add
-empty-form cleanup or another compatibility state. Name-tree output keys are
-UTF-16BE, so their ordering uses those encoded bytes rather than UTF-8 ordering;
-non-BMP/BMP destination names have a repeated-source oracle case.
+empty-form cleanup or another compatibility state. The initial UTF-16BE name-tree encoding experiment was superseded by the
+byte-identity correction below. Non-BMP/BMP destination names retain their raw
+encodings and have a repeated-source oracle case.
 
 WP4 verification: `go build ./...`, `go vet ./...`, and
 `PDFCONCAT_REQUIRE_ORACLE=1 go test ./...` pass on macOS arm64. Independent
@@ -391,3 +391,103 @@ Linux/amd64 and Windows/amd64 atomicfile test binaries and all packages cross-
 compile. Those binaries were not executed here. Native Linux/Windows acceptance
 is pending the three-runner replacement CI, as resolved in the sequencing section.
 The full failed-build/report/publication matrix remains pending WP6 integration.
+
+## Pipeline integration decisions (WP6)
+
+Safe reports are attempted once after either a successful or failed build/check;
+refusals retain their invalid codes, while attempted report I/O failures are
+failed. The final report role recheck happens after PDF publication. Both output
+published and report written follow actual rename/link state even if durability
+fails later; the saved report cannot predict its own trailing failure, so stdout
+is authoritative then. No report follows argv parse failure.
+
+For supported stdin (the process's os.File/pipe), cancellation closes the reader
+to unblock a pending read, then returns interrupted. Ordinary in-memory readers
+need no unblock action. Arbitrary nonclosable blocking Go readers are not a CLI
+input mode. Tiny plain pages remain valid; nonempty text with a derived block
+width below 1 point is text_overflow, even with overflow:allow. Give an explicit
+valid width or a wider page. This is unusable layout geometry rather than a
+measured overflow that allow can place.
+
+Stdin challenge: Go's Windows fd.Close cancels pipe I/O but waits for references
+held by a synchronous console ReadConsole call. Closing alone is therefore not
+a sufficient interruption design. For closable stdin, read on one goroutine and
+select completion versus context cancellation; request Close asynchronously on
+cancellation. The outcome path does not wait for a blocked console close/read.
+The CLI exits after rendering interrupted. Ordinary os.Pipe cancellation is a
+native product test; a blocked-close control checks the independent outcome
+path without console fault injection. No worker pool or native input API is added.
+
+Integration checks exposed numeric error-class edges: unsupported numeric version
+lexemes/overflow must be plan_version_unsupported; floating length/leading
+overflow is plan_value rather than a wrong-JSON-type error. Domain-specific token
+handling keeps that distinction without another parser. v1 diagnostics now locate
+the actual version value. Path grammar validation is pure and separate from
+resolution, avoiding a needless Getwd call for every parsed input path. Generated
+inheritance below the writer's 1-point minimum is plan_value with an explicit-size
+remedy; ordinary tiny source pages remain supported.
+
+Integration regressions found two effective-value gaps: an indirect null signature
+value was falsely classified as signed, and an indirect NeedsRendering=true was
+missed. Policy checks must dereference those values; unsigned null remains
+supported. A readable refused source also lost its already-known byte facts.
+Compute its digest before parsing and retain SHA/byte length through refusal or
+recovered panic; keep page counts null when they were not established. The new
+negative/positive tests first reproduced all three failures.
+
+The effective-value review reproduced further legal-indirection gaps: indirect
+FT /Sig with a signature value lacking optional Type was accepted; indirect
+Widget subtype and NeedAppearances were missed; indirect URI actions were not
+warned; and indirect GoTo actions could cross source occurrences after naming.
+The qpdf oracle was first taught to resolve action-type references so its GoTo
+negative control observed the wrong target rather than ignoring the action.
+Use ordinary context dereferencing for these values and text entries, retaining
+raw canonical-key checks. Form nonemptiness is determined by Fields, not by how
+many nonempty names happened to be extracted. This adds no PDF token parser,
+resource merger or appearance engine.
+
+When a destination points outside its source, its name and unusable references
+are omitted. A GoTo action removed for such a target also loses its own Next
+chain; sibling valid entries in a Next array remain. This narrow omission policy
+avoids publishing dangling references without inventing replacement actions.
+
+## Destination byte identity correction
+
+A real Poppler lookup exposed a defect that decoded qpdf JSON and MuPDF's text
+normalization did not detect: emitting every name-tree key as UTF-16 while leaving
+first-use link strings in PDFDocEncoding made those links dangling to Poppler.
+The short native Poppler probe and pdftohtml both resolved the source and failed
+the rebuilt first-copy names. Logs are retained as poppler-named-before.log and
+named-clickable-output-before.stderr in the external evidence.
+
+[ISO 32000 named destinations](https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf)
+use byte strings; [Poppler's API](https://poppler.freedesktop.org/api/glib/PopplerDocument.html)
+explicitly distinguishes them from display strings. Preserve raw string/name
+bytes, compare/sort bytewise, and write hex literals without text transcoding.
+Renamed destinations use unique ASCII names rather than appending ASCII to an
+opaque encoding. This also avoids repeated suffix searches. Conflicting targets
+for the same raw name in the name tree and legacy dictionary are refused rather
+than conflated. The qpdf target oracle remains useful for page membership/order;
+pdftohtml adds actual byte-name lookup checks using the already-required Poppler
+installation. The C++ probe remains external evidence, not a build/CI dependency.
+
+The corrected output resolves chap1→page 1 and chap2→page 2 with native Poppler,
+and pdftohtml produces no diagnostics. Raw ASCII and UTF-16BE keys that display
+the same text also remain distinct, with valid links. The complete destination
+fixture jobs now include real Poppler lookup checks alongside qpdf target checks.
+
+WP6 verification: build, vet and the complete oracle-required test suite pass on
+macOS arm64. In-process command tests cover JSON/text, every usage-code class,
+0/1/2/130 exits, schema-valid golden stdout/full reports, optional check reports
+without PDF writes, report refusals versus I/O failures, malformed/unreadable
+plans with new/existing reports under both overwrite choices, failed builds with
+safe reports, published PDF plus report failure, and the late symlink-parent
+alias regression. Font/text refusal precedes PDF reads; named nonregular input
+roles are rejected; regular source symlinks remain supported; tiny plain pages
+work and unusable derived text width is refused. Native pipe cancellation and a
+blocked-close control return interrupted. Two binary smoke tests execute version
+and a build. The rebuilt generated-only example publishes five pages; qpdf check
+reports no errors. Indirect policy/action values, unsigned null signatures,
+readable-refusal byte facts and version-selected validation rules pass their
+regressions. No real signal/console fault campaign, fuzz campaign or scale run
+was performed. Linux/Windows execution remains pending replacement CI.

@@ -174,6 +174,10 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *job.Size) (string, 
 	if err = pdf.Verify(t.Context(), path, layout.TotalPages); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
+	tools := oracle.RequireTools(t)
+	if err = tools.CheckLinks(path); err != nil {
+		t.Fatal(err)
+	}
 	return path, a, append(warnings, a.Diagnostics...)
 }
 
@@ -471,7 +475,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	if b.Len()-len(doc.Bytes()) >= 30000 {
 		t.Fatalf("short generated text grew output by %d bytes", b.Len()-len(doc.Bytes()))
 	}
-	fontList, err := exec.CommandContext(t.Context(), "pdffonts", path).Output()
+	fontList, err := exec.CommandContext(t.Context(), tools.PDFFonts, path).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -866,5 +870,169 @@ func TestDistinctNamedOutlinesAndUnicodeDestinations(t *testing.T) {
 		if err != nil || !slices.Equal(targets, []int{want}) {
 			t.Fatalf("Unicode name target %d -> %v %v", page, targets, err)
 		}
+	}
+}
+
+func TestUnsignedSignatureNullValuesAndIndirectRenderingFlag(t *testing.T) {
+	for _, indirect := range []bool{false, true} {
+		d := pdffixture.EmptySignatureField("unsigned-null")
+		value := "null"
+		if indirect {
+			d.Objs = append(d.Objs, []byte("null"))
+			value = fmt.Sprintf("%d 0 R", len(d.Objs))
+		}
+		insertEntry(d, 6, "/V "+value)
+		_, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if status, _ := diag.Outcome(ds); status != "ok" {
+			t.Errorf("unsigned null signature indirect=%v: %+v", indirect, ds)
+		}
+	}
+	d := pdffixture.Plain("indirect-needs-rendering")
+	d.Objs = append(d.Objs, []byte("true"))
+	insertEntry(d, 1, "/NeedsRendering 6 0 R")
+	_, ds := pdf.Inspect(t.Context(), d.Bytes())
+	if !codePresent(ds, "source_dynamic_form") {
+		t.Errorf("indirect NeedsRendering true was not refused: %+v", ds)
+	}
+}
+
+func TestIndirectPolicyAndActionValues(t *testing.T) {
+	t.Run("signature type", func(t *testing.T) {
+		d := pdffixture.SignatureValue("indirect-signature")
+		d.Objs[5] = bytes.ReplaceAll(bytes.ReplaceAll(d.Objs[5], []byte("/FT /Sig"), []byte("/FT 7 0 R")), []byte("/Type /Sig"), nil)
+		d.Objs = append(d.Objs, []byte("/Sig"))
+		_, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if !codePresent(ds, "source_signed") {
+			t.Fatalf("indirect field type: %+v", ds)
+		}
+	})
+	t.Run("widget subtype", func(t *testing.T) {
+		d := defaultForm("widget", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0)
+		d.Objs[5] = bytes.ReplaceAll(d.Objs[5], []byte("/Subtype /Widget"), []byte("/Subtype 7 0 R"))
+		d.Objs = append(d.Objs, []byte("/Widget"))
+		f, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if status, _ := diag.Outcome(ds); status != "ok" || !f.HasWidgets {
+			t.Fatalf("indirect widget: %+v %+v", f, ds)
+		}
+	})
+	t.Run("appearance flag", func(t *testing.T) {
+		d := defaultForm("appearance", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0)
+		d.Objs[0] = bytes.ReplaceAll(d.Objs[0], []byte("/NeedAppearances true"), []byte("/NeedAppearances 7 0 R"))
+		d.Objs = append(d.Objs, []byte("true"))
+		_, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if !codePresent(ds, "form_appearances_regenerated") {
+			t.Fatalf("indirect appearance flag: %+v", ds)
+		}
+	})
+	t.Run("URI action and text", func(t *testing.T) {
+		d := pdffixture.URILink("indirect-uri", "relative/path", "https://example.invalid/", false)
+		d.Objs[5] = bytes.ReplaceAll(bytes.ReplaceAll(d.Objs[5], []byte("/S /URI"), []byte("/S 7 0 R")), []byte("/URI (relative/path)"), []byte("/URI 8 0 R"))
+		d.Objs = append(d.Objs, []byte("/URI"), []byte("(relative/path)"))
+		_, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if !codePresent(ds, "source_uri_base_removed") {
+			t.Fatalf("indirect URI: %+v", ds)
+		}
+	})
+	t.Run("GoTo action type", func(t *testing.T) {
+		d := pdffixture.NamedDests("indirect-GoTo")
+		object := len(d.Objs) + 1
+		for i, body := range d.Objs {
+			d.Objs[i] = bytes.ReplaceAll(body, []byte("/S /GoTo"), []byte(fmt.Sprintf("/S %d 0 R", object)))
+		}
+		d.Objs = append(d.Objs, []byte("/GoTo"))
+		path, _, ds := assembleDocs(t, []*pdffixture.Doc{d, d}, nil)
+		if status, _ := diag.Outcome(ds); status != "ok" {
+			t.Fatal(ds)
+		}
+		doc, err := oracle.Load(oracle.RequireTools(t), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		targets, err := doc.ActionTargets(4)
+		if err != nil || !slices.Equal(targets, []int{3}) {
+			t.Fatalf("indirect GoTo crossed occurrences: %v %v", targets, err)
+		}
+	})
+}
+
+func TestSignatureFieldTypeInheritsThroughIndirectNull(t *testing.T) {
+	for _, signed := range []bool{false, true} {
+		d := pdffixture.EmptySignatureField("null-inheritance")
+		if signed {
+			d = pdffixture.SignatureValue("null-inheritance")
+		}
+		d.Objs[0] = bytes.ReplaceAll(d.Objs[0], []byte("/Fields [6 0 R]"), []byte("/Fields [7 0 R]"))
+		d.Objs[5] = bytes.ReplaceAll(bytes.ReplaceAll(d.Objs[5], []byte("/FT /Sig"), []byte("/FT 8 0 R")), []byte("/Type /Sig"), nil)
+		insertEntry(d, 6, "/Parent 7 0 R")
+		d.Objs = append(d.Objs, []byte("<< /FT /Sig /T (group) /Kids [6 0 R] >>"), []byte("null"))
+		_, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if signed {
+			if !codePresent(ds, "source_signed") {
+				t.Fatalf("inherited signature type missed: %+v", ds)
+			}
+		} else if status, _ := diag.Outcome(ds); status != "ok" {
+			t.Fatalf("unsigned inherited signature refused: %+v", ds)
+		}
+	}
+}
+
+func TestUnnamedNonemptyFormsUseTheSameResourceBoundary(t *testing.T) {
+	_, _, ds := assembleDocs(t, []*pdffixture.Doc{defaultForm("ONE", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0), defaultForm("", "Cour", "Courier", "/Cour 12 Tf 0 g", 0)}, nil)
+	if !codePresent(ds, "source_form_unsupported") {
+		t.Fatalf("unnamed fields bypassed resource compatibility: %+v", ds)
+	}
+}
+
+func TestDroppedDestinationInNextArrayLeavesValidActions(t *testing.T) {
+	d := pdffixture.NamedDests("dropped-next")
+	orphan := len(d.Objs) + 1
+	d.Objs = append(d.Objs, bytes.Clone(d.Objs[2]))
+	d.Objs[5] = bytes.ReplaceAll(d.Objs[5], []byte("(chap2) [4 0 R"), []byte(fmt.Sprintf("(chap2) [%d 0 R", orphan)))
+	// Page 1 now has one valid action followed by one unusable and one valid action.
+	d.Objs[9] = bytes.ReplaceAll(d.Objs[9], []byte("/Dest (chap2)"), []byte("/A << /S /GoTo /D (chap1) /Next [<< /S /GoTo /D (chap2) >> << /S /GoTo /D (chap1) >>] >>"))
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, nil)
+	if status, _ := diag.Outcome(ds); status != "ok" || !codePresent(ds, "destinations_dropped") {
+		t.Fatal(ds)
+	}
+	doc, err := oracle.Load(oracle.RequireTools(t), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := doc.ActionTargets(1)
+	if err != nil || !slices.Equal(targets, []int{1, 1}) {
+		t.Fatalf("valid Next actions were lost or left dangling: %v %v", targets, err)
+	}
+}
+
+func TestConflictingDestinationNamespacesAreRefused(t *testing.T) {
+	for _, same := range []bool{false, true} {
+		d := pdffixture.NamedDests("both")
+		target := 4
+		if same {
+			target = 3
+		}
+		insertEntry(d, 1, fmt.Sprintf("/Dests << /chap1 [%d 0 R /Fit] >>", target))
+		_, ds := pdf.Inspect(t.Context(), d.Bytes())
+		if same {
+			if status, _ := diag.Outcome(ds); status != "ok" {
+				t.Fatalf("equivalent namespaces refused: %+v", ds)
+			}
+		} else if !codePresent(ds, "source_invalid") {
+			t.Fatalf("conflicting namespaces silently conflated: %+v", ds)
+		}
+	}
+}
+
+func TestDestinationByteEncodingsStayDistinct(t *testing.T) {
+	d := pdffixture.NamedDests("bytes")
+	// ASCII chap1 and UTF-16BE chap1 are distinct byte-string keys and targets.
+	d.Objs[5] = []byte("<< /Names [(chap1) [3 0 R /Fit] <FEFF00630068006100700031> [4 0 R /Fit]] >>")
+	d.Objs[9] = bytes.ReplaceAll(d.Objs[9], []byte("(chap2)"), []byte("<FEFF00630068006100700031>"))
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, nil)
+	if status, _ := diag.Outcome(ds); status != "ok" {
+		t.Fatal(ds)
+	}
+	if err := oracle.RequireTools(t).CheckLinks(path); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -5,9 +5,10 @@ package pdf
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"reflect"
 	"slices"
-	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -29,15 +30,15 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 		index[page.ref] = i + 1
 	}
 	result := map[string]destination{}
-	add := func(name string, o types.Object, legacy bool) error {
+	decode := func(o types.Object, legacy bool) (destination, error) {
 		o, err := s.Dereference(o)
 		if err != nil {
-			return err
+			return destination{}, err
 		}
 		if d, ok := o.(types.Dict); ok {
 			o, err = s.Dereference(d["D"])
 			if err != nil {
-				return err
+				return destination{}, err
 			}
 		}
 		a, ok := o.(types.Array)
@@ -49,18 +50,17 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			for _, entry := range a[1:] {
 				value, err := s.Dereference(entry)
 				if err != nil {
-					return err
+					return destination{}, err
 				}
 				switch value.(type) {
 				case nil, types.Name, types.Integer, types.Float:
 					dest.tail = append(dest.tail, value)
 				default:
-					return refuse("source_invalid", "Unsupported destination coordinate value.")
+					return destination{}, refuse("source_invalid", "Unsupported destination coordinate value.")
 				}
 			}
 		}
-		result[name] = dest
-		return nil
+		return dest, nil
 	}
 	cat, err := s.Catalog()
 	if err != nil {
@@ -100,13 +100,18 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return refuse("source_invalid", "Odd destination name array.")
 		}
 		for i := 0; i < len(a); i += 2 {
-			name, err := textOf(a[i])
+			name, err := destinationName(s, a[i])
 			if err != nil {
 				return err
 			}
-			if err = add(name, a[i+1], false); err != nil {
-				return err
+			dest, e := decode(a[i+1], false)
+			if e != nil {
+				return e
 			}
+			if _, exists := result[name]; exists {
+				return refuse("source_invalid", "Duplicate destination byte-string keys are unsupported.")
+			}
+			result[name] = dest
 		}
 		kids, err := s.DereferenceArray(d["Kids"])
 		if err != nil {
@@ -127,15 +132,14 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 		return nil, err
 	}
 	for name, o := range legacy {
-		// A name-tree destination takes precedence when both structures define it.
-		if existing, ok := result[name]; ok {
-			existing.legacy = true
-			result[name] = existing
-			continue
+		dest, e := decode(o, true)
+		if e != nil {
+			return nil, e
 		}
-		if err = add(name, o, true); err != nil {
-			return nil, err
+		if existing, ok := result[name]; ok && (existing.page != dest.page || !reflect.DeepEqual(existing.tail, dest.tail)) {
+			return nil, refuse("source_invalid", "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
 		}
+		result[name] = dest
 	}
 	return result, nil
 }
@@ -149,7 +153,7 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	for name := range originals {
 		names = append(names, name)
 	}
-	slices.SortFunc(names, func(a, b string) int { return strings.Compare(utf16Hex(a), utf16Hex(b)) })
+	slices.Sort(names)
 	replacements := map[string]string{}
 	dropped := map[string]bool{}
 	result := map[string]destination{}
@@ -167,8 +171,8 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 		}
 		chosen := name
 		if used[chosen] {
-			for n := 2; ; n++ {
-				chosen = fmt.Sprintf("%s~%d", name, n)
+			for n := len(used) + 1; ; n++ {
+				chosen = fmt.Sprintf("pdfconcat.destination.%d", n)
 				if !used[chosen] && !reserved[chosen] {
 					break
 				}
@@ -183,12 +187,46 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	err = walkObjects(c, s, func(d types.Dict) error {
 		// Omitted targets must not leave dangling destination/action references.
 		for key, value := range d {
+			if key == "Next" {
+				next, e := s.Dereference(value)
+				if e != nil {
+					return e
+				}
+				if actions, ok := next.(types.Array); ok {
+					kept := make(types.Array, 0, len(actions))
+					for _, item := range actions {
+						action, e := s.DereferenceDict(item)
+						if e != nil {
+							return e
+						}
+						kind, e := nameValue(s, action["S"])
+						if e != nil {
+							return e
+						}
+						target, e := s.Dereference(action["D"])
+						if e != nil {
+							return e
+						}
+						name, e := destinationName(s, target)
+						if kind == types.Name("GoTo") && e == nil && dropped[name] {
+							continue
+						}
+						kept = append(kept, item)
+					}
+					if len(kept) == 0 {
+						delete(d, key)
+					} else {
+						d[key] = kept
+					}
+					continue
+				}
+			}
 			if key == "Dest" {
 				resolved, e := s.Dereference(value)
 				if e != nil {
 					return e
 				}
-				if name, e := textOf(resolved); e == nil && dropped[name] {
+				if name, e := destinationName(s, resolved); e == nil && dropped[name] {
 					delete(d, key)
 					continue
 				}
@@ -197,12 +235,19 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 			if e != nil {
 				return e
 			}
-			if action, ok := resolved.(types.Dict); ok && action["S"] == types.Name("GoTo") {
+			if action, ok := resolved.(types.Dict); ok {
+				actionType, e := nameValue(s, action["S"])
+				if e != nil {
+					return e
+				}
+				if actionType != types.Name("GoTo") {
+					continue
+				}
 				target, e := s.Dereference(action["D"])
 				if e != nil {
 					return e
 				}
-				if name, e := textOf(target); e == nil && dropped[name] {
+				if name, e := destinationName(s, target); e == nil && dropped[name] {
 					delete(d, key)
 				}
 			}
@@ -215,7 +260,7 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 			if _, isArray := value.(types.Array); isArray || value == nil {
 				return nil
 			}
-			old, err := textOf(value)
+			old, err := destinationName(s, value)
 			if err != nil {
 				return err
 			}
@@ -223,7 +268,7 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 				if _, isName := value.(types.Name); isName {
 					d[key] = types.Name(replacement)
 				} else {
-					d[key] = pdfText(replacement)
+					d[key] = destinationLiteral(replacement)
 				}
 			}
 			return nil
@@ -233,7 +278,11 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 				return err
 			}
 		}
-		if d["S"] == types.Name("GoTo") && d["D"] != nil {
+		actionType, e := nameValue(s, d["S"])
+		if e != nil {
+			return e
+		}
+		if actionType == types.Name("GoTo") && d["D"] != nil {
 			return rewrite("D")
 		}
 		return nil
@@ -258,7 +307,27 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	return result, renamed, nil
 }
 
-func pdfText(text string) types.HexLiteral { return types.HexLiteral("FEFF" + utf16Hex(text)) }
+func destinationName(s *model.Context, o types.Object) (string, error) {
+	value, err := s.Dereference(o)
+	if err != nil {
+		return "", err
+	}
+	switch name := value.(type) {
+	case types.Name:
+		return string(name), nil
+	case types.StringLiteral:
+		bytes, err := types.Unescape(string(name))
+		return string(bytes), err
+	case types.HexLiteral:
+		bytes, err := name.Bytes()
+		return string(bytes), err
+	default:
+		return "", fmt.Errorf("expected destination byte string or name, got %T", value)
+	}
+}
+func destinationLiteral(raw string) types.HexLiteral {
+	return types.HexLiteral(hex.EncodeToString([]byte(raw)))
+}
 
 func rebuildDestinations(c context.Context, s *model.Context, dests map[string]destination) error {
 	if len(dests) == 0 {
@@ -272,11 +341,11 @@ func rebuildDestinations(c context.Context, s *model.Context, dests map[string]d
 	for name := range dests {
 		names = append(names, name)
 	}
-	slices.SortFunc(names, func(a, b string) int { return strings.Compare(utf16Hex(a), utf16Hex(b)) })
+	slices.Sort(names)
 	legacy := types.Dict{}
 	var tree func([]string) (types.Dict, error)
 	tree = func(keys []string) (types.Dict, error) {
-		d := types.Dict{"Limits": types.Array{pdfText(keys[0]), pdfText(keys[len(keys)-1])}}
+		d := types.Dict{"Limits": types.Array{destinationLiteral(keys[0]), destinationLiteral(keys[len(keys)-1])}}
 		if len(keys) <= 128 {
 			entries := types.Array{}
 			for _, name := range keys {
@@ -285,7 +354,7 @@ func rebuildDestinations(c context.Context, s *model.Context, dests map[string]d
 					return nil, fmt.Errorf("output destination page %d out of range", dest.page)
 				}
 				value := append(types.Array{pages[dest.page-1].ref}, dest.tail...)
-				entries = append(entries, pdfText(name), value)
+				entries = append(entries, destinationLiteral(name), value)
 				if dest.legacy {
 					legacy[name] = value
 				}

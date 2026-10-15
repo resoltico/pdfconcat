@@ -16,7 +16,8 @@ import (
 type (
 	// Problem is one reason text cannot be rendered with a font.
 	Problem struct {
-		Reason string
+		Reason       string
+		missingGlyph bool
 		// Offset is the rune offset into the text, or -1 for invalid UTF-8.
 		Offset int
 		// More counts further consecutive code points rejected for the same reason.
@@ -186,4 +187,17 @@ func (state *shaperFont) checkNominalParagraph(font *Font, paragraph string) (bo
 	}
 
 	return false, nil
+}
+
+// GlyphMissingOnly distinguishes glyph coverage failures from character-policy errors.
+func (e *TextError) GlyphMissingOnly() bool {
+	if len(e.Problems) == 0 {
+		return false
+	}
+	for _, problem := range e.Problems {
+		if !problem.missingGlyph {
+			return false
+		}
+	}
+	return true
 }

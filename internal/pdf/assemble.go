@@ -24,23 +24,28 @@ import (
 )
 
 type Assembly struct {
-	FieldsRenamed map[int][]FieldRename
+	FieldsRenamed map[int][]job.FieldRename
 	Diagnostics   []diag.Diagnostic
 }
 
 // Assemble imports each occurrence independently and writes only after final validation.
 func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts, pages map[int]Page, fit *job.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, w io.Writer) (result Assembly, err error) {
+	var current *job.PlacedPart
 	defer func() {
 		if value := recover(); value != nil {
 			err = refuse("assembly_failed", fmt.Sprintf("PDF backend panic: %v", value))
 		}
+		if err != nil && current != nil {
+			d := diagnostic(err, "assembly_failed")
+			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Pointer}}
+		}
 	}()
-	result.FieldsRenamed = map[int][]FieldRename{}
+	result.FieldsRenamed = map[int][]job.FieldRename{}
 	var dest *model.Context
 	allDests := map[string]destination{}
 	usedNames := map[string]bool{}
 	version := model.V17
-	formBoundary := ""
+	formDefaultsDigest := ""
 	needAppearances := false
 	add := func(code diag.Code, message string, index int) {
 		d := diag.New(code, message, layout.Parts[index].Pointer)
@@ -48,6 +53,7 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 		result.Diagnostics = append(result.Diagnostics, d)
 	}
 	for index, part := range layout.Parts {
+		current = &layout.Parts[index]
 		if err = c.Err(); err != nil {
 			return result, err
 		}
@@ -65,11 +71,11 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 			if err != nil {
 				return result, err
 			}
-			if len(inspected.FieldNames) > 0 {
-				if formBoundary != "" && formBoundary != inspected.FormDefaultsDigest {
-					return result, refuse("source_form_unsupported", "Nonempty forms have different default resources or DA/Q defaults; assemble them separately or flatten them with a suitable PDF tool.")
+			if inspected.HasFields {
+				if formDefaultsDigest != "" && formDefaultsDigest != inspected.FormDefaultsDigest {
+					return result, refuse("source_form_unsupported", "Nonempty forms require identical resolved DR/DA/Q representations; these differ; assemble them separately or flatten them with a suitable PDF tool.")
 				}
-				formBoundary = inspected.FormDefaultsDigest
+				formDefaultsDigest = inspected.FormDefaultsDigest
 			}
 			needAppearances = needAppearances || inspected.NeedAppearances
 			if fit != nil && inspected.HasWidgets {
@@ -129,13 +135,14 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 				return result, e
 			}
 			if actual != record.name {
-				result.FieldsRenamed[index] = append(result.FieldsRenamed[index], FieldRename{From: record.name, To: actual})
+				result.FieldsRenamed[index] = append(result.FieldsRenamed[index], job.FieldRename{From: record.name, To: actual})
 			}
 		}
 		if len(result.FieldsRenamed[index]) > 0 {
 			add("form_fields_renamed", "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", index)
 		}
 	}
+	current = nil
 	if dest == nil {
 		return result, errors.New("no parts to assemble")
 	}

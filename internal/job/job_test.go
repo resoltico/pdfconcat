@@ -102,3 +102,11 @@ func TestRangesUseInt64(t *testing.T) {
 		t.Fatalf("ranges %+v %+v", layout, ds)
 	}
 }
+
+func TestInheritedSizeBelowGeneratedMinimumIsRefused(t *testing.T) {
+	page := job.Defaults()
+	_, ds := job.Resolve(job.Job{Parts: []job.Part{{Source: "tiny"}, {Page: &page, Count: 1, Pointer: "/items/1"}}}, map[string]job.SourceFacts{"tiny": {Pages: 1, FirstSize: job.Size{Width: .5, Height: 100}, LastSize: job.Size{Width: .5, Height: 100}}})
+	if len(ds) != 1 || ds[0].Code != "plan_value" {
+		t.Fatalf("unusable inherited canvas: %+v", ds)
+	}
+}

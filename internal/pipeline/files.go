@@ -73,6 +73,9 @@ func samePathOrFile(a, b string) bool {
 		return true
 	}
 	first, e1 := os.Stat(a)
+	if e1 != nil {
+		return false
+	}
 	second, e2 := os.Stat(b)
 	return e1 == nil && e2 == nil && os.SameFile(first, second)
 }

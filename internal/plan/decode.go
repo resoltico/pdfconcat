@@ -66,7 +66,14 @@ func Decode(data []byte, file, base string) (job.Job, []diag.Diagnostic) {
 		Version int `json:"version"`
 	}
 	if err := json.Unmarshal(input, &probe); err == nil && probe.Version == 1 {
-		return job.Job{}, []diag.Diagnostic{p.diagnostic(&fault{code: "plan_version_unsupported", message: "Use version: 2 and rename blank to page (top-level defaults and items).", pointer: "/version"}, file)}
+		location := &fault{code: "plan_version_unsupported", message: "Use version: 2 and rename blank to page (top-level defaults and items).", pointer: "/version"}
+		_ = p.object(func(name string) error {
+			if name == "version" {
+				location.offset = p.start()
+			}
+			return p.d.SkipValue()
+		})
+		return job.Job{}, []diag.Diagnostic{p.diagnostic(location, file)}
 	}
 	result, err := p.document(base)
 	if err == nil {
@@ -180,7 +187,7 @@ func (p *decoder) path() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err = job.Path(".", s); err != nil {
+	if err = job.ValidatePath(s); err != nil {
 		return "", p.fail("path_invalid", err.Error())
 	}
 	return s, nil
@@ -202,9 +209,20 @@ func (p *decoder) document(base string) (job.Job, error) {
 			_, err = p.text()
 		case "version":
 			seenVersion = true
-			var v int
-			if err = p.scalar(&v); err == nil && v != 2 {
-				err = p.fail("plan_version_unsupported", "Use version: 2 and rename blank to page.")
+			start := p.start()
+			var token jsontext.Token
+			token, err = p.d.ReadToken()
+			if err == nil {
+				switch token.Kind() {
+				case 'n':
+					err = &fault{code: "plan_null", message: "null is not allowed.", pointer: "/version", offset: start}
+				case '0':
+					if token.String() != "2" {
+						err = p.fail("plan_version_unsupported", "Use version: 2 and rename blank to page.")
+					}
+				default:
+					err = p.fail("plan_type", "version must be the JSON integer 2.")
+				}
 			}
 		case "output":
 			result.Output, err = p.path()
@@ -402,7 +420,7 @@ func (p *decoder) length(positive bool) (float64, error) {
 		}
 		n, err = job.Length(s)
 	} else {
-		err = p.scalar(&n)
+		n, err = p.number()
 	}
 	if err != nil {
 		var semantic *json.SemanticError
@@ -484,7 +502,7 @@ func (p *decoder) textStyle(s *job.PageStyle) error {
 		case "width":
 			s.Text.Width, err = p.length(true)
 		case "leading":
-			err = p.scalar(&s.Text.Leading)
+			s.Text.Leading, err = p.number()
 			if err == nil && (s.Text.Leading < 1 || s.Text.Leading > 10) {
 				err = p.fail("plan_value", "leading must be 1–10.")
 			}
@@ -532,4 +550,14 @@ func (p *decoder) font() (string, error) {
 		err = p.fail("plan_type", "font requires a file member.")
 	}
 	return file, err
+}
+
+func (p *decoder) number() (float64, error) {
+	var n float64
+	err := p.scalar(&n)
+	var semantic *json.SemanticError
+	if errors.As(err, &semantic) && semantic.JSONKind == '0' {
+		return 0, p.fail("plan_value", "Number is outside the supported finite range.")
+	}
+	return n, err
 }

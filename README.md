@@ -104,7 +104,7 @@ an observation, not a size bound; fonts that prohibit subsetting remain whole.
   relaxed parsing may accept other malformed syntax or repairs.
 - Fitting refuses widgets and does not transform destination scroll coordinates.
   Static forms require compatible defaults/resources. A form without widget
-  appearances cannot be assembled into PDF 2.0, including when another source
+  appearances can fail assembly into PDF 2.0, including when another source
   raises the output version. [DESIGN](docs/DESIGN.md)
   lists the full policy and fidelity limits.
 - Assembly is in memory. PDF object graphs and generated pages can cost much more

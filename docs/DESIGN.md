@@ -125,7 +125,7 @@ from merged parent chains; check only predicts possible namespacing. An empty
 form is replaced by the next nonempty form in upstream, including its resources;
 qpdf/resource and rendering tests cover conflicting unused defaults.
 
-The backend requires widget appearance dictionaries when writing PDF 2.0. A valid
+The backend can require widget appearance dictionaries when writing PDF 2.0. A valid
 PDF 1.7 form using viewer-regenerated appearances can therefore fail assembly
 when another source raises the output to 2.0. PDFConcat does not generate those
 appearances: provide sources with complete appearances or assemble the form

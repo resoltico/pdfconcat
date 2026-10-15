@@ -483,8 +483,6 @@ func (r *cancelingReader) Read(p []byte) (int, error) {
 }
 
 func TestStageDiskFullPermissionAndFlushFailures(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 	destination := filepath.Join(dir, reportPath)
 

@@ -14,7 +14,6 @@ import (
 )
 
 func TestOwnedDirectoryDACLActuallyRejectsNamespaceChangesAndRestores(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 
 	existing := filepath.Join(dir, "existing")

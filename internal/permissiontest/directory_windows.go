@@ -24,6 +24,8 @@ func RequireEnforcement(tb testing.TB) { tb.Helper() }
 
 // DenyDirectoryChanges denies namespace creation/deletion by the current SID in this owned test directory.
 // Its returned closure restores the original DACL, including whether inheritance was protected.
+// Callers and permission-bearing subtests must run serially: another parallel
+// test's panic can terminate the process before this fixture restores its DACL.
 func DenyDirectoryChanges(tb testing.TB, dir string) func() {
 	tb.Helper()
 

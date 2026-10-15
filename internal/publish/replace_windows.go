@@ -127,6 +127,6 @@ func renameInformationSizes(nameUnits uint64) (uint32, uint32, error) {
 	}
 
 	nameBytes := uint32(nameUnits) * 2
-	bufferSize := max(uint32(unsafe.Sizeof(renameInformation{})), uint32(offset)+nameBytes+2)
+	bufferSize := uint32(max(int(unsafe.Sizeof(renameInformation{})), offset+int(nameBytes)+2))
 	return nameBytes, bufferSize, nil
 }

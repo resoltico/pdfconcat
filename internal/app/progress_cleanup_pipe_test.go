@@ -33,11 +33,8 @@ func (sink *brokenCleanupPipe) WriteRecord(_ context.Context, record []byte) err
 }
 
 func TestNativeCleanupWarningPipeFailureAfterActualPublicationIsEphemeral(t *testing.T) {
-	t.Parallel()
-
 	for _, mode := range []cli.ProgressMode{cli.ProgressJSON, cli.ProgressAuto} {
 		t.Run(string(mode), func(t *testing.T) {
-			t.Parallel()
 			runNativeCleanupWarningPipeFailure(t, mode)
 		})
 	}

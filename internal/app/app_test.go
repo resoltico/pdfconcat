@@ -663,8 +663,6 @@ func execute2(tb testing.TB, env app.Env, args ...string) outcome {
 }
 
 func TestPostPublicationReportFailureKeepsThePDFAndARecoveryReport(t *testing.T) {
-	t.Parallel()
-
 	requireDirectoryPermissions(t)
 
 	dir := workDir(t)
@@ -754,8 +752,6 @@ func TestConcurrentCreationOfTheReportStopsBeforeThePDFIsPublished(t *testing.T)
 }
 
 func TestScratchCleanupFailureIsAWarningNotAFailure(t *testing.T) {
-	t.Parallel()
-
 	requireDirectoryPermissions(t)
 
 	dir := workDir(t)

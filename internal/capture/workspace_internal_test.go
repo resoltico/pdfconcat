@@ -98,8 +98,6 @@ func TestNewPathIsUniqueAndKeepsExtension(t *testing.T) {
 }
 
 func TestWorkspaceCreationFailuresAreActionable(t *testing.T) {
-	t.Parallel()
-
 	missing := filepath.Join(t.TempDir(), missingPath, outputPath)
 
 	_, err := NewWorkspaceBeside(missing)

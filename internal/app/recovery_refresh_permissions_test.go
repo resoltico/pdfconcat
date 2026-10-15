@@ -12,8 +12,6 @@ import (
 )
 
 func TestRefreshPermissionFailurePreservesPlannedCompleteRecoveryAndPDF(t *testing.T) {
-	t.Parallel()
-
 	requireDirectoryPermissions(t)
 
 	dir := workDir(t)

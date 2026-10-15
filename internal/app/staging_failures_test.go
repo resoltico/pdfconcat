@@ -18,15 +18,12 @@ type reportStagingScenario struct {
 }
 
 func TestReportStagingDenialPreservesInputsAndExistingReport(t *testing.T) {
-	t.Parallel()
-
 	for _, test := range []reportStagingScenario{
 		{"assembly", commandBuild, "", phaseComplete, 1},
 		{"check", commandCheck, "", phaseComplete, 1},
 		{"failed inspection", commandCheck, notAPDF, phaseIncomplete, 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			checkReportStagingDenial(t, test)
 		})
 	}
@@ -81,7 +78,6 @@ func checkReportStagingDenial(t *testing.T, test reportStagingScenario) {
 }
 
 func TestWorkspaceCreationDenialPublishesNothing(t *testing.T) {
-	t.Parallel()
 	requireDirectoryPermissions(t)
 	dir := workDir(t)
 	writePDF(t, dir, sourceA)

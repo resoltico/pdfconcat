@@ -9,6 +9,19 @@ inheritance, built-in Unicode text, per-occurrence named destinations, explicit
 source refusals and machine-readable results. Source bookmarks and supported
 static forms are retained. It is a CLI for trusted local documents.
 
+## Use a published release
+
+Download the archive matching your operating system and CPU from [published releases](https://github.com/resoltico/pdfconcat/releases), verify its checksum against `checksums.txt`, and extract it. The executable is at the archive root. From that directory, run `./pdfconcat version` on macOS/Linux or `.\pdfconcat.exe version` in Windows PowerShell. `version` reports the release version and build identity.
+
+With Go at the version declared in [go.mod](go.mod), install the public tag into your Go binary directory:
+
+```sh
+go install github.com/resoltico/pdfconcat/cmd/pdfconcat@v0.3.0
+pdfconcat version
+```
+
+Add that directory (`go env GOBIN`, or `bin` under `go env GOPATH` when GOBIN is empty) to PATH if needed. The examples below use the source-build path `bin/pdfconcat`; substitute the extracted executable path or the installed `pdfconcat` command when using a release.
+
 ## Build from source
 
 Build the current code from `main`:

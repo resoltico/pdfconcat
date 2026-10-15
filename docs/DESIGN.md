@@ -570,3 +570,19 @@ sfnt casts and best-effort cleanup/error-channel behavior. Real sfnt offset/leng
 overflow checks preserve the binary format instead of suppressing those findings.
 The existing ruleset still requires Required CI from integration 15368; no
 settings change is needed. Snapshot archives and hosted checks are pending next.
+
+Carry-over appearance review found that empty text must still validate the selected
+font, as specified by the released layering rules. A command regression first
+reproduced the bypass. Font loading now covers every selected generated-page font;
+only text-policy checks skip an empty value. The writer still emits no unused
+font for a plain page. Explicitly selecting default clears an unusable inherited
+font choice. This restores the stated contract rather than adding a new option.
+
+Hosted checkpoint: run https://github.com/resoltico/pdfconcat/actions/runs/38682084085
+has passed lint, Linux oracle/race tests, Windows tests and all-target builds.
+macOS is queued and Required CI is therefore pending, not green. WP9's independent
+documentation/comparison preparation proceeds while that runner waits; final
+hosted acceptance on the completed PR head remains required in WP10. PR #4 is
+open as draft and PR #1 was commented on and closed as superseded. The isolated
+WP8 snapshot passed, all six archive contents/checksums were inspected, and the
+native archive version command succeeded. No shared owner artifact was cleaned.

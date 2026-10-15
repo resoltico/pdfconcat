@@ -400,3 +400,12 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 		t.Fatalf("known byte facts were lost or pages guessed: %+v", full.Parts)
 	}
 }
+
+func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
+	dir := t.TempDir()
+	plan := `{"version":2,"page":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
+	r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
+	if exit != 1 || !hasDiagnostic(r, "font_unreadable") {
+		t.Fatalf("empty text bypassed selected-font validation: %+v %d", r, exit)
+	}
+}

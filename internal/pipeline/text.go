@@ -24,7 +24,7 @@ func loadFonts(c context.Context, j job.Job, r *result.Result) map[string]*types
 	var textOrder []textKey
 	textItems := map[textKey][]string{}
 	for _, p := range j.Parts {
-		if p.Page == nil || p.Page.Text.Value == "" {
+		if p.Page == nil {
 			continue
 		}
 		name := p.Page.Text.Font
@@ -32,6 +32,9 @@ func loadFonts(c context.Context, j job.Job, r *result.Result) map[string]*types
 			fontOrder = append(fontOrder, name)
 		}
 		fontItems[name] = append(fontItems[name], p.Pointer)
+		if p.Page.Text.Value == "" {
+			continue
+		}
 		key := textKey{font: name, value: p.Page.Text.Value}
 		if _, ok := textItems[key]; !ok {
 			textOrder = append(textOrder, key)

@@ -1,67 +1,113 @@
-# Product design
+# Design and rebuild acceptance
 
-PDFConcat assembles existing PDF documents in an explicit order and inserts generated blank pages at explicit positions. The plan is a description of the final packet, including repeated sources and generated-page appearance. It does not infer the author's intended order or choose files for them.
+PDFConcat assembles a declared packet of source PDFs and generated pages using
+unmodified upstream pdfcpu. The rebuild follows WP0–WP10 from the owner-approved
+2026-10-15 bundle, with the peer-review corrections. Acceptance below describes
+work actually run; pending work is not a passing check.
 
-## The sequence is the interface
+## Preconditions (WP0)
 
-An ordered sequence keeps each insertion next to the documents it separates. A filename suffix, a directive attached to another filename, or a precomputed output page number hides that position or requires knowledge of source page counts. A generated page is part of the job rather than a separately managed blank PDF.
+On 2026-10-15, the working tree was clean. The foundation branch and its remote
+both identified `56260859095ceac53c4455486f84e2ac3547ad76`; main identified
+`a74cd6fbf6ffcb5934e034a54d071d496b5794f6`. Fetch and a second remote observation
+confirmed those tips. Neither branch contains commits newer than the bundle's
+snapshot, so there are no additional commits to classify. PR #1 remains open.
+The latest existing CI run failed:
+<https://github.com/resoltico/pdfconcat/actions/runs/38659639579>.
 
-The plan can be a named JSON file, standard input, or one inline JSON argument. Direct PDF operands and `--blank` express small unstyled jobs. All transports resolve to the same assembly model. Appearance belongs in the plan, with item settings overriding group/root defaults and built-ins; a second style-flag language would create another precedence rule.
+The app's chat inventory showed the previous PDFConcat writer unloaded and the
+audit chat idle; this chat is the sole implementation writer. The branch is
+`rebuild/upstream-pdfcpu`, based on the foundation tip. All owner decisions
+D1–D10 apply: keep the project, plan v2/page, curated lint, umask permissions,
+100,000 generated-page limit, remove progress/query/jobs/inline plans, supersede
+PR #1, add the contributor-scope pointer, draft upstream issues only, and let the
+owner tag the release.
 
-There is no implicit scan, glob, sort or source deduplication. File order and repeats remain visible in the instructions. Shell recipes in [`CLI.md`](CLI.md#large-jobs-and-shells) generate plans with an explicit ordering policy.
+Go 1.27.2 runs on macOS arm64. qpdf and Poppler are installed. The comparison
+binary and diagnostic logs live outside the checkout at
+`/Users/erst/Tools/pdfconcat-implementation-evidence/`. Owner artifacts `dist/`,
+`bin/`, `.tools/`, `pdfconcat`, `plan.test`, and ignored filesystem metadata are
+protected. No cleanup command may remove them.
 
-## JSON plans
+Baseline verification: the old executable was built to the external evidence
+directory; `go build ./...`, `go vet ./...`, and `go test ./...` passed on macOS
+arm64 (23 package results, including one package without tests). No campaign or
+opt-in scale test was requested. This local result does not resolve the existing
+hosted CI failure or establish native Linux/Windows behavior.
 
-The job is an ordered heterogeneous array of paths, generated pages and groups. JSON gives that array a portable typed representation that shells and programming languages can generate, and JSON Schema supplies editor validation. One syntax avoids duplicated parsers and divergent rules.
+## Sequencing decisions
 
-The strict token decoder rejects duplicate members, unknown keys, invalid Unicode and trailing data, retains declaration positions, and charges resource limits during reading. A schema cannot detect duplicate members or every unit-converted bound; [`PLAN.md`](PLAN.md) states these parser requirements. A bare string always names a PDF, including a string that resembles a CLI option. A group's `dir` supplies a path prefix without scanning or restricting filesystem access.
+WP1 removes obsolete CI, release and GoReleaser configurations when their
+dependencies are removed; WP8 recreates them. Leaving broken configurations
+until WP8 would contradict WP1's acceptance and permit obsolete campaigns.
+Every WP still requires build, vet, tests and a commit.
 
-## Agent-visible evidence
+WP5 native Linux/Windows acceptance remains pending until replacement CI runs.
+WP8 opens the single authorized draft PR after committing replacement tooling,
+observes its CI, then comments on and closes PR #1 as superseded. WP10 updates
+that same PR and verifies the delivered state. All GoReleaser snapshots using
+`--clean` run in isolated clones, preserving the owner's `dist/`.
 
-Compact JSON is the default for results, failures, help and version. Human text carries the same outcome, location and repair facts. A bounded summary exposes publication state, captured counts and material diagnostics; complete reports retain precise declarations, digests, appearance findings and consumer references.
+## Contract decisions to verify before implementation
 
-A successful job can carry warnings about measured clipping or consequential source-feature handling. Error and warning counts refer to captured diagnostic records, after aggregation. They do not count pages. A successful query can return errors from a failed saved run: the query operation and captured run have separate outcomes.
+The peer audit supplies executable counterexamples outside this repository.
+The following corrections must be reproduced before their affected changes.
 
-An attempt-bound continuation retrieves full diagnostics or a selected contribution without reopening source PDFs. Reports are captured evidence, not current filesystem observations or authentication. An agent compares intended order, page counts, source digests, provenance and warnings before accepting a packet. PDFConcat cannot infer that a valid explicitly named source is the wrong document for the user's purpose.
+- Integrate null rejection with strict decoding; a blanket null scan masks
+  earlier faults. Accept one leading BOM and count its bytes in offsets. Detect
+  v1 deliberately and explain both `version: 2` and `blank` → `page`.
+- Required version omission maps to `plan_version_unsupported`; missing items
+  to `plan_type`; empty items to `plan_value`. Wrong JSON types map to
+  `plan_type`; noninteger/low count to `plan_value`; excessive count (including
+  integer overflow) to `plan_limit`. Groups require dir and nonempty items.
+  Warning classes are empty and cannot change outcome status.
+- Standard JSON Schema cannot distinguish 3, 3.0 and 3e0. Lexical counts,
+  duplicate members, encoding, converted dimensions, paths and aggregate limits
+  remain decoder checks. Positive numeric font size/width bounds belong in
+  schema too. Complete documentation examples must validate.
+- Named plan/font/source inputs require Stat before open, then f.Stat before
+  read. Follow input symlinks to regular files; stdin is the stream exception.
+- Recheck report roles immediately before publication, including against an
+  output that was initially absent. Unsafe report refusal remains invalid;
+  attempted I/O failure is failed. Attempt safe reports after failed builds;
+  never recursively report a report failure.
+- Publication state is independent of Commit error. Set it after rename/link,
+  before cleanup or directory sync, retain published bytes on later failure,
+  and never let Abort undo publication.
 
-Counts and ranges remain null until their determining layout is known. Check/unpublished diagnostics describe predicted consequences; a published build records committed effects. Post-commit failures retain the actual publication and owned recovery state instead of suggesting a rollback or rebuild.
+## PDF boundaries to verify before implementation
 
-## Generated appearance
+- Walk raw page trees before validation, rejecting a Page with effective
+  non-null Kids, including an empty array. Keep canonical dictionary-name
+  identity protection with a narrow refusal where upstream double-decodes.
+- Triage every fork regression individually. Preserve valid-input fidelity
+  through small adapters/refusals; do not restore forks, appearance machinery
+  or the fitting parser. Resource-exhaustion budgets are outside the accepted
+  trusted-local-input threat model; ordinary API cancellation remains required.
+- Prune forbidden name trees from both catalog and context caches. Reopen the
+  serialized output and check its catalog. Close named/direct outlines, GoTo
+  chains, repeated/distinct name trees and legacy destinations with oracles.
+- Classify upstream password errors as source_encrypted even without a context.
+  Synchronize cached effective version before validation/writing. Retain a
+  warning for relative URI links whose catalog Base is removed.
+- Upstream does not generally merge AcroForm DR and namespaces later fields
+  even without collisions. Establish a narrow compatible boundary/refusal,
+  report actual mappings, document limitations, and draft an upstream issue.
+- Test minimal UserUnit normalization after Resize against physical geometry
+  and pixels; otherwise explicitly refuse the unsupported case. Destination
+  coordinates after fitting remain an explicit upstream limitation.
+- Preserve bitmap-only font refusal, no-subsetting restrictions, and ActualText
+  for glyph aliases and multi-glyph/multi-character clusters. Job-wide font
+  identity includes widths and ToUnicode, not only the font program.
 
-Nine anchors and PDF-coordinate offsets provide one placement model. Generated sizes inherit from neighboring source geometry unless explicitly set. Settings preserve declaration provenance through inheritance; clearing text retains the selected font and its validation.
+## Tooling and delivery boundaries
 
-The embedded Unicode font makes generated rendering independent of installed fonts. Shaping uses the selected font's metrics and mark positioning. Unsupported scripts, missing glyphs and invalid font data fail rather than producing fallback boxes. [`BLANK_PAGES.md`](BLANK_PAGES.md) defines supported text and whitespace.
-
-Text is never silently shrunk or truncated. Overflow rejects by default. Explicit `allow` retains placement and records any measured consequence as a warning; an in-bounds placement does not warn merely because `allow` was selected. Block and glyph-ink findings share one layout authority.
-
-## PDF fidelity and policy
-
-One backend adapter owns PDF object semantics. Supported source pages, ordinary links and static forms retain their relationships. Static-form resource reconciliation preserves current appearance and ordinary subsequent field editing while keeping widget appearance scopes independent. Unsupported semantic shapes fail at shared inspection/import boundaries.
-
-Assembly rewrites signed bytes, so actual signature-bearing inputs are refused. Use suitable unsigned sources and sign the final PDF in an external signing workflow. Retained page-local actions do not make output sanitized or establish script behavior after field names are qualified. Scope-specific keep/drop/refusal policy is in [`ARCHITECTURE.md`](ARCHITECTURE.md#pdf-backend-behavior) and [`SECURITY.md`](../SECURITY.md).
-
-Runtime output verification validates the staged PDF and exact page count. Independent rendering, resource inspection, form refilling and signed-byte negative controls are development assurance; syntax validation alone cannot prove appearance or editability.
-
-## Scale
-
-Resolution emits compact runs rather than allocating a page object per planned repeat. The backend assembles once from a shared resource pool, with no per-blank rewrite. Distinct generated appearances share one resource document; each page is shaped and emitted sequentially, retaining report geometry and findings. Each distinct source and font is captured once. Sources with occurrence-sensitive annotations/forms/destinations are imported per occurrence to preserve relationships.
-
-Source capture/inspection has bounded concurrency; assembly remains sequential. PDF pooling and the written output remain proportional to imported content and output page count. Reports serialize directly into owned target-local staging files. These mechanisms reduce redundant work; they do not establish a universal memory or elapsed-time envelope.
-
-### Measured results
-
-Measure the delivered executable and record its source/input identity, tool versions and host. Keep raw execution and independent-oracle evidence outside the repository; do not substitute older measurements for a changed binary. Published release outcomes belong in [`CHANGELOG.md`](../CHANGELOG.md).
-
-The deterministic [`test/scale`](../test/scale/doc.go) harness exercises distinct sources and generated styles, file/stdin plans, repeated styles, long text and image-rich inputs. Run only an explicitly authorized scale campaign:
-
-```text
-PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_QA_TOOLS=1 go test ./test/scale -run TestScaleAcceptance -count=1 -timeout 30m
-```
-
-Set `PDFCONCAT_SCALE_RESULTS` to retain JSON rows. Record launch-to-exit wall time, output/response bytes, RSS, sampled descriptors and scratch disk separately from fixture generation and independent verification. Descriptor/disk samples and Windows RSS are observed lower bounds; kernel peak RSS on Unix has a different measurement contract. A missing observation remains unavailable rather than becoming zero. Uncapped cases fail enabled acceptance on missing or failed required readings. For verified Unix capped cases, a private native launcher prepares soft/hard RLIMIT_NOFILE=64/64 on the same PID, refuses a hard-limit raise, and enforces inheritance hygiene at product exec. Successful execution and independent oracles establish the run-specific resource bound; sampled descriptor quality remains valid, partial/error, or unavailable, and the sampled maximum is never replaced by 64. At least one actual reading remains required to record cost. Windows retains its distinct native sampled-handle contract. Capped runs require frozen executable/input directories without concurrent writers or privileged external limit mutation; the bound applies after successful product exec and does not aggregate arbitrary descendants.
-
-The harness declares budgets for its light cases; other workloads are measurements. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#gates) for exact discovery and acceptance controls. Native platform behavior requires execution on that platform; a cross-build establishes compilation only.
-
-## Scope boundaries
-
-The tool remains an offline standalone executable with no daemon, configuration directory, implicit correction, network dependency or second runtime PDF engine. It does not repair arbitrary PDFs, authenticate signatures, sanitize active content, validate an author's intent, perform OCR or convert other document formats. Keep separate parsing, layout, backend and publication responsibilities when extending the implementation.
+Build the pinned linter for the host once and run that binary under each target
+GOOS; cross-building a module tool cannot execute it. Stock depguard also
+enforces diag/job/typeset leaf boundaries. Keep six CI jobs and Required CI.
+Compare fresh outputs with an evidence-preserving harness that asserts expected
+exits; do not generate unused scale fixtures. Run only the authorized WP7 scale
+case. Release readiness does not create tagged binaries or change @latest.
+Changelog outcomes are relative to published v0.2.0: repeated named destinations
+and damaged-tree refusal already shipped; repeated legacy Dests support is new.
+Review actual linked licenses, NOTICE files and archive contents.

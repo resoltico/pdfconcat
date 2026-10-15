@@ -332,7 +332,7 @@ func defaultForm(tag, resource, font, da string, q int) *pdffixture.Doc {
 	return d
 }
 
-func TestNarrowFormBoundary(t *testing.T) {
+func TestNarrowFormDefaultsDigest(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		first, second *pdffixture.Doc

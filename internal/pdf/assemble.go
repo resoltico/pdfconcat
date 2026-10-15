@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+
 	"path/filepath"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -18,6 +18,7 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/inputfile"
 	"github.com/resoltico/pdfconcat/internal/job"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
@@ -25,48 +26,6 @@ import (
 type Assembly struct {
 	FieldsRenamed map[int][]FieldRename
 	Diagnostics   []diag.Diagnostic
-}
-
-// ReadSource follows symlinks to regular files, rejecting named streams before open.
-func ReadSource(c context.Context, path string) ([]byte, error) {
-	if err := c.Err(); err != nil {
-		return nil, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	info, err = f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
-	}
-	var b bytes.Buffer
-	chunk := make([]byte, 256<<10)
-	for {
-		if err = c.Err(); err != nil {
-			return nil, err
-		}
-		n, e := f.Read(chunk)
-		b.Write(chunk[:n])
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return nil, e
-		}
-	}
-	return b.Bytes(), nil
 }
 
 // Assemble imports each occurrence independently and writes only after final validation.
@@ -94,7 +53,7 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 		}
 		var s *model.Context
 		if part.Page == nil {
-			data, e := ReadSource(c, part.Source)
+			data, e := inputfile.Read(c, part.Source, 0)
 			if e != nil {
 				return result, &policyError{code: "source_unreadable", err: e}
 			}
@@ -107,10 +66,10 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 				return result, err
 			}
 			if len(inspected.FieldNames) > 0 {
-				if formBoundary != "" && formBoundary != inspected.FormBoundary {
+				if formBoundary != "" && formBoundary != inspected.FormDefaultsDigest {
 					return result, refuse("source_form_unsupported", "Nonempty forms have different default resources or DA/Q defaults; assemble them separately or flatten them with a suitable PDF tool.")
 				}
-				formBoundary = inspected.FormBoundary
+				formBoundary = inspected.FormDefaultsDigest
 			}
 			needAppearances = needAppearances || inspected.NeedAppearances
 			if fit != nil && inspected.HasWidgets {
@@ -238,7 +197,7 @@ func Verify(c context.Context, path string, expected int64) (err error) {
 			err = refuse("output_invalid", fmt.Sprintf("Output parser panic: %v", value))
 		}
 	}()
-	data, err := ReadSource(c, path)
+	data, err := inputfile.Read(c, path, 0)
 	if err != nil {
 		return &policyError{code: "output_invalid", err: err}
 	}

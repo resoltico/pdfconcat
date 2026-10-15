@@ -360,3 +360,34 @@ and exact Poppler pixels against independent scaled-coordinate controls with
 crop/rotation and mixed units. Widget fitting is refused. Fuzz seeds ran as
 ordinary tests; no fuzzing or scale campaign ran. Full command/publication
 acceptance and native Linux/Windows results remain pending subsequent WPs/CI.
+
+## Files and publication decisions (WP5)
+
+Reran the report-alias and regular-file probes: initially absent targets through
+symlinked parent directories compare unequal, then SameFile after PDF publication;
+an unchecked report rename replaces PDF bytes. Stat accepts a symlink to a
+regular input and identifies a FIFO before opening it. Role checks therefore run
+again immediately before report publication. Report refusal is invalid; an
+attempted environmental write/durability failure is failed. Commit returns
+publication state independently from error and records visibility before cleanup
+or directory sync. Abort only removes its own temporary name.
+
+A small inputfile leaf shares named regular-file reading between plan, font and
+PDF sources. This replaces the PDF package's reader rather than duplicating its
+Stat/open/f.Stat/cancellation loop in the pipeline. A byte limit serves the real
+64 MiB plan contract; fonts/PDFs use the existing unbounded trusted-input policy.
+Stdin remains a separate stream exception. This additional responsibility-specific
+package has no internal imports or native calls and adds no identity/race layer.
+
+WP5 local verification: build, vet and the full Go test suite pass on macOS
+arm64. Native publication tests cover late-target no-clobber, overwrite/mode,
+umask, abort cleanup, real no-replace publication and real hard-link fallback.
+Narrow state tests preserve published=true through post-link removal and
+post-publication sync failures. Role tests cover hard/symbolic/case aliases and
+the initially absent symlink-parent report alias; refusal stays invalid and PDF
+bytes remain unchanged. Input tests reject directories, a device and a FIFO,
+allow regular-file symlinks, and bound stream reading to the detection byte.
+Linux/amd64 and Windows/amd64 atomicfile test binaries and all packages cross-
+compile. Those binaries were not executed here. Native Linux/Windows acceptance
+is pending the three-runner replacement CI, as resolved in the sequencing section.
+The full failed-build/report/publication matrix remains pending WP6 integration.

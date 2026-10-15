@@ -28,7 +28,7 @@ type SourceFacts struct {
 	Bytes                       int64
 	Version                     string
 	FieldNames, DestNames       []string
-	FormBoundary                string
+	FormDefaultsDigest          string
 	HasWidgets, NeedAppearances bool
 }
 
@@ -337,7 +337,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	}
 	if len(fields) > 0 {
 		signature := types.Dict{"DR": form["DR"], "DA": form["DA"], "Q": form["Q"]}
-		facts.FormBoundary, err = resourceIdentity(s, signature)
+		facts.FormDefaultsDigest, err = resourceIdentity(s, signature)
 		if err != nil {
 			return facts, ds, err
 		}

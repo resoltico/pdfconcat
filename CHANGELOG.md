@@ -4,6 +4,8 @@ Notable changes to this project are documented in this file. The format is based
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
 ### Changed
 
 - **Breaking:** plan v2 requires `version: 2` and renames top-level/item `blank` to `page`; migrate existing plans. Counts must use integer tokens from 1 to 100,000, so spell `3.0` or `3e0` as `3`; total generated pages are limited to 100,000 instead of 1,000,000. The CLI `--blank` operand remains supported. See [plan migration and limits](docs/PLAN.md).
@@ -20,7 +22,7 @@ Notable changes to this project are documented in this file. The format is based
 
 - Source bookmarks are preserved, including occurrence-specific direct and named destinations.
 - Repeated legacy `/Dests` sources retain per-occurrence targets. Existing repeated named-destination and damaged-page-tree protections remain in place.
-- Release packaging includes executable archives for macOS, Linux and Windows on amd64 and arm64, documentation, schemas and third-party notices/licenses. Checksums and provenance are configured for tag-triggered publication; assets are not available until that publication succeeds. Runtime modules no longer use local replacements, enabling module-based installation of a compatible published tag; `v0.2.0` and earlier published releases contain source only.
+- Release packaging includes executable archives for macOS, Linux and Windows on amd64 and arm64, documentation, schemas and third-party notices/licenses. Tagged release publication provides checksums and build provenance for the archives. Runtime modules no longer use local replacements, enabling module-based installation of a compatible published tag; `v0.2.0` and earlier published releases contain source only.
 
 ### Internal
 

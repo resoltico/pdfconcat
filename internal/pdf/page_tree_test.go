@@ -4,37 +4,25 @@
 package pdf
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"io"
-	"regexp"
-	"strconv"
-	"strings"
 	"testing"
+
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
-
-type pageTreeWriteCounter struct {
-	bytes.Buffer
-	chunks []int
-}
-
-func (w *pageTreeWriteCounter) Write(data []byte) (int, error) {
-	w.chunks = append(w.chunks, len(data))
-	return w.Buffer.Write(data)
-}
 
 type pageTreeWriteFunc func([]byte) (int, error)
 
 func (w pageTreeWriteFunc) Write(data []byte) (int, error) { return w(data) }
 
-func TestPageTreeProductionBufferPreservesOrderedReferencesAndWriteChunks(t *testing.T) {
+func TestNativePageTreeHasBoundedKidsAndPreservesWriteFailures(t *testing.T) {
 	t.Parallel()
 	pages := make([]Page, 8193)
 	for index := range pages {
 		pages[index] = Page{Width: 100, Height: 100}
 	}
-	var output pageTreeWriteCounter
+	var output bytes.Buffer
 	written, err := Write(t.Context(), &output, pages)
 	if err != nil {
 		t.Fatal(err)
@@ -42,43 +30,26 @@ func TestPageTreeProductionBufferPreservesOrderedReferencesAndWriteChunks(t *tes
 	if written != int64(output.Len()) {
 		t.Fatalf("returned %d bytes, actually wrote %d", written, output.Len())
 	}
-	// Every page reference occurs exactly once in bounded Kids arrays.
-	refs := map[int]int{}
-	for _, match := range regexp.MustCompile(`/Kids \[([^\]]*)\]`).FindAllStringSubmatch(output.String(), -1) {
-		fields := strings.Fields(match[1])
-		if len(fields)%3 != 0 || len(fields) > 64*3 {
-			t.Fatal("unbounded or malformed Kids array")
-		}
-		for i := 0; i < len(fields); i += 3 {
-			id, err := strconv.Atoi(fields[i])
-			if err != nil {
-				t.Fatal(err)
-			}
-			refs[id]++
-		}
+	native, _, err := generatedContext(t.Context(), pages, len(pages), nil, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for i := range pages {
-		if refs[3+2*i] != 1 {
-			t.Fatalf("page %d appears %d times", i, refs[3+2*i])
+	actual, err := rawPages(t.Context(), native)
+	if err != nil || len(actual) != len(pages) {
+		t.Fatalf("native page tree: %d %v", len(actual), err)
+	}
+	for _, entry := range native.Table {
+		if entry == nil || entry.Free {
+			continue
 		}
-	}
-	if !strings.Contains(output.String(), "/Count 8193 ") {
-		t.Fatal("root count is missing")
-	}
-	// Exercise the configured production transport, not a private tiny buffer.
-	// A direct write may exceed its capacity, but only the last write may be
-	// smaller. Ask bufio for the effective capacity, including its zero default.
-	capacity := bufio.NewWriterSize(io.Discard, writeBufferSize).Size()
-	remaining := output.Len()
-	for index, size := range output.chunks {
-		minimum := min(capacity, remaining)
-		if size < minimum {
-			t.Fatalf("production write %d used %d bytes before the final flush, want at least a %d-byte buffered chunk", index, size, minimum)
+		dict, ok := entry.Object.(types.Dict)
+		if !ok || dict["Type"] != types.Name("Pages") {
+			continue
 		}
-		remaining -= size
-	}
-	if remaining != 0 {
-		t.Fatalf("production chunks omitted %d bytes", remaining)
+		kids, err := native.DereferenceArray(dict["Kids"])
+		if err != nil || len(kids) > 64 {
+			t.Fatalf("unbounded Kids array: %d %v", len(kids), err)
+		}
 	}
 
 	refused := errors.New("staged output refused")

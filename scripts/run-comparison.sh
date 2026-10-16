@@ -46,7 +46,7 @@ def pages(path):
 
 def result(args, code=0, diagnostic=None):
     value = json.loads(run([pc] + args, expected=code))
-    if value.get("format_version") != 3:
+    if value.get("format_version") != 4:
         raise RuntimeError("unexpected result version")
     if diagnostic and diagnostic not in [d["code"] for d in value["diagnostics"]]:
         raise RuntimeError("missing expected refusal " + diagnostic)
@@ -101,11 +101,13 @@ def targets(path):
 # Versions are checked before fixture generation or long commands.
 pin = run(["go", "list", "-m", "-f", "{{.Version}}", "github.com/pdfcpu/pdfcpu"], cwd=repo).strip()
 cpu_version = run(["pdfcpu", "version"])
-if pin not in cpu_version:
-    raise RuntimeError("pdfcpu CLI does not match module pin " + pin)
+reported_versions = [value.strip() for value in re.findall(
+    r"^[ \t]*version:[ \t]*(.*)$", cpu_version, flags=re.MULTILINE)]
+if reported_versions != [pin]:
+    raise RuntimeError("pdfcpu CLI version must equal module pin %s; reported %r" % (pin, reported_versions))
 pc_version = result(["version"])
 env = dict(os.environ, PDFCONCAT_COMPARISON_DIR=str(work))
-run(["go", "test", "./internal/pipeline", "-run", "^TestComparisonFixtures$", "-count=1"], env=env, cwd=repo)
+run(["go", "test", "./internal/core", "-run", "^TestComparisonFixtures$", "-count=1"], env=env, cwd=repo)
 
 sources = ["plain-a.pdf", "links.pdf", "form.pdf", "links.pdf", "form.pdf", "named.pdf", "named.pdf", "outlined.pdf", "outlined.pdf"]
 run(["pdfcpu", "merge", "-c", "disable", "-b=false", "cpu-merge.pdf"] + sources)
@@ -134,7 +136,7 @@ if legacy_pc.get(2) != [3] or legacy_pc.get(3) != [2] or legacy_cpu.get(2) != [5
     raise RuntimeError("legacy destination observation changed")
 
 text = "Pielikums Ā ļ ķ — Ελληνικά Кириллица"
-plan = {"version": 2, "output": "pc-unicode.pdf", "items": ["plain-a.pdf", {"page": {"text": {"value": text, "size": 18}}}]}
+plan = {"version": 3, "output": "pc-unicode.pdf", "items": [{"source":"plain-a.pdf"}, {"page": {"text": {"value": text, "size": 18}}}]}
 (work / "unicode-plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 result(["check", "--plan", "unicode-plan.json"])
 if (work / "pc-unicode.pdf").exists():
@@ -150,6 +152,29 @@ core_text = run(["pdftotext", fresh_pdf("cpu-core.pdf"), "-"]).strip()
 if "Pielikums" not in core_text or any(word in core_text for word in ("Ā", "Ελληνικά", "Кириллица")):
     raise RuntimeError("core-font observation changed: " + repr(core_text))
 
+# The same font establishes shared Unicode capability, independently of core fonts.
+config = work / "pdfcpu-config"
+config.mkdir()
+run(["pdfcpu", "fonts", "install", "-c", config, repo / "internal/typeset/fontdata/NotoSans-Regular.ttf"])
+core["pages"]["1"]["content"]["text"][0]["font"]["name"] = "NotoSans-Regular"
+(work / "noto.json").write_text(json.dumps(core, ensure_ascii=False), encoding="utf-8")
+run(["pdfcpu", "create", "-c", config, "noto.json", "cpu-noto.pdf"])
+noto_text = run(["pdftotext", "-raw", fresh_pdf("cpu-noto.pdf"), "-"]).strip("\n\f")
+if noto_text != text:
+    raise RuntimeError("installed-font Unicode extraction mismatch: " + repr(noto_text))
+
+# Simple blank-divider parity: counts and every page's dimensions, not inheritance.
+run(["pdfcpu", "merge", "-c", "disable", "-b=false", "--divider", "cpu-divider.pdf", "plain-a.pdf", "links.pdf"])
+result(["build", "-o", "pc-divider.pdf", "plain-a.pdf", "--blank", "links.pdf"])
+for name in ("cpu-divider.pdf", "pc-divider.pdf"):
+    path = fresh_pdf(name)
+    if pages(path) != 4:
+        raise RuntimeError("blank-divider page count mismatch: " + name)
+    info = run(["pdfinfo", "-f", "1", "-l", "4", path])
+    sizes = re.findall(r"Page\s+\d+ size:\s+([0-9.]+) x ([0-9.]+) pts", info)
+    if len(sizes) != 4 or any((float(w), float(h)) != (612, 792) for w, h in sizes):
+        raise RuntimeError("blank-divider sheet dimensions mismatch: " + info)
+
 run(["pdfcpu", "merge", "-c", "disable", "-b=false", "cpu-signed.pdf", "plain-a.pdf", "signed.pdf"])
 if pages(fresh_pdf("cpu-signed.pdf")) != 2:
     raise RuntimeError("signed-source merge did not produce its declared pages")
@@ -160,10 +185,17 @@ run(["pdfcpu", "resize", "-c", "disable", "form:A4P, rotate:off", "fitmarks.pdf"
 result(["build", "--fit-to", "A4", "-o", "pc-fit.pdf", "fitmarks.pdf"])
 fresh_pdf("cpu-fit.pdf")
 fresh_pdf("pc-fit.pdf")
-summary = {"pdfcpu": pin, "pdfconcat": pc_version["version"], "ordered_pages": 17,
+# The pinned resize leaves local scroll coordinates unchanged; refuse this input.
+result(["check", "--fit-to", "A4", "links.pdf"], code=2, diagnostic="fit_destination_unsupported")
+result(["build", "--fit-to", "A4", "-o", "pc-fit-refused.pdf", "links.pdf"], code=2, diagnostic="fit_destination_unsupported")
+if (work / "pc-fit-refused.pdf").exists():
+    raise RuntimeError("refused fitting published a PDF")
+summary = {"pdfcpu": reported_versions[0], "pdfconcat": pc_version["version"], "ordered_pages": 17,
            "named_targets_pdfconcat": pc_targets, "named_targets_pdfcpu": cpu_targets,
            "legacy_targets_pdfconcat": legacy_pc, "legacy_targets_pdfcpu": legacy_cpu,
-           "unicode": extracted, "core_font_text": core_text,
+           "unicode": extracted, "installed_font_unicode_pdfcpu": noto_text,
+           "blank_divider_pages": 4, "blank_divider_size_pt": [612, 792],
+           "core_font_text": core_text,
            "damaged_cpu_pages": pages(fresh_pdf("cpu-damaged.pdf")),
            "short_separator_growth_bytes": (work / "pc-unicode.pdf").stat().st_size - (work / "plain-a.pdf").stat().st_size,
            "workdir": str(work)}

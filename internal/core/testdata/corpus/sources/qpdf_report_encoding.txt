@@ -1,0 +1,6 @@
+From internal/core/testdata/corpus, with a fresh output path:
+qpdf --linearize --object-streams=generate --stream-data=preserve business-report.pdf FRESH_OUTPUT.pdf
+Observed qpdf 12.4.2. This changes object/xref encoding and adds linearization;
+ReportLab already compressed content streams. It is not a new content producer.
+Independently inspect --check-linearization, --show-xref, ObjStm/XRef objects,
+page/text/navigation equivalence and pixel equality before replacing frozen bytes.

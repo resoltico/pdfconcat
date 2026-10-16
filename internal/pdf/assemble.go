@@ -4,7 +4,6 @@
 package pdf
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -30,7 +29,7 @@ type Assembly struct {
 }
 
 // Assemble imports each occurrence independently and writes only after final validation.
-func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts, pages map[int]Page, fit *job.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, w io.Writer) (result Assembly, err error) {
+func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts, occurrences map[string]OccurrenceFacts, pages map[int][]Page, fit *job.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, w io.Writer) (result Assembly, err error) {
 	var current *job.PlacedPart
 	defer func() {
 		if value := recover(); value != nil {
@@ -41,12 +40,21 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Pointer}}
 		}
 	}()
+	names, nameErr := generatedFontNames(fonts, facts)
+	if nameErr != nil {
+		return result, nameErr
+	}
 	result.FieldsRenamed = map[int][]job.FieldRename{}
 	var dest *model.Context
 	allDests := map[string]destination{}
 	usedNames := map[string]bool{}
-	version := model.V17
-	formDefaultsDigest := ""
+	var importedOutlines []importedOutlineRoot
+	var generatedLinks []generatedLink
+	compatibility := CheckCompatibility(layout, facts, occurrences, fit)
+	if len(compatibility.Diagnostics) > 0 {
+		d := compatibility.Diagnostics[0]
+		return result, &policyError{code: d.Code, err: errors.New(d.Message), file: d.File, items: d.Items}
+	}
 	needAppearances := false
 	add := func(code diag.Code, message string, index int) {
 		d := diag.New(code, message, layout.Parts[index].Pointer)
@@ -59,7 +67,7 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 			return result, err
 		}
 		var s *model.Context
-		if part.Page == nil {
+		if part.Source != "" {
 			data, e := inputfile.Read(c, part.Source, 0)
 			if e != nil {
 				return result, &policyError{code: "source_unreadable", err: e}
@@ -72,41 +80,29 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 			if err != nil {
 				return result, err
 			}
-			if inspected.HasFields {
-				if formDefaultsDigest != "" && formDefaultsDigest != inspected.FormDefaultsDigest {
-					return result, refuse("source_form_unsupported", "Nonempty forms require identical resolved DR/DA/Q representations; these differ; assemble them separately or flatten them with a suitable PDF tool.")
-				}
-				formDefaultsDigest = inspected.FormDefaultsDigest
+			occurrence, ok := occurrences[part.Pointer]
+			if !ok {
+				return result, errors.New("source occurrence was not inspected")
 			}
-			needAppearances = needAppearances || inspected.NeedAppearances
-			if fit != nil && inspected.HasWidgets {
-				return result, refuse("fit_form_unsupported", "Fitting form widgets is unsupported.")
-			}
-		} else {
-			var b bytes.Buffer
-			_, err = WriteRepeated(c, &b, pages[index], part.Count, fonts)
-			if err != nil {
-				return result, err
-			}
-			s, err = read(c, b.Bytes())
-			if err != nil {
-				return result, err
-			}
-		}
-		if s.XRefTable.Version() > version {
-			version = s.XRefTable.Version()
-		}
-		if fit != nil {
-			err = pdfcpu.Resize(c, s, nil, &model.Resize{PageDim: &types.Dim{Width: fit.Width, Height: fit.Height}, UserDim: true, EnforceOrient: true, DisableContentRotation: true})
-			if err != nil {
-				return result, err
-			}
-			resized, e := rawPages(c, s)
+			removed, e := projectSelection(c, s, occurrence.Selection)
 			if e != nil {
 				return result, e
 			}
-			for _, p := range resized {
-				delete(p.dict, "UserUnit")
+			if removed {
+				add("source_navigation_removed", "Navigation targets omitted from this source occurrence were removed.", index)
+			}
+			needAppearances = needAppearances || inspected.NeedAppearances
+		} else {
+			var links []generatedLink
+			s, links, err = generatedContext(c, pages[index], part.Pages, fonts, names)
+			if err != nil {
+				return result, err
+			}
+			generatedLinks = append(generatedLinks, links...)
+		}
+		if fit != nil {
+			if err = fitContext(c, s, fit); err != nil {
+				return result, err
 			}
 		}
 		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage)
@@ -118,6 +114,13 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 		}
 		if renamed {
 			add("destinations_renamed", "Colliding destination names were renamed for this occurrence.", index)
+		}
+		if part.Source != "" {
+			root, e := detachOutlineRoot(s, part.Owner)
+			if e != nil {
+				return result, e
+			}
+			importedOutlines = append(importedOutlines, root)
 		}
 		records, e := fields(c, s)
 		if e != nil {
@@ -150,13 +153,25 @@ func Assemble(c context.Context, layout job.Layout, facts map[string]SourceFacts
 	if err = rebuildDestinations(c, dest, allDests); err != nil {
 		return result, err
 	}
-	if err = cleanCatalog(dest, version, needAppearances); err != nil {
+	if err = graftOutlines(c, dest, layout, importedOutlines); err != nil {
+		return result, err
+	}
+	if err = finalizeGeneratedLinks(c, dest, generatedLinks); err != nil {
+		return result, err
+	}
+	if err = applyPageNumbers(c, dest, layout, fonts, names); err != nil {
+		return result, err
+	}
+	if err = cleanCatalog(dest, compatibility.version, needAppearances); err != nil {
 		return result, err
 	}
 	if err = api.OptimizeContext(c, dest); err != nil {
 		return result, err
 	}
 	if err = api.ValidateContext(c, dest); err != nil {
+		return result, err
+	}
+	if err = freeUnreachable(c, dest); err != nil {
 		return result, err
 	}
 	output := &outputWriter{writer: w}
@@ -264,5 +279,5 @@ func Verify(c context.Context, path string, expected int64) (err error) {
 	return nil
 }
 
-// Diagnostic preserves typed product failures at the pipeline boundary.
+// Diagnostic preserves typed product failures at the application boundary.
 func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, "assembly_failed") }

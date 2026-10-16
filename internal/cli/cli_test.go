@@ -12,9 +12,9 @@ import (
 )
 
 func TestInterleavedOperandsAndDelimiter(t *testing.T) {
-	c, ds := cli.Parse([]string{"build", "a.pdf", "--blank", "-o", "out.pdf", "b.pdf", "--report=report.json", "--", "--blank", "-h"})
-	if len(ds) > 0 || c.Output != "out.pdf" || c.Report != "report.json" || len(c.Operands) != 5 {
-		t.Fatalf("command %+v diagnostics %+v", c, ds)
+	c, failure := cli.Parse([]string{"build", "a.pdf", "--blank", "-o", "out.pdf", "b.pdf", "--report=report.json", "--", "--blank", "-h"})
+	if failure != nil || c.Output != "out.pdf" || c.Report != "report.json" || len(c.Operands) != 5 {
+		t.Fatalf("command %+v diagnostics %+v", c, failure)
 	}
 	for i, want := range []struct {
 		path  string
@@ -26,9 +26,9 @@ func TestInterleavedOperandsAndDelimiter(t *testing.T) {
 			t.Fatalf("operand %d: %+v", i, got)
 		}
 	}
-	c, ds = cli.Parse([]string{"check", "--plan=-", "--base-dir=here", "--fit-to", "297x210mm", "--overwrite", "--format=text"})
-	if len(ds) > 0 || c.Plan != "-" || c.BaseDir != "here" || c.Format != "text" || !c.Overwrite {
-		t.Fatalf("options %+v %+v", c, ds)
+	c, failure = cli.Parse([]string{"check", "--plan=-", "--base-dir=here", "--fit-to", "297x210mm", "--overwrite", "--format=text"})
+	if failure != nil || c.Plan != "-" || c.BaseDir != "here" || c.Format != "text" || !c.Overwrite {
+		t.Fatalf("options %+v %+v", c, failure)
 	}
 }
 
@@ -48,9 +48,9 @@ func TestUsageDiagnostics(t *testing.T) {
 		{[]string{"help", "unknown"}, "usage_unknown_command"}, {[]string{"build", string([]byte{0xff})}, "usage_invalid_value"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
-			_, ds := cli.Parse(tc.args)
-			if len(ds) != 1 || ds[0].Code != tc.code {
-				t.Fatalf("want %s got %+v", tc.code, ds)
+			_, failure := cli.Parse(tc.args)
+			if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != tc.code {
+				t.Fatalf("want %s got %+v", tc.code, failure)
 			}
 		})
 	}
@@ -58,15 +58,15 @@ func TestUsageDiagnostics(t *testing.T) {
 
 func TestHelpAndVersionForms(t *testing.T) {
 	for _, args := range [][]string{nil, {"help"}, {"--help"}, {"build", "--help"}, {"check", "-h"}, {"help", "version"}, {"schema", "--help"}} {
-		c, ds := cli.Parse(args)
-		if len(ds) > 0 || !c.Help || cli.Help(c.Name) == "" {
-			t.Fatalf("help %v: %+v %+v", args, c, ds)
+		c, failure := cli.Parse(args)
+		if failure != nil || !c.Help || cli.Help(c.Name) == "" {
+			t.Fatalf("help %v: %+v %+v", args, c, failure)
 		}
 	}
 	for _, args := range [][]string{{"version"}, {"--version"}, {"version", "--format=text"}} {
-		c, ds := cli.Parse(args)
-		if len(ds) > 0 || c.Name != "version" {
-			t.Fatalf("version %v: %+v %+v", args, c, ds)
+		c, failure := cli.Parse(args)
+		if failure != nil || c.Name != "version" {
+			t.Fatalf("version %v: %+v %+v", args, c, failure)
 		}
 	}
 	help := cli.Help("build")
@@ -79,5 +79,48 @@ func TestHelpAndVersionForms(t *testing.T) {
 		if strings.Contains(help, removed) {
 			t.Fatalf("help advertises removed option %s", removed)
 		}
+	}
+}
+
+func TestUsageErrorFormatAndFirstFailure(t *testing.T) {
+	for _, tc := range []struct {
+		args   []string
+		format string
+		code   diag.Code
+		item   string
+	}{
+		{[]string{"check", "--bad", "--format", "text"}, "text", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--format", "text", "--bad"}, "text", "usage_unknown_option", "argv:3"},
+		{[]string{"check", "--report=", "--format=text"}, "text", "usage_invalid_value", "argv:1"},
+		{[]string{"check", "--format=text", "--report="}, "text", "usage_invalid_value", "argv:2"},
+		{[]string{"check", "--report", "", "--format", "text"}, "text", "usage_invalid_value", "argv:2"},
+		{[]string{"check", "--report", "--format", "text"}, "text", "usage_missing_value", "argv:1"},
+		{[]string{"check", "--format", "text", "--report"}, "text", "usage_missing_value", "argv:3"},
+		{[]string{"check", "--overwrite=yes", "--format=text"}, "text", "usage_invalid_value", "argv:1"},
+		{[]string{"check", "--bad=--format", "text"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--report=--format", "text"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--report", "--", "--format=text"}, "text", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--", "--format=text"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--format", "xml"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--format="}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--format"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--format=text", "--format=text"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--format=text", "--format=json"}, "json", "usage_conflict", "argv:2"},
+		{[]string{"check", "--format=json", "--format=text"}, "json", "usage_conflict", "argv:2"},
+		{[]string{"check", "--format=text", "--format"}, "json", "usage_conflict", "argv:2"},
+		{[]string{"check", "--format", "--report", "x", "--format=text"}, "json", "usage_missing_value", "argv:1"},
+		{[]string{"check", "--report=x", "--report", "--", "--format=text"}, "text", "usage_conflict", "argv:2"},
+		{[]string{"version", "--report", "--", "--format=text"}, "json", "usage_unknown_option", "argv:1"},
+		{[]string{"version", "--bad", "--format=text"}, "text", "usage_unknown_option", "argv:1"},
+		{[]string{"--version", "--bad", "--format=text"}, "text", "usage_unknown_option", "argv:1"},
+		{[]string{"schema", "--bad", "--format=text"}, "json", "usage_invalid_value", "argv:1"},
+		{[]string{"unknown", "--format=text"}, "json", "usage_unknown_command", "argv:0"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			c, failure := cli.Parse(tc.args)
+			if c.Format != tc.format || failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != tc.code || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != tc.item {
+				t.Fatalf("want %s/%s/%s, got %+v %+v", tc.format, tc.code, tc.item, c, failure)
+			}
+		})
 	}
 }

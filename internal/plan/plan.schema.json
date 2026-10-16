@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
   "title": "PDFConcat plan",
-  "description": "An ordered assembly of PDF files and generated pages (plan format version 2). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
+  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 3). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
   "type": "object",
   "required": [
     "version",
@@ -15,7 +15,7 @@
       "description": "Ignored by PDFConcat; for editors."
     },
     "version": {
-      "const": 2,
+      "const": 3,
       "description": "Plan format version."
     },
     "output": {
@@ -30,7 +30,7 @@
     },
     "fit_to": {
       "$ref": "#/$defs/sheetSize",
-      "description": "Scale every output page proportionally, centred, onto this sheet. Paper names are portrait. --fit-to overrides it."
+      "description": "Scale every output page proportionally, centred, onto this sheet. Refuses form widgets and internal destinations with numeric position coordinates. Paper names are portrait. --fit-to overrides it."
     },
     "page": {
       "$ref": "#/$defs/page",
@@ -38,6 +38,21 @@
     },
     "items": {
       "$ref": "#/$defs/items"
+    },
+    "page_numbers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "$ref": "#/$defs/positiveLength",
+          "default": 9
+        },
+        "margin": {
+          "$ref": "#/$defs/nonnegativeLength",
+          "default": "8mm"
+        }
+      },
+      "description": "Presence paints physical Arabic page numbers on all non-padding pages. The overlay may cover source content."
     }
   },
   "$defs": {
@@ -47,9 +62,39 @@
       "items": {
         "oneOf": [
           {
-            "type": "string",
-            "minLength": 1,
-            "description": "A PDF path. Never interpreted: \"--blank\" is a file name."
+            "type": "object",
+            "required": [
+              "source"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pages": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100000,
+                "items": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  ],
+                  "items": false
+                },
+                "description": "Ascending disjoint inclusive original page ranges; adjacency is normalized. Decoder checks ordering, aggregate pair count and source bounds."
+              }
+            }
           },
           {
             "type": "object",
@@ -73,15 +118,72 @@
           {
             "type": "object",
             "required": [
-              "dir",
+              "contents"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "contents": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "$ref": "#/$defs/title",
+                    "default": "Contents"
+                  },
+                  "size": {
+                    "$ref": "#/$defs/sheetSize",
+                    "description": "Defaults to fit_to, otherwise A4; explicit size is authored before fitting."
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "items"
             ],
+            "anyOf": [
+              {
+                "required": [
+                  "dir"
+                ]
+              },
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "start_on"
+                ]
+              }
+            ],
+            "dependentRequired": {
+              "divider": [
+                "title"
+              ]
+            },
             "additionalProperties": false,
             "properties": {
               "dir": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Directory for relative paths inside this group, relative to the enclosing directory."
+                "description": "Scope for child item paths; divider font declarations resolve in the enclosing scope."
+              },
+              "title": {
+                "$ref": "#/$defs/title"
+              },
+              "start_on": {
+                "enum": [
+                  "any",
+                  "odd"
+                ],
+                "default": "any"
+              },
+              "divider": {
+                "$ref": "#/$defs/divider"
               },
               "items": {
                 "$ref": "#/$defs/items"
@@ -259,6 +361,57 @@
         {
           "type": "number",
           "minimum": 1,
+          "maximum": 14400
+        },
+        {
+          "type": "string",
+          "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$"
+        }
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000,
+      "allOf": [
+        {
+          "pattern": "[^\\p{Z}\\s]"
+        },
+        {
+          "not": {
+            "pattern": "[\\p{Cc}\\p{Cf}\u2028\u2029]"
+          }
+        }
+      ],
+      "description": "Single-line title without control or format characters; preserve authored Unicode without trimming."
+    },
+    "divider": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/page"
+        },
+        {
+          "not": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "required": [
+                  "value"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "description": "One generated section title page. text.value is supplied by the section title and must not be declared."
+    },
+    "nonnegativeLength": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
           "maximum": 14400
         },
         {

@@ -1,1 +1,1 @@
-{"format_version":3,"command":"","status":"invalid","output":null,"pages":null,"fit_to":null,"diagnostics":[{"severity":"error","code":"usage_unknown_command","message":"Unknown command: unknown","items":["argv:0"],"items_omitted":0}],"diagnostics_omitted":0,"report":null}
+{"format_version":4,"command":"","status":"invalid","output":null,"pages":null,"fit_to":null,"page_numbers":null,"diagnostics":[{"severity":"error","code":"usage_unknown_command","message":"Unknown command: unknown","items":["argv:0"],"items_omitted":0}],"diagnostics_omitted":0,"report":null}

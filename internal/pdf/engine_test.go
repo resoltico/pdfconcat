@@ -152,10 +152,10 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *job.Size) (string, 
 		}
 		warnings = append(warnings, ds...)
 		facts[path] = f
-		domain[path] = f.SourceFacts
+		domain[fmt.Sprintf("/items/%d", i)] = f.SourceFacts
 		j.Parts = append(j.Parts, job.Part{Pointer: fmt.Sprintf("/items/%d", i), Source: path})
 	}
-	layout, ds := job.Resolve(j, domain)
+	layout, ds := job.Resolve(j, domain, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -164,7 +164,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *job.Size) (string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := pdf.Assemble(t.Context(), layout, facts, nil, fit, nil, f)
+	a, err := pdf.Assemble(t.Context(), layout, facts, wholeOccurrences(layout, facts), nil, fit, nil, f)
 	closeErr := f.Close()
 	if err != nil {
 		return path, a, []diag.Diagnostic{pdf.Diagnostic(err)}
@@ -282,9 +282,6 @@ func TestGeneratedItemSharesContentAndFontUnion(t *testing.T) {
 	if _, err = pdf.WriteRepeated(t.Context(), &b, page, 130, fonts); err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Count(b.Bytes(), []byte("/Contents ")) != 130 || bytes.Count(b.Bytes(), []byte("\nstream\n")) != 3 || bytes.Count(b.Bytes(), []byte("/Resources ")) != 130 {
-		t.Fatal("generated item did not share resources/content")
-	}
 	path := filepath.Join(t.TempDir(), "generated.pdf")
 	if err = os.WriteFile(path, b.Bytes(), 0600); err != nil {
 		t.Fatal(err)
@@ -292,6 +289,24 @@ func TestGeneratedItemSharesContentAndFontUnion(t *testing.T) {
 	tools := oracle.RequireTools(t)
 	if err = tools.Check(path); err != nil {
 		t.Fatal(err)
+	}
+	count := 0
+	var content, resource any
+	for _, dict := range qpdfDictionaries(t, path) {
+		if dict["/Type"] != "/Page" {
+			continue
+		}
+		count++
+		if content == nil {
+			content = dict["/Contents"]
+			resource = dict["/Resources"]
+		}
+		if dict["/Contents"] != content || dict["/Resources"] != resource {
+			t.Fatal("generated pages did not share content/resources")
+		}
+	}
+	if count != 130 || content == nil || resource == nil || embeddedPrograms(t, path) != 1 {
+		t.Fatalf("repeated page/font structure: pages=%d", count)
 	}
 	raw, err := exec.CommandContext(t.Context(), tools.PDFToText, "-f", "1", "-l", "1", "-raw", path, "-").Output()
 	if err != nil {
@@ -312,17 +327,17 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	layout, _ := job.Resolve(job.Job{Parts: []job.Part{{Source: path}}}, map[string]job.SourceFacts{path: facts.SourceFacts})
+	layout, _ := job.Resolve(job.Job{Parts: []job.Part{{Source: path, Pointer: path}}}, map[string]job.SourceFacts{path: facts.SourceFacts}, 0)
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, nil, nil, nil, &bytes.Buffer{})
+	_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != "source_changed" {
 		t.Fatalf("change detection %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = pdf.Assemble(ctx, layout, nil, nil, nil, nil, &bytes.Buffer{})
+	_, err = pdf.Assemble(ctx, layout, nil, nil, nil, nil, nil, &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != "interrupted" {
 		t.Fatalf("cancel %v", err)
 	}
@@ -382,43 +397,62 @@ func TestMalformedWidgetRectangleIsRefused(t *testing.T) {
 
 func TestGlyphPruningPreservesPixels(t *testing.T) {
 	tools := oracle.RequireTools(t)
-	font := defaultFont(t)
-	for _, text := range []string{"Latvija Ā ļ ķ", "Ελληνικά", "Кириллица ā ļ Áé"} {
-		page := textPage(t, font, text)
-		prepared, err := typeset.PrepareFonts([]*typeset.Placed{page.Text})
-		if err != nil {
-			t.Fatal(err)
-		}
-		dir := t.TempDir()
-		original := filepath.Join(dir, "original.pdf")
-		pruned := filepath.Join(dir, "pruned.pdf")
-		var a, b bytes.Buffer
-		if _, err = pdf.Write(t.Context(), &a, []pdf.Page{page}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = pdf.WriteRepeated(t.Context(), &b, page, 1, prepared); err != nil {
-			t.Fatal(err)
-		}
-		if err = os.WriteFile(original, a.Bytes(), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if err = os.WriteFile(pruned, b.Bytes(), 0600); err != nil {
-			t.Fatal(err)
-		}
-		var pixels [][]byte
-		for i, path := range []string{original, pruned} {
-			prefix := filepath.Join(dir, fmt.Sprintf("render-%d", i))
-			if out, err := exec.CommandContext(t.Context(), tools.PDFToPPM, "-singlefile", "-r", "72", path, prefix).CombinedOutput(); err != nil {
-				t.Fatalf("render: %v %s", err, out)
-			}
-			data, err := os.ReadFile(prefix + ".ppm")
+	for _, font := range []*typeset.Font{defaultFont(t), noSubsetFont(t, false), noSubsetFont(t, true)} {
+		for _, text := range []string{"Latvija Ā ļ ķ", "Ελληνικά", "Кириллица ā ļ Áé"} {
+			page := textPage(t, font, text)
+			prepared, err := typeset.PrepareFonts([]*typeset.Placed{page.Text})
 			if err != nil {
 				t.Fatal(err)
 			}
-			pixels = append(pixels, data)
-		}
-		if !bytes.Equal(pixels[0], pixels[1]) {
-			t.Fatalf("pruning changed pixels for %q", text)
+			dir := t.TempDir()
+			original := filepath.Join(dir, "original.pdf")
+			pruned := filepath.Join(dir, "pruned.pdf")
+			var a, b bytes.Buffer
+			if _, err = pdf.Write(t.Context(), &a, []pdf.Page{page}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = pdf.WriteRepeated(t.Context(), &b, page, 1, prepared); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(original, a.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(pruned, b.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Read the actual serialized programs independently; matching pixels alone
+			// cannot establish that the intended pruned/full program was embedded.
+			_, programs := finalFontFacts(t, pruned)
+			if len(programs) != 1 {
+				t.Fatal("one generated font program expected")
+			}
+			for _, program := range programs {
+				if prepared[font.Identity()].Subset {
+					if len(program) >= len(font.Bytes()) {
+						t.Fatal("short-text native embedding was not actually reduced")
+					}
+				} else if !bytes.Equal(program, font.Bytes()) {
+					t.Fatal("full-font embedding changed original bytes")
+				}
+			}
+			if got := strings.TrimSpace(extractRaw(t, pruned)[0]); got != text {
+				t.Fatalf("pruned Unicode extraction %q want %q", got, text)
+			}
+			var pixels [][]byte
+			for i, path := range []string{original, pruned} {
+				prefix := filepath.Join(dir, fmt.Sprintf("render-%d", i))
+				if out, err := exec.CommandContext(t.Context(), tools.PDFToPPM, "-singlefile", "-r", "72", path, prefix).CombinedOutput(); err != nil {
+					t.Fatalf("render: %v %s", err, out)
+				}
+				data, err := os.ReadFile(prefix + ".ppm")
+				if err != nil {
+					t.Fatal(err)
+				}
+				pixels = append(pixels, data)
+			}
+			if !bytes.Equal(pixels[0], pixels[1]) {
+				t.Fatalf("pruning changed pixels for %q", text)
+			}
 		}
 	}
 }
@@ -437,11 +471,11 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	}
 	font := defaultFont(t)
 	j := job.Job{Parts: []job.Part{{Source: source, Pointer: "source"}}}
-	pages := map[int]pdf.Page{}
+	pages := map[int][]pdf.Page{}
 	var placements []*typeset.Placed
 	for i, text := range []string{"Ā ļ ķ", "Ελληνικά", "Кириллица ā"} {
 		page := textPage(t, font, text)
-		pages[i+1] = page
+		pages[i+1] = []pdf.Page{page}
 		placements = append(placements, page.Text)
 		style := job.Defaults()
 		style.Size = job.Size{Width: 300, Height: 200}
@@ -451,12 +485,12 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := job.Resolve(j, map[string]job.SourceFacts{source: facts.SourceFacts})
+	layout, ds := job.Resolve(j, map[string]job.SourceFacts{"source": facts.SourceFacts}, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	var b bytes.Buffer
-	if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, pages, nil, fonts, &b); err != nil {
+	if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), pages, nil, fonts, &b); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "output.pdf")
@@ -480,8 +514,18 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(fontList), "yes") {
-		t.Fatalf("font not embedded: %s", fontList)
+	found := false
+	for _, line := range strings.Split(string(fontList), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 8 && strings.HasSuffix(fields[0], "+NotoSans-Regular") {
+			found = true
+			if fields[len(fields)-5] != "yes" || fields[len(fields)-4] != "yes" || fields[len(fields)-3] != "yes" {
+				t.Fatalf("generated font embedding/subset/Unicode flags: %s", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("generated subset font missing: %s", fontList)
 	}
 }
 
@@ -921,7 +965,7 @@ func TestIndirectPolicyAndActionValues(t *testing.T) {
 		d.Objs[0] = bytes.ReplaceAll(d.Objs[0], []byte("/NeedAppearances true"), []byte("/NeedAppearances 7 0 R"))
 		d.Objs = append(d.Objs, []byte("true"))
 		_, ds := pdf.Inspect(t.Context(), d.Bytes())
-		if !codePresent(ds, "form_appearances_regenerated") {
+		if !codePresent(ds, "form_appearance_regeneration_requested") {
 			t.Fatalf("indirect appearance flag: %+v", ds)
 		}
 	})

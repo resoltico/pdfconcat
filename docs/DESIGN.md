@@ -6,24 +6,62 @@ PDFConcat is a sequential, in-memory packet assembler built on unmodified pdfcpu
 
 | Package | Responsibility |
 | --- | --- |
-| cmd/pdfconcat | Signals, standard streams, build identity and exit code |
-| cli | Interleaved argument grammar and help |
+| cmd/pdfconcat | Signals, streams, cwd capability, linker override and exit |
+| cli | Grammar/help, process stdin adapter and copied stdout/terminal views |
 | plan | Strict plan decoding, located errors and editor schema |
 | job | Styles, paths, sizes, layering and page ranges |
 | typeset | Font validation, shaping, placement and stable-GID pruning |
 | pdf | PDF inspection, generation, fitting, merging and verification |
 | inputfile | Regular-file reads and bounded stream reads |
-| atomicfile | Sibling staging, no-replace publication and durability |
-| result | Result/report v3, schemas and capped stdout views |
-| pipeline | Staged check/build execution and safe reporting |
+| publication | Native object identity, role reservations, staging and durability |
+| result | Complete result/report v4, normalization, schemas and JSON encoding |
+| core | Closed application facade; admission, preparation, composition, build and report |
 
-Only `internal/pdf` imports pdfcpu; only `internal/typeset` imports go-text; only `internal/atomicfile` imports x/sys. The domain and typesetting packages depend only on the diagnostic package internally. Test-only `pdffixture` creates PDFs and `oracle` inspects them with qpdf and Poppler. Stock depguard enforces these boundaries.
+Only `internal/pdf` imports pdfcpu; only `internal/typeset` imports go-text;
+only `internal/publication` imports x/sys. Exact strict owner rules in
+`.golangci.yml` cover the entire current package graph without grandfathering.
+Owner directories are canonical and module-relative; root `.` selectors are
+refused because their layer glob would not match canonical source filenames.
+The tools-module architecture command invokes pinned depguard directly, fully
+syntax-parsing all physical Go files including inactive OS/custom tags, hidden,
+ignored, generated and testdata files. It rejects unclassified/overlapping/stale
+owners, source links, unexpected module/workspace roots and discovery/config/syntax
+errors. Root and tools are the supported modules. Tests have explicit allowances;
+fixture/oracle production has no local imports. The core parity executable in
+`internal/core/testdata/client` has an explicit owner permitting only core/std.
+Import/ownership enforcement does not prove inactive-code type correctness or
+behavior. Review semantic cohesion separately.
+See [application contracts and ownership](CORE.md) and [contributor checks](../CONTRIBUTING.md).
 
 ## Strict decoding
 
 Plan decoding uses jsontext grammar and duplicate-member checks, json/v2 scalar conversion, and immediate domain/null checks to preserve first-fault order. A leading UTF-8 BOM is included in original byte locations. Required members, lexical integer counts and aggregate limits are checked by the decoder; standard JSON Schema cannot enforce every one of these constraints. See [PLAN](PLAN.md) for syntax, paths, layering and error precedence.
 
-## Pipeline and input identity
+## Declared tree and physical layout
+
+Plan v3 keeps containers through resolution. Source objects hold normalized,
+ascending disjoint original-page ranges. A single resolved layout supplies
+compact mappings, authored section targets/ranges and all source, page, divider,
+contents and padding spans. The result/report v4 leaf parts partition physical
+pages 1..N; section ranges can overlap and can begin before their non-padding
+target. Titles are stored once on sections and derived into divider text.
+
+Contents titles wrap once against a fixed measured digit column sized by the
+conservative selected-source/authored-page/divider/section/odd-boundary bound.
+The exact contents count is known before final parity resolution; actual target
+digits do not reflow titles. Whole-row logical and ink bounds fit beneath a
+repeated heading and above the configured footer envelope in final fitted
+geometry. Without contents its page count is zero.
+
+Physical Arabic footers count every page but skip painting automatic parity
+blanks. They are overlays, not page parts. Fresh page-local resource dictionaries
+and q/Q wrapper streams isolate original conforming graphics state; original
+stream objects and page/annotation geometry remain intact. Fitted preservation
+is measured against the immediate post-fit baseline. Footer placement does not
+inspect source content for overlaps. The output uses physical page numbers
+without a PageLabels override.
+
+## Execution and input identity
 
 `check` and `build` load the plan or operands, check file roles, load selected fonts and validate text policy before reading PDFs, inspect each distinct source, resolve sizes/ranges and form/destination policy, then lay out generated text. `check` stops after layout and may write a report. It does not prove that merging or serialization will succeed.
 
@@ -63,6 +101,32 @@ The raw page-tree walk requires nonempty dictionaries, valid Page/Pages types an
 
 Ambiguous canonical dictionary keys and name values containing a literal hash followed by hex digits are refused because upstream can decode their identity twice. Ordinary literal hashes remain supported. A resource dictionary shared with an annotation or field is refused because upstream validation can discard that other role. These checks do not constitute a general PDF repair detector.
 
+## Selected sources and native construction
+
+Inspection validates each whole path once, retaining full hash/byte count,
+original page count/version, safety and conservative font-prefix facts. Each
+requested occurrence gets an isolated ephemeral selected view; only selected
+geometry/navigation/appearance facts drive composition compatibility. Partial
+sources with fields/widgets refuse. Optional footer geometry is measured once
+for the union of selected original pages, rather than reparsing each occurrence.
+Building independently rereads and digest-checks every occurrence.
+
+Projection materializes effective inheritable resources/boxes/rotation and
+places selected original page references in a balanced tree, refreshing page
+caches. Selected objects stay within their occurrence's native context.
+Semantic links/actions/named destinations and native outline dictionaries are
+pruned within the occurrence. Omitted parent outline targets may retain a
+nonclickable container for surviving descendants. Native styles/actions and
+open/closed state survive grafting beneath the nearest authored section; the
+composed hierarchy is checked against the backend's actual outline limit.
+
+Generated pages use a complete native pdfcpu context and the same font/content
+builder for ordinary text, multi-block contents and footers. Generated contexts
+merge directly. Pruning tests serialize the same builder with original and
+pruned font programs. After catalog cleanup, structural reachability
+frees orphan native objects so stale live trailing entries cannot leave an
+incorrect serialized xref Size; this is separate from semantic navigation policy.
+
 ## Destination byte identity
 
 Named destinations are byte strings rather than display text. The adapter preserves raw literal/hex bytes, compares and sorts bytewise, and emits hex without text transcoding. Collisions receive unique ASCII names. References in annotations, outlines, GoTo actions and Next chains are rewritten within their source occurrence; JavaScript references are not rewritten.
@@ -75,9 +139,9 @@ Conflicting targets for the same key in a name tree and legacy dictionary are re
 
 Upstream does not generally merge multiple form default-resource dictionaries. PDFConcat compares resolved `/DR`, form-level `/DA` and `/Q` representations and permits multiple nonempty forms only when those representations match. The Fields array determines nonemptiness. An empty form is replaced by a later nonempty form, including its resources. `check` predicts possible namespacing; `build` reads actual names from the merged parent chains.
 
-The backend can require widget appearance dictionaries when writing PDF 2.0. A valid PDF 1.7 form using viewer-regenerated appearances can fail assembly when another source raises the output to 2.0. Provide sources with complete appearances or assemble the form separately. This produces `assembly_failed`; `output_write_failed` is reserved for actual destination I/O failures. `check` does not serialize a merged document and may not detect this combination.
+The effective output version is the maximum of PDF 1.7 and every source version. Both preflight and assembly apply the same form and fitting compatibility rules. When individually valid sources combine into PDF 2.0 output with a missing required retained annotation appearance, `check` and `build` refuse with `source_output_incompatible`, identifying the affected source and the source requiring PDF 2.0. An invalid original source can fail whole-source validation earlier as `source_invalid`. Provide complete appearances or assemble the affected source separately. The upstream checker retains its Link/Popup/Projection and both-zero-size rectangle exceptions. `check` remains predictive: other merge or serialization failures can still produce `assembly_failed`; `output_write_failed` is reserved for actual destination I/O failures.
 
-Fitting uses upstream proportional resize with enforced target orientation and no extra rotation. Widget forms are refused. Resized pages have UserUnit 1 so the target dimensions describe physical sheets. Nonzero output box origins are permitted; target side lengths are the contract. Destination XYZ/FitH/FitV/FitR scroll coordinates are not transformed. Print-box, bleed and imposition fidelity beyond this boundary is not guaranteed. Explicit generated canvases retain authored layout/overflow checks before resizing; inherited canvases use the fit target.
+Fitting uses upstream proportional resize with enforced target orientation and no extra rotation. Widget forms are refused. Resized pages have UserUnit 1 so the target dimensions describe physical sheets. Nonzero output box origins are permitted; target side lengths are the contract. Fitting refuses internal destinations with explicit numeric position coordinates (`fit_destination_unsupported`): XYZ left/top, FitH/FitBH top, FitV/FitBV left and FitR rectangle coordinates. This includes retained named definitions, links, outlines and chained local GoTo actions. Whole-page Fit/FitB, null-only position coordinates and zoom-only XYZ remain supported. Remote destinations, removed catalog actions and omitted out-of-tree named definitions do not trigger the guard. Use original page sizes for sources with numeric local targets. Print-box, bleed and imposition fidelity beyond this boundary is not guaranteed. Explicit generated canvases retain authored layout/overflow checks before resizing; inherited canvases use the fit target.
 
 The output catalog permits Type, Pages, AcroForm, Dests, Outlines, Version and Names containing only Dests. XFA is removed. Cleanup covers catalog entries and internal caches so writing cannot recreate removed name trees. Effective version fields are synchronized before validation and writing: output is at least PDF 1.7, or PDF 2.0 if any source is 2.0.
 
@@ -85,7 +149,18 @@ The output catalog permits Type, Pages, AcroForm, Dests, Outlines, Version and N
 
 Text is shaped and measured with the original static TrueType program. ToUnicode and ActualText preserve text extraction for glyph aliases and clusters. Restricted and bitmap-only outline embedding are refused; no-subsetting permissions retain the original program. Empty text still validates its selected font without embedding an unused font. See [PLAN](PLAN.md) for script, wrapping, placement and overflow rules.
 
+Fonts selected for generated text require complete consumed `post` metadata
+(32-byte common header; formats 1, 2, 2.5 or 3) and `OS/2` metadata (version 0–5;
+64-byte consumed prefix). The signed 16.16 `post` angle and nonzero fixed-pitch
+value are independent of style. Italic style uses `fsSelection` bit 0 or, for
+`OS/2` version 4 or later, oblique bit 9; names, angle and `head` flags are not
+style fallbacks. Missing, short or unknown metadata is `font_invalid`; embedding
+rights are enforced separately. Original traits feed shared native font
+descriptors for full/pruned programs and body/contents/footer resources.
+
 Glyph pruning keeps IDs, metrics, glyph count, used outlines and composite components; rebuilds glyf/loca and checksums; reduces post to format 3; and drops layout/cmap tables after shaping. Stable IDs allow Identity CID-to-GID mapping without a renumbering layer. The job-wide glyph union produces identical font programs, widths and ToUnicode in generated items so upstream can deduplicate them. Counted pages within one item share content/resources and use a balanced page tree.
+
+Prepared fonts explicitly record whether they contain a subset. Before writing any generated item, the PDF adapter reserves six-uppercase-letter subset prefixes found in imported BaseFont and descriptor FontName entries and tag-like names of generated full fonts, then allocates unused prefixes deterministically in sorted font-byte identity order. Each pruned font uses one `AAAAAA+PostScriptName`-style name throughout the job; its Type0 wrapper, CIDFont and descriptor agree. Full programs receive no added prefix and retain their original sanitized PostScript name and exact bytes, including names that already resemble subset names. TrueType name tables remain unchanged. PDF name syntax is escaped when writing, so ordinary literal hashes remain literal. The canonical-name safety policy also applies to generated fonts: a PostScript name containing a literal hash followed by two hexadecimal digits is refused as `font_invalid` by both check and build, before publication. Select a font with a different PostScript name. Generated allocation avoids adding imported-tag collisions; it does not repair naming defects between sources.
 
 ## Parser and resource limits
 
@@ -101,4 +176,4 @@ Output and report files follow umask; replacements retain their mode. Publicatio
 
 Tool versions are declared in `tools/go.mod`. The linter is built for the host before running it under each target GOOS. Actionlint runs with stock `@version` isolation because its YAML API is incompatible with the combined linter-tool dependency graph; the selected version is derived from that same module. Contributor commands, verification scope and isolated snapshot precautions are in [CONTRIBUTING](../CONTRIBUTING.md).
 
-CI runs lint, native tests on Linux/macOS/Windows, a six-target cross-build and the `Required CI` aggregate. The release workflow requires these checks before publishing tagged binaries and provenance. Current upstream reproduction drafts are in [upstream issue drafts](https://github.com/resoltico/pdfconcat/blob/main/docs/upstream-pdfcpu-issues.md); posting them requires maintainer approval.
+CI runs lint, native tests on Linux/macOS/Windows, a six-target cross-build and the `Required CI` aggregate. The release workflow requires these checks before publishing tagged binaries and provenance.

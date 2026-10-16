@@ -5,7 +5,8 @@ Use Go at the version declared in `go.mod`. From a clean checkout:
 ```sh
 go build -o bin/pdfconcat ./cmd/pdfconcat
 go vet ./...
-go test ./...
+go test -count=1 ./...
+(cd tools && go test -count=1 ./... && go run ./cmd/architecture ..)
 ```
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
@@ -14,7 +15,7 @@ Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
 `PDFCONCAT_REQUIRE_ORACLE=1` to require them. Linux CI does that.
 
 ```sh
-PDFCONCAT_REQUIRE_ORACLE=1 go test -race ./...
+PDFCONCAT_REQUIRE_ORACLE=1 go test -race -count=1 ./...
 ```
 
 Race tests run on Linux/macOS; Windows runs ordinary tests. CI has six jobs:
@@ -38,9 +39,15 @@ go mod tidy -diff
 ```
 
 Use a writable scratch executable path on Windows. Actionlint uses isolated
-`@version` execution because its prerelease YAML API conflicts with the linter's
-combined dependency graph; the version is still derived from the one tool module.
-See [DESIGN](docs/DESIGN.md). Actionlint uses shellcheck when it is available.
+`@version` execution with its version derived from the tool module; see
+[DESIGN](docs/DESIGN.md#files-tools-and-delivery) for the isolation reason.
+Actionlint uses shellcheck when it is available.
+
+The architecture command checks every physical Go file, including inactive tags
+and hidden or ignored source, against `.golangci.yml`. New package directories
+require deliberate ownership classification. See
+[package boundaries](docs/DESIGN.md#packages-and-boundaries) for its scope and
+limits. Run it and its rejecting controls as shown above.
 
 Lint is standard plus a curated list. No inline lint suppressions are allowed.
 Every exception belongs in `.golangci.yml` with its reason. Do not run an all-
@@ -55,7 +62,7 @@ We test behavior at the boundary where users rely on it:
 - PDF behavior with small synthetic fixtures and independent qpdf/Poppler checks.
   Poppler byte-name lookup complements decoded qpdf JSON; pixels complement
   structural font/pruning checks.
-- File publication natively on Linux, macOS and Windows; pipeline report safety
+- File publication natively on Linux, macOS and Windows; core report safety
   and cancellation use small product tests.
 
 We deliberately do not gate on mutation testing, coverage percentages, fuzzing
@@ -68,21 +75,63 @@ A new check needs a concrete user-visible risk and the cheapest meaningful test
 for it. Preserve failure visibility and expected test discovery. Do not create a
 check mainly to satisfy another check.
 
+## Permanent corpus
+
+Frozen, fictional producer exports, authored sources and font notices live in
+`internal/core/testdata/corpus` in a source checkout. Authoritative ordinary Go
+case tables are in `internal/core/corpus*_test.go`; no producer or network access
+is needed by tests. This is finite pairwise/higher-order capability coverage,
+not exhaustive arbitrary PDF permutations. Binary archives do not include the
+source-only corpus; these commands and paths refer to a source checkout.
+
+Use an unused absolute output directory outside the checkout for retention:
+
+```sh
+mkdir -p /absolute/fresh/pdfconcat-artifacts
+PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestCorpus' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
+PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestCorpusScaleProfiles$|^TestCorpusStagedBuildSIGINT$' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
+```
+
+The large scale and staged-build workloads are opt-in; ordinary tests and CI
+exclude them.
+
+`t.ArtifactDir` provides actual unique case paths; child directories are siblings,
+not children of the suite directory. Derived matrices record those paths. Each
+case stages copies of selected inputs and consumed fonts; canonical corpus bytes
+are never writable product inputs/collision targets. Product/schema/publication
+checks run without optional PDF tools; only nested oracle checks skip locally.
+Linux CI requires the tools. Ordinary subprocess tests compile fresh normal children;
+a race parent does not instrument such children. The Linux/macOS stdin test
+explicitly builds both normal/race children and proves pipe consumption before SIGINT. The
+opt-in staging test observes an owned stage before signaling and verifies cleanup.
+Scale profiles have no timing threshold. Existing unit/context tests remain
+supporting checks, not substitutes for real signal boundaries.
+
+Regeneration is reviewed authoring, not CI setup. Inspect every source page,
+metadata/action/attachment content and prior form revision, retain complete font
+notices, and refresh independent facts/hashes only after visual/structural review.
+
 ## Comparison and scale
 
 The comparison uses the pdfcpu CLI matching the runtime module pin, Python 3.9+
-and the oracle tools. It creates a fresh child directory, checks expected
+and the oracle tools. It requires the exact reported pdfcpu version before
+exporting fixtures. It creates a fresh child directory, checks expected
 success/refusal exits and preserves stdout/stderr for failures. It exports only
-small fixtures from `internal/pdffixture`.
+small fixtures from `internal/pdffixture`. It installs the bundled Noto Sans into
+an isolated pdfcpu configuration for the Unicode comparison and checks blank divider
+page counts and dimensions in both tools.
 
 ```sh
 scripts/run-comparison.sh /absolute/path/to/pdfconcat /tmp/pdfconcat-comparisons
 ```
 
-Scale measurements are opt-in and do not run in CI or ordinary tests. They build 2,000 sources interleaved with 2,000 generated items, then one item with 100,000 generated pages. Run this only when investigating a concrete scale question:
+`TestScale` is an opt-in measurement, separate from the corpus scale profiles
+above. It builds 2,000 sources interleaved with 2,000 generated items, then one
+item with 100,000 generated pages. Run it when investigating a concrete scale
+question:
 
 ```sh
-go test -c -o /tmp/pdfconcat-scale.test ./internal/pipeline
+go test -c -o /tmp/pdfconcat-scale.test ./internal/core
 PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 /usr/bin/time -l /tmp/pdfconcat-scale.test -test.run '^TestScale$' -test.v
 ```
 

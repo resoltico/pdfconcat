@@ -46,6 +46,9 @@ jobs:
             GOOS=$goos "$RUNNER_TEMP/golangci-lint" run ./...
             echo "::endgroup::"
           done
+      - name: Whole-source architecture and controls
+        run: |
+          (cd tools && go test -count=1 ./... && go run ./cmd/architecture ..)
       - name: Workflow lint
         run: |
           actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
@@ -77,10 +80,10 @@ jobs:
         if: runner.os != 'Windows'
         env:
           PDFCONCAT_REQUIRE_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: go test -race ./...
+        run: go test -race -count=1 ./...
       - name: Test
         if: runner.os == 'Windows'
-        run: go test ./...
+        run: go test -count=1 ./...
 
   build:
     name: Build all release targets

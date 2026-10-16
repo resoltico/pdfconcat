@@ -1,14 +1,26 @@
 {
-  "version": 2,
+  "version": 3,
   "output": "Pielikums.pdf",
-  "page": { "background": "#F4EFE6", "text": { "size": 20, "leading": 1.5 } },
+  "page": {
+    "background": "#F4EFE6",
+    "text": {
+      "size": 20,
+      "leading": 1.5
+    }
+  },
   "items": [
-    "01.pdf",
+    {
+      "source": "01.pdf"
+    },
     {
       "page": {
-        "text": { "value": "Pielikums\nĀ ļ ķ š ž, ā ļ; Ελληνικά; Кириллица" }
+        "text": {
+          "value": "Pielikums\nĀ ļ ķ š ž, ā ļ; Ελληνικά; Кириллица"
+        }
       }
     },
-    "02.pdf"
+    {
+      "source": "02.pdf"
+    }
   ]
 }

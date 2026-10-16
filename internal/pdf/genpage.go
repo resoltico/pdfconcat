@@ -4,9 +4,7 @@
 package pdf
 
 import (
-	"bufio"
 	"bytes"
-	"compress/zlib"
 	"context"
 	"errors"
 	"fmt"
@@ -16,398 +14,525 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
-type (
-	// Color is an sRGB color.
-	Color struct {
-		R, G, B uint8
-	}
+// Color is an sRGB text or background color.
+type Color struct{ R, G, B uint8 }
 
-	// Page is one generated page specification.
-	Page struct {
-		// Background paints the whole page when not nil.
-		Background *Color
-		// Text is the placed text block, or nil for a background-only page. Its coordinates are page
-		// coordinates of a page of this Width and Height.
-		Text *typeset.Placed
-		// Width and Height are the page sides in points, MinPageSide through MaxPageSide of package typeset.
-		Width, Height float64
-		// TextColor paints Text.
-		TextColor Color
-	}
+// TextBlock is one measured, independently colored block on a generated page.
+type TextBlock struct {
+	Text  *typeset.Placed
+	Color Color
+}
 
-	// fontSet is the distinct fonts of the pages and, per font, the glyphs the pages use.
-	fontSet struct {
-		index map[typeset.Digest]int
-		list  []*typeset.Font
-		used  [][glyphSetWords]uint64
-	}
+// PageLink is a measured contents row linked to a final physical output page.
+type PageLink struct {
+	Rect       typeset.Rect
+	TargetPage int64
+}
 
-	document struct {
-		out           *sink
-		fonts         *fontSet
-		flate         *zlib.Writer
-		offsets       []int64 // offsets[n] is the byte offset of object n
-		content       []byte
-		packed        bytes.Buffer
-		firstPg       int
-		pageObjects   []int
-		parents       map[int]int
-		tree          []pageTreeNode
-		repeated      bool
-		resources     int
-		contentObject int
-		prepared      map[typeset.Digest]typeset.EmbeddedFont
-	}
-
-	// sink counts bytes and keeps the first write error.
-	sink struct {
-		w   *bufio.Writer
-		err error
-		n   int64
-	}
-
-	// lineWriter writes the text-showing operators of one line and tracks the two pens: where the shaper's
-	// pen is and where the PDF text pen is, both in font units from the line start.
-	lineWriter struct {
-		doc       *document
-		font      *typeset.Font
-		array     []byte
-		size      float64
-		perEm     float64
-		extraUnit float64
-		shapedPen float64
-		pdfPen    float64
-		rise      int
-		fontIndex int
-		seenWord  bool
-	}
-)
+// Page is a generated canvas with optional background, text and contents links.
+type Page struct {
+	Background    *Color
+	Text          *typeset.Placed
+	Blocks        []TextBlock
+	Links         []PageLink
+	Width, Height float64
+	TextColor     Color
+}
+type fontSet struct {
+	index map[typeset.Digest]int
+	list  []*typeset.Font
+	used  [][glyphSetWords]uint64
+}
+type document struct {
+	fonts    *fontSet
+	content  []byte
+	fontKeys []string
+}
+type lineWriter struct {
+	doc                                       *document
+	font                                      *typeset.Font
+	array                                     []byte
+	size, perEm, extraUnit, shapedPen, pdfPen float64
+	rise, fontIndex                           int
+	seenWord                                  bool
+}
+type generatedLink struct {
+	dict   types.Dict
+	target int64
+}
 
 const (
-	// MaxPages is the largest number of pages in one resource document, the generated-page limit of a job.
-	MaxPages = 100_000
-
-	fontObjects      = 5 // Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode
-	cidFontObject    = 1 // object offsets from a font's first object
-	descriptorObject = 2
-	fontFileObject   = 3
-	toUnicodeObject  = 4
-	decimalBase      = 10
-	firstFontObject  = 3
-	maxOffsetDigits  = 9_999_999_999
-	glyphSetWords    = 1 << 10 // 65,536 glyph identifiers as bits
-	glyphWordShift   = 6       // glyph identifier bits that select the word
+	// MaxPages limits newly generated pages in one resource document.
+	MaxPages         = 100_000
+	glyphSetWords    = 1 << 10
+	glyphWordShift   = 6
 	glyphBitMask     = 1<<glyphWordShift - 1
 	thousandthsPerEm = 1000.0
 	bfCharChunk      = 100
-	writeBufferSize  = 1 << 16
-	objectsPerPage   = 2 // the page and its content stream
-	hexDigitsPerUnit = 4 // UTF-16 code unit in hexadecimal
+	hexDigitsPerUnit = 4
 	minPageSide      = typeset.MinPageSide
 	maxPageSide      = typeset.MaxPageSide
-
-	// cmapPrologue starts the ToUnicode CMap stream; cmapEpilogue ends it.
-	cmapPrologue = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
-		"/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n" +
-		"1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
-	cmapEpilogue = "endcmap\nCMapName currentdict /CMap defineresource pop\n" + "end\n" + "end\n"
+	cmapPrologue     = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" + "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n" + "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+	cmapEpilogue     = "endcmap\nCMapName currentdict /CMap defineresource pop\n" + "end\n" + "end\n"
 )
 
 var (
-	// ErrTooManyPages reports a document above MaxPages.
+	// ErrTooManyPages reports the generated-page count limit.
 	ErrTooManyPages = errors.New("pdf: generated page: too many pages")
-	// ErrNoPages reports a document without pages.
+	// ErrNoPages reports an empty generated document.
 	ErrNoPages = errors.New("pdf: generated page: no pages")
-	// ErrInvalidPage reports a page whose size or text block is outside what the writer supports.
+	// ErrInvalidPage reports an invalid generated canvas or missing font union.
 	ErrInvalidPage = errors.New("pdf: generated page: invalid page")
-	// ErrDocumentTooLarge reports a document whose byte offsets do not fit the cross-reference table.
-	ErrDocumentTooLarge = errors.New("pdf: generated page: document exceeds the cross-reference offset range")
 )
 
-// Write writes the resource document for pages to w and returns the byte count. Page i of the
-// document is pages[i]. Fonts are the distinct fonts of the pages' text, by identity, in order of
-// first use; each is embedded once. Write stops with ctx's error between pages. Output is
-// deterministic.
-func Write(ctx context.Context, w io.Writer, pages []Page) (int64, error) {
-	if len(pages) == 0 {
-		return 0, ErrNoPages
+func pageBlocks(page Page) []TextBlock {
+	if page.Text == nil {
+		return page.Blocks
 	}
-
-	if len(pages) > MaxPages {
-		return 0, fmt.Errorf("%w: %d pages exceed the limit of %d", ErrTooManyPages, len(pages), MaxPages)
-	}
-
-	fonts, err := collectFonts(pages)
-	if err != nil {
-		return 0, err
-	}
-
-	doc := &document{
-		out:     &sink{w: bufio.NewWriterSize(w, writeBufferSize)},
-		fonts:   fonts,
-		firstPg: firstFontObject + fontObjects*len(fonts.list),
-	}
-	doc.initialize(len(pages), false)
-
-	return doc.write(ctx, len(pages), func(index int) (Page, error) { return pages[index], nil })
+	result := make([]TextBlock, 0, 1+len(page.Blocks))
+	result = append(result, TextBlock{Text: page.Text, Color: page.TextColor})
+	return append(result, page.Blocks...)
 }
 
-func collectFonts(pages []Page) (*fontSet, error) {
+func collectFonts(c context.Context, pages []Page) (*fontSet, error) {
 	set := &fontSet{index: map[typeset.Digest]int{}}
-
 	for number, page := range pages {
+		if err := c.Err(); err != nil {
+			return nil, err
+		}
 		if !(page.Width >= minPageSide && page.Width <= maxPageSide && page.Height >= minPageSide && page.Height <= maxPageSide) {
-			return nil, fmt.Errorf("%w %d: size %v x %v pt outside %v to %v",
-				ErrInvalidPage, number, page.Width, page.Height, minPageSide, maxPageSide)
+			return nil, fmt.Errorf("%w %d: size %v x %v pt outside %v to %v", ErrInvalidPage, number, page.Width, page.Height, minPageSide, maxPageSide)
 		}
-
-		if page.Text == nil || len(page.Text.Lines) == 0 {
-			continue
-		}
-
-		if page.Text.Font == nil || !(page.Text.Size >= typeset.MinFontSize && page.Text.Size <= typeset.MaxFontSize) {
-			return nil, fmt.Errorf("%w %d: text has no font or an invalid size", ErrInvalidPage, number)
-		}
-
-		identity := page.Text.Font.Identity()
-
-		_, known := set.index[identity]
-		if !known {
-			set.index[identity] = len(set.list)
-			set.list = append(set.list, page.Text.Font)
+		for _, block := range pageBlocks(page) {
+			text := block.Text
+			if text == nil || len(text.Lines) == 0 {
+				continue
+			}
+			if text.Font == nil || !(text.Size >= typeset.MinFontSize && text.Size <= typeset.MaxFontSize) {
+				return nil, fmt.Errorf("%w %d: text has no font or an invalid size", ErrInvalidPage, number)
+			}
+			if err := ValidateFontName(text.Font); err != nil {
+				return nil, err
+			}
+			id := text.Font.Identity()
+			index, known := set.index[id]
+			if !known {
+				index = len(set.list)
+				set.index[id] = index
+				set.list = append(set.list, text.Font)
+				set.used = append(set.used, [glyphSetWords]uint64{})
+			}
+			for _, line := range text.Lines {
+				for _, cluster := range line.Clusters {
+					for _, g := range cluster.Glyphs {
+						set.used[index][g.ID>>glyphWordShift] |= 1 << (g.ID & glyphBitMask)
+					}
+				}
+			}
 		}
 	}
-
-	set.used = make([][glyphSetWords]uint64, len(set.list))
-
 	return set, nil
 }
 
-func (s *sink) write(data []byte) {
-	if s.err != nil {
-		return
-	}
-
-	written, err := s.w.Write(data)
-	s.n += int64(written)
-	s.err = err
-}
-
-func (s *sink) textf(format string, args ...any) {
-	s.write(fmt.Appendf(nil, format, args...))
-}
-
-func (d *document) begin(obj int) {
-	d.offsets[obj] = d.out.n
-	d.out.textf("%d 0 obj\n", obj)
-}
-
-func (d *document) stream(obj int, dict string, data []byte) {
-	d.begin(obj)
-	d.out.textf("<< %s /Length %d >>\nstream\n", dict, len(data))
-	d.out.write(data)
-	d.out.write([]byte("\nendstream\nendobj\n"))
-}
-
-// deflate compresses data into a buffer owned by d; the result is valid until the next call.
-func (d *document) deflate(data []byte) []byte {
-	d.packed.Reset()
-
-	if d.flate == nil {
-		d.flate = zlib.NewWriter(&d.packed)
-	} else {
-		d.flate.Reset(&d.packed)
-	}
-
-	// The compressor writes exclusively to bytes.Buffer, whose writes cannot fail.
-	_, _ = d.flate.Write(data)
-	_ = d.flate.Close()
-
-	return d.packed.Bytes()
-}
-
-func (d *document) write(ctx context.Context, count int, produce func(int) (Page, error)) (int64, error) {
-	d.out.write([]byte("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n"))
-	d.begin(1)
-	d.out.textf("<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
-	d.writePageTree(count)
-
-	for index := range count {
-		err := ctx.Err()
-		if err != nil {
-			return d.out.n, fmt.Errorf("pdf: generated page: %w", err)
-		}
-
-		page, err := produce(index)
-		if err != nil {
-			return d.out.n, err
-		}
-
-		err = d.writePage(index, page)
-		if err != nil {
-			return d.out.n, err
-		}
-	}
-
-	for index := range d.fonts.list {
-		err := d.writeFont(index)
-		if err != nil {
-			return d.out.n, err
-		}
-	}
-
-	return d.finish()
-}
-
-type pageTreeNode struct {
-	object int
-	kids   []int
-	count  int
-}
-
-func (d *document) initialize(count int, repeated bool) {
-	d.repeated = repeated
-	d.parents = map[int]int{}
-	d.pageObjects = make([]int, count)
-	stride := objectsPerPage
-	if repeated {
-		stride = 1
-	}
-	for i := range count {
-		d.pageObjects[i] = d.firstPg + stride*i
-	}
-	next := d.firstPg + stride*count
-	if repeated {
-		d.contentObject = next
-		d.resources = next + 1
-		next += 2
-	}
-	level := make([]pageTreeNode, count)
-	for i, obj := range d.pageObjects {
-		level[i] = pageTreeNode{object: obj, count: 1}
-	}
-	for len(level) > 64 {
-		var upper []pageTreeNode
-		for start := 0; start < len(level); start += 64 {
-			node := pageTreeNode{object: next}
-			next++
-			for _, child := range level[start:min(start+64, len(level))] {
-				node.kids = append(node.kids, child.object)
-				node.count += child.count
-				d.parents[child.object] = node.object
-			}
-			d.tree = append(d.tree, node)
-			upper = append(upper, node)
-		}
-		level = upper
-	}
-	root := pageTreeNode{object: 2, count: count}
-	for _, child := range level {
-		root.kids = append(root.kids, child.object)
-		d.parents[child.object] = 2
-	}
-	d.tree = append(d.tree, root)
-	d.offsets = make([]int64, next)
-}
-
-func (d *document) writePageTree(_ int) {
-	for _, node := range d.tree {
-		d.begin(node.object)
-		d.out.textf("<< /Type /Pages /Count %d /Kids [", node.count)
-		for _, kid := range node.kids {
-			d.out.textf("%d 0 R ", kid)
-		}
-		d.out.write([]byte("]"))
-		if node.object != 2 {
-			d.out.textf(" /Parent %d 0 R", d.parents[node.object])
-		}
-		d.out.write([]byte(" >>\nendobj\n"))
-	}
-}
-
-func (d *document) writePage(index int, page Page) error {
-	obj := d.pageObjects[index]
-	contentObject := obj + 1
-	if d.repeated {
-		contentObject = d.contentObject
-	}
-	font := -1
-	if !d.repeated || index == 0 {
-		d.content = d.content[:0]
-		font = d.appendContent(page)
-	}
-	d.begin(obj)
-	d.out.textf("<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %s %s] ", d.parents[obj], number(page.Width), number(page.Height))
-	switch {
-	case d.repeated:
-		d.out.textf("/Resources %d 0 R ", d.resources)
-	case font >= 0:
-		d.out.textf("/Resources << /Font << /F1 %d 0 R >> >> ", firstFontObject+fontObjects*font)
-	default:
-		d.out.textf("/Resources << >> ")
-	}
-	d.out.textf("/Contents %d 0 R >>\nendobj\n", contentObject)
-	if !d.repeated || index == 0 {
-		data := d.deflate(d.content)
-		d.stream(contentObject, "/Filter /FlateDecode", data)
-		if d.repeated {
-			d.begin(d.resources)
-			if font >= 0 {
-				d.out.textf("<< /Font << /F1 %d 0 R >> >>\nendobj\n", firstFontObject+fontObjects*font)
-			} else {
-				d.out.textf("<< >>\nendobj\n")
-			}
-		}
-	}
-	return d.out.err
-}
-
-// WriteRepeated writes one generated item with shared content and resources.
-// Prepared fonts are the authoritative union for the whole job.
-func WriteRepeated(ctx context.Context, w io.Writer, page Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont) (int64, error) {
-	if count < 1 {
-		return 0, ErrNoPages
-	}
-	if count > MaxPages {
-		return 0, ErrTooManyPages
-	}
-	fonts, err := collectFonts([]Page{page})
+// Write serializes the same native builder used by assembly, retaining full fonts
+// for the independent original-program comparison path.
+func Write(c context.Context, w io.Writer, pages []Page) (int64, error) {
+	s, links, err := generatedContext(c, pages, len(pages), nil, nil)
 	if err != nil {
 		return 0, err
 	}
-	for _, font := range fonts.list {
-		if _, ok := prepared[font.Identity()]; !ok {
-			return 0, ErrInvalidPage
-		}
+	if err = finalizeGeneratedLinks(c, s, links); err != nil {
+		return 0, err
 	}
-	doc := &document{out: &sink{w: bufio.NewWriterSize(w, writeBufferSize)}, fonts: fonts, firstPg: firstFontObject + fontObjects*len(fonts.list), prepared: prepared}
-	doc.initialize(count, true)
-	return doc.write(ctx, count, func(int) (Page, error) { return page, nil })
+	return serializeGenerated(c, s, w)
 }
 
-// appendContent writes the page's content stream into d.content and returns the used font index, or -1.
-func (d *document) appendContent(page Page) int {
+// WriteRepeated serializes a repeated native generated item with its job union.
+func WriteRepeated(c context.Context, w io.Writer, page Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont) (int64, error) {
+	names, err := generatedFontNames(prepared, nil)
+	if err != nil {
+		return 0, err
+	}
+	return writeRepeatedNamed(c, w, page, count, prepared, names)
+}
+func writeRepeatedNamed(c context.Context, w io.Writer, page Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) (int64, error) {
+	if prepared == nil {
+		prepared = map[typeset.Digest]typeset.EmbeddedFont{}
+	}
+	s, links, err := generatedContext(c, []Page{page}, count, prepared, names)
+	if err != nil {
+		return 0, err
+	}
+	if err = finalizeGeneratedLinks(c, s, links); err != nil {
+		return 0, err
+	}
+	return serializeGenerated(c, s, w)
+}
+
+type generatedOutput struct {
+	writer  io.Writer
+	context context.Context
+	n       int64
+	err     error
+}
+
+func (o *generatedOutput) Write(data []byte) (int, error) {
+	written := 0
+	for len(data) > 0 {
+		if o.err == nil {
+			o.err = o.context.Err()
+		}
+		if o.err != nil {
+			return written, o.err
+		}
+		// Native serialization can forward an entire font stream in one Write.
+		// Bound each downstream write so cancellation is observed between chunks.
+		chunk := data[:min(len(data), 32*1024)]
+		n, err := o.writer.Write(chunk)
+		written += n
+		o.n += int64(n)
+		if err == nil && n != len(chunk) {
+			err = io.ErrShortWrite
+		}
+		o.err = err
+		if err != nil {
+			return written, err
+		}
+		data = data[n:]
+	}
+	return written, nil
+}
+func serializeGenerated(c context.Context, s *model.Context, w io.Writer) (int64, error) {
+	output := &generatedOutput{writer: w, context: c}
+	err := api.WriteContext(c, s, output)
+	if output.err != nil {
+		return output.n, fmt.Errorf("pdf: generated page: write: %w", output.err)
+	}
+	return output.n, err
+}
+
+func newGeneratedContext() (*model.Context, error) {
+	conf, err := configuration()
+	if err != nil {
+		return nil, err
+	}
+	s, err := model.NewContext(bytes.NewReader(nil), conf)
+	if err != nil {
+		return nil, err
+	}
+	s.Table[0] = model.NewFreeHeadXRefTableEntry()
+	size := 1
+	s.Size = &size
+	version := model.V17
+	s.HeaderVersion = &version
+	catalog := types.Dict{"Type": types.Name("Catalog")}
+	s.Root, err = s.IndRefForNewObject(catalog)
+	if err != nil {
+		return nil, err
+	}
+	root, err := s.IndRefForNewObject(types.Dict{"Type": types.Name("Pages")})
+	if err != nil {
+		return nil, err
+	}
+	catalog["Pages"] = *root
+	return s, nil
+}
+
+// generatedContext builds one native resource document. A one-page slice repeats
+// to count; otherwise each supplied page contributes exactly one physical page.
+func generatedContext(c context.Context, pages []Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) (*model.Context, []generatedLink, error) {
+	if count < 1 || len(pages) == 0 {
+		return nil, nil, ErrNoPages
+	}
+	if count > MaxPages {
+		return nil, nil, ErrTooManyPages
+	}
+	if len(pages) != 1 && len(pages) != count {
+		return nil, nil, ErrInvalidPage
+	}
+	if err := c.Err(); err != nil {
+		return nil, nil, err
+	}
+	fonts, err := collectFonts(c, pages)
+	if err != nil {
+		return nil, nil, err
+	}
+	s, err := newGeneratedContext()
+	if err != nil {
+		return nil, nil, err
+	}
+	doc := &document{fonts: fonts}
+	resources := types.Dict{"Font": types.Dict{}}
+	fontDict := types.Dict{}
+	resources["Font"] = fontDict
+	for index, font := range fonts.list {
+		if err = c.Err(); err != nil {
+			return nil, nil, err
+		}
+		embedded := typeset.EmbeddedFont{Font: font, Program: font.Bytes(), Glyphs: doc.usedGlyphs(index)}
+		if prepared != nil {
+			var ok bool
+			embedded, ok = prepared[font.Identity()]
+			if !ok {
+				return nil, nil, ErrInvalidPage
+			}
+		}
+		name := font.PostScriptName()
+		if assigned, ok := names[font.Identity()]; ok {
+			name = assigned
+		}
+		ref, e := buildFontResource(c, s, embedded, name)
+		if e != nil {
+			return nil, nil, e
+		}
+		fontDict[fmt.Sprintf("F%d", index+1)] = *ref
+	}
+	resourceRef, err := s.IndRefForNewObject(resources)
+	if err != nil {
+		return nil, nil, err
+	}
+	refs := make([]types.IndirectRef, 0, count)
+	var pending []generatedLink
+	var repeatedContent *types.IndirectRef
+	for index := range count {
+		if err = c.Err(); err != nil {
+			return nil, nil, err
+		}
+		page := pages[0]
+		if len(pages) > 1 {
+			page = pages[index]
+		}
+		pageDict := types.Dict{"Type": types.Name("Page"), "MediaBox": types.NewNumberArray(0, 0, page.Width, page.Height), "Resources": *resourceRef}
+		pageRef, e := s.IndRefForNewObject(pageDict)
+		if e != nil {
+			return nil, nil, e
+		}
+		refs = append(refs, *pageRef)
+		contentRef := repeatedContent
+		if contentRef == nil || len(pages) > 1 {
+			doc.content = nil
+			doc.appendContent(page)
+			contentRef, e = addStream(s, doc.content, nil)
+			if e != nil {
+				return nil, nil, e
+			}
+			if len(pages) == 1 {
+				repeatedContent = contentRef
+			}
+		}
+		pageDict["Contents"] = *contentRef
+		if len(page.Links) > 0 {
+			annots := types.Array{}
+			for _, link := range page.Links {
+				r := link.Rect
+				annotation := types.Dict{"Type": types.Name("Annot"), "Subtype": types.Name("Link"), "Rect": types.NewNumberArray(r.X, r.Y, r.X+r.Width, r.Y+r.Height), "Border": types.NewIntegerArray(0, 0, 0), "Dest": types.Array{*pageRef, types.Name("Fit")}}
+				ref, e := s.IndRefForNewObject(annotation)
+				if e != nil {
+					return nil, nil, e
+				}
+				annots = append(annots, *ref)
+				pending = append(pending, generatedLink{dict: annotation, target: link.TargetPage})
+			}
+			pageDict["Annots"] = annots
+		}
+	}
+	if err = buildGeneratedPageTree(c, s, refs); err != nil {
+		return nil, nil, err
+	}
+	s.PageCount = count
+	if err = api.ValidateContext(c, s); err != nil {
+		return nil, nil, err
+	}
+	return s, pending, nil
+}
+
+func addStream(s *model.Context, data []byte, extra types.Dict) (*types.IndirectRef, error) {
+	stream, err := s.NewStreamDictForBuf(data)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range extra {
+		stream.Dict[key] = value
+	}
+	if err = stream.Encode(); err != nil {
+		return nil, err
+	}
+	return s.IndRefForNewObject(*stream)
+}
+
+func buildGeneratedPageTree(c context.Context, s *model.Context, refs []types.IndirectRef) error {
+	root, err := s.Pages()
+	if err != nil {
+		return err
+	}
+	type node struct {
+		ref   types.IndirectRef
+		count int
+	}
+	level := make([]node, len(refs))
+	for i, ref := range refs {
+		level[i] = node{ref: ref, count: 1}
+	}
+	for len(level) > 64 {
+		var upper []node
+		for start := 0; start < len(level); start += 64 {
+			if err = c.Err(); err != nil {
+				return err
+			}
+			dict := types.Dict{"Type": types.Name("Pages")}
+			ref, e := s.IndRefForNewObject(dict)
+			if e != nil {
+				return e
+			}
+			kids := types.Array{}
+			count := 0
+			for _, child := range level[start:min(start+64, len(level))] {
+				kids = append(kids, child.ref)
+				count += child.count
+				d, e := s.DereferenceDict(child.ref)
+				if e != nil {
+					return e
+				}
+				d["Parent"] = *ref
+			}
+			dict["Kids"] = kids
+			dict["Count"] = types.Integer(count)
+			upper = append(upper, node{ref: *ref, count: count})
+		}
+		level = upper
+	}
+	dict, err := s.DereferenceDict(*root)
+	if err != nil {
+		return err
+	}
+	kids := types.Array{}
+	count := 0
+	for _, child := range level {
+		kids = append(kids, child.ref)
+		count += child.count
+		d, e := s.DereferenceDict(child.ref)
+		if e != nil {
+			return e
+		}
+		d["Parent"] = *root
+	}
+	dict["Kids"] = kids
+	dict["Count"] = types.Integer(count)
+	return nil
+}
+
+func finalizeGeneratedLinks(c context.Context, s *model.Context, links []generatedLink) error {
+	for _, link := range links {
+		if err := c.Err(); err != nil {
+			return err
+		}
+		if link.target < 1 || link.target > int64(s.PageCount) {
+			return ErrInvalidPage
+		}
+		_, ref, _, err := s.PageDict(c, int(link.target), false)
+		if err != nil {
+			return err
+		}
+		link.dict["Dest"] = types.Array{*ref, types.Name("Fit")}
+	}
+	return nil
+}
+
+func buildFontResource(c context.Context, s *model.Context, font typeset.EmbeddedFont, name string) (*types.IndirectRef, error) {
+	if err := ValidateFontName(font.Font); err != nil {
+		return nil, err
+	}
+	dictionaries := make([]types.Dict, 5)
+	refs := make([]types.IndirectRef, 5)
+	for index := range dictionaries {
+		dictionaries[index] = types.Dict{}
+		ref, err := s.IndRefForNewObject(dictionaries[index])
+		if err != nil {
+			return nil, err
+		}
+		refs[index] = *ref
+	}
+	f := font.Font
+	perEm := thousandthsPerEm / float64(f.UnitsPerEm())
+	widths := types.Array{}
+	for _, g := range font.Glyphs {
+		if err := c.Err(); err != nil {
+			return nil, err
+		}
+		widths = append(widths, types.Integer(g), types.Array{types.Float(float64(f.GlyphAdvance(g)) * perEm)})
+	}
+	dictionaries[0]["Type"] = types.Name("Font")
+	dictionaries[0]["Subtype"] = types.Name("Type0")
+	dictionaries[0]["BaseFont"] = types.Name(name)
+	dictionaries[0]["Encoding"] = types.Name("Identity-H")
+	dictionaries[0]["DescendantFonts"] = types.Array{refs[1]}
+	dictionaries[0]["ToUnicode"] = refs[4]
+	dictionaries[1]["Type"] = types.Name("Font")
+	dictionaries[1]["Subtype"] = types.Name("CIDFontType2")
+	dictionaries[1]["BaseFont"] = types.Name(name)
+	dictionaries[1]["CIDSystemInfo"] = types.Dict{"Registry": types.StringLiteral("Adobe"), "Ordering": types.StringLiteral("Identity"), "Supplement": types.Integer(0)}
+	dictionaries[1]["FontDescriptor"] = refs[2]
+	dictionaries[1]["DW"] = types.Integer(1000)
+	dictionaries[1]["W"] = widths
+	dictionaries[1]["CIDToGIDMap"] = types.Name("Identity")
+	box := f.BBox()
+	dictionaries[2]["Type"] = types.Name("FontDescriptor")
+	dictionaries[2]["FontName"] = types.Name(name)
+	traits := f.Traits()
+	flags := 4
+	if traits.FixedPitch {
+		flags |= 1
+	}
+	if traits.ItalicOrOblique {
+		flags |= 64
+	}
+	dictionaries[2]["Flags"] = types.Integer(flags)
+	dictionaries[2]["FontBBox"] = types.NewNumberArray(float64(box[0])*perEm, float64(box[1])*perEm, float64(box[2])*perEm, float64(box[3])*perEm)
+	dictionaries[2]["ItalicAngle"] = types.Float(traits.ItalicAngle)
+	dictionaries[2]["Ascent"] = types.Float(f.Ascent() * perEm)
+	dictionaries[2]["Descent"] = types.Float(f.Descent() * perEm)
+	dictionaries[2]["CapHeight"] = types.Float(f.CapHeight() * perEm)
+	dictionaries[2]["StemV"] = types.Integer(80)
+	dictionaries[2]["FontFile2"] = refs[3]
+	for _, stream := range []struct {
+		index int
+		data  []byte
+		extra types.Dict
+	}{{3, font.Program, types.Dict{"Length1": types.Integer(len(font.Program))}}, {4, toUnicodeCMap(f, font.Glyphs), nil}} {
+		sd, err := s.NewStreamDictForBuf(stream.data)
+		if err != nil {
+			return nil, err
+		}
+		for key, value := range stream.extra {
+			sd.Dict[key] = value
+		}
+		if err = sd.Encode(); err != nil {
+			return nil, err
+		}
+		s.Table[refs[stream.index].ObjectNumber.Value()].Object = *sd
+	}
+	return &refs[0], nil
+}
+
+func (d *document) appendContent(page Page) {
 	if page.Background != nil {
 		d.appendColor(*page.Background)
-		d.content = append(d.content, "0 0 "...)
-		d.content = append(d.content, number(page.Width)...)
-		d.content = append(d.content, ' ')
-		d.content = append(d.content, number(page.Height)...)
-		d.content = append(d.content, " re\nf\n"...)
+		d.content = fmt.Appendf(d.content, "0 0 %s %s re\nf\n", number(page.Width), number(page.Height))
 	}
-
-	if page.Text == nil || len(page.Text.Lines) == 0 {
-		return -1
+	for _, block := range pageBlocks(page) {
+		if block.Text == nil || len(block.Text.Lines) == 0 {
+			continue
+		}
+		font := d.fonts.index[block.Text.Font.Identity()]
+		d.appendColor(block.Color)
+		d.appendText(block.Text, font)
 	}
-
-	font := d.fonts.index[page.Text.Font.Identity()]
-	d.appendColor(page.TextColor)
-	d.appendText(page.Text, font)
-
-	return font
 }
 
 func (d *document) appendColor(color Color) {
@@ -460,7 +585,11 @@ func needsActualText(font *typeset.Font, cluster typeset.Cluster) bool {
 // per glyph: the first glyph's span carries the cluster text, later glyphs (marks) an empty one, because
 // one span over base and mark makes poppler insert a spurious space after the mark.
 func (d *document) appendText(placed *typeset.Placed, fontIndex int) {
-	d.content = append(d.content, "BT\n/F1 "...)
+	key := fmt.Sprintf("F%d", fontIndex+1)
+	if len(d.fontKeys) > fontIndex {
+		key = d.fontKeys[fontIndex]
+	}
+	d.content = fmt.Appendf(d.content, "BT\n/%s ", key)
 	d.content = append(d.content, number(placed.Size)...)
 	d.content = append(d.content, " Tf\n"...)
 
@@ -585,68 +714,6 @@ func (d *document) usedGlyphs(font int) []uint16 {
 	return glyphs
 }
 
-func (d *document) writeFont(index int) error {
-	font := d.fonts.list[index]
-	base := firstFontObject + fontObjects*index
-	glyphs := d.usedGlyphs(index)
-	program := font.Bytes()
-	if prepared, ok := d.prepared[font.Identity()]; ok {
-		glyphs = prepared.Glyphs
-		program = prepared.Program
-	}
-	perEm := thousandthsPerEm / float64(font.UnitsPerEm())
-
-	var widths []byte
-	for _, glyph := range glyphs {
-		widths = fmt.Appendf(widths, "%d [%s] ", glyph, number(float64(font.GlyphAdvance(glyph))*perEm))
-	}
-
-	name := font.PostScriptName()
-
-	d.begin(base)
-	d.out.textf(
-		"<< /Type /Font /Subtype /Type0 /BaseFont /%s /Encoding /Identity-H /DescendantFonts [%d 0 R] /ToUnicode %d 0 R >>\nendobj\n",
-		name,
-		base+cidFontObject,
-		base+toUnicodeObject,
-	)
-	d.begin(base + cidFontObject)
-	d.out.textf(
-		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /%s /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "+
-			"/FontDescriptor %d 0 R /DW 1000 /W [%s] /CIDToGIDMap /Identity >>\nendobj\n",
-		name,
-		base+descriptorObject,
-		widths,
-	)
-	d.begin(base + descriptorObject)
-	d.out.textf("<< /Type /FontDescriptor /FontName /%s /Flags 4 %s /ItalicAngle 0 %s /StemV 80 /FontFile2 %d 0 R >>\nendobj\n",
-		name, fontBox(font, perEm), fontHeights(font, perEm), base+fontFileObject)
-
-	packed := d.deflate(program)
-
-	d.stream(base+fontFileObject, fmt.Sprintf("/Filter /FlateDecode /Length1 %d", len(program)), packed)
-
-	packed = d.deflate(toUnicodeCMap(font, glyphs))
-
-	d.stream(base+toUnicodeObject, "/Filter /FlateDecode", packed)
-
-	return d.out.err
-}
-
-// fontBox is the /FontBBox entry of a font descriptor; perEm scales font units to thousandths of an em.
-func fontBox(font *typeset.Font, perEm float64) string {
-	box := font.BBox()
-
-	return fmt.Sprintf("/FontBBox [%s %s %s %s]",
-		number(float64(box[0])*perEm), number(float64(box[1])*perEm), number(float64(box[2])*perEm), number(float64(box[3])*perEm))
-}
-
-// fontHeights is the /Ascent, /Descent and /CapHeight entries of a font descriptor.
-func fontHeights(font *typeset.Font, perEm float64) string {
-	return fmt.Sprintf("/Ascent %s /Descent %s /CapHeight %s",
-		number(font.Ascent()*perEm), number(font.Descent()*perEm), number(font.CapHeight()*perEm))
-}
-
 func toUnicodeCMap(font *typeset.Font, glyphs []uint16) []byte {
 	entries := make([]string, 0, len(glyphs))
 
@@ -675,30 +742,4 @@ func toUnicodeCMap(font *typeset.Font, glyphs []uint16) []byte {
 	cmap.WriteString(cmapEpilogue)
 
 	return cmap.Bytes()
-}
-
-func (d *document) finish() (int64, error) {
-	xref := d.out.n
-
-	d.out.textf("xref\n0 %d\n0000000000 65535 f \n", len(d.offsets))
-
-	for object := 1; object < len(d.offsets); object++ {
-		if d.offsets[object] > maxOffsetDigits {
-			return d.out.n, ErrDocumentTooLarge
-		}
-
-		d.out.textf("%010d 00000 n \n", d.offsets[object])
-	}
-
-	d.out.textf("trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(d.offsets), xref)
-
-	if d.out.err == nil {
-		d.out.err = d.out.w.Flush()
-	}
-
-	if d.out.err != nil {
-		return d.out.n, fmt.Errorf("pdf: generated page: write: %w", d.out.err)
-	}
-
-	return d.out.n, nil
 }

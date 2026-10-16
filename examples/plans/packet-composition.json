@@ -1,0 +1,28 @@
+{
+  "version": 3,
+  "output": "packet.pdf",
+  "dir": "inputs",
+  "page": { "size": "A4", "text": { "size": 24 } },
+  "page_numbers": { "size": 9, "margin": "8mm" },
+  "items": [
+    { "source": "cover.pdf" },
+    { "contents": { "title": "Contents", "size": "A4" } },
+    {
+      "title": "Project report",
+      "start_on": "odd",
+      "divider": {},
+      "items": [
+        { "source": "report.pdf", "pages": [[2, 8]] },
+        {
+          "title": "Figures",
+          "dir": "figures",
+          "start_on": "odd",
+          "items": [
+            { "source": "plots.pdf", "pages": [[1, 3], [8, 8]] }
+          ]
+        }
+      ]
+    },
+    { "page": { "size": "A4" } }
+  ]
+}

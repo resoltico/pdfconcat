@@ -146,18 +146,6 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 	return result, nil
 }
 
-func fieldNames(c context.Context, s *model.Context) ([]string, error) {
-	records, err := fields(c, s)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(records))
-	for _, r := range records {
-		names = append(names, r.name)
-	}
-	return names, nil
-}
-
 func qualifiedName(s *model.Context, d types.Dict) (string, error) {
 	var names []string
 	seen := map[types.IndirectRef]bool{}

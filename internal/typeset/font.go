@@ -34,6 +34,7 @@ type (
 		ascent, descent, capHeight float64
 
 		fsType uint16
+		traits FontTraits
 	}
 
 	// EmbeddingError reports an OS/2 fsType that forbids embedding.
@@ -43,25 +44,26 @@ type (
 )
 
 const (
-	sfntTrueType      = 0x00010000
-	sfntTrueTypeTag   = 0x74727565
-	sfntOpenTypeCFF   = 0x4F54544F
-	sfntCollection    = 0x74746366
-	headMagic         = 0x5F0F3CF5
-	maxTables         = 128
-	minUnitsPerEm     = 16
-	maxUnitsPerEm     = 16384
-	maxGlyphID        = 0xFFFF
-	directoryHeader   = 12
-	directoryRecord   = 16
-	headLength        = 54
-	hheaLength        = 36
-	maxpLength        = 6
-	os2Length         = 10
-	fsTypeRestricted  = 0x0002
-	fsTypeBitmapOnly  = 0x0200
-	fsTypeUsageMask   = 0x000F
-	maxPostScriptName = 63
+	sfntTrueType       = 0x00010000
+	sfntTrueTypeTag    = 0x74727565
+	sfntOpenTypeCFF    = 0x4F54544F
+	sfntCollection     = 0x74746366
+	headMagic          = 0x5F0F3CF5
+	maxTables          = 128
+	minUnitsPerEm      = 16
+	maxUnitsPerEm      = 16384
+	maxGlyphID         = 0xFFFF
+	directoryHeader    = 12
+	directoryRecord    = 16
+	headLength         = 54
+	hheaLength         = 36
+	maxpLength         = 6
+	os2Length          = 64
+	fsTypeRestricted   = 0x0002
+	fsTypeNoSubsetting = 0x0100
+	fsTypeBitmapOnly   = 0x0200
+	fsTypeUsageMask    = 0x000F
+	maxPostScriptName  = 63
 
 	// Field offsets inside the tables read here.
 	headMagicOffset     = 12
@@ -104,7 +106,7 @@ func (e *EmbeddingError) Error() string {
 }
 
 func requiredTables() []string {
-	return []string{"head", "hhea", "hmtx", "maxp", "cmap", "glyf", "loca", "OS/2"}
+	return []string{"head", "hhea", "hmtx", "maxp", "cmap", "glyf", "loca", "OS/2", "post"}
 }
 
 // LoadFont validates data as an embeddable static TrueType font. It retains data, which the caller
@@ -407,6 +409,10 @@ func (f *Font) readTables(tables map[string][]byte) error {
 		return fmt.Errorf("%w: hmtx shorter than numberOfHMetrics", ErrMalformedFont)
 	}
 
+	f.traits, err = readFontTraits(tables["post"], os2)
+	if err != nil {
+		return err
+	}
 	err = f.readEmbeddingPermission(os2)
 	if err != nil {
 		return err

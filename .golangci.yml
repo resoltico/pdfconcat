@@ -50,24 +50,10 @@ linters:
             - pkg: github.com/go-text/typesetting
               desc: only internal/typeset shapes text
         native-boundary:
-          files: ["$all", "!**/internal/atomicfile/**"]
+          files: ["$all", "!**/internal/publication/**"]
           deny:
             - pkg: golang.org/x/sys
-              desc: only internal/atomicfile makes native calls
-        internal-leaves:
-          list-mode: lax
-          files: ["**/internal/diag/**", "**/internal/inputfile/**", "!$test"]
-          deny:
-            - pkg: github.com/resoltico/pdfconcat/internal
-              desc: diagnostic and input-reader leaves cannot import internal packages
-        pure-domain:
-          list-mode: lax
-          files: ["**/internal/job/**", "**/internal/typeset/**", "!$test"]
-          allow:
-            - github.com/resoltico/pdfconcat/internal/diag$
-          deny:
-            - pkg: github.com/resoltico/pdfconcat/internal
-              desc: job and typeset may import only diag internally
+              desc: only internal/publication makes native calls
         test-support:
           files: ["$all", "!$test"]
           deny:
@@ -76,15 +62,150 @@ linters:
             - pkg: github.com/resoltico/pdfconcat/internal/oracle
               desc: independent PDF oracle is test-only
 
+        layer-cmd-pdfconcat:
+          list-mode: strict
+          files: ["**/cmd/pdfconcat/*.go", "!$test"]
+          allow:
+            - context$
+            - os$
+            - os/signal$
+            - syscall$
+            - github.com/resoltico/pdfconcat/internal/cli$
+        layer-internal-cli:
+          list-mode: strict
+          files: ["**/internal/cli/*.go", "!$test"]
+          allow:
+            - context$
+            - encoding/json/v2$
+            - errors$
+            - fmt$
+            - io$
+            - slices$
+            - strconv$
+            - strings$
+            - unicode$
+            - unicode/utf8$
+            - github.com/resoltico/pdfconcat/internal/core$
+        layer-internal-core:
+          list-mode: strict
+          files: ["**/internal/core/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/result$
+            - github.com/resoltico/pdfconcat/internal/job$
+            - github.com/resoltico/pdfconcat/internal/plan$
+            - github.com/resoltico/pdfconcat/internal/pdf$
+            - github.com/resoltico/pdfconcat/internal/typeset$
+            - github.com/resoltico/pdfconcat/internal/inputfile$
+            - github.com/resoltico/pdfconcat/internal/publication$
+            - github.com/resoltico/pdfconcat/internal/diag$
+        layer-internal-result:
+          list-mode: strict
+          files: ["**/internal/result/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/job$
+            - github.com/resoltico/pdfconcat/internal/diag$
+        layer-internal-plan:
+          list-mode: strict
+          files: ["**/internal/plan/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/job$
+            - github.com/resoltico/pdfconcat/internal/diag$
+        layer-internal-job:
+          list-mode: strict
+          files: ["**/internal/job/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/diag$
+        layer-internal-pdf:
+          list-mode: strict
+          files: ["**/internal/pdf/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/job$
+            - github.com/resoltico/pdfconcat/internal/typeset$
+            - github.com/resoltico/pdfconcat/internal/inputfile$
+            - github.com/resoltico/pdfconcat/internal/diag$
+            - github.com/pdfcpu/pdfcpu
+        layer-internal-typeset:
+          list-mode: strict
+          files: ["**/internal/typeset/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/go-text/typesetting
+            - golang.org/x/image
+            - golang.org/x/text
+        layer-internal-inputfile:
+          list-mode: strict
+          files: ["**/internal/inputfile/*.go", "!$test"]
+          allow:
+            - $gostd
+        layer-internal-publication:
+          list-mode: strict
+          files: ["**/internal/publication/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/diag$
+            - golang.org/x/sys
+        layer-internal-diag:
+          list-mode: strict
+          files: ["**/internal/diag/*.go", "!$test"]
+          allow:
+            - $gostd
+        layer-internal-oracle:
+          list-mode: strict
+          files: ["**/internal/oracle/*.go", "!$test"]
+          allow:
+            - $gostd
+        layer-internal-pdffixture:
+          list-mode: strict
+          files: ["**/internal/pdffixture/*.go", "!$test"]
+          allow:
+            - $gostd
+        layer-tools-architecture:
+          list-mode: strict
+          files: ["**/tools/architecture/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/OpenPeeDeeP/depguard/v2$
+            - go/ast$
+            - go/parser$
+            - go/token$
+            - go.yaml.in/yaml/v3$
+            - golang.org/x/tools/go/analysis$
+        layer-tools-cmd-architecture:
+          list-mode: strict
+          files: ["**/tools/cmd/architecture/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/tools/architecture$
+
+        layer-core-parity-client:
+          list-mode: strict
+          files: ["**/internal/core/testdata/client/*.go", "!$test"]
+          allow:
+            - $gostd
+            - github.com/resoltico/pdfconcat/internal/core$
+
   exclusions:
     # Central exception registry. Each entry: what, why, and when it can be removed.
     rules:
+      # Adjacent generated pages are required literal physical itinerary data.
+      - path: internal/core/corpus_profiles_test.go
+        text: "Duplicate words"
+        linters: [dupword]
       # Repetition is the input in this tab/character aggregation regression.
       - path: internal/typeset/internal_test.go
         text: "Duplicate words"
         linters: [dupword]
+      # PDF null position operands intentionally repeat in fitting boundary fixtures.
+      - path: internal/pdf/compatibility_test.go
+        text: "Duplicate words"
+        linters: [dupword]
       # stderr is the last best-effort error channel; recursively reporting its own error cannot help.
-      - path: cmd/pdfconcat/main.go
+      - path: internal/cli/run.go
         text: "Error return value of `fmt.Fprintln`"
         linters: [errcheck]
       # Read-only input close errors do not change the captured bytes; no write durability is claimed.
@@ -92,7 +213,7 @@ linters:
         text: "Error return value of `f.Close`"
         linters: [errcheck]
       # Abort only retries owned temporary-name cleanup; primary outcomes and publication state are already recorded.
-      - path: internal/pipeline/run.go
+      - path: internal/core/(build|report).go
         text: "Error return value of `staged.Abort`"
         linters: [errcheck]
       # This subprocess deliberately exits before testing.T cleanup; its private directory is explicitly removed.
@@ -100,14 +221,14 @@ linters:
         text: "Error return value of `os.RemoveAll`|os.MkdirTemp"
         linters: [errcheck, usetesting]
       # Pipe handles may already be closed by cancellation; cleanup is intentionally idempotent.
-      - path: internal/pipeline/run_test.go
+      - path: internal/cli/stdin_test.go
         text: "Error return value of `(reader|writer).Close`"
         linters: [errcheck]
       # No background fill is a successful nil color, rather than an exceptional condition.
       - path: internal/job/values.go
         linters: [nilnil]
       # Conventional permissions are D4; exclusive random sibling creation in the chosen directory is intentional.
-      - path: internal/atomicfile/file.go
+      - path: internal/publication/file.go
         text: "G(302|304):"
         linters: [gosec]
       # Named regular inputs are the program's purpose; Stat and descriptor checks enforce the supported boundary.
@@ -115,7 +236,7 @@ linters:
         text: "G304:"
         linters: [gosec]
       # The owned target's parent directory is opened only for fsync, not for arbitrary content inclusion.
-      - path: internal/atomicfile/sync_unix.go
+      - path: internal/publication/sync_unix.go
         text: "G304:"
         linters: [gosec]
       # Oracle executables are discovered programs with fixed argument arrays; this is test-only infrastructure.

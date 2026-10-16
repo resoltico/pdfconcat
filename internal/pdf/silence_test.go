@@ -54,11 +54,11 @@ func silentLibraryBuild(t *testing.T) error {
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		return fmt.Errorf("inspection: %+v", ds)
 	}
-	layout, ds := job.Resolve(job.Job{Parts: []job.Part{{Source: path}, {Source: path}}}, map[string]job.SourceFacts{path: facts.SourceFacts})
+	layout, ds := job.Resolve(job.Job{Parts: []job.Part{{Source: path, Pointer: path}, {Source: path, Pointer: path}}}, map[string]job.SourceFacts{path: facts.SourceFacts}, 0)
 	if len(ds) > 0 {
 		return fmt.Errorf("layout: %+v", ds)
 	}
 	var output bytes.Buffer
-	_, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, nil, nil, nil, &output)
+	_, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, &output)
 	return err
 }

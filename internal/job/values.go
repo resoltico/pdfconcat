@@ -15,8 +15,14 @@ import (
 	"strings"
 )
 
-// MaxEntries bounds flattened source/generated items.
+// MaxEntries bounds all authored item nodes, including containers.
 const MaxEntries = 100_000
+
+// MaxSelectionPairs bounds the aggregate authored source range pairs.
+const MaxSelectionPairs = 100_000
+
+// MaxPageIndex is the largest page index representable by the PDF backend.
+const MaxPageIndex = int64(math.MaxInt)
 
 // MaxGeneratedPages bounds both an item count and the job total.
 const MaxGeneratedPages = 100_000

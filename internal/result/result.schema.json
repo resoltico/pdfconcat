@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/result/result.schema.json",
-  "title": "PDFConcat result version 3",
+  "title": "PDFConcat result version 4",
   "oneOf": [
     {
       "$ref": "#/$defs/result"
@@ -23,11 +23,12 @@
         "fit_to",
         "diagnostics",
         "diagnostics_omitted",
-        "report"
+        "report",
+        "page_numbers"
       ],
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 4
         },
         "command": {
           "enum": [
@@ -99,6 +100,22 @@
           "items": {
             "$ref": "#/$defs/part"
           }
+        },
+        "page_numbers": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/page_numbers"
+            }
+          ]
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/section"
+          }
         }
       },
       "allOf": [
@@ -138,6 +155,25 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "required": [
+              "parts"
+            ]
+          },
+          "then": {
+            "required": [
+              "sections"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "sections"
+              ]
+            }
+          }
         }
       ]
     },
@@ -154,7 +190,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 3
+          "const": 4
         },
         "command": {
           "const": "version"
@@ -379,7 +415,9 @@
         "kind",
         "pages",
         "output_pages",
-        "text"
+        "text",
+        "input_pages",
+        "spans"
       ],
       "properties": {
         "item": {
@@ -388,7 +426,10 @@
         "kind": {
           "enum": [
             "source",
-            "page"
+            "page",
+            "divider",
+            "contents",
+            "padding"
           ]
         },
         "path": {
@@ -461,6 +502,58 @@
               }
             }
           }
+        },
+        "input_pages": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "spans": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "output"
+            ],
+            "properties": {
+              "source": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "output": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "minItems": 1,
+          "description": "Known source mappings are nonempty arrays; unresolved mappings and non-source parts are null."
+        },
+        "section": {
+          "type": "string"
+        },
+        "reason": {
+          "const": "odd_start"
+        },
+        "before_item": {
+          "type": "string"
         }
       },
       "allOf": [
@@ -479,9 +572,11 @@
             ]
           },
           "else": {
-            "required": [
-              "count"
-            ]
+            "properties": {
+              "spans": {
+                "type": "null"
+              }
+            }
           }
         }
       ]
@@ -530,6 +625,72 @@
         },
         "overflow": {
           "type": "boolean"
+        }
+      }
+    },
+    "page_numbers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "margin"
+      ],
+      "properties": {
+        "size": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "margin": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "title",
+        "parent",
+        "target_page",
+        "output_pages"
+      ],
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "output_pages": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          ]
         }
       }
     }

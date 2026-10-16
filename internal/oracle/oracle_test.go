@@ -4,8 +4,10 @@
 package oracle_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -441,5 +443,57 @@ func TestRequiredToolsRejectMissingPrerequisite(t *testing.T) {
 	output, err := command.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "QA tools are required") || strings.Contains(string(output), "SKIP") {
 		t.Fatalf("missing required tool must fail the real test process: %v\n%s", err, output)
+	}
+}
+
+func TestOutlineHierarchyAndRejectingControls(t *testing.T) {
+	tools := oracle.RequireTools(t)
+	document := load(t, tools, pdffixture.Outlined("OUTLINE"))
+	expected := []oracle.Outline{{Title: "First", Targets: []int{1}}, {Title: "Second", Targets: []int{2}}}
+	if err := document.CheckOutlineTree(expected); err != nil {
+		t.Fatal(err)
+	}
+	wrong := []oracle.Outline{{Title: "First", Targets: []int{1}, Open: true, Children: []oracle.Outline{{Title: "Second", Targets: []int{2}}}}}
+	if err := document.CheckOutlineTree(wrong); err == nil {
+		t.Fatal("wrong hierarchy accepted")
+	}
+	for _, key := range []string{"/Parent", "/Prev", "/Last", "/Count"} {
+		t.Run(key, func(t *testing.T) {
+			doc := pdffixture.Outlined("BROKEN")
+			for n, b := range doc.Objs {
+				if strings.Contains(string(b), key+" ") && (key != "/Parent" || strings.Contains(string(b), "/Title")) && (key != "/Count" || strings.Contains(string(b), "/Type /Outlines")) {
+					pattern := regexp.MustCompile(regexp.QuoteMeta(key) + ` [0-9]+`)
+					doc.Objs[n] = pattern.ReplaceAll(b, []byte(key+" 999"))
+					break
+				}
+			}
+			broken := load(t, tools, doc)
+			if _, err := broken.OutlineTree(); err == nil {
+				t.Fatal("broken outline accepted")
+			}
+		})
+	}
+}
+
+func TestLinkedAnnotationOwnersExposeAdditionalActions(t *testing.T) {
+	doc := pdffixture.Pages("LINKED", 2)
+	// One on-page Text owns a Popup and a reply. Neither linked owner is in Annots.
+	base := len(doc.Objs) + 1
+	for n, b := range doc.Objs {
+		if strings.Contains(string(b), "/Type /Page ") {
+			last := strings.LastIndex(string(b), ">>")
+			doc.Objs[n] = []byte(string(b[:last]) + fmt.Sprintf(" /Annots [%d 0 R] ", base) + string(b[last:]))
+			break
+		}
+	}
+	doc.Objs = append(doc.Objs, []byte(fmt.Sprintf("<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] /Popup %d 0 R /IRT %d 0 R >>", base+1, base+2)), []byte(fmt.Sprintf("<< /Type /Annot /Subtype /Popup /Rect [0 0 20 20] /Parent %d 0 R /AA << /O << /S /GoTo /D [6 0 R /Fit] >> >> >>", base)), []byte("<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] /AA << /E << /S /GoTo /D [4 0 R /Fit] >> >> >>"))
+	document := load(t, oracle.RequireTools(t), doc)
+	targets, err := document.ActionTargets(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(targets)
+	if !slices.Equal(targets, []int{1, 2}) {
+		t.Fatal(targets)
 	}
 }

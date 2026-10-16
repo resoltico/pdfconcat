@@ -32,9 +32,9 @@ func assembleSourceBytes(t *testing.T, data []byte) string {
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	layout, _ := job.Resolve(job.Job{Parts: []job.Part{{Source: source}}}, map[string]job.SourceFacts{source: facts.SourceFacts})
+	layout, _ := job.Resolve(job.Job{Parts: []job.Part{{Source: source, Pointer: source}}}, map[string]job.SourceFacts{source: facts.SourceFacts}, 0)
 	var b bytes.Buffer
-	if _, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, nil, nil, nil, &b); err != nil {
+	if _, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil, &b); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(out, b.Bytes(), 0600); err != nil {

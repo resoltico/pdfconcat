@@ -7,15 +7,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
@@ -112,11 +114,41 @@ func cluster(font *typeset.Font, ref glyphRef, xOffset, yOffset int) typeset.Clu
 
 func hex4(id uint16) string { return fmt.Sprintf("<%04X>", id) }
 
-// objectStream returns the decoded data of stream object number of the file, read by qpdf.
-func objectStream(tb testing.TB, path string, number int) string {
+// objectStream resolves a semantic stream reference in independent qpdf JSON.
+func objectStream(tb testing.TB, path, key string) string {
 	tb.Helper()
+	for _, dict := range qpdfDictionaries(tb, path) {
+		if ref, ok := dict[key].(string); ok {
+			return string(run(tb, qpdfTool, "--show-object="+strings.Fields(ref)[0], "--filtered-stream-data", path))
+		}
+	}
+	tb.Fatalf("missing %s stream", key)
+	return ""
+}
 
-	return string(run(tb, qpdfTool, "--show-object="+strconv.Itoa(number), "--filtered-stream-data", path))
+func qpdfDictionaries(tb testing.TB, path string) []map[string]any {
+	tb.Helper()
+	var dump any
+	if err := json.Unmarshal(run(tb, qpdfTool, "--json", path), &dump); err != nil {
+		tb.Fatal(err)
+	}
+	var result []map[string]any
+	var walk func(any)
+	walk = func(value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			result = append(result, v)
+			for _, child := range v {
+				walk(child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+			}
+		}
+	}
+	walk(dump)
+	return result
 }
 
 // handLine is a line at a fixed position holding clusters, justified by extra points per interior space.
@@ -210,9 +242,7 @@ func TestContentStreamOperators(t *testing.T) {
 		path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
 		qpdfCheck(t, path)
 
-		// Pages are numbered after the catalog, the page tree and the five objects of the font (the first page
-		// is object 8); its content stream is the next object.
-		const contents = 9
+		const contents = "/Contents"
 		if got := objectStream(t, path, contents); got != row.want {
 			t.Errorf("%s:\n got %q\nwant %q", row.name, got, row.want)
 		}
@@ -234,77 +264,8 @@ func TestContentStreamPaintsBackgroundAndTextColor(t *testing.T) {
 	path, _ := writePDF(t, []pdf.Page{page})
 
 	want := "1 0.2 0 rg\n0 0 100.5 50 re\nf\n0.2 0.4 0.6 rg\nBT\n/F1 10 Tf\n1 0 0 1 1 2 Tm\n[" + hex4(handGlyphs(t).a.id) + "] TJ\nET\n"
-	if got := objectStream(t, path, 3+5+1); got != want {
+	if got := objectStream(t, path, "/Contents"); got != want {
 		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestDocumentObjectNumbersAndOffsets(t *testing.T) {
-	t.Parallel()
-
-	first := defaultFont(t)
-	second := halfEmFont(t)
-	pages := []pdf.Page{
-		textPage(t, first, firstPageText),
-		{Width: 100, Height: 50},
-		textPage(t, second, secondPageText),
-	}
-
-	path, data := writePDF(t, pages)
-	qpdfCheck(t, path)
-
-	text := string(data)
-
-	// Objects 1 and 2 are the catalog and page tree, 3 to 7 and 8 to 12 the two fonts, 13 on the pages.
-	for _, want := range []string{
-		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-		"2 0 obj\n<< /Type /Pages /Count 3 /Kids [13 0 R 15 0 R 17 0 R ] >>\nendobj\n",
-		"3 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /NotoSans-Regular /Encoding /Identity-H " +
-			"/DescendantFonts [4 0 R] /ToUnicode 7 0 R >>\n",
-		"/FontDescriptor 5 0 R /DW 1000 /W [",
-		"/Flags 4 /FontBBox [-621 -389 2800 1067] /ItalicAngle 0 /Ascent 1069 /Descent -293 /CapHeight 714 /StemV 80 /FontFile2 6 0 R >>",
-		"8 0 obj\n<< /Type /Font /Subtype /Type0",
-		"/DescendantFonts [9 0 R] /ToUnicode 12 0 R >>\n",
-		"13 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] " +
-			"/Resources << /Font << /F1 3 0 R >> >> /Contents 14 0 R >>\nendobj\n",
-		"15 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 50] /Resources << >> /Contents 16 0 R >>\nendobj\n",
-		"17 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] " +
-			"/Resources << /Font << /F1 8 0 R >> >> /Contents 18 0 R >>\nendobj\n",
-		"trailer\n<< /Size 19 /Root 1 0 R >>\nstartxref\n",
-	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-
-	checkCrossReference(t, data, 19)
-}
-
-// checkCrossReference verifies the cross-reference table against the bytes: every object starts where its
-// entry says and startxref points at the table.
-func checkCrossReference(tb testing.TB, data []byte, size int) {
-	tb.Helper()
-
-	startxref := regexp.MustCompile(`startxref\n(\d+)\n%%EOF\n$`).FindSubmatch(data)
-	if startxref == nil {
-		tb.Fatal("no startxref")
-	}
-
-	table, err := strconv.Atoi(string(startxref[1]))
-	if err != nil || !bytes.HasPrefix(data[table:], []byte(fmt.Sprintf("xref\n0 %d\n0000000000 65535 f \n", size))) {
-		tb.Fatalf("startxref %s does not point at the table", startxref[1])
-	}
-
-	entries := regexp.MustCompile(`(\d{10}) 0{5} n \n`).FindAllSubmatch(data[table:], -1)
-	if len(entries) != size-1 {
-		tb.Fatalf("%d entries, want %d", len(entries), size-1)
-	}
-
-	for index, entry := range entries {
-		offset, convErr := strconv.Atoi(string(entry[1]))
-		if convErr != nil || !bytes.HasPrefix(data[offset:], []byte(fmt.Sprintf("%d 0 obj\n", index+1))) {
-			tb.Errorf("object %d: offset %s does not point at its header", index+1, entry[1])
-		}
 	}
 }
 
@@ -318,22 +279,27 @@ func TestFontDescriptorAndWidthsAreScaledToThousandthsOfAnEm(t *testing.T) {
 		cluster(font, hand.b, 0, 0), cluster(font, hand.a, 0, 0),
 	}}}}
 
-	_, data := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
-	text := string(data)
-
-	// Half of each font-unit value: the font is 2,000 units to the em, so a thousandth of an em is two units.
-	widths := fmt.Sprintf("/W [%d [%s] %d [%s] ]", hand.a.id, trimNumber(float64(font.GlyphAdvance(hand.a.id))/2),
-		hand.b.id, trimNumber(float64(font.GlyphAdvance(hand.b.id))/2))
-
-	for _, want := range []string{
-		widths,
-		"/FontBBox [-310.5 -194.5 1400 533.5]",
-		"/Ascent 534.5 /Descent -146.5 /CapHeight 357",
-	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("missing %q", want)
+	path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
+	foundWidths, foundDescriptor := false, false
+	for _, dict := range qpdfDictionaries(t, path) {
+		if actual, ok := dict["/W"]; ok && dict["/Subtype"] == "/CIDFontType2" {
+			foundWidths = true
+			want := []any{float64(hand.a.id), []any{float64(font.GlyphAdvance(hand.a.id)) / 2}, float64(hand.b.id), []any{float64(font.GlyphAdvance(hand.b.id)) / 2}}
+			if !reflect.DeepEqual(actual, want) {
+				t.Fatalf("scaled widths: %v want %v", actual, want)
+			}
+		}
+		if dict["/Type"] == "/FontDescriptor" {
+			foundDescriptor = true
+			if !reflect.DeepEqual(dict["/FontBBox"], []any{-310.5, -194.5, 1400.0, 533.5}) || dict["/Ascent"] != 534.5 || dict["/Descent"] != -146.5 || dict["/CapHeight"] != 357.0 {
+				t.Fatalf("scaled descriptor: %v", dict)
+			}
 		}
 	}
+	if !foundWidths || !foundDescriptor {
+		t.Fatal("missing independent font dictionary facts")
+	}
+
 }
 
 func TestToUnicodeMapsExactlyTheUsedGlyphs(t *testing.T) {
@@ -349,7 +315,7 @@ func TestToUnicodeMapsExactlyTheUsedGlyphs(t *testing.T) {
 	path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
 
 	want := toUnicodeHeader + "2 beginbfchar\n<0024> <0041>\n<0025> <0042>\nendbfchar\n" + toUnicodeFooter
-	if got := objectStream(t, path, 3+4); got != want {
+	if got := objectStream(t, path, "/ToUnicode"); got != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
 }
@@ -425,7 +391,7 @@ func toUnicodeCounts(tb testing.TB, page pdf.Page) []string {
 
 	path, _ := writePDF(tb, []pdf.Page{page})
 
-	matches := beginBfChar.FindAllStringSubmatch(objectStream(tb, path, 3+4), -1)
+	matches := beginBfChar.FindAllStringSubmatch(objectStream(tb, path, "/ToUnicode"), -1)
 	counts := make([]string, 0, len(matches))
 
 	for _, match := range matches {
@@ -511,5 +477,48 @@ func TestPageLimitIsInclusive(t *testing.T) {
 	_, err := pdf.Write(ctx, io.Discard, pages)
 	if err == nil || !strings.Contains(err.Error(), context.Canceled.Error()) {
 		t.Errorf("a document of exactly MaxPages pages: %v", err)
+	}
+}
+
+func TestGeneratedBlocksShareFontAndLinkFinalPhysicalPage(t *testing.T) {
+	font := defaultFont(t)
+	digits, err := typeset.NewDigits(font, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	numeric, err := digits.Place("123", 260, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := textPage(t, font, "Heading")
+	first.Blocks = []pdf.TextBlock{{Text: numeric}}
+	first.Links = []pdf.PageLink{{Rect: typeset.Rect{X: 10, Y: 90, Width: 270, Height: 100}, TargetPage: 2}}
+	path, _ := writePDF(t, []pdf.Page{first, textPage(t, font, "TARGET")})
+	qpdfCheck(t, path)
+	texts := extractRaw(t, path)
+	if len(texts) != 2 || strings.Join(strings.Fields(texts[0]), " ") != "Heading 123" || strings.TrimSpace(texts[1]) != "TARGET" {
+		t.Fatalf("multi-block extraction: %q", texts)
+	}
+	doc, err := oracle.Load(oracle.RequireTools(t), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := doc.PageObjects()
+	found := false
+	for _, dict := range qpdfDictionaries(t, path) {
+		if dict["/Subtype"] != "/Link" {
+			continue
+		}
+		found = true
+		if !reflect.DeepEqual(dict["/Dest"], []any{objects[1], "/Fit"}) || !reflect.DeepEqual(dict["/Rect"], []any{10.0, 90.0, 280.0, 190.0}) {
+			t.Fatalf("generated row link: %v", dict)
+		}
+	}
+	if !found {
+		t.Fatal("missing row link")
+	}
+	names, programs := finalFontFacts(t, path)
+	if names[font.PostScriptName()] != 3 || len(programs) != 1 {
+		t.Fatalf("blocks did not share font: %v", names)
 	}
 }

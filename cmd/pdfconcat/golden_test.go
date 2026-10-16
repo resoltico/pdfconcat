@@ -14,7 +14,7 @@ import (
 )
 
 func TestGoldenResultsAndReport(t *testing.T) {
-	plan := `{"version":2,"items":[{"page":{"size":"100x200pt"},"count":2}]}`
+	plan := `{"version":3,"items":[{"page":{"size":"100x200pt"},"count":2}]}`
 	for _, tc := range []struct {
 		name  string
 		args  []string

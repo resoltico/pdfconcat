@@ -1,11 +1,35 @@
 {
-  "version": 2,
+  "version": 3,
   "output": "Titles.pdf",
-  "page": { "text": { "font": { "file": "fonts/Example.ttf" }, "size": 28 } },
+  "page": {
+    "text": {
+      "font": {
+        "file": "fonts/Example.ttf"
+      },
+      "size": 28
+    }
+  },
   "items": [
-    "01.pdf",
-    { "page": { "text": { "value": "Chapter two" } } },
-    "02.pdf",
-    { "page": { "text": { "font": "default", "value": "Set in the built-in font" } } }
+    {
+      "source": "01.pdf"
+    },
+    {
+      "page": {
+        "text": {
+          "value": "Chapter two"
+        }
+      }
+    },
+    {
+      "source": "02.pdf"
+    },
+    {
+      "page": {
+        "text": {
+          "font": "default",
+          "value": "Set in the built-in font"
+        }
+      }
+    }
   ]
 }

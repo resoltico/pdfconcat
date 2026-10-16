@@ -415,12 +415,10 @@ func writeValid(t *testing.T) string {
 
 func TestFindToolsReportsAMissingTool(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv(oracle.RequireToolsEnv, "1")
 
-	if _, err := oracle.FindTools(); err != nil {
-		// A Homebrew prefix may still supply the tools; either outcome is valid, a failure must name a tool.
-		if !strings.Contains(err.Error(), "look up") {
-			t.Errorf("error does not name the tool lookup: %v", err)
-		}
+	if _, err := oracle.FindTools(); err == nil || !strings.Contains(err.Error(), "look up") {
+		t.Errorf("missing required tool must name the failed lookup: %v", err)
 	}
 }
 

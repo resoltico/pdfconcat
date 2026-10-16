@@ -13,6 +13,7 @@ Notable changes to this project are documented in this file. The format is based
 - **Breaking:** fitting refuses retained internal page destinations with numeric position coordinates as `fit_destination_unsupported`. Use original page sizes for those sources; whole-page and valid null-position or zoom-only destinations remain supported.
 - **Breaking:** when individually valid sources combine into PDF 2.0 output with a missing required retained annotation appearance, `check` and `build` refuse the known conflict before assembly as `source_output_incompatible`. Supply complete appearances or assemble the affected source separately; other merge/write failures can still occur.
 - **Breaking:** the viewer-regeneration warning `form_appearances_regenerated` is renamed to `form_appearance_regeneration_requested`; update diagnostic-code consumers. PDFConcat retains the request and does not generate field appearances.
+- Independent contributor PDF checks require qpdf 12.4.2 or newer for corrected linearization checking. Upgrade older distribution packages; Linux CI uses a checksum-pinned official binary. qpdf remains a test tool and is not required to run PDFConcat.
 
 ### Added
 

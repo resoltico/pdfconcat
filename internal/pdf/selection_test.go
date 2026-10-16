@@ -91,8 +91,13 @@ func TestGroupedSelectionsRetainIndependentGeometryAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	texts, err := output.RawTexts()
-	if err != nil || len(texts) != 3 || !strings.Contains(texts[0], "select p1") || !strings.Contains(texts[1], "select p3") || !strings.Contains(texts[2], "select p2") || output.EffectiveVersion() != 20 {
+	if err != nil || len(texts) != 3 || output.EffectiveVersion() != 20 {
 		t.Fatalf("selected text/version: %q %v", texts, err)
+	}
+	for page, want := range []string{"select p1", "select p3", "select p2"} {
+		if got := strings.Join(strings.Fields(texts[page]), " "); got != want {
+			t.Fatalf("selected page %d text: %q; want words %q", page+1, texts[page], want)
+		}
 	}
 	sourcePath := filepath.Join(t.TempDir(), "source.pdf")
 	if err := doc.WriteFile(sourcePath); err != nil {

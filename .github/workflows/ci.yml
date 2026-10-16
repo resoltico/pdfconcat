@@ -75,7 +75,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y qpdf poppler-utils
+          sudo apt-get install --no-install-recommends -y poppler-utils
+          qpdf_version=$(cat internal/oracle/qpdf.version)
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/qpdf.zip" "https://github.com/qpdf/qpdf/releases/download/v${qpdf_version}/qpdf-${qpdf_version}-bin-linux-x86_64.zip"
+          echo "db367d897829f22c4198ce1094143c9d467bd6ee7dfabc44ba6f02056b24f8b1  $RUNNER_TEMP/qpdf.zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/qpdf.zip" -d "$RUNNER_TEMP/qpdf"
+          chmod +x "$RUNNER_TEMP/qpdf/bin/qpdf"
+          "$RUNNER_TEMP/qpdf/bin/qpdf" --version
+          echo "$RUNNER_TEMP/qpdf/bin" >> "$GITHUB_PATH"
       - name: Test with race detector (oracle required on Linux)
         if: runner.os != 'Windows'
         env:

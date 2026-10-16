@@ -10,8 +10,15 @@ go test -count=1 ./...
 ```
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
-`pdffonts`, `pdftohtml`). Install `qpdf poppler` with Homebrew, or
-`qpdf poppler-utils` with apt. Missing tools skip their tests locally; set
+`pdffonts`, `pdftohtml`). The minimum qpdf version is declared in
+[`internal/oracle/qpdf.version`](https://github.com/resoltico/pdfconcat/blob/main/internal/oracle/qpdf.version);
+it includes corrected linearization checking required by the frozen corpus.
+Install `qpdf poppler` with Homebrew. On Linux, install `poppler-utils` with apt
+and obtain a supported qpdf from the [official releases](https://github.com/qpdf/qpdf/releases)
+if the distribution package is older. CI downloads that declared version's official
+Linux binary with a pinned checksum in `.github/workflows/ci.yml`; updating the pin
+requires updating its checksum too. These are test tools, not runtime dependencies.
+Missing or unsupported tools skip their tests locally; set
 `PDFCONCAT_REQUIRE_ORACLE=1` to require them. Linux CI does that.
 
 ```sh

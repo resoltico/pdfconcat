@@ -32,7 +32,7 @@ func TestCorpusSourceFacts(t *testing.T) {
 		tools := oracle.RequireTools(t)
 		report := filepath.Join("testdata/corpus", "business-report.pdf")
 		encoded := filepath.Join("testdata/corpus", "business-report-object-streams.pdf")
-		if raw, err := exec.CommandContext(t.Context(), tools.QPDF, "--check-linearization", encoded).CombinedOutput(); err != nil {
+		if raw, err := exec.CommandContext(t.Context(), tools.QPDF, "--check-linearization", encoded).CombinedOutput(); err != nil || strings.TrimSpace(string(raw)) != encoded+": no linearization errors" {
 			t.Fatal(string(raw), err)
 		}
 		xref, err := exec.CommandContext(t.Context(), tools.QPDF, "--show-xref", encoded).Output()

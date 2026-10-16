@@ -4,6 +4,8 @@ Notable changes to this project are documented in this file. The format is based
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-16
+
 ### Changed
 
 - **Breaking:** plans require `version: 3` and source objects such as `{"source":"chapter.pdf"}` instead of source strings. Results and full reports use `format_version: 4`, adding original-page counts, selection spans, sections, divider/contents/padding parts and packet numbering settings. Update saved plans and JSON consumers using the current [plan](docs/PLAN.md) and [result](docs/CLI.md#output) contracts.

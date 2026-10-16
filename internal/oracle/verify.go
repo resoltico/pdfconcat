@@ -608,7 +608,7 @@ func (d *Document) checkVersion(exp Expectation, fail failFunc) {
 }
 
 func (d *Document) checkOutlines(_ map[string]int, fail failFunc) {
-	if _, err := d.OutlineTargets(); err != nil {
+	if _, err := d.OutlineTree(); err != nil {
 		fail(CheckOutlines, "%v", err)
 	}
 }

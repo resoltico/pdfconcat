@@ -6,10 +6,13 @@ package oracle
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -19,13 +22,19 @@ type Tools struct {
 	QPDF, PDFToText, PDFInfo, PDFToPPM, PDFFonts, PDFToHTML string
 }
 
-// RequireToolsEnv names the environment variable that turns missing QA tools from a skip into a failure.
+// RequireToolsEnv names the environment variable that turns unavailable QA tools from a skip into a failure.
 // CI sets it to "1"; a developer without the tools only loses these checks locally.
 const RequireToolsEnv = "PDFCONCAT_REQUIRE_ORACLE"
 
 var errQPDFWarnings = errors.New("qpdf --check reported a warning")
+var errQPDFVersion = errors.New("unsupported qpdf version")
 
-// FindTools locates the QA tools and reports the first one that is missing.
+// qpdfMinimumVersion includes the corrected linearization checker required by the frozen corpus.
+//
+//go:embed qpdf.version
+var qpdfMinimumVersion string
+
+// FindTools locates the QA tools and checks the qpdf prerequisite.
 func FindTools() (Tools, error) {
 	var tools Tools
 
@@ -40,10 +49,18 @@ func FindTools() (Tools, error) {
 		*target = path
 	}
 
+	stdout, stderr, err := run(tools.QPDF, "--version")
+	if err != nil {
+		return Tools{}, fmt.Errorf("qpdf --version: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	if err := checkQPDFVersion(stdout); err != nil {
+		return Tools{}, err
+	}
+
 	return tools, nil
 }
 
-// RequireTools locates the QA tools. When one is missing it fails the test if RequireToolsEnv is "1"
+// RequireTools locates the QA tools. When one is unavailable it fails the test if RequireToolsEnv is "1"
 // and otherwise skips it.
 func RequireTools(tb testing.TB) Tools {
 	tb.Helper()
@@ -54,10 +71,41 @@ func RequireTools(tb testing.TB) Tools {
 			tb.Fatalf("QA tools are required (%s=1): %v", RequireToolsEnv, err)
 		}
 
-		tb.Skipf("QA tools not found (%v); install qpdf and Poppler, or set %s=1 in CI to make this an error", err, RequireToolsEnv)
+		tb.Skipf("QA tools unavailable (%v); install supported qpdf and Poppler, or set %s=1 in CI to make this an error", err, RequireToolsEnv)
 	}
 
 	return tools
+}
+
+func checkQPDFVersion(output string) error {
+	minimum := strings.TrimSpace(qpdfMinimumVersion)
+	required, validMinimum := versionNumbers(minimum)
+	fields := strings.Fields(output)
+	var version string
+	if len(fields) >= 3 && fields[0] == "qpdf" && fields[1] == "version" {
+		version = fields[2]
+	}
+	installed, validInstalled := versionNumbers(version)
+	if !validMinimum || !validInstalled || slices.Compare(installed[:], required[:]) < 0 {
+		return fmt.Errorf("%w: found %q; install qpdf %s or newer for corrected linearization checking", errQPDFVersion, strings.TrimSpace(output), minimum)
+	}
+	return nil
+}
+
+func versionNumbers(version string) ([3]int, bool) {
+	var numbers [3]int
+	parts := strings.Split(version, ".")
+	if len(parts) != len(numbers) {
+		return numbers, false
+	}
+	for i, part := range parts {
+		number, err := strconv.Atoi(part)
+		if err != nil || number < 0 || strconv.Itoa(number) != part {
+			return numbers, false
+		}
+		numbers[i] = number
+	}
+	return numbers, true
 }
 
 // lookPath finds a program on PATH, then in the usual Homebrew prefix, which GUI-launched shells omit.

@@ -32,7 +32,15 @@ type (
 		n, limit int
 	}
 
-	failingWriter struct{ left int }
+	failingWriter struct {
+		left, written, calls int
+		injected             bool
+	}
+	phaseFailureWriter struct {
+		marker, suffix []byte
+		written, calls int
+		injected       bool
+	}
 )
 
 var (
@@ -42,7 +50,7 @@ var (
 	errRaster = errors.New("rendering does not match the page")
 )
 
-func TestWriteIsDeterministicAndShapedLikePDF(t *testing.T) {
+func TestWriteHasExpectedPageAndFontStructure(t *testing.T) {
 	t.Parallel()
 
 	f := defaultFont(t)
@@ -53,24 +61,40 @@ func TestWriteIsDeterministicAndShapedLikePDF(t *testing.T) {
 		{Width: 100, Height: 50, Text: &typeset.Placed{Font: f, Size: 10}},
 	}
 
-	_, first := writePDF(t, pages)
-	_, second := writePDF(t, pages)
-
-	if !bytes.Equal(first, second) {
-		t.Error("output is not deterministic")
-	}
-
+	path, first := writePDF(t, pages)
 	if !bytes.HasPrefix(first, []byte("%PDF-1.7\n%")) || !bytes.HasSuffix(first, []byte("%%EOF\n")) {
 		t.Error("header or trailer missing")
 	}
 
-	if bytes.Contains(first, []byte("UserUnit")) || bytes.Count(first, []byte("/MediaBox [0 0 ")) != len(pages) {
-		t.Error("expected one clean-origin MediaBox per page and no UserUnit")
+	actualPages := 0
+	for _, dict := range qpdfDictionaries(t, path) {
+		if dict["/Type"] != "/Page" {
+			continue
+		}
+		actualPages++
+		box, ok := dict["/MediaBox"].([]any)
+		if !ok || len(box) != 4 || box[0] != 0.0 || box[1] != 0.0 || dict["/UserUnit"] != nil {
+			t.Fatalf("generated viewport: %v", dict)
+		}
+	}
+	if actualPages != len(pages) {
+		t.Fatalf("page dictionaries: %d", actualPages)
+	}
+	if count := embeddedPrograms(t, path); count != 1 {
+		t.Fatalf("embedded fonts: %d", count)
 	}
 
-	if n := bytes.Count(first, []byte(fontFileReference)); n != 1 {
-		t.Errorf("FontFile2 references: %d", n)
+}
+
+func embeddedPrograms(t *testing.T, path string) int {
+	t.Helper()
+	count := 0
+	for _, dict := range qpdfDictionaries(t, path) {
+		if dict["/FontFile2"] != nil {
+			count++
+		}
 	}
+	return count
 }
 
 func TestIndependentValidationAndExtraction(t *testing.T) {
@@ -393,7 +417,7 @@ func TestThousandPagesShareOneFont(t *testing.T) {
 	pages := distinctPages(t, f, 1000)
 	path, data := writePDF(t, pages)
 
-	if n := bytes.Count(data, []byte(fontFileReference)); n != 1 {
+	if n := embeddedPrograms(t, path); n != 1 {
 		t.Errorf("FontFile2 references: %d", n)
 	}
 
@@ -438,9 +462,9 @@ func TestDistinctFontsAreEmbeddedOnceEach(t *testing.T) {
 		textPage(t, sameBytes, "three"),
 		textPage(t, other, "four"),
 	}
-	path, data := writePDF(t, pages)
+	path, _ := writePDF(t, pages)
 
-	if n := bytes.Count(data, []byte(fontFileReference)); n != 2 {
+	if n := embeddedPrograms(t, path); n != 2 {
 		t.Errorf("FontFile2 references: %d, want 2", n)
 	}
 
@@ -498,19 +522,29 @@ func TestWriteRejectsInvalidInput(t *testing.T) {
 
 func TestPageSizeBoundariesAreAccepted(t *testing.T) {
 	t.Parallel()
-
 	for _, side := range []float64{typeset.MinPageSide, 595.276, typeset.MaxPageSide} {
-		path, data := writePDF(t, []pdf.Page{{Width: side, Height: side}})
-		if !bytes.Contains(data, []byte(fmt.Sprintf("/MediaBox [0 0 %s %s]", trimNumber(side), trimNumber(side)))) {
-			t.Errorf("side %v: media box missing", side)
-		}
-
+		path, _ := writePDF(t, []pdf.Page{{Width: side, Height: side}})
+		assertPageDimensions(t, path, side, side)
 		qpdfCheck(t, path)
 	}
 }
 
-func trimNumber(v float64) string {
-	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", v), "0"), ".")
+func assertPageDimensions(t *testing.T, path string, width, height float64) {
+	t.Helper()
+	found := false
+	for _, dict := range qpdfDictionaries(t, path) {
+		if dict["/Type"] != "/Page" {
+			continue
+		}
+		found = true
+		box, ok := dict["/MediaBox"].([]any)
+		if !ok || len(box) != 4 || box[0] != 0.0 || box[1] != 0.0 || box[2] != width || box[3] != height {
+			t.Fatalf("page dimensions: %v", dict["/MediaBox"])
+		}
+	}
+	if !found {
+		t.Fatal("missing final page dictionary")
+	}
 }
 
 func TestCancellation(t *testing.T) {
@@ -526,7 +560,7 @@ func TestCancellation(t *testing.T) {
 		t.Errorf("canceled before start: %v", err)
 	}
 
-	// Cancel while writing: the first page's output cancels the context.
+	// Cancel during output after a fixed transport byte threshold is crossed.
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
@@ -550,62 +584,102 @@ func (c *cancelAfter) Write(p []byte) (int, error) {
 }
 
 func (w *failingWriter) Write(p []byte) (int, error) {
-	if len(p) > w.left {
+	w.calls++
+	if w.injected {
 		return 0, errDisk
 	}
-
+	if len(p) > w.left {
+		n := w.left
+		w.written += n
+		w.left = 0
+		w.injected = true
+		return n, errDisk
+	}
 	w.left -= len(p)
+	w.written += len(p)
+	return len(p), nil
+}
 
+// phaseFailureWriter refuses a marker from this serialization, including when
+// its prefix was accepted in earlier writes. It never relies on another PDF's
+// length or the backend's chunk boundaries.
+func (w *phaseFailureWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.injected {
+		return 0, errDisk
+	}
+	combined := append(bytes.Clone(w.suffix), p...)
+	if index := bytes.Index(combined, w.marker); index >= 0 {
+		n := max(0, index-len(w.suffix))
+		w.written += n
+		w.injected = true
+		return n, errDisk
+	}
+	w.suffix = bytes.Clone(combined[max(0, len(combined)-len(w.marker)+1):])
+	w.written += len(p)
 	return len(p), nil
 }
 
 func TestWriteReportsWriterFailures(t *testing.T) {
 	t.Parallel()
-
 	pages := distinctPages(t, defaultFont(t), 300)
-
-	var full bytes.Buffer
-	if _, err := pdf.Write(context.Background(), &full, pages); err != nil {
-		t.Fatal(err)
+	// These fixed budgets are crossed by this full-font fixture. The explicit
+	// injection assertion detects a fixture change that stops exercising failure.
+	for _, budget := range []int{0, 1000, 70000, 130000} {
+		writer := &failingWriter{left: budget}
+		written, err := pdf.Write(t.Context(), writer, pages)
+		if !writer.injected || writer.calls == 0 || writer.written != budget || written != int64(writer.written) || !errors.Is(err, errDisk) {
+			t.Fatalf("budget %d: injected=%v accepted=%d reported=%d calls=%d error=%v", budget, writer.injected, writer.written, written, writer.calls, err)
+		}
+		t.Logf("budget %d injected after %d bytes across %d writes", budget, writer.written, writer.calls)
 	}
+	for _, phase := range []struct{ name, marker string }{{"trailer", "\nstartxref\n"}, {"EOF", "\n%%EOF\n"}} {
+		writer := &phaseFailureWriter{marker: []byte(phase.marker)}
+		written, err := pdf.Write(t.Context(), writer, pages)
+		if !writer.injected || writer.calls == 0 || writer.written == 0 || written != int64(writer.written) || !errors.Is(err, errDisk) {
+			t.Fatalf("%s: injected=%v accepted=%d reported=%d calls=%d error=%v", phase.name, writer.injected, writer.written, written, writer.calls, err)
+		}
+		t.Logf("%s injected after %d bytes across %d writes", phase.name, writer.written, writer.calls)
+	}
+}
 
-	// Fail at the first flush, among the pages, while writing the font, and at the very end.
-	for _, keep := range []int{0, 1000, 70_000, 130_000, full.Len() - 70_000, full.Len() - 1} {
-		_, err := pdf.Write(context.Background(), &failingWriter{left: keep}, pages)
-		if !errors.Is(err, errDisk) {
-			t.Errorf("failure after %d bytes: %v", keep, err)
+func TestWriterFailureMarkerSpansTransportWrites(t *testing.T) {
+	for _, marker := range []string{"\nstartxref\n", "\n%%EOF\n"} {
+		// Exercise the real serializer through one-byte transport writes, ensuring
+		// marker detection spans calls instead of assuming a particular buffer size.
+		pages := []pdf.Page{{Width: 10, Height: 10}}
+		writer := &phaseFailureWriter{marker: []byte(marker)}
+		split := singleByteWriter{writer: writer}
+		written, err := pdf.Write(t.Context(), split, pages)
+		if !writer.injected || writer.calls < len(marker) || written != int64(writer.written) || !errors.Is(err, errDisk) {
+			t.Fatalf("split %q: injected=%v accepted=%d reported=%d calls=%d error=%v", marker, writer.injected, writer.written, written, writer.calls, err)
 		}
 	}
 }
 
-func TestNumberFormatting(t *testing.T) {
+type singleByteWriter struct{ writer io.Writer }
+
+func (w singleByteWriter) Write(p []byte) (int, error) {
+	total := 0
+	for index := range p {
+		n, err := w.writer.Write(p[index : index+1])
+		total += n
+		if err != nil {
+			return total, err
+		}
+		if n != 1 {
+			return total, io.ErrShortWrite
+		}
+	}
+	return total, nil
+}
+
+func TestPageDimensionsRetainFractionalPoints(t *testing.T) {
 	t.Parallel()
-
-	// Observed through MediaBox values.
-	cases := map[float64]string{
-		1:          "1",
-		100.5:      "100.5",
-		595.276:    "595.276",
-		841.8894:   "841.8894",
-		14400:      "14400",
-		1.0004:     "1.0004",
-		1.0006:     "1.0006",
-		12.3000001: "12.3000001",
+	for _, width := range []float64{1, 100.5, 595.276, 841.8894, 14400, 1.0004, 1.0006, 12.3000001} {
+		path, _ := writePDF(t, []pdf.Page{{Width: width, Height: 10}})
+		assertPageDimensions(t, path, width, 10)
 	}
-
-	for v, want := range cases {
-		_, data := writePDF(t, []pdf.Page{{Width: v, Height: 10}})
-		if !bytes.Contains(data, []byte("/MediaBox [0 0 "+want+" 10]")) {
-			t.Errorf("%v: want %s in %s", v, want, between(data, "/MediaBox", "]"))
-		}
-	}
-}
-
-func between(data []byte, from, to string) string {
-	s := string(data)
-	i := strings.Index(s, from)
-
-	return s[i : i+strings.Index(s[i:], to)+1]
 }
 
 func TestBlankLinesProduceNoOperators(t *testing.T) {

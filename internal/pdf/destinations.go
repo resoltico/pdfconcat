@@ -155,7 +155,6 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	}
 	slices.Sort(names)
 	replacements := map[string]string{}
-	dropped := map[string]bool{}
 	result := map[string]destination{}
 	renamed := false
 	// Reserve every original name before choosing suffixes, avoiding future collisions.
@@ -166,7 +165,6 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	for _, name := range names {
 		d := originals[name]
 		if d.page < 1 {
-			dropped[name] = true
 			continue
 		}
 		chosen := name
@@ -184,109 +182,46 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 		d.page += int(first) - 1
 		result[chosen] = d
 	}
-	err = walkObjects(c, s, func(d types.Dict) error {
-		// Omitted targets must not leave dangling destination/action references.
-		for key, value := range d {
-			if key == "Next" {
-				next, e := s.Dereference(value)
-				if e != nil {
-					return e
-				}
-				if actions, ok := next.(types.Array); ok {
-					kept := make(types.Array, 0, len(actions))
-					for _, item := range actions {
-						action, e := s.DereferenceDict(item)
-						if e != nil {
-							return e
-						}
-						kind, e := nameValue(s, action["S"])
-						if e != nil {
-							return e
-						}
-						target, e := s.Dereference(action["D"])
-						if e != nil {
-							return e
-						}
-						name, e := destinationName(s, target)
-						if kind == types.Name("GoTo") && e == nil && dropped[name] {
-							continue
-						}
-						kept = append(kept, item)
-					}
-					if len(kept) == 0 {
-						delete(d, key)
-					} else {
-						d[key] = kept
-					}
-					continue
-				}
-			}
-			if key == "Dest" {
-				resolved, e := s.Dereference(value)
-				if e != nil {
-					return e
-				}
-				if name, e := destinationName(s, resolved); e == nil && dropped[name] {
-					delete(d, key)
-					continue
-				}
-			}
-			resolved, e := s.Dereference(value)
-			if e != nil {
-				return e
-			}
-			if action, ok := resolved.(types.Dict); ok {
-				actionType, e := nameValue(s, action["S"])
-				if e != nil {
-					return e
-				}
-				if actionType != types.Name("GoTo") {
-					continue
-				}
-				target, e := s.Dereference(action["D"])
-				if e != nil {
-					return e
-				}
-				if name, e := destinationName(s, target); e == nil && dropped[name] {
-					delete(d, key)
-				}
+	targetNames := make(map[string]destination, len(originals)+len(replacements))
+	for name, d := range originals {
+		targetNames[name] = d
+	}
+	for old, chosen := range replacements {
+		targetNames[chosen] = originals[old]
+	}
+	pages, err := rawPages(c, s)
+	if err != nil {
+		return nil, false, err
+	}
+	pageSet := map[types.IndirectRef]bool{}
+	for _, page := range pages {
+		pageSet[page.ref] = true
+	}
+	err = walkRetained(c, s, func(types.Dict) error { return nil }, func(d types.Dict, key string) (bool, error) {
+		keep, err := localTarget(s, d[key], targetNames, pageSet)
+		if err != nil || !keep {
+			return keep, err
+		}
+		value, err := s.Dereference(d[key])
+		if err != nil {
+			return false, err
+		}
+		if _, array := value.(types.Array); array || value == nil {
+			return true, nil
+		}
+		name, err := destinationName(s, value)
+		if err != nil {
+			return false, err
+		}
+		if replacement, ok := replacements[name]; ok {
+			if _, isName := value.(types.Name); isName {
+				d[key] = types.Name(replacement)
+			} else {
+				d[key] = destinationLiteral(replacement)
 			}
 		}
-		rewrite := func(key string) error {
-			value, err := s.Dereference(d[key])
-			if err != nil {
-				return err
-			}
-			if _, isArray := value.(types.Array); isArray || value == nil {
-				return nil
-			}
-			old, err := destinationName(s, value)
-			if err != nil {
-				return err
-			}
-			if replacement, ok := replacements[old]; ok {
-				if _, isName := value.(types.Name); isName {
-					d[key] = types.Name(replacement)
-				} else {
-					d[key] = destinationLiteral(replacement)
-				}
-			}
-			return nil
-		}
-		if d["Dest"] != nil {
-			if err := rewrite("Dest"); err != nil {
-				return err
-			}
-		}
-		actionType, e := nameValue(s, d["S"])
-		if e != nil {
-			return e
-		}
-		if actionType == types.Name("GoTo") && d["D"] != nil {
-			return rewrite("D")
-		}
-		return nil
-	})
+		return true, nil
+	}, true)
 	if err != nil {
 		return nil, false, err
 	}

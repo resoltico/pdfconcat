@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package cli parses the small interleaved command grammar without doing I/O.
+// Package cli adapts argument grammar, process input and presentation to core.
 package cli
 
 import (
@@ -9,8 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
+	"github.com/resoltico/pdfconcat/internal/core"
 )
 
 // Operand is a source path or a plain generated page at an argv position.
@@ -29,21 +28,24 @@ type Command struct {
 type option struct{ name, alias, value, description string }
 
 var options = []option{
-	{"--plan", "", "FILE|-", "Read a JSON plan file or standard input."},
+	{"--plan", "", "FILE|-", "Read a plan v3 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
-	{"--fit-to", "", "SIZE", "Fit every page onto this sheet size."},
+	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; refuses widgets and numeric local destinations."},
 	{"--report", "", "FILE", "Write a full JSON report."},
 	{"--overwrite", "", "", "Replace existing output/report files."},
 	{"--format", "", "json|text", "Standard-output format (default json)."},
 	{"--help", "-h", "", "Show help."},
 }
 
-// Parse validates commands, interleaved options and operands.
-func Parse(args []string) (Command, []diag.Diagnostic) {
+// Parse returns command intent and an optional complete normalized failure.
+// Token validation and error-format discovery perform no I/O.
+func Parse(args []string) (Command, *core.Result) {
 	c := Command{Format: "json"}
-	failure := func(code diag.Code, message string, index int) (Command, []diag.Diagnostic) {
-		return c, []diag.Diagnostic{diag.New(code, message, fmt.Sprintf("argv:%d", index))}
+	failure := func(kind core.InvocationFaultKind, message string, index int) (Command, *core.Result) {
+		c.Format = errorFormat(args)
+		r := core.InvocationFailure(operationHint(c.Name), kind, message, fmt.Sprintf("argv:%d", index))
+		return c, &r
 	}
 	for i, arg := range args {
 		if !utf8.ValidString(arg) || strings.ContainsRune(arg, 0) {
@@ -109,15 +111,9 @@ func Parse(args []string) (Command, []diag.Diagnostic) {
 			continue
 		}
 		if !positional && strings.HasPrefix(arg, "-") && arg != "-" {
-			name, value, equals := strings.Cut(arg, "=")
-			var spec *option
-			for j := range options {
-				if name == options[j].name || name == options[j].alias {
-					spec = &options[j]
-					break
-				}
-			}
-			if spec == nil || c.Name == "version" && spec.name != "--format" && spec.name != "--help" {
+			name, _, _ := strings.Cut(arg, "=")
+			spec, value, equals := optionToken(arg)
+			if !optionAllowed(c.Name, spec) {
 				return failure("usage_unknown_option", "Unknown option: "+name, i)
 			}
 			if seen[spec.name] {
@@ -126,10 +122,11 @@ func Parse(args []string) (Command, []diag.Diagnostic) {
 			seen[spec.name] = true
 			if spec.value != "" {
 				if !equals {
-					i++
-					if i >= len(args) {
-						return failure("usage_missing_value", spec.name+" needs "+spec.value, i-1)
+					next, ok := separateValueIndex(args, i)
+					if !ok {
+						return failure("usage_missing_value", spec.name+" needs "+spec.value, i)
 					}
+					i = next
 					value = args[i]
 				}
 				if value == "" {
@@ -146,7 +143,7 @@ func Parse(args []string) (Command, []diag.Diagnostic) {
 			case "--base-dir":
 				c.BaseDir = value
 			case "--fit-to":
-				if _, err := job.ParseSize(value, false); err != nil {
+				if _, err := core.ParseSheet(value); err != nil {
 					return failure("usage_invalid_value", err.Error(), i)
 				}
 				c.FitTo = value
@@ -187,6 +184,69 @@ func Parse(args []string) (Command, []diag.Diagnostic) {
 	return c, nil
 }
 
+func optionToken(arg string) (*option, string, bool) {
+	name, value, equals := strings.Cut(arg, "=")
+	for i := range options {
+		if name == options[i].name || options[i].alias != "" && name == options[i].alias {
+			return &options[i], value, equals
+		}
+	}
+	return nil, value, equals
+}
+
+func optionAllowed(command string, spec *option) bool {
+	return spec != nil && (command != "version" && command != "--version" || spec.name == "--format" || spec.name == "--help")
+}
+
+func separateValueIndex(args []string, index int) (int, bool) {
+	next := index + 1
+	if next >= len(args) || args[next] == "--blank" {
+		return index, false
+	}
+	if spec, _, _ := optionToken(args[next]); spec != nil {
+		return index, false
+	}
+	// A literal -- remains a value here; it ends options only at an option boundary.
+	return next, true
+}
+
+// errorFormat chooses presentation without changing the first parsing failure.
+// Invalid or repeated format requests fall back to JSON, independent of order.
+func errorFormat(args []string) string {
+	if len(args) == 0 {
+		return "json"
+	}
+	switch args[0] {
+	case "build", "check", "version", "--version":
+	default:
+		return "json"
+	}
+	format, count := "json", 0
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		spec, value, equals := optionToken(args[i])
+		if !optionAllowed(args[0], spec) {
+			continue
+		}
+		if spec.value != "" && !equals {
+			if next, ok := separateValueIndex(args, i); ok {
+				i = next
+				value = args[i]
+			}
+		}
+		if spec.name == "--format" {
+			count++
+			if count > 1 || value != "json" && value != "text" {
+				return "json"
+			}
+			format = value
+		}
+	}
+	return format
+}
+
 func knownCommand(name string) bool {
 	return name == "build" || name == "check" || name == "schema" || name == "version"
 }
@@ -196,7 +256,7 @@ func Help(command string) string {
 	var b strings.Builder
 	switch command {
 	case "":
-		b.WriteString("PDFConcat assembles PDFs and generated pages from one reviewed plan.\n\nCommands: build, check, schema plan|result, version, help [COMMAND]\nUse pdfconcat help build for inputs and options.\n")
+		b.WriteString("PDFConcat assembles selected PDF pages, sections and generated pages from one reviewed plan.\n\nCommands: build, check, schema plan|result, version, help [COMMAND]\nUse pdfconcat help build for inputs and options.\n")
 		return b.String()
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"
@@ -207,7 +267,7 @@ func Help(command string) string {
 		b.WriteString("Options may interleave with operands; -- ends options.\n")
 	}
 	for _, o := range options {
-		if command == "version" && o.name != "--format" && o.name != "--help" {
+		if !optionAllowed(command, &o) {
 			continue
 		}
 		names := o.name

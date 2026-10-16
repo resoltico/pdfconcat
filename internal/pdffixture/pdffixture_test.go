@@ -21,17 +21,21 @@ type fixtureCase struct {
 	pages int
 }
 
-// fixtureCases are every constructor, with unusual arguments where they change the output.
+// fixtureCases are normal valid constructors; refusal placeholders are separate.
 func fixtureCases() map[string]fixtureCase {
 	return map[string]fixtureCase{
-		"plain":          {pdffixture.Plain("PLAIN"), "PLAIN", 1},
-		"escaped marker": {pdffixture.Plain(`A(B)C\D`), `A(B)C\D`, 1},
-		"pages":          {pdffixture.Pages("PG", 3), "PG p3", 3},
-		"links":          {pdffixture.Links("LK"), "LK p2", 2},
-		"named":          {pdffixture.NamedDests("NM"), "NM p2", 2},
-		"legacy":         {pdffixture.LegacyDests("LG"), "LG p2", 2},
-		"form":           {pdffixture.Form("FM"), "FM p2", 2},
-		"actions":        {pdffixture.PageActions("PA"), "PA p2", 2},
+		"URI":             {pdffixture.URILink("URI", "https://example.invalid/fixture", "", false), "URI", 1},
+		"fit":             {pdffixture.FitMarks(""), "q Q /q /Q", 1},
+		"fit streams":     {pdffixture.FitMarkStreams(), "q Q /q /Q", 1},
+		"empty signature": {pdffixture.EmptySignatureField("UNSIGNED"), "UNSIGNED", 1},
+		"plain":           {pdffixture.Plain("PLAIN"), "PLAIN", 1},
+		"escaped marker":  {pdffixture.Plain(`A(B)C\D`), `A(B)C\D`, 1},
+		"pages":           {pdffixture.Pages("PG", 3), "PG p3", 3},
+		"links":           {pdffixture.Links("LK"), "LK p2", 2},
+		"named":           {pdffixture.NamedDests("NM"), "NM p2", 2},
+		"legacy":          {pdffixture.LegacyDests("LG"), "LG p2", 2},
+		"form":            {pdffixture.Form("FM"), "FM p2", 2},
+		"actions":         {pdffixture.PageActions("PA"), "PA p2", 2},
 		"boxes inherited": {
 			pdffixture.WithBoxes(
 				"BX",
@@ -61,7 +65,7 @@ func fixtureCases() map[string]fixtureCase {
 	}
 }
 
-// TestFixturesAreValidPDFsThatShowTheirMarkers checks every constructor with qpdf (structure) and
+// TestFixturesAreValidPDFsThatShowTheirMarkers checks the normal constructor table with qpdf and
 // pdftotext (the marker each page must show), so the fixtures other tests rely on are themselves
 // independently confirmed.
 func TestFixturesAreValidPDFsThatShowTheirMarkers(t *testing.T) {
@@ -133,5 +137,34 @@ func TestWriteFileReportsFailure(t *testing.T) {
 	err := pdffixture.Plain("P").WriteFile(filepath.Join(t.TempDir(), "no-such-directory", "x.pdf"))
 	if err == nil {
 		t.Fatal("no error writing into a missing directory")
+	}
+}
+
+func TestImageConstructorPaintsItsResource(t *testing.T) {
+	tools := oracle.RequireTools(t)
+	painted := filepath.Join(t.TempDir(), "painted.pdf")
+	plain := filepath.Join(t.TempDir(), "plain.pdf")
+	if err := pdffixture.ImageRich("IMAGE", 4096).WriteFile(painted); err != nil {
+		t.Fatal(err)
+	}
+	if err := pdffixture.Plain("IMAGE").WriteFile(plain); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := oracle.Load(tools, painted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blank, err := oracle.Load(tools, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	difference, err := actual.AppearanceDifference(1, blank, 1, 5)
+	if err != nil || difference < .01 {
+		t.Fatalf("image is not independently painted: difference=%v %v", difference, err)
+	}
+	// Negative control: text and structure alone do not satisfy the image witness.
+	difference, err = blank.AppearanceDifference(1, blank, 1, 5)
+	if err != nil || difference != 0 {
+		t.Fatalf("blank-image negative control: %v %v", difference, err)
 	}
 }

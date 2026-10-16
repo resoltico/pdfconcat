@@ -39,6 +39,9 @@ func TestPrunedGlyphsMetricsAndChecksums(t *testing.T) {
 		t.Fatal(err)
 	}
 	embedded := prepared[font.Identity()]
+	if !embedded.Subset {
+		t.Fatal("pruned program not marked as subset")
+	}
 	data := embedded.Program
 	original, reduced := sfntTables(t, font.Bytes()), sfntTables(t, data)
 	if !bytes.Equal(original["maxp"], reduced["maxp"]) || !bytes.Equal(original["hmtx"], reduced["hmtx"]) {

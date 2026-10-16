@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v3 and its full-report and capped-stdout views.
+// Package result defines result v4 and its complete factual outcomes.
 package result
 
 import (
 	_ "embed"
 	"encoding/json/v2"
-	"fmt"
 	"io"
 	"slices"
 
@@ -15,10 +14,13 @@ import (
 	"github.com/resoltico/pdfconcat/internal/job"
 )
 
-// Schema covers result v3, full reports and version objects.
+// Schema covers result v4, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
+
+// WireVersion is the result and version wire contract.
+const WireVersion = 4
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -50,9 +52,29 @@ type Text struct {
 	Overflow  bool        `json:"overflow"`
 }
 
-// Part is the full-report entry for one flattened item.
+// Span maps an inclusive original-source range to its physical output range.
+type Span struct {
+	Source [2]int   `json:"source"`
+	Output [2]int64 `json:"output"`
+}
+
+// Section records declared identity separately from resolved navigation/ranges.
+type Section struct {
+	Item        string    `json:"item"`
+	Title       string    `json:"title"`
+	Parent      *string   `json:"parent"`
+	TargetPage  *int64    `json:"target_page"`
+	OutputPages *[2]int64 `json:"output_pages"`
+}
+
+// Part is one compact declared or resolved leaf in the complete report.
 type Part struct {
 	Item          string            `json:"item"`
+	InputPages    *int64            `json:"input_pages"`
+	Spans         *[]Span           `json:"spans"`
+	Section       string            `json:"section,omitempty"`
+	Reason        string            `json:"reason,omitempty"`
+	BeforeItem    string            `json:"before_item,omitempty"`
 	Kind          string            `json:"kind"`
 	Path          string            `json:"path,omitempty"`
 	SHA256        string            `json:"sha256,omitempty"`
@@ -73,10 +95,12 @@ type Result struct {
 	Output             *Output           `json:"output"`
 	Pages              *Pages            `json:"pages"`
 	FitTo              *job.Size         `json:"fit_to"`
+	PageNumbers        *job.PageNumbers  `json:"page_numbers"`
 	Diagnostics        []diag.Diagnostic `json:"diagnostics"`
 	DiagnosticsOmitted int               `json:"diagnostics_omitted"`
 	Report             *Report           `json:"report"`
 	Parts              []Part            `json:"parts,omitzero"`
+	Sections           []Section         `json:"sections,omitzero"`
 }
 
 // Version identifies the executable and its build environment.
@@ -91,7 +115,7 @@ type Version struct {
 
 // New starts a result with unknown facts and no diagnostics.
 func New(command string) Result {
-	return Result{FormatVersion: 3, Command: command, Status: "ok", Diagnostics: []diag.Diagnostic{}}
+	return Result{FormatVersion: WireVersion, Command: command, Status: "ok", Diagnostics: []diag.Diagnostic{}}
 }
 
 // Full normalizes diagnostics without caps and always includes report parts.
@@ -102,22 +126,8 @@ func (r Result) Full() Result {
 	if r.Parts == nil {
 		r.Parts = []Part{}
 	}
-	return r
-}
-
-// Summary omits parts and bounds both diagnostics and their consumer pointers.
-func (r Result) Summary() Result {
-	r = r.Full()
-	r.Parts = nil
-	if len(r.Diagnostics) > 20 {
-		r.DiagnosticsOmitted = len(r.Diagnostics) - 20
-		r.Diagnostics = r.Diagnostics[:20]
-	}
-	for i := range r.Diagnostics {
-		if len(r.Diagnostics[i].Items) > 20 {
-			r.Diagnostics[i].ItemsOmitted = len(r.Diagnostics[i].Items) - 20
-			r.Diagnostics[i].Items = r.Diagnostics[i].Items[:20]
-		}
+	if r.Sections == nil {
+		r.Sections = []Section{}
 	}
 	return r
 }
@@ -170,41 +180,4 @@ func JSON(w io.Writer, value any) error {
 	data = append(data, '\n')
 	_, err = w.Write(data)
 	return err
-}
-
-// Render writes the capped JSON or text stdout view.
-func Render(w io.Writer, r Result, format string) error {
-	r = r.Summary()
-	if format != "text" {
-		return JSON(w, r)
-	}
-	if _, err := fmt.Fprintf(w, "%s %s\n", r.Command, r.Status); err != nil {
-		return err
-	}
-	if r.Pages != nil && r.Pages.Total != nil {
-		if _, err := fmt.Fprintf(w, "Pages: %d\n", *r.Pages.Total); err != nil {
-			return err
-		}
-	}
-	if r.Output != nil {
-		if _, err := fmt.Fprintf(w, "Output: %s (published: %t)\n", r.Output.Path, r.Output.Published); err != nil {
-			return err
-		}
-	}
-	for _, d := range r.Diagnostics {
-		if _, err := fmt.Fprintf(w, "%s %s: %s\n", d.Severity, d.Code, d.Message); err != nil {
-			return err
-		}
-	}
-	if r.DiagnosticsOmitted > 0 {
-		if _, err := fmt.Fprintf(w, "%d more diagnostics; use --report for full details.\n", r.DiagnosticsOmitted); err != nil {
-			return err
-		}
-	}
-	if r.Report != nil {
-		if _, err := fmt.Fprintf(w, "Report: %s (written: %t)\n", r.Report.Path, r.Report.Written); err != nil {
-			return err
-		}
-	}
-	return nil
 }

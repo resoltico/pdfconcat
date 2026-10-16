@@ -1,0 +1,24 @@
+Run from the repository root. Authoring tools only; never part of tests/CI.
+Observed producer: LibreOffice 26.8.1.1 (AARCH64), writer_pdf_Export.
+Python: 3.12; fonttools 4.61.1.
+
+1. Create a fresh absolute AUTHORING directory outside the checkout.
+2. python3 internal/core/testdata/corpus/sources/prepare_office_font.py "$AUTHORING/fonts/CorpusNotoSans-Regular.ttf"
+   Create the fonts directory first. This transient derivative changes only name
+   records in the authoritative bundled Noto Sans so exporter font selection is
+   unambiguous. The Noto copyright, OFL and outlines remain intact. Do not commit
+   a second standalone Noto font. Font software remains under its original OFL.
+3. Create "$AUTHORING/fonts.conf" with an absolute local dir element pointing to
+   "$AUTHORING/fonts" and a cachedir under AUTHORING. This generated config is
+   private authoring state, not provenance or a corpus source.
+4. FONTCONFIG_FILE="$AUTHORING/fonts.conf" soffice \
+   -env:UserInstallation="file://$AUTHORING/profile" --headless \
+   --convert-to 'pdf:writer_pdf_Export:{"ExportBookmarks":{"type":"boolean","value":"true"}}' \
+   --outdir "$AUTHORING" internal/core/testdata/corpus/sources/office-report.fodt
+5. Review actual embedded fonts (CorpusNotoSans-Regular only), two pages, native
+   bookmarks/link, table/vector content, all source/export metadata and renders.
+   Replace the frozen office-report.pdf only after review and provenance refresh.
+
+Only original fictional source content is included. No linked graphics, comments,
+tracked edits, macros, personal user profile or external fetched resources.
+Regeneration is not promised byte-identical across producer/platform upgrades.

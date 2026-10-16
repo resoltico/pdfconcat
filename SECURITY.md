@@ -17,6 +17,11 @@ unsigned signature fields remain supported. Signatures are not authenticated.
 Upstream relaxed parsing may accept other repairs/malformed syntax; see the
 [feature policy and limitations](docs/DESIGN.md).
 
+Page selection is visible-page composition, not redaction. It does not promise
+removal of every private object or byte associated with omitted pages. Every
+original source remains subject to whole-file safety checks and hashing. Footer
+numbers are overlays and may cover existing content.
+
 Named input plans, fonts and PDFs must be regular files; input symlinks to regular
 files are supported. Filesystem checks assume trusted local namespaces and do not
 claim protection against concurrent adversarial path substitution.

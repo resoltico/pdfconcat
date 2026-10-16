@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -193,8 +194,11 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 				dir := t.TempDir()
 				planPath := filepath.Join(dir, "plan.json")
 				report := filepath.Join(dir, "report.json")
+				if unreadable {
+					report = filepath.Join(t.TempDir(), "report.json")
+				}
 				if !unreadable {
-					if err := os.WriteFile(planPath, []byte(`{"version":2,"items":[`), 0600); err != nil {
+					if err := os.WriteFile(planPath, []byte(`{"version":3,"items":[`), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -290,7 +294,7 @@ func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
 func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ text, code string }{{"漢", "text_unsupported_character"}, {"😀", "text_glyph_missing"}} {
-		plan := `{"version":2,"items":["missing.pdf",{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
+		plan := `{"version":3,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
 		r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 		if exit != 2 || !hasDiagnostic(r, tc.code) || hasDiagnostic(r, "source_unreadable") {
 			t.Fatalf("font/text ordering: %+v %d", r, exit)
@@ -298,7 +302,7 @@ func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	}
 	for _, text := range []string{"", "A"} {
 		out := filepath.Join(dir, "tiny-"+text+".pdf")
-		plan := `{"version":2,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
+		plan := `{"version":3,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
 		r, exit, _ := invoke(t, []string{"build", "--plan", "-", "-o", out}, plan)
 		if text == "" {
 			if exit != 0 || !r.Output.Published {
@@ -323,7 +327,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 		t.Fatalf("directory source: %+v %d", r, exit)
 	}
 	fontPlan := func(path string) string {
-		data, err := json.Marshal(map[string]any{"version": 2, "items": []any{"missing.pdf", map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
+		data, err := json.Marshal(map[string]any{"version": 3, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -403,9 +407,62 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 
 func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 	dir := t.TempDir()
-	plan := `{"version":2,"page":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
+	plan := `{"version":3,"page":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
 	r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 	if exit != 1 || !hasDiagnostic(r, "font_unreadable") {
 		t.Fatalf("empty text bypassed selected-font validation: %+v %d", r, exit)
+	}
+}
+
+func TestTextPlanLocationsAndInputContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Rīga-Ελλάδα-Київ.json")
+	input := "{\n  \"version\":3,\n  \"items\":[null]\n}\n"
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{"check", "--format", "text", "--plan", path}, strings.NewReader(""), &stdout, &stderr)
+	if exit != 2 || stderr.Len() != 0 || !strings.Contains(stdout.String(), strconv.Quote(path)+":3:12") || !strings.Contains(stdout.String(), `[pointer "/items/0"]`) {
+		t.Fatalf("located plan error: %d %q %q", exit, stdout.String(), stderr.String())
+	}
+	for _, tc := range []struct{ input, code, file, item string }{
+		{`{"version":3,"items":[{"source":"missing.pdf"}]}`, "source_unreadable", filepath.Join(dir, "missing.pdf"), "/items/0"},
+		{`{"version":3,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_unreadable", filepath.Join(dir, "missing.ttf"), "/items/0"},
+		{`{"version":3,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		exit = run([]string{"check", "--format", "text", "--plan", "-", "--base-dir", dir}, strings.NewReader(tc.input), &stdout, &stderr)
+		if exit == 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), tc.code) || !strings.Contains(stdout.String(), tc.item) || tc.file != "" && !strings.Contains(stdout.String(), strconv.Quote(tc.file)) {
+			t.Fatalf("%s context: %d %q %q", tc.code, exit, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestTextLegalControlCharacterSourcePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames forbid the tested control characters")
+	}
+	source := filepath.Join(t.TempDir(), "Rīga-Ελλάδα-Київ\n\r\t\x1b.pdf")
+	if err := pdffixture.Plain("safe path").WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exit := run([]string{"check", "--format", "text", source}, strings.NewReader(""), &stdout, &stderr); exit != 0 || stderr.Len() != 0 {
+		t.Fatalf("legal filename rejected: %d %q %q", exit, stdout.String(), stderr.String())
+	}
+	// A refusal must identify the same legal path without printing its controls.
+	if err := os.WriteFile(source, []byte("not a PDF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	exit := run([]string{"check", "--format", "text", source}, strings.NewReader(""), &stdout, &stderr)
+	if exit != 2 || !strings.Contains(stdout.String(), strconv.Quote(source)) || strings.ContainsAny(stdout.String(), "\r\t\x1b") || strings.Count(stdout.String(), "\n") != 3 {
+		t.Fatalf("unsafe filename diagnostic: %d %q %q", exit, stdout.String(), stderr.String())
+	}
+	r, code, _ := invoke(t, []string{"check", source}, "")
+	if code != 2 || len(r.Diagnostics) != 1 || r.Diagnostics[0].File != source {
+		t.Fatalf("JSON path changed: %d %+v", code, r)
 	}
 }

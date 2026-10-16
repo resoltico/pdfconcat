@@ -46,7 +46,7 @@ const (
 )
 
 func requiredTableTags() []string {
-	return []string{headTableTag, "hhea", "hmtx", "maxp", "cmap", "glyf", "loca", os2TableTag}
+	return []string{headTableTag, "hhea", "hmtx", "maxp", "cmap", "glyf", "loca", os2TableTag, "post"}
 }
 
 // emptyRequiredTables has every required table, each of length zero.
@@ -211,7 +211,7 @@ func headerCases(tb testing.TB) map[string]headerCase {
 			unwanted: errTableTooShort,
 		},
 		"OS/2 of the minimum length": {
-			edit:     func(tables map[string][]byte) { tables[os2TableTag] = tables[os2TableTag][:10] },
+			edit:     func(tables map[string][]byte) { tables[os2TableTag] = tables[os2TableTag][:64] },
 			unwanted: errTableTooShort,
 		},
 		"one glyph": {

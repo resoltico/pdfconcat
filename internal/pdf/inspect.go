@@ -22,13 +22,23 @@ import (
 	"github.com/resoltico/pdfconcat/internal/job"
 )
 
-// SourceFacts is the inspected identity, geometry and policy state of one source.
-type SourceFacts struct {
+// OccurrenceFacts describes one retained selection, without duplicating source identity.
+type OccurrenceFacts struct {
 	job.SourceFacts
+	DestNames                 []string
+	HasCoordinateDestinations bool
+	PDF20AppearanceIssue      string
+	OutlineDepth              int
+}
+
+// SourceFacts retains immutable whole-file identity and policy facts.
+type SourceFacts struct {
+	OccurrenceFacts
+	PageSizes                              map[int]job.Size
+	SubsetPrefixes                         []string
 	SHA256                                 [32]byte
 	Bytes                                  int64
 	Version                                string
-	FieldNames, DestNames                  []string
 	FormDefaultsDigest                     string
 	HasFields, HasWidgets, NeedAppearances bool
 }
@@ -76,6 +86,10 @@ func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagn
 	}()
 	s, err := read(c, data)
 	if err != nil {
+		if s != nil {
+			facts.Pages = s.PageCount
+			facts.Version = s.XRefTable.Version().String()
+		}
 		return facts, []diag.Diagnostic{diagnostic(err, "source_invalid")}
 	}
 	facts, ds, err = observe(c, s)
@@ -86,24 +100,26 @@ func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagn
 	return facts, ds
 }
 
-func read(c context.Context, data []byte) (*model.Context, error) {
+func read(c context.Context, data []byte) (s *model.Context, err error) {
 	conf, err := configuration()
 	if err != nil {
-		return nil, err
+		return s, err
 	}
-	s, err := api.ReadContext(c, bytes.NewReader(data), conf)
+	s, err = api.ReadContext(c, bytes.NewReader(data), conf)
 	if err != nil {
 		if errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) {
-			return nil, refuse("source_encrypted", "Encrypted sources are not supported (including password-protected input).")
+			return s, refuse("source_encrypted", "Encrypted sources are not supported (including password-protected input).")
 		}
-		return nil, err
+		return s, err
 	}
 	if s.Encrypt != nil {
-		return nil, refuse("source_encrypted", "Encrypted sources are not supported.")
+		return s, refuse("source_encrypted", "Encrypted sources are not supported.")
 	}
-	if _, err = rawPages(c, s); err != nil {
-		return nil, err
+	pages, err := rawPages(c, s)
+	if err != nil {
+		return s, err
 	}
+	s.PageCount = len(pages)
 	if err = walkObjects(c, s, func(d types.Dict) error {
 		if resource, ok := d["Resources"]; ok {
 			resourceDict, e := s.DereferenceDict(resource)
@@ -160,11 +176,11 @@ func read(c context.Context, data []byte) (*model.Context, error) {
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return s, err
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return nil, err
+		return s, err
 	}
 	for _, policy := range []struct {
 		key     string
@@ -177,29 +193,29 @@ func read(c context.Context, data []byte) (*model.Context, error) {
 	} {
 		value, e := s.Dereference(cat[policy.key])
 		if e != nil {
-			return nil, e
+			return s, e
 		}
 		if value != nil {
-			return nil, refuse(policy.code, policy.message)
+			return s, refuse(policy.code, policy.message)
 		}
 	}
 	rendering, e := s.Dereference(cat["NeedsRendering"])
 	if e != nil {
-		return nil, e
+		return s, e
 	}
 	if rendering == types.Boolean(true) {
-		return nil, refuse("source_dynamic_form", "Dynamic forms are not supported.")
+		return s, refuse("source_dynamic_form", "Dynamic forms are not supported.")
 	}
 	if _, err = fields(c, s); err != nil {
-		return nil, err
+		return s, err
 	}
 	report, err := api.ValidateContextWithReport(c, s)
 	if err != nil {
-		return nil, err
+		return s, err
 	}
 	for _, n := range report.Notices() {
 		if (n.Disposition == model.NoticeRepaired || n.Disposition == model.NoticeSkipped) && (n.PageNumber > 0 || strings.Contains(strings.ToLower(n.Path), "page") || strings.Contains(strings.ToLower(n.Message), "page")) {
-			return nil, refuse("source_damaged", n.Message)
+			return s, refuse("source_damaged", n.Message)
 		}
 	}
 	return s, nil
@@ -329,7 +345,12 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 }
 
 func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnostic, error) {
-	facts := SourceFacts{SourceFacts: job.SourceFacts{Pages: s.PageCount}, Version: s.XRefTable.Version().String()}
+	facts := SourceFacts{OccurrenceFacts: OccurrenceFacts{SourceFacts: job.SourceFacts{Pages: s.PageCount}}, Version: s.XRefTable.Version().String()}
+	prefixes, err := importedSubsetPrefixes(c, s)
+	facts.SubsetPrefixes = prefixes
+	if err != nil {
+		return facts, nil, err
+	}
 	catalog, err := s.Catalog()
 	if err != nil {
 		return facts, nil, err
@@ -379,13 +400,8 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		return facts, ds, err
 	}
 	facts.HasFields = len(roots) > 0
-	fields, err := fieldNames(c, s)
-	if err != nil {
-		return facts, ds, err
-	}
-	facts.FieldNames = fields
 	if facts.NeedAppearances && facts.HasFields {
-		add("form_appearances_regenerated", "The source requests viewer-regenerated field appearances.")
+		add("form_appearance_regeneration_requested", "The source requests viewer-regenerated field appearances.")
 	}
 	if facts.HasFields {
 		signature := types.Dict{"DR": form["DR"], "DA": form["DA"], "Q": form["Q"]}
@@ -451,6 +467,19 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		if d.page < 1 {
 			add("destinations_dropped", "A destination outside its source document will be omitted.")
 		}
+	}
+	facts.HasCoordinateDestinations, err = coordinateDestinations(c, s, destinations)
+	if err != nil {
+		return facts, ds, err
+	}
+	facts.PDF20AppearanceIssue, err = appearanceIssue(c, s)
+	if err != nil {
+		return facts, ds, err
+	}
+	facts.Selection = []job.PageRange{{First: 1, Last: s.PageCount}}
+	facts.OutlineDepth, err = outlineDepth(c, s)
+	if err != nil {
+		return facts, ds, err
 	}
 	slices.Sort(facts.DestNames)
 	return facts, ds, nil

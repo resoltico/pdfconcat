@@ -16,6 +16,7 @@ type EmbeddedFont struct {
 	Font    *Font
 	Program []byte
 	Glyphs  []uint16
+	Subset  bool // Program was pruned; false when licensing requires the full font.
 }
 
 // PrepareFonts unions shaped glyphs by font identity in deterministic GID order.
@@ -50,7 +51,7 @@ func PrepareFonts(placements []*Placed) (map[Digest]EmbeddedFont, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[id] = EmbeddedFont{Font: f, Program: program, Glyphs: glyphs}
+		result[id] = EmbeddedFont{Font: f, Program: program, Glyphs: glyphs, Subset: f.fsType&fsTypeNoSubsetting == 0}
 	}
 	return result, nil
 }
@@ -59,7 +60,7 @@ func PrepareFonts(placements []*Placed) (map[Digest]EmbeddedFont, error) {
 // Shaping uses the original font; this program is solely for embedding in PDFs.
 // Fonts whose license forbids subsetting are returned byte-for-byte unchanged.
 func (f *Font) Prune(glyphs []uint16) ([]byte, error) {
-	if f.fsType&0x0100 != 0 {
+	if f.fsType&fsTypeNoSubsetting != 0 {
 		return f.data, nil
 	}
 	tables, err := readTableDirectory(f.data)

@@ -1,10 +1,38 @@
 {
-  "version": 2,
+  "version": 3,
   "output": "Dividers.pdf",
-  "page": { "size": "A4", "text": { "color": "#FFFFFF", "size": 36 } },
+  "page": {
+    "size": "A4",
+    "text": {
+      "color": "#FFFFFF",
+      "size": 36
+    }
+  },
   "items": [
-    { "page": { "background": "#1F3A5F", "text": { "value": "Section one" } } },
-    { "page": { "background": "#7A2E2E", "text": { "value": "Section two" } } },
-    { "page": { "background": "none", "text": { "value": "" } }, "count": 3 }
+    {
+      "page": {
+        "background": "#1F3A5F",
+        "text": {
+          "value": "Section one"
+        }
+      }
+    },
+    {
+      "page": {
+        "background": "#7A2E2E",
+        "text": {
+          "value": "Section two"
+        }
+      }
+    },
+    {
+      "page": {
+        "background": "none",
+        "text": {
+          "value": ""
+        }
+      },
+      "count": 3
+    }
   ]
 }

@@ -33,6 +33,13 @@ Generated PDFs normally embed a glyph-pruned copy with stable glyph IDs. A font
 whose embedding permission prohibits subsetting is embedded unchanged. The
 bundled font asset itself is unchanged; the font is not sold separately.
 
+## Source-only test corpus
+
+Source checkouts include Go Italic and Go Mono fonts, plus frozen PDFs with
+embedded Noto Sans and Libertinus Serif font programs. Their credits, licenses
+and authoring details are recorded in the [corpus notices](https://github.com/resoltico/pdfconcat/blob/main/internal/core/testdata/corpus/NOTICE.txt).
+These test assets are not included in the executable or binary release archives.
+
 ## Development tools
 
 Stock golangci-lint, govulncheck and actionlint are development dependencies pinned

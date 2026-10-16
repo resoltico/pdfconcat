@@ -33,8 +33,12 @@ archives:
       - CONTRIBUTING.md
       - SECURITY.md
       - docs/DESIGN.md
+      - docs/CORE.md
       - docs/PLAN.md
       - docs/CLI.md
+      - src: examples/plans/*.json
+        dst: examples/plans
+        strip_parent: true
       - src: third_party/licenses/*.txt
         dst: third_party/licenses
         strip_parent: true

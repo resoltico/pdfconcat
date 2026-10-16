@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package plan decodes strict, located version 2 assembly plans.
+// Package plan decodes strict, located version 3 assembly plans.
 package plan
 
 import (
@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/resoltico/pdfconcat/internal/diag"
@@ -23,7 +25,7 @@ import (
 // MaxBytes bounds the original UTF-8 plan, including an optional BOM.
 const MaxBytes = 64 << 20
 
-// Schema is the editor-facing plan v2 JSON Schema.
+// Schema is the editor-facing plan v3 JSON Schema.
 //
 //go:embed plan.schema.json
 var Schema []byte
@@ -36,18 +38,14 @@ type fault struct {
 
 func (e *fault) Error() string { return e.message }
 
-type node struct {
-	pointer, source, dir string
-	page                 *job.PageStyle
-	count                int
-	children             []node
-}
-
 type decoder struct {
 	d                  *jsontext.Decoder
 	data               []byte
 	bom                int64
 	entries, generated int
+	pairs, contents    int
+	contentsPointer    string
+	contentsOffset     int64
 }
 
 // Decode charges the original input bytes, including an optional leading BOM.
@@ -63,21 +61,6 @@ func Decode(data []byte, file, base string) (job.Job, []diag.Diagnostic) {
 		input = input[3:]
 	}
 	p.d = jsontext.NewDecoder(bytes.NewReader(input))
-	// A complete, well-formed v1 document has an explicit migration diagnostic,
-	// independent of where its old members appear.
-	var probe struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(input, &probe); err == nil && probe.Version == 1 {
-		location := &fault{code: "plan_version_unsupported", message: "Use version: 2 and rename blank to page (top-level defaults and items).", pointer: "/version"}
-		_ = p.object(func(name string) error {
-			if name == "version" {
-				location.offset = p.start()
-			}
-			return p.d.SkipValue()
-		})
-		return job.Job{}, []diag.Diagnostic{p.diagnostic(location, file)}
-	}
 	result, err := p.document(base)
 	if err == nil {
 		_, err = p.d.ReadToken()
@@ -200,9 +183,9 @@ func (p *decoder) unknown(name string) error {
 }
 
 func (p *decoder) document(base string) (job.Job, error) {
-	result := job.Job{BaseDir: base}
+	var result job.Job
 	var defaults job.PageStyle
-	var nodes []node
+	var nodes []job.Part
 	var dir string
 	seenVersion, seenItems := false, false
 	err := p.object(func(name string) error {
@@ -220,11 +203,11 @@ func (p *decoder) document(base string) (job.Job, error) {
 				case token.Kind() == 'n':
 					err = &fault{code: "plan_null", message: "null is not allowed.", pointer: "/version", offset: start}
 				case token.Kind() == '0':
-					if token.String() != "2" {
-						err = p.fail("plan_version_unsupported", "Use version: 2 and rename blank to page.")
+					if token.String() != "3" {
+						err = &fault{code: "plan_version_unsupported", message: "Supported plan version is 3.", pointer: "/version", offset: start}
 					}
 				default:
-					err = p.fail("plan_type", "version must be the JSON integer 2.")
+					err = p.fail("plan_type", "version must be the JSON integer 3.")
 				}
 			}
 		case "output":
@@ -238,7 +221,9 @@ func (p *decoder) document(base string) (job.Job, error) {
 				result.FitTo = &size
 			}
 		case "page":
-			defaults, err = p.style()
+			defaults, err = p.style(false)
+		case "page_numbers":
+			result.PageNumbers, err = p.pageNumbers()
 		case "items":
 			seenItems = true
 			nodes, err = p.items(0)
@@ -251,7 +236,7 @@ func (p *decoder) document(base string) (job.Job, error) {
 		return result, err
 	}
 	if !seenVersion {
-		return result, p.fail("plan_version_unsupported", "Missing version; use version: 2 and page instead of blank.")
+		return result, p.fail("plan_version_unsupported", "Missing version; supported plan version is 3.")
 	}
 	if !seenItems {
 		return result, p.fail("plan_type", "Required member items is missing.")
@@ -267,18 +252,25 @@ func (p *decoder) document(base string) (job.Job, error) {
 	if dir != "" {
 		scope, _ = job.Path(base, dir)
 	}
-	p.flatten(nodes, scope, defaults, &result.Parts)
+	result.Parts = nodes
+	p.resolveDeclarations(result.Parts, scope, defaults)
+	if p.contents > 0 {
+		_, sections := job.Declarations(result)
+		if len(sections) == 0 {
+			return result, &fault{code: "plan_value", message: "Contents requires at least one titled section.", pointer: p.contentsPointer, offset: p.contentsOffset}
+		}
+	}
 	return result, nil
 }
 
-func (p *decoder) items(depth int) ([]node, error) {
+func (p *decoder) items(depth int) ([]job.Part, error) {
 	if depth > 64 {
 		return nil, p.fail("plan_limit", "Group nesting exceeds 64.")
 	}
 	if err := p.expect('['); err != nil {
 		return nil, err
 	}
-	var nodes []node
+	var nodes []job.Part
 	for p.d.PeekKind() != ']' {
 		n, err := p.item(depth)
 		if err != nil {
@@ -293,68 +285,213 @@ func (p *decoder) items(depth int) ([]node, error) {
 	return nodes, err
 }
 
-func (p *decoder) item(depth int) (node, error) {
-	n := node{count: 1}
-	if p.d.PeekKind() == '"' {
-		source, err := p.path()
-		n.source = source
-		n.pointer = string(p.d.StackPointer())
-		if err == nil {
-			err = p.charge(n)
+func (p *decoder) item(depth int) (job.Part, error) {
+	n := job.Part{Count: 1}
+	if p.d.PeekKind() != '{' {
+		err := p.expect('{')
+		var typeFault *fault
+		if errors.As(err, &typeFault) && typeFault.code == "plan_type" {
+			typeFault.message = `An item must be a source object, generated page object, contents object, or container object; for example {"source":"source.pdf"}.`
 		}
 		return n, err
 	}
-	// StackPointer identifies an element after its opening token is read.
-	seenPage, seenDir, seenItems, seenCount := false, false, false, false
+	seen := map[string]bool{}
 	err := p.object(func(name string) error {
+		seen[name] = true
 		var err error
 		switch name {
+		case "source":
+			n.Source, err = p.path()
+		case "pages":
+			n.Selection, err = p.selection()
 		case "page":
-			seenPage = true
 			var style job.PageStyle
-			style, err = p.style()
-			n.page = &style
+			style, err = p.style(false)
+			n.Page = &style
 		case "dir":
-			seenDir = true
-			n.dir, err = p.path()
+			n.Dir, err = p.path()
 		case "items":
-			seenItems = true
-			n.children, err = p.items(depth + 1)
+			n.Items, err = p.items(depth + 1)
 		case "count":
-			seenCount = true
-			n.count, err = p.count()
+			n.Count, err = p.count()
+		case "title":
+			n.Title, err = p.title()
+		case "start_on":
+			n.StartOn, err = p.enum("any", "odd")
+		case "divider":
+			var style job.PageStyle
+			style, err = p.style(true)
+			n.Divider = &style
+		case "contents":
+			start, pointer := p.start(), string(p.d.StackPointer())
+			n.Contents, err = p.contentsStyle()
+			if err == nil {
+				p.contents++
+				if p.contents > 1 {
+					err = &fault{code: "plan_value", message: "A packet may contain at most one contents item.", pointer: pointer, offset: start}
+				} else {
+					p.contentsPointer, p.contentsOffset = pointer, start
+				}
+			}
 		default:
 			err = p.unknown(name)
 		}
 		return err
 	})
-	n.pointer = string(p.d.StackPointer())
+	n.Pointer = string(p.d.StackPointer())
 	if err != nil {
 		return n, err
 	}
-	isPage := seenPage && !seenDir && !seenItems
-	isGroup := !seenPage && !seenCount && seenDir && seenItems
-	if !isPage && !isGroup {
-		return n, p.fail("plan_item_shape", "An item must have page (and optional count), or dir and items.")
+	source := seen["source"] && len(seen) == 1 || seen["source"] && seen["pages"] && len(seen) == 2
+	page := seen["page"] && (len(seen) == 1 || seen["count"] && len(seen) == 2)
+	contents := seen["contents"] && len(seen) == 1
+	container := seen["items"] && (seen["dir"] || seen["title"] || seen["start_on"]) && (!seen["divider"] || seen["title"])
+	for _, key := range []string{"source", "pages", "page", "count", "contents"} {
+		container = container && !seen[key]
 	}
-	if seenPage {
-		err = p.charge(n)
+	if !source && !page && !contents && !container {
+		return n, p.fail("plan_item_shape", "An item must be a source, generated page, contents item, or useful container; divider requires a title.")
 	}
-	return n, err
+	generated := 0
+	if n.Page != nil {
+		generated = n.Count
+	}
+	if n.Divider != nil {
+		generated++
+	}
+	if message := charge(&p.entries, &p.generated, generated); message != "" {
+		return n, p.fail("plan_limit", message)
+	}
+	return n, nil
 }
 
-func (p *decoder) charge(n node) error {
-	p.entries++
-	if p.entries > job.MaxEntries {
-		return p.fail("plan_limit", "Plan exceeds 100000 flattened entries.")
+func (p *decoder) title() (string, error) {
+	value, err := p.text()
+	if err != nil {
+		return "", err
 	}
-	if n.page != nil {
-		p.generated += n.count
-		if p.generated > job.MaxGeneratedPages {
-			return p.fail("plan_limit", "Plan generates more than 100000 pages.")
+	if utf8.RuneCountInString(value) > 10000 {
+		return "", p.fail("plan_limit", "Title exceeds 10000 characters.")
+	}
+	visible := false
+	for _, r := range value {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+			return "", p.fail("plan_value", "Titles must be single-line text without control or format characters.")
 		}
+		visible = visible || !unicode.IsSpace(r)
 	}
-	return nil
+	if !visible {
+		return "", p.fail("plan_value", "Title must not be empty or whitespace-only.")
+	}
+	return value, nil
+}
+
+func (p *decoder) contentsStyle() (*job.ContentsStyle, error) {
+	style := &job.ContentsStyle{Title: "Contents"}
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "title":
+			style.Title, err = p.title()
+		case "size":
+			style.Size, err = p.size(false)
+		default:
+			err = p.unknown(name)
+		}
+		return err
+	})
+	return style, err
+}
+
+func (p *decoder) pageNumbers() (*job.PageNumbers, error) {
+	numbers := &job.PageNumbers{Size: 9, Margin: 8 * 72 / 25.4}
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "size":
+			numbers.Size, err = p.length(true)
+		case "margin":
+			numbers.Margin, err = p.length(false)
+			if err == nil && numbers.Margin < 0 {
+				err = p.fail("plan_value", "Page-number margin must not be negative.")
+			}
+		default:
+			err = p.unknown(name)
+		}
+		return err
+	})
+	return numbers, err
+}
+
+func (p *decoder) pageIndex() (int, error) {
+	start := p.start()
+	t, err := p.d.ReadToken()
+	if err != nil {
+		return 0, err
+	}
+	if t.Kind() == 'n' {
+		return 0, &fault{code: "plan_null", message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+	}
+	if t.Kind() != '0' {
+		return 0, p.fail("plan_type", "Source page indexes must be JSON integers.")
+	}
+	if strings.ContainsAny(t.String(), ".eE") {
+		return 0, p.fail("plan_value", "Source page indexes must use positive integer tokens.")
+	}
+	n, err := strconv.ParseUint(t.String(), 10, 64)
+	if err != nil || n > math.MaxInt {
+		return 0, p.fail("plan_value", "Source page index is outside the supported positive range.")
+	}
+	if n == 0 {
+		return 0, p.fail("plan_value", "Source page indexes start at 1.")
+	}
+	return int(n), nil
+}
+
+func (p *decoder) selection() ([]job.PageRange, error) {
+	if err := p.expect('['); err != nil {
+		return nil, err
+	}
+	var ranges []job.PageRange
+	for p.d.PeekKind() != ']' {
+		if err := p.expect('['); err != nil {
+			return nil, err
+		}
+		first, err := p.pageIndex()
+		if err != nil {
+			return nil, err
+		}
+		last, err := p.pageIndex()
+		if err != nil {
+			return nil, err
+		}
+		if err = p.expect(']'); err != nil {
+			return nil, err
+		}
+		if first > last {
+			return nil, p.fail("plan_value", "Source page ranges must be ascending inclusive pairs.")
+		}
+		p.pairs++
+		if p.pairs > job.MaxSelectionPairs {
+			return nil, p.fail("plan_limit", "Plan exceeds 100000 source selection pairs.")
+		}
+		if len(ranges) > 0 {
+			previous := &ranges[len(ranges)-1]
+			if first <= previous.Last {
+				return nil, p.fail("plan_value", "Source page ranges must be ascending and disjoint.")
+			}
+			if previous.Last < math.MaxInt && first == previous.Last+1 {
+				previous.Last = last
+				continue
+			}
+		}
+		ranges = append(ranges, job.PageRange{First: first, Last: last})
+	}
+	if len(ranges) == 0 {
+		return nil, p.fail("plan_value", "Source pages selection must not be empty.")
+	}
+	_, err := p.d.ReadToken()
+	return ranges, err
 }
 
 func (p *decoder) count() (int, error) {
@@ -383,22 +520,31 @@ func (p *decoder) count() (int, error) {
 	return int(n), nil
 }
 
-func (p *decoder) flatten(nodes []node, base string, defaults job.PageStyle, parts *[]job.Part) {
-	for _, n := range nodes {
+func (p *decoder) resolveDeclarations(parts []job.Part, base string, defaults job.PageStyle) {
+	style := func(authored *job.PageStyle) *job.PageStyle {
+		result := *authored
+		if result.Text.Font != "" && result.Text.Font != "default" {
+			result.Text.Font, _ = job.Path(base, result.Text.Font)
+		}
+		result = job.Layer(defaults, result)
+		return &result
+	}
+	for index := range parts {
+		part := &parts[index]
 		switch {
-		case n.source != "":
-			source, _ := job.Path(base, n.source)
-			*parts = append(*parts, job.Part{Pointer: n.pointer, Source: source})
-		case n.page != nil:
-			style := *n.page
-			if style.Text.Font != "" && style.Text.Font != "default" {
-				style.Text.Font, _ = job.Path(base, style.Text.Font)
+		case part.Source != "":
+			part.Source, _ = job.Path(base, part.Source)
+		case part.Page != nil:
+			part.Page = style(part.Page)
+		case part.Items != nil:
+			if part.Divider != nil {
+				part.Divider = style(part.Divider)
 			}
-			style = job.Layer(defaults, style)
-			*parts = append(*parts, job.Part{Pointer: n.pointer, Page: &style, Count: n.count})
-		default:
-			scope, _ := job.Path(base, n.dir)
-			p.flatten(n.children, scope, defaults, parts)
+			scope := base
+			if part.Dir != "" {
+				scope, _ = job.Path(base, part.Dir)
+			}
+			p.resolveDeclarations(part.Items, scope, defaults)
 		}
 	}
 }
@@ -444,7 +590,7 @@ func (p *decoder) length(positive bool) (float64, error) {
 	return n, nil
 }
 
-func (p *decoder) style() (job.PageStyle, error) {
+func (p *decoder) style(titleDivider bool) (job.PageStyle, error) {
 	s := job.PageStyle{Origins: map[string]string{}}
 	err := p.object(func(name string) error {
 		var err error
@@ -461,7 +607,7 @@ func (p *decoder) style() (job.PageStyle, error) {
 				}
 			}
 		case "text":
-			return p.textStyle(&s)
+			return p.textStyle(&s, titleDivider)
 		default:
 			return p.unknown(name)
 		}
@@ -473,12 +619,15 @@ func (p *decoder) style() (job.PageStyle, error) {
 	return s, err
 }
 
-func (p *decoder) textStyle(s *job.PageStyle) error {
+func (p *decoder) textStyle(s *job.PageStyle, titleDivider bool) error {
 	return p.object(func(name string) error {
 		var err error
 		originName := name
 		switch name {
 		case "value":
+			if titleDivider {
+				return &fault{code: "plan_value", message: "Divider text.value is supplied by its section title.", pointer: string(p.d.StackPointer()), offset: p.start()}
+			}
 			s.Text.Value, err = p.text()
 			if err == nil && utf8.RuneCountInString(s.Text.Value) > 10000 {
 				err = p.fail("plan_limit", "Text exceeds 10000 characters.")

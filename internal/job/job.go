@@ -3,8 +3,6 @@
 
 package job
 
-import "github.com/resoltico/pdfconcat/internal/diag"
-
 // TextStyle is the effective generated text declaration in points.
 type TextStyle struct {
 	Value, Font          string
@@ -23,39 +21,86 @@ type PageStyle struct {
 	Origins    map[string]string
 }
 
-// Part is one flattened source occurrence or generated item.
+// PageRange selects an inclusive range in the original source page order.
+type PageRange struct {
+	First, Last int
+}
+
+// ContentsStyle describes the fixed-format contents heading and authored canvas.
+type ContentsStyle struct {
+	Title string
+	Size  Size // zero means fit target, or A4 without fitting
+}
+
+// PageNumbers configures physical Arabic footer numbers when present.
+type PageNumbers struct {
+	Size   float64 `json:"size"`
+	Margin float64 `json:"margin"`
+}
+
+// Part is a declared source, generated page, contents item or semantic container.
 type Part struct {
-	Pointer string
-	Source  string
-	Page    *PageStyle
-	Count   int
+	Pointer        string
+	Source         string
+	Dir            string
+	Selection      []PageRange
+	Page           *PageStyle
+	Count          int
+	Contents       *ContentsStyle
+	Items          []Part
+	Title, StartOn string
+	Divider        *PageStyle
 }
 
-// Job is an ordered packet with absolute input/output paths.
+// Job is an ordered declared packet with absolute input/output paths.
 type Job struct {
-	Output  string
-	FitTo   *Size
-	Parts   []Part
-	BaseDir string
+	Output      string
+	FitTo       *Size
+	Parts       []Part
+	PageNumbers *PageNumbers
 }
 
-// SourceFacts contains inspected page counts and displayed boundary sizes.
+// SourceFacts contains the selected count, boundaries and normalized ranges of one occurrence.
 type SourceFacts struct {
 	Pages               int
 	FirstSize, LastSize Size
+	Selection           []PageRange
 }
 
-// PlacedPart has its resolved canvas and inclusive output range.
-type PlacedPart struct {
+// Leaf is a derived declared emission, with its innermost authored section.
+type Leaf struct {
 	Part
+	Kind, Owner string
+}
+
+// SourceMapping associates one selected original range with its first output page.
+type SourceMapping struct {
+	SourceFirst, SourceLast int
+	OutputFirst             int64
+}
+
+// PlacedPart is one compact physical span in the complete resolved packet.
+type PlacedPart struct {
+	Leaf
 	Pages               int
 	FirstPage, LastPage int64
 	Size                Size
+	Mapping             []SourceMapping
+	Reason, BeforeItem  string
 }
 
-// Layout is the resolved ordered packet and its page totals.
+// Section identifies an authored container and its target and inclusive subtree range.
+type Section struct {
+	Item, Title, Parent         string
+	Depth                       int
+	FirstPage, LastPage, Target int64
+}
+
+// Layout is the authoritative physical sequence, section hierarchy and totals.
 type Layout struct {
 	Parts                                   []PlacedPart
+	Sections                                []Section
+	PageNumbers                             *PageNumbers
 	SourcePages, GeneratedPages, TotalPages int64
 }
 
@@ -103,62 +148,6 @@ func Layer(base, override PageStyle) PageStyle {
 		}
 	}
 	return result
-}
-
-// Resolve computes page ranges and generated canvases from inspected source facts.
-func Resolve(j Job, facts map[string]SourceFacts) (Layout, []diag.Diagnostic) {
-	var layout Layout
-	var diagnostics []diag.Diagnostic
-	var previous Size
-	for _, part := range j.Parts {
-		if part.Source != "" {
-			if f, ok := facts[part.Source]; ok {
-				previous = f.FirstSize
-				break
-			}
-		}
-	}
-	var total int64
-	for _, part := range j.Parts {
-		placed := PlacedPart{Part: part, FirstPage: total + 1}
-		if part.Page == nil {
-			f, ok := facts[part.Source]
-			if !ok || f.Pages < 1 {
-				diagnostics = append(diagnostics, diag.New("source_invalid", "Source page facts are unavailable.", part.Pointer))
-				continue
-			}
-			placed.Pages = f.Pages
-			layout.SourcePages += int64(f.Pages)
-			previous = f.LastSize
-		} else {
-			placed.Pages = part.Count
-			if placed.Pages < 1 || placed.Pages > MaxGeneratedPages || layout.GeneratedPages+int64(placed.Pages) > MaxGeneratedPages {
-				diagnostics = append(diagnostics, diag.New("plan_limit", "Generated pages exceed 100000.", part.Pointer))
-				continue
-			}
-			placed.Size = part.Page.Size
-			if placed.Size == (Size{}) {
-				placed.Size = previous
-				if j.FitTo != nil {
-					placed.Size = *j.FitTo
-				}
-				switch {
-				case placed.Size == (Size{}):
-					diagnostics = append(diagnostics, diag.New("page_size_required", "Give an explicit page size when no source is available.", part.Pointer))
-				case placed.Size.Width < 1 || placed.Size.Height < 1:
-					diagnostics = append(diagnostics, diag.New("plan_value", "Inherited generated-page sides must be at least 1 point; give an explicit size.", part.Pointer))
-				case placed.Size.Width > MaxSide || placed.Size.Height > MaxSide:
-					diagnostics = append(diagnostics, diag.New("page_size_too_large", "Inherited page exceeds 14400 points; give an explicit size.", part.Pointer))
-				}
-			}
-			layout.GeneratedPages += int64(placed.Pages)
-		}
-		total += int64(placed.Pages)
-		placed.LastPage = total
-		layout.Parts = append(layout.Parts, placed)
-	}
-	layout.TotalPages = total
-	return layout, diagnostics
 }
 
 // FieldRename records a fully-qualified form field name before and after merging.

@@ -14,6 +14,7 @@ import (
 
 	"os/exec"
 
+	"github.com/resoltico/pdfconcat/internal/job"
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/typeset"
@@ -34,11 +35,10 @@ type (
 
 // run runs an independent QA tool and returns its standard output.
 const (
-	qpdfTool          = "qpdf"
-	pdfToPPMTool      = "pdftoppm"
-	firstPageText     = "one"
-	secondPageText    = "two"
-	fontFileReference = "/FontFile2"
+	qpdfTool       = "qpdf"
+	pdfToPPMTool   = "pdftoppm"
+	firstPageText  = "one"
+	secondPageText = "two"
 )
 
 func run(tb testing.TB, tool string, args ...string) []byte {
@@ -236,4 +236,14 @@ func (b bitmap) sumAbsDiff(other bitmap) int {
 	}
 
 	return total
+}
+
+func wholeOccurrences(layout job.Layout, facts map[string]pdf.SourceFacts) map[string]pdf.OccurrenceFacts {
+	result := map[string]pdf.OccurrenceFacts{}
+	for _, part := range layout.Parts {
+		if part.Source != "" {
+			result[part.Pointer] = facts[part.Source].OccurrenceFacts
+		}
+	}
+	return result
 }

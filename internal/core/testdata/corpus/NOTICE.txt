@@ -1,0 +1,23 @@
+Original fictional document content, artwork and authoring sources:
+Copyright (c) 2026 Ervins Strauhmanis. Mozilla Public License 2.0;
+see the repository LICENSE. No customer documents or downloaded imagery.
+
+Embedded/generated Noto Sans: Copyright 2022 The Noto Project Authors.
+See internal/typeset/fontdata/OFL.txt and its original Monotype credits.
+The office authoring recipe gives a transient naming-only derivative the family
+Corpus Noto Sans to avoid fallback fonts. Original copyright/OFL remain.
+
+Technical note embedded Libertinus Serif Regular/Bold 7.051:
+Copyright 2012–2024 The Libertinus Project Authors. OFL 1.1 with reserved names
+Linux Libertine, Biolinum and STIX Fonts. See licenses/Libertinus-OFL-1.1.txt.
+Public credits: Caleb Maclennan; Philipp H. Poll and Khaled Hosny.
+
+Go Italic and Go Mono: Copyright (c) 2016 Bigelow & Holmes Inc.
+Designers Kris Holmes and Charles Bigelow. See licenses/Go-font-license.txt
+for the exact original notice/license, not the generic Go source-code license.
+TTFs are unmodified copies from golang.org/x/image v0.46.0.
+
+Form Helvetica refers to PDF Base14; no proprietary Helvetica program is bundled.
+ReportLab, Pillow, fonttools, Typst and LibreOffice are authoring tools, not new
+application runtime or normal test/CI dependencies. Inert example.invalid URIs
+are deliberately retained metadata; no test or generator follows them.

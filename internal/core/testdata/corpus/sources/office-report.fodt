@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:meta><dc:title>Fictional office report</dc:title><dc:creator>PDFConcat fixture authors</dc:creator><meta:initial-creator>PDFConcat fixture authors</meta:initial-creator><dc:description>Original fictional corpus content. MPL-2.0. No customer data.</dc:description></office:meta>
+ <office:font-face-decls><style:font-face style:name="CorpusNoto" svg:font-family="'Corpus Noto Sans'"/></office:font-face-decls>
+ <office:styles><style:style style:name="Body" style:family="paragraph"><style:paragraph-properties fo:margin-bottom="0.4cm"/><style:text-properties style:font-name="CorpusNoto" fo:font-family="Corpus Noto Sans" fo:font-size="12pt" fo:font-weight="normal"/></style:style>
+  <style:default-style style:family="paragraph"><style:paragraph-properties fo:margin-bottom="0.3cm"/><style:text-properties style:font-name="CorpusNoto" fo:font-size="12pt"/></style:default-style>
+  <style:style style:name="Title" style:family="paragraph" style:parent-style-name="Body"><style:paragraph-properties fo:margin-bottom="0.7cm"/><style:text-properties fo:font-size="22pt" fo:color="#19334a"/></style:style>
+  <style:style style:name="Next" style:family="paragraph" style:parent-style-name="Body"><style:paragraph-properties fo:break-before="page"/></style:style>
+ </office:styles>
+ <office:automatic-styles><style:page-layout style:name="A4"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" fo:margin="2cm"/></style:page-layout></office:automatic-styles>
+ <office:master-styles><style:master-page style:name="Standard" style:page-layout-name="A4"/></office:master-styles>
+ <office:body><office:text>
+  <text:h text:style-name="Title" text:outline-level="1">Office summary</text:h>
+  <text:p text:style-name="Body">Fictional quarterly materials for PDFConcat. Pielikums Ā ļ ķ. Ελληνικά. Кириллица.</text:p>
+  <table:table table:name="FictionalTable"><table:table-column table:number-columns-repeated="3"/><table:table-row><table:table-cell office:value-type="string"><text:p text:style-name="Body">Sample</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p text:style-name="Body">Units</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p text:style-name="Body">Fictional total</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell><text:p text:style-name="Body">Paper prototype</text:p></table:table-cell><table:table-cell><text:p text:style-name="Body">12</text:p></table:table-cell><table:table-cell><text:p text:style-name="Body">208.20 EUR</text:p></table:table-cell></table:table-row></table:table>
+  <text:p text:style-name="Body"><draw:rect draw:name="Original vector landmark" text:anchor-type="as-char" svg:width="12cm" svg:height="2cm"/></text:p>
+  <text:p text:style-name="Body"><text:a xlink:href="https://example.invalid/fixture" xlink:type="simple">Offline fixture reference</text:a></text:p>
+  <text:p text:style-name="Next">Office appendix</text:p>
+  <text:h text:style-name="Body" text:outline-level="1">Appendix observations</text:h>
+  <text:p text:style-name="Body">This source was authored for the public test corpus. All quantities and document statements are fictional.</text:p>
+  <text:p text:style-name="Body">Unicode appendix: Ā ļ ķ Ελληνικά Кириллица. End of office source.</text:p>
+ </office:text></office:body>
+</office:document>

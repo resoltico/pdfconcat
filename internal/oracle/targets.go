@@ -109,20 +109,51 @@ func (d *Document) ActionTargets(page int) ([]int, error) {
 	}
 	p := d.dict(d.pages[page-1])
 	var result []int
-	for _, ref := range d.annotationsOf(p) {
+	pending := d.annotationsOf(p)
+	seen := map[string]bool{}
+	for len(pending) > 0 {
+		ref := pending[0]
+		pending = pending[1:]
+		if key, ok := ref.(string); ok {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
 		a := d.dict(ref)
-		if dest, ok := a["/Dest"]; ok {
+		for _, key := range []string{"/Popup", "/IRT"} {
+			if a[key] != nil {
+				pending = append(pending, a[key])
+			}
+		}
+		if d.deref(a["/Subtype"]) == "/Popup" && a["/Parent"] != nil {
+			pending = append(pending, a["/Parent"])
+		}
+
+		subtype := d.deref(a["/Subtype"])
+		if dest, ok := a["/Dest"]; ok && subtype == "/Link" {
 			target, err := d.target(dest)
 			if err != nil {
 				return nil, err
 			}
 			result = append(result, target)
 		}
-		targets, err := d.actionTargets(a["/A"], 0)
+		var primary any
+		if subtype == "/Link" || subtype == "/Widget" || subtype == "/Screen" {
+			primary = a["/A"]
+		}
+		targets, err := d.actionTargets(primary, 0)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, targets...)
+		for _, action := range d.dict(a["/AA"]) {
+			targets, err := d.actionTargets(action, 0)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, targets...)
+		}
 	}
 	for _, action := range d.dict(p["/AA"]) {
 		targets, err := d.actionTargets(action, 0)
@@ -132,6 +163,33 @@ func (d *Document) ActionTargets(page int) ([]int, error) {
 		result = append(result, targets...)
 	}
 	return result, nil
+}
+
+// AnnotationDestination returns the explicit destination's page and mode/operand
+// tail for a zero-based annotation index on a one-based page. It resolves PDF
+// indirect values through qpdf's object graph independently of the adapter.
+func (d *Document) AnnotationDestination(page, annotation int) (int, []any, error) {
+	if page < 1 || page > len(d.pages) {
+		return 0, nil, errors.New("page out of range")
+	}
+	annotations := d.annotationsOf(d.dict(d.pages[page-1]))
+	if annotation < 0 || annotation >= len(annotations) {
+		return 0, nil, errors.New("annotation out of range")
+	}
+	object := d.dict(annotations[annotation])["/Dest"]
+	destination := d.list(object)
+	if len(destination) < 2 {
+		return 0, nil, errors.New("annotation has no explicit destination")
+	}
+	target, err := d.target(object)
+	if err != nil {
+		return 0, nil, err
+	}
+	tail := make([]any, 0, len(destination)-1)
+	for _, operand := range destination[1:] {
+		tail = append(tail, d.deref(operand))
+	}
+	return target, tail, nil
 }
 
 // FormDefaultFontNames returns the final AcroForm DR Font resource keys.
@@ -167,4 +225,37 @@ func (d *Document) AnnotationRects(page int) ([][4]float64, error) {
 		rects = append(rects, rect)
 	}
 	return rects, nil
+}
+
+// FieldActionTargets includes field-only additional actions, independently of page annotation roots.
+func (d *Document) FieldActionTargets() ([]int, error) {
+	pending := d.list(d.dict(d.catalog()["/AcroForm"])["/Fields"])
+	seen := map[string]bool{}
+	var targets []int
+	for len(pending) > 0 {
+		node := pending[0]
+		pending = pending[1:]
+		if ref, ok := node.(string); ok {
+			if seen[ref] {
+				continue
+			}
+			seen[ref] = true
+		}
+		field := d.dict(node)
+		pending = append(pending, d.list(field["/Kids"])...)
+		actions := d.dict(field["/AA"])
+		keys := make([]string, 0, len(actions))
+		for key := range actions {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			values, err := d.actionTargets(actions[key], 0)
+			if err != nil {
+				return nil, err
+			}
+			targets = append(targets, values...)
+		}
+	}
+	return targets, nil
 }

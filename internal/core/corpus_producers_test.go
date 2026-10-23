@@ -172,7 +172,7 @@ func TestCorpusReportLabPackets(t *testing.T) {
 				section["divider"] = map[string]any{}
 				items = []any{section}
 			}
-			_, r := corpusRecipe(t, dir, map[string]any{"page": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": items})
+			_, r := corpusRecipe(t, dir, map[string]any{"page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": items})
 			if *r.Pages.Total != int64(pages) {
 				t.Fatal(r.Pages)
 			}

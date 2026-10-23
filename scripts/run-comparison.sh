@@ -136,7 +136,7 @@ if legacy_pc.get(2) != [3] or legacy_pc.get(3) != [2] or legacy_cpu.get(2) != [5
     raise RuntimeError("legacy destination observation changed")
 
 text = "Pielikums Ā ļ ķ — Ελληνικά Кириллица"
-plan = {"version": 3, "output": "pc-unicode.pdf", "items": [{"source":"plain-a.pdf"}, {"page": {"text": {"value": text, "size": 18}}}]}
+plan = {"version": 4, "output": "pc-unicode.pdf", "items": [{"source":"plain-a.pdf"}, {"page": {"text": {"value": text, "size": 18}}}]}
 (work / "unicode-plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 result(["check", "--plan", "unicode-plan.json"])
 if (work / "pc-unicode.pdf").exists():

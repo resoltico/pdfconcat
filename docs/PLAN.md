@@ -8,10 +8,10 @@ for documentation matching a source build or published binary.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "output": "packet.pdf",
   "dir": "inputs",
-  "page": { "size": "A4", "text": { "size": 24 } },
+  "page_defaults": { "size": "A4", "text": { "size": 24 } },
   "page_numbers": {},
   "items": [
     { "source": "cover.pdf" },
@@ -228,7 +228,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "output": "column.pdf",
   "items": [{ "page": {
     "size": "A4",

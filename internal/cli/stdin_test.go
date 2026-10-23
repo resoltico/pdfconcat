@@ -39,7 +39,7 @@ func TestStdinCancellationUnblocksPendingNativePipe(t *testing.T) {
 	defer cancel()
 	completed := make(chan error, 1)
 	go func() { _, err := readStdin(ctx, pipe, 64<<20); completed <- err }()
-	if _, err = writer.Write([]byte(`{"version":3,"items":[`)); err != nil {
+	if _, err = writer.Write([]byte(`{"version":4,"items":[`)); err != nil {
 		t.Fatal(err)
 	}
 	select {

@@ -22,7 +22,7 @@ import (
 
 func writePlan(tb testing.TB, dir string, items []any) string {
 	tb.Helper()
-	data, err := json.Marshal(map[string]any{"version": 3, "output": "packet.pdf", "items": items})
+	data, err := json.Marshal(map[string]any{"version": 4, "output": "packet.pdf", "items": items})
 	if err != nil {
 		tb.Fatal(err)
 	}

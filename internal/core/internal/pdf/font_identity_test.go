@@ -427,7 +427,7 @@ func TestHashEscapeFontNamesAreRefusedBeforePublication(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, value := range []string{"Ā Ελληνικά", ""} {
-			recipe := map[string]any{"version": 3, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"value": value, "font": map[string]any{"file": "font.ttf"}}}}}}
+			recipe := map[string]any{"version": 4, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"value": value, "font": map[string]any{"file": "font.ttf"}}}}}}
 			data, err := json.Marshal(recipe)
 			if err != nil {
 				t.Fatal(err)

@@ -108,7 +108,7 @@ func TestReferencesOwnershipStaticEditingAndScopes(t *testing.T) {
 	if r.Status != "ok" || len(r.Parts) != 2 || r.Parts[1].Item != "item:2" || *r.Parts[0].InputPages != 1 || *r.Parts[1].InputPages != 2 {
 		t.Fatalf("references/facts: %+v", r)
 	}
-	data := []byte("\xef\xbb\xbf{\"version\":3, \"items\":[{\"source\":\"a.pdf\"}]}")
+	data := []byte("\ufeff{\"version\":4, \"items\":[{\"source\":\"a.pdf\"}]}")
 	original := bytes.Clone(data)
 	input := core.BytesPlan(data, "editor", "")
 	data[3] = '!'
@@ -139,7 +139,7 @@ func TestReferencesOwnershipStaticEditingAndScopes(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	opened, ds = opened.ReplaceJSON([]byte(`{"version":3,"items":[{"page":{}}]}`))
+	opened, ds = opened.ReplaceJSON([]byte(`{"version":4,"items":[{"page":{}}]}`))
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -162,7 +162,7 @@ func TestReferencesOwnershipStaticEditingAndScopes(t *testing.T) {
 }
 func TestAcquisitionPrecedenceAndCanceledReservations(t *testing.T) {
 	dir := t.TempDir()
-	valid := []byte(`{"version":3,"items":[{"page":{"size":"A4"}}]}`)
+	valid := []byte(`{"version":4,"items":[{"page":{"size":"A4"}}]}`)
 	for _, tc := range []struct {
 		name string
 		data []byte
@@ -202,7 +202,7 @@ func TestAcquisitionPrecedenceAndCanceledReservations(t *testing.T) {
 	if calls != 0 || !code(r, "interrupted") {
 		t.Fatal(r)
 	}
-	doc, ds := core.DecodePlan([]byte(`{"version":3,"items":[{"source":"missing.pdf"}]}`), "editor", dir)
+	doc, ds := core.DecodePlan([]byte(`{"version":4,"items":[{"source":"missing.pdf"}]}`), "editor", dir)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -220,7 +220,7 @@ func TestCoreDirectPlanParityAndConcurrentDocuments(t *testing.T) {
 	if err := pdffixture.Pages("SOURCE", 2).WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte(`{"version":3,"items":[{"source":"source.pdf"},{"page":{}}]}`)
+	data := []byte(`{"version":4,"items":[{"source":"source.pdf"},{"page":{}}]}`)
 	doc, ds := core.DecodePlan(data, "editor", dir)
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -287,9 +287,9 @@ func TestSeparateCoreClientRichParity(t *testing.T) {
 		name, recipe string
 		pages        int
 	}{
-		{"rich", `{"version":3,"page":{"size":"A4"},"page_numbers":{},"items":[{"contents":{}},{"title":"Ā Ελληνικά","start_on":"odd","divider":{},"items":[{"source":"source.pdf","pages":[[2,2]]},{"dir":".","items":[{"source":"source.pdf"}]}]},{"page":{"text":{"value":"Custom Ā","font":{"file":"custom.ttf"}}}},{"page":{"text":{"value":"Full Ελληνικά","font":{"file":"full.ttf"}}}}]}`, 8},
-		{"fitted", `{"version":3,"fit_to":"A4","page_numbers":{},"items":[{"source":"source.pdf"},{"source":"source.pdf","pages":[[2,2]]}]}`, 3},
-		{"forms", `{"version":3,"items":[{"source":"form.pdf"},{"source":"form.pdf"}]}`, 4},
+		{"rich", `{"version":4,"page_defaults":{"size":"A4"},"page_numbers":{},"items":[{"contents":{}},{"title":"Ā Ελληνικά","start_on":"odd","divider":{},"items":[{"source":"source.pdf","pages":[[2,2]]},{"dir":".","items":[{"source":"source.pdf"}]}]},{"page":{"text":{"value":"Custom Ā","font":{"file":"custom.ttf"}}}},{"page":{"text":{"value":"Full Ελληνικά","font":{"file":"full.ttf"}}}}]}`, 8},
+		{"fitted", `{"version":4,"fit_to":"A4","page_numbers":{},"items":[{"source":"source.pdf"},{"source":"source.pdf","pages":[[2,2]]}]}`, 3},
+		{"forms", `{"version":4,"items":[{"source":"form.pdf"},{"source":"form.pdf"}]}`, 4},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			plan := filepath.Join(dir, scenario.name+".json")
@@ -408,7 +408,7 @@ func TestUncappedDiagnosticsRemainComplete(t *testing.T) {
 	if len(full.Diagnostics) != 30 || full.DiagnosticsOmitted != 0 {
 		t.Fatal("report capped")
 	}
-	if _, ds := core.DecodePlan([]byte(`{"version":3,"items":[{"source":"missing.pdf"}]}`), "static", dir); len(ds) > 0 {
+	if _, ds := core.DecodePlan([]byte(`{"version":4,"items":[{"source":"missing.pdf"}]}`), "static", dir); len(ds) > 0 {
 		t.Fatal("static opened PDF", ds)
 	}
 	// A late higher-priority error must determine exit even beyond a presentation cap.
@@ -433,7 +433,7 @@ func TestEffectiveFontReservationsAndDirectBudgets(t *testing.T) {
 		{`[{"source":"source.pdf"}]`, ""},
 		{`[{"page":{}}]`, "report_identity_unverified"},
 	} {
-		data := []byte(`{"version":3,"page":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
+		data := []byte(`{"version":4,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
 		report := filepath.Join(dir, "report.json")
 		r := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromPlan(core.BytesPlan(data, "editor", dir)), core.Options{WorkingDir: dir, Report: report, Overwrite: true}))
 		if tc.want == "" {

@@ -198,7 +198,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 					report = filepath.Join(t.TempDir(), "report.json")
 				}
 				if !unreadable {
-					if err := os.WriteFile(planPath, []byte(`{"version":3,"items":[`), 0600); err != nil {
+					if err := os.WriteFile(planPath, []byte(`{"version":4,"items":[`), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -294,7 +294,7 @@ func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
 func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ text, code string }{{"漢", "text_unsupported_character"}, {"😀", "text_glyph_missing"}} {
-		plan := `{"version":3,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
+		plan := `{"version":4,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
 		r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 		if exit != 2 || !hasDiagnostic(r, tc.code) || hasDiagnostic(r, "source_unreadable") {
 			t.Fatalf("font/text ordering: %+v %d", r, exit)
@@ -302,7 +302,7 @@ func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	}
 	for _, text := range []string{"", "A"} {
 		out := filepath.Join(dir, "tiny-"+text+".pdf")
-		plan := `{"version":3,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
+		plan := `{"version":4,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
 		r, exit, _ := invoke(t, []string{"build", "--plan", "-", "-o", out}, plan)
 		if text == "" {
 			if exit != 0 || !r.Output.Published {
@@ -327,7 +327,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 		t.Fatalf("directory source: %+v %d", r, exit)
 	}
 	fontPlan := func(path string) string {
-		data, err := json.Marshal(map[string]any{"version": 3, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
+		data, err := json.Marshal(map[string]any{"version": 4, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -407,7 +407,7 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 
 func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 	dir := t.TempDir()
-	plan := `{"version":3,"page":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
+	plan := `{"version":4,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
 	r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 	if exit != 1 || !hasDiagnostic(r, "font_unreadable") {
 		t.Fatalf("empty text bypassed selected-font validation: %+v %d", r, exit)
@@ -417,7 +417,7 @@ func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 func TestTextPlanLocationsAndInputContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Rīga-Ελλάδα-Київ.json")
-	input := "{\n  \"version\":3,\n  \"items\":[null]\n}\n"
+	input := "{\n  \"version\":4,\n  \"items\":[null]\n}\n"
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -427,9 +427,9 @@ func TestTextPlanLocationsAndInputContext(t *testing.T) {
 		t.Fatalf("located plan error: %d %q %q", exit, stdout.String(), stderr.String())
 	}
 	for _, tc := range []struct{ input, code, file, item string }{
-		{`{"version":3,"items":[{"source":"missing.pdf"}]}`, "source_unreadable", filepath.Join(dir, "missing.pdf"), "/items/0"},
-		{`{"version":3,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_unreadable", filepath.Join(dir, "missing.ttf"), "/items/0"},
-		{`{"version":3,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
+		{`{"version":4,"items":[{"source":"missing.pdf"}]}`, "source_unreadable", filepath.Join(dir, "missing.pdf"), "/items/0"},
+		{`{"version":4,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_unreadable", filepath.Join(dir, "missing.ttf"), "/items/0"},
+		{`{"version":4,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
 	} {
 		stdout.Reset()
 		stderr.Reset()

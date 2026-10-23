@@ -35,7 +35,7 @@ var fieldDispositions = []fieldDisposition{
 	{Suite: "cli", ID: "20-malformed-location", Owner: "TestTextPlanLocationsAndInputContext", Source: "cmd/pdfconcat/main_test.go", Boundary: "existing_test", Property: "Text identifies line 4, column 5 and /items/0."},
 	{Suite: "cli", ID: "21-duplicate-member", Owner: "TestLocatedFirstFaults", Source: "internal/plan/decode_test.go", Boundary: "existing_test", Property: "plan_duplicate_member at /items."},
 	{Suite: "cli", ID: "22-first-fault-before-version", Owner: "TestLocatedFirstFaults", Source: "internal/plan/decode_test.go", Boundary: "existing_test", Property: "plan_null at /items/0 rather than a later version message."},
-	{Suite: "cli", ID: "23-old-plan-format", Owner: "TestLocatedFirstFaults", Source: "internal/plan/decode_test.go", Boundary: "existing_test", Property: "plan_version_unsupported and supported version 3."},
+	{Suite: "cli", ID: "23-old-plan-format", Owner: "TestLocatedFirstFaults", Source: "internal/plan/decode_test.go", Boundary: "existing_test", Property: "plan_version_unsupported and supported version 4."},
 	{Suite: "cli", ID: "24-v3-string-source", Owner: "TestInvalidItemTypeExplainsShapesAtExactLocation", Source: "internal/plan/item_type_test.go", Boundary: "existing_test", Property: "plan_type at the source item."},
 	{Suite: "cli", ID: "25-json-number-count", Owner: "TestLocatedFirstFaults", Source: "internal/plan/decode_test.go", Boundary: "existing_test", Property: "plan_value before missing PDF input is read."},
 	{Suite: "cli", ID: "26-json-trailing-data", Owner: "TestLocatedFirstFaults", Source: "internal/plan/decode_test.go", Boundary: "existing_test", Property: "plan_syntax, without output creation."},

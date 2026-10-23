@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "output": "Titles.pdf",
-  "page": {
+  "page_defaults": {
     "text": {
       "font": {
         "file": "fonts/Example.ttf"

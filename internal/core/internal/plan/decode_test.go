@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,33 +25,33 @@ func TestLocatedFirstFaults(t *testing.T) {
 		code    diag.Code
 		pointer string
 	}{
-		{`{"version":3,"unknown":1,"items":[null]}`, diag.PlanUnknownMember, "/unknown"},
-		{`{"version":3,"a~/b":1}`, diag.PlanUnknownMember, "/a~0~1b"},
-		{`{"version":3,"items":[{"page":{},"count":3.0},null]}`, diag.PlanValue, "/items/0/count"},
-		{`{"version":3,"items":[{"page":{},"count":3e0}]}`, diag.PlanValue, "/items/0/count"},
-		{`{"version":3,"items":[{"page":{},"count":0}]}`, diag.PlanValue, "/items/0/count"},
-		{`{"version":3,"items":[{"page":{},"count":100001}]}`, diag.PlanLimit, "/items/0/count"},
-		{`{"version":3,"items":[{"page":{},"count":9223372036854775808}]}`, diag.PlanLimit, "/items/0/count"},
-		{`{"version":3,"items":[{"page":{},"count":"3"}]}`, diag.PlanType, "/items/0/count"},
-		{`{"version":3,"items":[{"page":{},"count":null}]}`, diag.PlanNull, "/items/0/count"},
-		{`{"version":3,"items":[null],"items":[]}`, diag.PlanNull, "/items/0"},
-		{`{"version":3,"version":3,"items":[null]}`, diag.PlanDuplicateMember, "/version"},
-		{`{"version":3,"items":[{"page":{"text":{"size":null}}}]}`, diag.PlanNull, "/items/0/page/text/size"},
-		{`{"version":3,"items":[{"page":{"text":{"width":0}}}]}`, diag.PlanValue, "/items/0/page/text/width"},
-		{`{"version":3,"items":[{"page":{"text":{"font":{}}}}]}`, diag.PlanType, "/items/0/page/text/font"},
-		{`{"version":3,"items":[{"page":{},"dir":"x"}]}`, diag.PlanItemShape, "/items/0"},
-		{`{"version":3,"items":[{"items":[{"source":"a.pdf"}]}]}`, diag.PlanItemShape, "/items/0"},
-		{`{"version":3,"items":[{"dir":"x","items":[]}]}`, diag.PlanValue, "/items/0/items"},
-		{`{"version":3,"items":[]}`, diag.PlanValue, "/items"},
-		{`{"version":3,"items":"x"}`, diag.PlanType, "/items"},
-		{`{"version":3,"items":[{"source":"\u0000"}]}`, diag.PathInvalid, "/items/0/source"},
-		{`{"version":3,"items":[{"page":{"size":"0x10"}}]}`, diag.PlanValue, "/items/0/page/size"},
-		{`{"version":3,"items":[{"source":"\ud800"}]}`, diag.PlanSyntax, "/items/0/source"},
-		{`{"version":3,"items":[{"source":"a.pdf"}]} null`, diag.PlanSyntax, ""},
-		{`{"version":3`, diag.PlanSyntax, ""},
+		{`{"version":4,"unknown":1,"items":[null]}`, diag.PlanUnknownMember, "/unknown"},
+		{`{"version":4,"a~/b":1}`, diag.PlanUnknownMember, "/a~0~1b"},
+		{`{"version":4,"items":[{"page":{},"count":3.0},null]}`, diag.PlanValue, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":3e0}]}`, diag.PlanValue, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":0}]}`, diag.PlanValue, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":100001}]}`, diag.PlanLimit, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":9223372036854775808}]}`, diag.PlanLimit, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":"3"}]}`, diag.PlanType, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":null}]}`, diag.PlanNull, "/items/0/count"},
+		{`{"version":4,"items":[null],"items":[]}`, diag.PlanNull, "/items/0"},
+		{`{"version":4,"version":4,"items":[null]}`, diag.PlanDuplicateMember, "/version"},
+		{`{"version":4,"items":[{"page":{"text":{"size":null}}}]}`, diag.PlanNull, "/items/0/page/text/size"},
+		{`{"version":4,"items":[{"page":{"text":{"width":0}}}]}`, diag.PlanValue, "/items/0/page/text/width"},
+		{`{"version":4,"items":[{"page":{"text":{"font":{}}}}]}`, diag.PlanType, "/items/0/page/text/font"},
+		{`{"version":4,"items":[{"page":{},"dir":"x"}]}`, diag.PlanItemShape, "/items/0"},
+		{`{"version":4,"items":[{"items":[{"source":"a.pdf"}]}]}`, diag.PlanItemShape, "/items/0"},
+		{`{"version":4,"items":[{"dir":"x","items":[]}]}`, diag.PlanValue, "/items/0/items"},
+		{`{"version":4,"items":[]}`, diag.PlanValue, "/items"},
+		{`{"version":4,"items":"x"}`, diag.PlanType, "/items"},
+		{`{"version":4,"items":[{"source":"\u0000"}]}`, diag.PathInvalid, "/items/0/source"},
+		{`{"version":4,"items":[{"page":{"size":"0x10"}}]}`, diag.PlanValue, "/items/0/page/size"},
+		{`{"version":4,"items":[{"source":"\ud800"}]}`, diag.PlanSyntax, "/items/0/source"},
+		{`{"version":4,"items":[{"source":"a.pdf"}]} null`, diag.PlanSyntax, ""},
+		{`{"version":4`, diag.PlanSyntax, ""},
 		{`{}`, diag.PlanVersionUnsupported, ""},
-		{`{"version":3}`, diag.PlanType, ""},
-		{`{"version":4}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":4}`, diag.PlanType, ""},
+		{`{"version":5}`, diag.PlanVersionUnsupported, "/version"},
 		{`{"version":1,"blank":{},"items":[]}`, diag.PlanVersionUnsupported, "/version"},
 		{`{"blank":{},"items":[],"version":1}`, diag.PlanUnknownMember, "/blank"},
 		{`{"items":[null],"version":1}`, diag.PlanNull, "/items/0"},
@@ -77,9 +79,9 @@ func TestLocatedFirstFaults(t *testing.T) {
 }
 
 func TestBOMOffsets(t *testing.T) {
-	plain := "{\n  \"version\":3,\n  \"items\":[null]}"
+	plain := "{\n  \"version\":4,\n  \"items\":[null]}"
 	_, a := plan.Decode([]byte(plain), "p", ".")
-	_, b := plan.Decode([]byte("\xef\xbb\xbf"+plain), "p", ".")
+	_, b := plan.Decode([]byte("\ufeff"+plain), "p", ".")
 	if a[0].Location.Offset+3 != b[0].Location.Offset || a[0].Location.Line != b[0].Location.Line || a[0].Location.Column != b[0].Location.Column {
 		t.Fatalf("BOM offsets: %+v %+v", a, b)
 	}
@@ -87,7 +89,7 @@ func TestBOMOffsets(t *testing.T) {
 
 func TestLayeringSettingRefsAndPaths(t *testing.T) {
 	base := t.TempDir()
-	input := `{"version":3,"output":"packet.pdf","dir":"sources","page":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm"},"background":"#abc"},"items":[{"dir":"chapters","items":[{"source":"a.pdf"},{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":""}}}]},{"page":{"text":{"font":"default"}}}]}`
+	input := `{"version":4,"output":"packet.pdf","dir":"sources","page_defaults":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm"},"background":"#abc"},"items":[{"dir":"chapters","items":[{"source":"a.pdf"},{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":""}}}]},{"page":{"text":{"font":"default"}}}]}`
 	j, ds := plan.Decode([]byte(input), "p", base)
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -99,10 +101,10 @@ func TestLayeringSettingRefsAndPaths(t *testing.T) {
 	if a.Background.Value != nil || a.Text.Value.Value != "" || a.Text.Font.Value.Path != filepath.Join(base, "sources/chapters/local.ttf") || b.Text.Font.Value != (packet.Font{}) || b.Text.Value.Value != "default" || b.Background.Value == nil {
 		t.Fatalf("layered: %+v %+v", a, b)
 	}
-	if a.Text.Font.From != "/items/0/items/1/page/text/font" || a.Text.Width.From != "/page/text/width" || b.Background.From != "/page/background" {
+	if a.Text.Font.From != "/items/0/items/1/page/text/font" || a.Text.Width.From != "/page_defaults/text/width" || b.Background.From != "/page_defaults/background" {
 		t.Fatalf("origins %+v %+v", a, b)
 	}
-	top, ds := plan.Decode([]byte(`{"version":3,"page":{"text":{"font":{"file":"top.ttf"}}},"items":[{"dir":"elsewhere","items":[{"page":{}}]}]}`), "p", base)
+	top, ds := plan.Decode([]byte(`{"version":4,"page_defaults":{"text":{"font":{"file":"top.ttf"}}},"items":[{"dir":"elsewhere","items":[{"page":{}}]}]}`), "p", base)
 	if len(ds) > 0 || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, top.Items[0]).Items[0]).Style.Text.Font.Value.Path != filepath.Join(base, "top.ttf") {
 		t.Fatalf("top font scope %+v %+v", top, ds)
 	}
@@ -110,19 +112,19 @@ func TestLayeringSettingRefsAndPaths(t *testing.T) {
 
 func TestLimits(t *testing.T) {
 	for _, n := range []int{100000, 100001} {
-		input := `{"version":3,"items":[` + strings.Repeat(`{"source":"a"},`, n-1) + `{"source":"a"}]}`
+		input := `{"version":4,"items":[` + strings.Repeat(`{"source":"a"},`, n-1) + `{"source":"a"}]}`
 		j, ds := plan.Decode([]byte(input), "p", ".")
 		if n == 100000 && (len(ds) > 0 || len(j.Items) != n) || n == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
 			t.Fatalf("entry boundary %d: %d %+v", n, len(j.Items), ds)
 		}
 	}
 	for _, count := range []string{"100000", "100001"} {
-		_, ds := plan.Decode([]byte(`{"version":3,"items":[{"page":{},"count":`+count+`}]}`), "p", ".")
+		_, ds := plan.Decode([]byte(`{"version":4,"items":[{"page":{},"count":`+count+`}]}`), "p", ".")
 		if count == "100000" && len(ds) > 0 || count == "100001" && len(ds) == 0 {
 			t.Fatalf("count %s: %+v", count, ds)
 		}
 	}
-	_, ds := plan.Decode([]byte(`{"version":3,"items":[{"page":{},"count":100000},{"page":{}}]}`), "p", ".")
+	_, ds := plan.Decode([]byte(`{"version":4,"items":[{"page":{},"count":100000},{"page":{}}]}`), "p", ".")
 	if len(ds) != 1 || ds[0].Code != diag.PlanLimit {
 		t.Fatal(ds)
 	}
@@ -131,18 +133,18 @@ func TestLimits(t *testing.T) {
 		for range n {
 			input = `{"dir":"x","items":[` + input + `]}`
 		}
-		_, ds := plan.Decode([]byte(`{"version":3,"items":[`+input+`]}`), "p", ".")
+		_, ds := plan.Decode([]byte(`{"version":4,"items":[`+input+`]}`), "p", ".")
 		if n == 64 && len(ds) > 0 || n == 65 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
 			t.Fatalf("depth %d: %+v", n, ds)
 		}
 	}
 	for _, n := range []int{10000, 10001} {
-		_, ds := plan.Decode([]byte(`{"version":3,"items":[{"page":{"text":{"value":"`+strings.Repeat("a", n)+`"}}}]}`), "p", ".")
+		_, ds := plan.Decode([]byte(`{"version":4,"items":[{"page":{"text":{"value":"`+strings.Repeat("a", n)+`"}}}]}`), "p", ".")
 		if n == 10000 && len(ds) > 0 || n == 10001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
 			t.Fatalf("text %d: %+v", n, ds)
 		}
 	}
-	input := append([]byte(`{"version":3,"items":[{"source":"a"}]}`), []byte(strings.Repeat(" ", plan.MaxBytes))...)
+	input := append([]byte(`{"version":4,"items":[{"source":"a"}]}`), []byte(strings.Repeat(" ", plan.MaxBytes))...)
 	_, ds = plan.Decode(input, "p", ".")
 	if len(ds) != 1 || ds[0].Code != diag.PlanTooLarge {
 		t.Fatal(ds)
@@ -190,9 +192,9 @@ func TestSchemaAndExamples(t *testing.T) {
 		}
 	}
 	for _, input := range []string{
-		`{"version":3,"items":[]}`, `{"version":3,"items":[{"page":{},"count":0}]}`,
-		`{"version":3,"items":[{"page":{"text":{"size":-1}}}]}`, `{"version":3,"items":[{"page":{"text":{"width":0}}}]}`,
-		`{"version":3,"items":[{"items":[{"source":"a"}]}]}`, `{"version":3,"items":[null]}`,
+		`{"version":4,"items":[]}`, `{"version":4,"items":[{"page":{},"count":0}]}`,
+		`{"version":4,"items":[{"page":{"text":{"size":-1}}}]}`, `{"version":4,"items":[{"page":{"text":{"width":0}}}]}`,
+		`{"version":4,"items":[{"items":[{"source":"a"}]}]}`, `{"version":4,"items":[null]}`,
 	} {
 		var instance any
 		if err := json.Unmarshal([]byte(input), &instance); err != nil {
@@ -204,7 +206,7 @@ func TestSchemaAndExamples(t *testing.T) {
 	}
 	// Standard schema integer semantics cannot enforce lexical integer tokens.
 	for _, count := range []string{"3.0", "3e0"} {
-		input := []byte(`{"version":3,"items":[{"page":{},"count":` + count + `}]}`)
+		input := []byte(`{"version":4,"items":[{"page":{},"count":` + count + `}]}`)
 		var instance any
 		if err := json.Unmarshal(input, &instance); err != nil {
 			t.Fatal(err)
@@ -219,7 +221,7 @@ func TestSchemaAndExamples(t *testing.T) {
 }
 
 func FuzzPlanDecode(f *testing.F) {
-	for _, seed := range []string{`{"version":3,"items":[{"source":"a.pdf"}]}`, `{"version":3,"items":[{"page":{}}]}`, `{"version":3,"items":[null]}`, `{"version":1,"blank":{}}`, `{`, "\xef\xbb\xbf{}"} {
+	for _, seed := range []string{`{"version":4,"items":[{"source":"a.pdf"}]}`, `{"version":4,"items":[{"page":{}}]}`, `{"version":4,"items":[null]}`, `{"version":1,"blank":{}}`, `{`, "\ufeff{}"} {
 		f.Add([]byte(seed))
 	}
 	f.Fuzz(func(t *testing.T, input []byte) {
@@ -236,10 +238,10 @@ func TestNumericVersionAndLengthFaultClasses(t *testing.T) {
 		code    diag.Code
 		pointer string
 	}{
-		{`{"version":3.0,"items":[{"source":"a"}]}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":4.0,"items":[{"source":"a"}]}`, diag.PlanVersionUnsupported, "/version"},
 		{`{"version":999999999999999999999999,"items":[{"source":"a"}]}`, diag.PlanVersionUnsupported, "/version"},
-		{`{"version":3,"items":[{"page":{"text":{"size":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/size"},
-		{`{"version":3,"items":[{"page":{"text":{"leading":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/leading"},
+		{`{"version":4,"items":[{"page":{"text":{"size":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/size"},
+		{`{"version":4,"items":[{"page":{"text":{"leading":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/leading"},
 	} {
 		_, ds := plan.Decode([]byte(tc.input), "p", ".")
 		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.pointer {
@@ -255,7 +257,7 @@ func TestNumericVersionAndLengthFaultClasses(t *testing.T) {
 
 func TestPacketShapesScopesAndDefaults(t *testing.T) {
 	base := t.TempDir()
-	input := `{"version":3,"dir":"inputs","page":{"text":{"value":"inherited","font":{"file":"top.ttf"}},"background":"#abc"},"page_numbers":{},"items":[{"contents":{}},{"title":"  Rīga Ελληνικά Кириллица  ","dir":"chapter","start_on":"odd","divider":{"text":{"font":{"file":"title.ttf"}}},"items":[{"source":"source.pdf","pages":[[2,3],[4,4],[8,8]]},{"page":{"background":"none","text":{"value":""}},"count":2}]},{"title":"漢字","items":[{"source":"last.pdf"}]}]}`
+	input := `{"version":4,"dir":"inputs","page_defaults":{"text":{"value":"inherited","font":{"file":"top.ttf"}},"background":"#abc"},"page_numbers":{},"items":[{"contents":{}},{"title":"  Rīga Ελληνικά Кириллица  ","dir":"chapter","start_on":"odd","divider":{"text":{"font":{"file":"title.ttf"}}},"items":[{"source":"source.pdf","pages":[[2,3],[4,4],[8,8]]},{"page":{"background":"none","text":{"value":""}},"count":2}]},{"title":"漢字","items":[{"source":"last.pdf"}]}]}`
 	j, ds := plan.Decode([]byte(input), "packet.json", base)
 	if len(ds) != 0 {
 		t.Fatal(ds)
@@ -295,30 +297,30 @@ func TestPacketRejectingContracts(t *testing.T) {
 		code           diag.Code
 	}{
 		{`{"version":2,"items":[{"source":"x.pdf"}]}`, "/version", diag.PlanVersionUnsupported},
-		{`{"version":3,"items":["x.pdf"]}`, "/items/0", diag.PlanType},
-		{`{"version":3,"items":[{"source":"x","page":{}}]}`, "/items/0", diag.PlanItemShape},
-		{`{"version":3,"items":[{"source":"x","count":2}]}`, "/items/0", diag.PlanItemShape},
-		{`{"version":3,"items":[{"items":[{"source":"x"}]}]}`, "/items/0", diag.PlanItemShape},
-		{`{"version":3,"items":[{"divider":{},"start_on":"odd","items":[{"source":"x"}]}]}`, "/items/0", diag.PlanItemShape},
-		{`{"version":3,"items":[{"title":"A","divider":{"text":{"value":"B"}},"items":[{"source":"x"}]}]}`, "/items/0/divider/text/value", diag.PlanValue},
-		{`{"version":3,"items":[{"title":"A","divider":{"text":{"value":"B","unknown":0}},"items":[{"source":"x"}]}]}`, "/items/0/divider/text/value", diag.PlanValue},
-		{`{"version":3,"items":[{"contents":{}}]}`, "/items/0/contents", diag.PlanValue},
-		{`{"version":3,"items":[{"title":"A","items":[{"contents":{}},{"contents":{}}]}]}`, "/items/0/items/1/contents", diag.PlanValue},
-		{`{"version":3,"items":[{"title":"A","items":[{"contents":{"size":"inherit"}}]}]}`, "/items/0/items/0/contents/size", diag.PlanValue},
-		{`{"version":3,"page_numbers":{"margin":-1},"items":[{"source":"x"}]}`, "/page_numbers/margin", diag.PlanValue},
-		{`{"version":3,"page_numbers":{"size":0},"items":[{"source":"x"}]}`, "/page_numbers/size", diag.PlanValue},
-		{`{"version":3,"page_numbers":null,"items":[{"source":"x"}]}`, "/page_numbers", diag.PlanNull},
-		{`{"version":3,"page_numbers":{"margin":1,"margin":2},"items":[{"source":"x"}]}`, "/page_numbers/margin", diag.PlanDuplicateMember},
-		{`{"version":3,"items":[{"source":"x","pages":[[1,2],[2,3]]}]}`, "/items/0/pages/1", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[[4,4],[1,2]]}]}`, "/items/0/pages/1", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[[2,1]]}]}`, "/items/0/pages/0", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[]}]}`, "/items/0/pages", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[[0,2]]}]}`, "/items/0/pages/0/0", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[[1.0,2]]}]}`, "/items/0/pages/0/0", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[[1,2e0]]}]}`, "/items/0/pages/0/1", diag.PlanValue},
-		{`{"version":3,"items":[{"source":"x","pages":[[1,null]]}]}`, "/items/0/pages/0/1", diag.PlanNull},
-		{`{"version":3,"items":[{"source":"x","pages":[[1,2,3]]}]}`, "/items/0/pages/0/2", diag.PlanType},
-		{`{"version":3,"items":[{"source":"x","pages":[[1,9223372036854775808]]}]}`, "/items/0/pages/0/1", diag.PlanValue},
+		{`{"version":4,"items":["x.pdf"]}`, "/items/0", diag.PlanType},
+		{`{"version":4,"items":[{"source":"x","page":{}}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"source":"x","count":2}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"items":[{"source":"x"}]}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"divider":{},"start_on":"odd","items":[{"source":"x"}]}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"title":"A","divider":{"text":{"value":"B"}},"items":[{"source":"x"}]}]}`, "/items/0/divider/text/value", diag.PlanValue},
+		{`{"version":4,"items":[{"title":"A","divider":{"text":{"value":"B","unknown":0}},"items":[{"source":"x"}]}]}`, "/items/0/divider/text/value", diag.PlanValue},
+		{`{"version":4,"items":[{"contents":{}}]}`, "/items/0/contents", diag.PlanValue},
+		{`{"version":4,"items":[{"title":"A","items":[{"contents":{}},{"contents":{}}]}]}`, "/items/0/items/1/contents", diag.PlanValue},
+		{`{"version":4,"items":[{"title":"A","items":[{"contents":{"size":"inherit"}}]}]}`, "/items/0/items/0/contents/size", diag.PlanValue},
+		{`{"version":4,"page_numbers":{"margin":-1},"items":[{"source":"x"}]}`, "/page_numbers/margin", diag.PlanValue},
+		{`{"version":4,"page_numbers":{"size":0},"items":[{"source":"x"}]}`, "/page_numbers/size", diag.PlanValue},
+		{`{"version":4,"page_numbers":null,"items":[{"source":"x"}]}`, "/page_numbers", diag.PlanNull},
+		{`{"version":4,"page_numbers":{"margin":1,"margin":2},"items":[{"source":"x"}]}`, "/page_numbers/margin", diag.PlanDuplicateMember},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,2],[2,3]]}]}`, "/items/0/pages/1", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[4,4],[1,2]]}]}`, "/items/0/pages/1", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[2,1]]}]}`, "/items/0/pages/0", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[]}]}`, "/items/0/pages", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[0,2]]}]}`, "/items/0/pages/0/0", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[1.0,2]]}]}`, "/items/0/pages/0/0", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,2e0]]}]}`, "/items/0/pages/0/1", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,null]]}]}`, "/items/0/pages/0/1", diag.PlanNull},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,2,3]]}]}`, "/items/0/pages/0/2", diag.PlanType},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,9223372036854775808]]}]}`, "/items/0/pages/0/1", diag.PlanValue},
 	}
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
@@ -333,7 +335,7 @@ func TestPacketRejectingContracts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		input := `{"version":3,"items":[{"title":` + string(encoded) + `,"items":[{"source":"x"}]}]}`
+		input := `{"version":4,"items":[{"title":` + string(encoded) + `,"items":[{"source":"x"}]}]}`
 		_, ds := plan.Decode([]byte(input), "packet.json", t.TempDir())
 		if len(ds) != 1 || ds[0].Code != diag.PlanValue || ds[0].Location.Ref != "/items/0/title" {
 			t.Fatalf("invalid title %q accepted: %+v", title, ds)
@@ -350,7 +352,7 @@ func TestPacketRejectingContracts(t *testing.T) {
 
 func TestAggregateContainerAndSelectionBudgets(t *testing.T) {
 	for _, count := range []int{99999, 100000} {
-		input := `{"version":3,"items":[{"title":"A","items":[` + strings.Repeat(`{"source":"x"},`, count-1) + `{"source":"x"}]}]}`
+		input := `{"version":4,"items":[{"title":"A","items":[` + strings.Repeat(`{"source":"x"},`, count-1) + `{"source":"x"}]}]}`
 		_, ds := plan.Decode([]byte(input), "p", ".")
 		if count == 99999 && len(ds) > 0 || count == 100000 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
 			t.Fatalf("container item budget %d: %+v", count, ds)
@@ -364,7 +366,7 @@ func TestAggregateContainerAndSelectionBudgets(t *testing.T) {
 			}
 			fmt.Fprintf(&pairs, "[%d,%d]", i+1, i+1)
 		}
-		input := `{"version":3,"items":[{"source":"x","pages":[` + pairs.String() + `]}]}`
+		input := `{"version":4,"items":[{"source":"x","pages":[` + pairs.String() + `]}]}`
 		j, ds := plan.Decode([]byte(input), "p", ".")
 		if count == 100000 && (len(ds) > 0 || len(itemAs[*packet.SourceItem](t, j.Items[0]).Selection) != 1 || itemAs[*packet.SourceItem](t, j.Items[0]).Selection[0].Last != count) || count == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
 			t.Fatalf("selection pair budget %d: %+v", count, ds)
@@ -379,4 +381,69 @@ func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
 		t.Fatalf("item has type %T, expected %T", item, value)
 	}
 	return value
+}
+
+// Schema vocabulary must describe exactly the values accepted by the domain.
+
+func TestSchemaEnumsEqualPacketVocabulary(t *testing.T) {
+	var schema any
+	if err := json.Unmarshal(plan.Schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path   string
+		values []string
+	}{
+		{"/$defs/page/properties/text/properties/anchor/enum", packet.Anchor("").Values()},
+		{"/$defs/page/properties/text/properties/align/enum", packet.Align("").Values()},
+		{"/$defs/page/properties/text/properties/overflow/enum", packet.Overflow("").Values()},
+		{"/$defs/items/items/oneOf/3/properties/start_on/enum", packet.StartOn("").Values()},
+	} {
+		value := schema
+		for _, key := range strings.Split(strings.TrimPrefix(tc.path, "/"), "/") {
+			switch node := value.(type) {
+			case map[string]any:
+				value = node[key]
+			case []any:
+				index, err := strconv.Atoi(key)
+				if err != nil || index < 0 || index >= len(node) {
+					t.Fatalf("invalid schema path %s", tc.path)
+				}
+				value = node[index]
+			default:
+				t.Fatalf("missing schema path %s", tc.path)
+			}
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual []string
+		if err = json.Unmarshal(data, &actual); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(actual, tc.values) {
+			t.Fatalf("%s: schema %v domain %v", tc.path, actual, tc.values)
+		}
+	}
+}
+
+func TestPlanVersionAndDefaultsContract(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		code  diag.Code
+		ref   string
+	}{
+		{`{"version":3,"items":[{"page":{}}]}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":4,"page":{},"items":[{"page":{}}]}`, diag.PlanUnknownMember, "/page"},
+	} {
+		_, ds := plan.Decode([]byte(tc.input), "plan.json", t.TempDir())
+		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.ref {
+			t.Fatalf("contract refusal: %+v", ds)
+		}
+		if tc.code == diag.PlanVersionUnsupported && ds[0].Message != "Supported plan version is 4." {
+			t.Fatal(ds[0].Message)
+		}
+
+	}
 }

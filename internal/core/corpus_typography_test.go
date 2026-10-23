@@ -239,7 +239,7 @@ func TestCorpusTypography(t *testing.T) {
 	})
 	t.Run("layering-palette-decomposition", func(t *testing.T) {
 		value := "ā ļ Ā ļ ķ Ελληνικά Кириллица"
-		plan := map[string]any{"page": map[string]any{"size": "400x300pt", "background": "#112233", "text": map[string]any{"value": "INHERITED", "size": 18, "color": "#FFFFFF", "width": 250}}, "items": []any{map[string]any{"page": map[string]any{}}, map[string]any{"page": map[string]any{"background": "none", "text": map[string]any{"value": "", "font": "default"}}}, map[string]any{"page": map[string]any{"background": "none", "text": map[string]any{"value": "OVERRIDE", "size": 12, "color": "#000000"}}}, corpusStyledPage(value, "400x300pt", map[string]any{"width": 330, "size": 20})}}
+		plan := map[string]any{"page_defaults": map[string]any{"size": "400x300pt", "background": "#112233", "text": map[string]any{"value": "INHERITED", "size": 18, "color": "#FFFFFF", "width": 250}}, "items": []any{map[string]any{"page": map[string]any{}}, map[string]any{"page": map[string]any{"background": "none", "text": map[string]any{"value": "", "font": "default"}}}, map[string]any{"page": map[string]any{"background": "none", "text": map[string]any{"value": "OVERRIDE", "size": 12, "color": "#000000"}}}, corpusStyledPage(value, "400x300pt", map[string]any{"width": 330, "size": 20})}}
 		_, r := corpusRecipe(t, t.ArtifactDir(), plan)
 		if r.Parts[1].Text != nil || r.Parts[0].Text.FontSize != 18 || r.Parts[2].Text.FontSize != 12 {
 			t.Fatal("style clearing facts")
@@ -285,7 +285,7 @@ func TestCorpusTypography(t *testing.T) {
 				if tc.allow {
 					text["overflow"] = "allow"
 				}
-				plan := map[string]any{"version": 3, "output": "packet.pdf", "items": []any{corpusStyledPage(tc.value, tc.size, text)}}
+				plan := map[string]any{"version": 4, "output": "packet.pdf", "items": []any{corpusStyledPage(tc.value, tc.size, text)}}
 				if tc.fit {
 					plan["fit_to"] = "A4"
 				}

@@ -270,7 +270,7 @@ import subprocess
 files = sorted(path.as_posix() for path in pathlib.Path("chapters").glob("*.pdf"))
 if not files:
     raise SystemExit("no PDF files in chapters/")
-plan = {"version": 3, "items": [{"source": path} for path in files]}
+plan = {"version": 4, "items": [{"source": path} for path in files]}
 pathlib.Path("job.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 raise SystemExit(subprocess.run(["pdfconcat", "build", "--plan", "job.json", "-o", "book.pdf"]).returncode)
 ```

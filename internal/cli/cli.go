@@ -28,7 +28,7 @@ type Command struct {
 type option struct{ name, alias, value, description string }
 
 var options = []option{
-	{"--plan", "", "FILE|-", "Read a plan v3 JSON file or standard input."},
+	{"--plan", "", "FILE|-", "Read a plan v4 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
 	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; refuses widgets and numeric local destinations."},

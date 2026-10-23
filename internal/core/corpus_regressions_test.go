@@ -22,7 +22,7 @@ func TestCorpusDocumentReservationRefresh(t *testing.T) {
 	oldSource, newSource := filepath.Join(t.TempDir(), "old.pdf"), filepath.Join(t.TempDir(), "new.pdf")
 	oldFont, newFont := filepath.Join(t.TempDir(), "old.ttf"), filepath.Join(t.TempDir(), "new.ttf")
 	recipe := func(source, font string) []byte {
-		data, err := json.Marshal(map[string]any{"version": 3, "items": []any{map[string]any{"source": source}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": font}}}}}})
+		data, err := json.Marshal(map[string]any{"version": 4, "items": []any{map[string]any{"source": source}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": font}}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -41,7 +41,7 @@ func TestCorpusDocumentReservationRefresh(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	if _, ds = edited.ReplaceJSON([]byte(`{"version":3,"items":[null]}`)); len(ds) == 0 {
+	if _, ds = edited.ReplaceJSON([]byte(`{"version":4,"items":[null]}`)); len(ds) == 0 {
 		t.Fatal("invalid replacement accepted")
 	}
 	ctx, cancel := context.WithCancel(t.Context())

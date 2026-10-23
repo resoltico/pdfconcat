@@ -1,8 +1,8 @@
 {
-  "version": 3,
+  "version": 4,
   "output": "Evidence.pdf",
   "dir": "source",
-  "page": {
+  "page_defaults": {
     "size": "A4",
     "text": {
       "anchor": "top-left",

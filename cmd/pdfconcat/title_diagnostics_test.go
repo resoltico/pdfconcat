@@ -33,7 +33,7 @@ func titlePlan(t *testing.T, sections int, contents, dividers bool, font string)
 	if font != "" {
 		page["text"] = map[string]any{"font": map[string]any{"file": font}}
 	}
-	data, err := json.Marshal(map[string]any{"version": 3, "page": page, "items": items})
+	data, err := json.Marshal(map[string]any{"version": 4, "page_defaults": page, "items": items})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 	if exit != 1 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code.String() != "font_unreadable" {
 		t.Fatalf("selected-font refusal: %+v %d", summary, exit)
 	}
-	for _, want := range []string{"/page/text/font", "/items/0/title", "/items/0/divider", "/items/1/title", "/items/1/divider"} {
+	for _, want := range []string{"/page_defaults/text/font", "/items/0/title", "/items/0/divider", "/items/1/title", "/items/1/divider"} {
 		if !slices.Contains(summary.Diagnostics[0].Items, want) {
 			t.Fatalf("font error lost %s: %+v", want, summary.Diagnostics)
 		}

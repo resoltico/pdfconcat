@@ -44,9 +44,9 @@ For a divider with text, save this as `packet.json` next to the source PDFs:
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "output": "packet-with-divider.pdf",
-  "page": {
+  "page_defaults": {
     "text": {
       "value": "Pielikums Ā ļ ķ — Ελληνικά",
       "size": 18

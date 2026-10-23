@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
+  "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/core/internal/plan/plan.schema.json",
   "title": "PDFConcat plan",
-  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 3). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
+  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 4). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
   "type": "object",
   "required": [
     "version",
@@ -15,7 +15,7 @@
       "description": "Ignored by PDFConcat; for editors."
     },
     "version": {
-      "const": 3,
+      "const": 4,
       "description": "Plan format version."
     },
     "output": {
@@ -32,7 +32,7 @@
       "$ref": "#/$defs/sheetSize",
       "description": "Scale every output page proportionally, centred, onto this sheet. Refuses form widgets and internal destinations with numeric position coordinates. Paper names are portrait. --fit-to overrides it."
     },
-    "page": {
+    "page_defaults": {
       "$ref": "#/$defs/page",
       "description": "Default style of every generated page. Font files here resolve against the base directory."
     },
@@ -379,7 +379,7 @@
         },
         {
           "not": {
-            "pattern": "[\\p{Cc}\\p{Cf}\u2028\u2029]"
+            "pattern": "[\\p{Cc}\\p{Cf}  ]"
           }
         }
       ],

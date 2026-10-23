@@ -25,7 +25,7 @@ func TestUnicodeSeparatorExtractionEmbeddingAndSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := "Pielikums Ā ļ ķ\nΕλληνικά\nКириллица ā ļ"
-	plan, err := json.Marshal(map[string]any{"version": 3, "output": "packet.pdf", "items": []any{map[string]any{"source": "source.pdf"}, map[string]any{"page": map[string]any{"text": map[string]any{"value": text}}}}})
+	plan, err := json.Marshal(map[string]any{"version": 4, "output": "packet.pdf", "items": []any{map[string]any{"source": "source.pdf"}, map[string]any{"page": map[string]any{"text": map[string]any{"value": text}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ func TestCorpusScaleProfiles(t *testing.T) {
 			dir := t.ArtifactDir()
 			items := []any{corpusGenerated(tc.Count, "A4", "")}
 			pages := tc.Count
-			plan := map[string]any{"version": 3, "output": "packet.pdf", "page": map[string]any{"size": "A4"}}
+			plan := map[string]any{"version": 4, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}}
 			if tc.Numbers {
 				plan["page_numbers"] = map[string]any{}
 			}

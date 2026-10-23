@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/result/result.schema.json",
+  "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/core/internal/result/result.schema.json",
   "title": "PDFConcat result version 4",
   "oneOf": [
     {

@@ -37,7 +37,7 @@ func TestCompositionReportPartitionsPhysicalPacket(t *testing.T) {
 	if err := pdffixture.Pages("SOURCE", 4).WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 		t.Fatal(err)
 	}
-	recipe := map[string]any{"version": 3, "output": "packet.pdf", "page": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": []any{
+	recipe := map[string]any{"version": 4, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": []any{
 		map[string]any{"page": map[string]any{"text": map[string]any{"value": "Cover"}}},
 		map[string]any{"contents": map[string]any{}},
 		map[string]any{"title": "Pielikums Ā Ελληνικά", "start_on": "odd", "divider": map[string]any{}, "items": []any{
@@ -170,7 +170,7 @@ func TestRefusedCompositionRetainsOnlyEstablishedFacts(t *testing.T) {
 			if kind == "layout" {
 				count = 100000
 			}
-			recipe := map[string]any{"version": 3, "output": "packet.pdf", "items": []any{source, map[string]any{"title": "Section", "start_on": "odd", "items": []any{map[string]any{"page": page, "count": count}}}}}
+			recipe := map[string]any{"version": 4, "output": "packet.pdf", "items": []any{source, map[string]any{"title": "Section", "start_on": "odd", "items": []any{map[string]any{"page": page, "count": count}}}}}
 			path := packetPlan(t, dir, recipe)
 			report := filepath.Join(dir, "report.json")
 			if kind == "font" {

@@ -9,14 +9,14 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 )
 
-func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occurrences map[string]pdf.OccurrenceFacts, fit *packet.Size, predict bool) []diag.Diagnostic {
-	ds := pdf.CheckCompatibility(layout, facts, occurrences, fit).Diagnostics
+func resolvePolicies(a pdf.Assembly, predict bool) []diag.Diagnostic {
+	ds := pdf.CheckCompatibility(a).Diagnostics
 	names := map[string]bool{}
-	for i, p := range layout.Parts {
+	for i, p := range a.Parts {
 		if p.Kind != packet.PartSource {
 			continue
 		}
-		f := facts[p.Source]
+		f := p.Occurrence.File
 		add := func(code diag.Code, message string) {
 			d := diag.New(code, message, p.Ref)
 			d.File = p.Source
@@ -28,7 +28,7 @@ func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occ
 			}
 		}
 		collision := false
-		for _, name := range occurrences[p.Ref].DestNames {
+		for _, name := range p.Occurrence.Facts.DestNames {
 			if names[name] {
 				collision = true
 			}

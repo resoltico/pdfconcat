@@ -36,7 +36,7 @@ func prepare(c context.Context, j packet.Plan) preparationOutcome {
 			d.Items = use.items
 			ds = append(ds, d)
 		} else {
-			f, views, findings := pdf.InspectSelections(c, data, use.requests)
+			f, views, findings := pdf.Inspect(c, data, use.requests)
 			for i := range findings {
 				findings[i].File = use.path
 				if len(findings[i].Items) == 0 {
@@ -45,8 +45,12 @@ func prepare(c context.Context, j packet.Plan) preparationOutcome {
 			}
 			ds = append(ds, findings...)
 			facts[use.path] = f
-			for item, view := range views {
-				occurrences[item] = view
+			for index, view := range views {
+				if view == nil {
+					continue
+				}
+				item := use.items[index]
+				occurrences[item] = *view
 				domain[item] = view.SourceFacts
 			}
 		}

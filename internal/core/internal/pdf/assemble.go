@@ -16,22 +16,14 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
-	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
-	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-// Assembly records changes and warnings from the actual merge.
-type Assembly struct {
-	FieldsRenamed map[int][]packet.FieldRename
-	Diagnostics   []diag.Diagnostic
-}
-
 // Assemble imports each occurrence independently and writes only after final validation.
-func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFacts, occurrences map[string]OccurrenceFacts, pages map[int][]compose.Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, footer *compose.Footer, w io.Writer) (result Assembly, err error) {
-	var current *packet.Part
+func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err error) {
+	var current *Part
 	defer func() {
 		if value := recover(); value != nil {
 			err = refuse(diag.AssemblyFailed, fmt.Sprintf("PDF backend panic: %v", value))
@@ -41,29 +33,37 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Ref}}
 		}
 	}()
-	names, nameErr := generatedFontNames(fonts, facts)
+	if err = c.Err(); err != nil {
+		return result, err
+	}
+	names, nameErr := generatedFontNames(a.Fonts, a.Parts)
 	if nameErr != nil {
 		return result, nameErr
 	}
-	result.FieldsRenamed = map[int][]packet.FieldRename{}
+	result.Renames = make([][]packet.FieldRename, len(a.Parts))
+	for i, part := range a.Parts {
+		if part.Kind == packet.PartSource {
+			result.Renames[i] = []packet.FieldRename{}
+		}
+	}
 	var dest *model.Context
 	allDests := map[string]destination{}
 	usedNames := map[string]bool{}
 	var importedOutlines []importedOutlineRoot
 	var generatedLinks []generatedLink
-	compatibility := CheckCompatibility(layout, facts, occurrences, fit)
+	compatibility := CheckCompatibility(a)
 	if len(compatibility.Diagnostics) > 0 {
 		d := compatibility.Diagnostics[0]
 		return result, &policyError{code: d.Code, err: errors.New(d.Message), file: d.File, items: d.Items}
 	}
 	needAppearances := false
 	add := func(code diag.Code, message string, index int) {
-		d := diag.New(code, message, layout.Parts[index].Ref)
-		d.File = layout.Parts[index].Source
+		d := diag.New(code, message, a.Parts[index].Ref)
+		d.File = a.Parts[index].Source
 		result.Diagnostics = append(result.Diagnostics, d)
 	}
-	for index, part := range layout.Parts {
-		current = &layout.Parts[index]
+	for index, part := range a.Parts {
+		current = &a.Parts[index]
 		if err = c.Err(); err != nil {
 			return result, err
 		}
@@ -73,18 +73,15 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 			if e != nil {
 				return result, &policyError{code: diag.SourceUnreadable, err: e}
 			}
-			inspected, ok := facts[part.Source]
-			if !ok || sha256.Sum256(data) != inspected.SHA256 {
+			inspected := part.Occurrence.File
+			if sha256.Sum256(data) != inspected.SHA256 {
 				return result, refuse(diag.SourceChanged, "Source bytes changed after inspection: "+part.Source)
 			}
 			s, err = read(c, data)
 			if err != nil {
 				return result, err
 			}
-			occurrence, ok := occurrences[part.Ref]
-			if !ok {
-				return result, errors.New("source occurrence was not inspected")
-			}
+			occurrence := part.Occurrence.Facts
 			removed, e := projectSelection(c, s, occurrence.Selection)
 			if e != nil {
 				return result, e
@@ -95,14 +92,24 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 			needAppearances = needAppearances || inspected.NeedAppearances
 		} else {
 			var links []generatedLink
-			s, links, err = generatedContext(c, pages[index], part.Pages, fonts, names)
+			count := len(part.Generated)
+			if part.Repeat > 1 {
+				if len(part.Generated) != 1 {
+					return result, ErrInvalidPage
+				}
+				count = part.Repeat
+			}
+			if count != part.Pages {
+				return result, ErrInvalidPage
+			}
+			s, links, err = generatedContext(c, part.Generated, count, a.Fonts, names)
 			if err != nil {
 				return result, err
 			}
 			generatedLinks = append(generatedLinks, links...)
 		}
-		if fit != nil {
-			if err = fitContext(c, s, fit); err != nil {
+		if a.FitTo != nil {
+			if err = fitContext(c, s, a.FitTo); err != nil {
 				return result, err
 			}
 		}
@@ -140,10 +147,10 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 				return result, e
 			}
 			if actual != record.name {
-				result.FieldsRenamed[index] = append(result.FieldsRenamed[index], packet.FieldRename{From: record.name, To: actual})
+				result.Renames[index] = append(result.Renames[index], packet.FieldRename{From: record.name, To: actual})
 			}
 		}
-		if len(result.FieldsRenamed[index]) > 0 {
+		if len(result.Renames[index]) > 0 {
 			add(diag.FormFieldsRenamed, "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", index)
 		}
 	}
@@ -154,13 +161,13 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 	if err = rebuildDestinations(c, dest, allDests); err != nil {
 		return result, err
 	}
-	if err = graftOutlines(c, dest, layout, importedOutlines); err != nil {
+	if err = graftOutlines(c, dest, a, importedOutlines); err != nil {
 		return result, err
 	}
 	if err = finalizeGeneratedLinks(c, dest, generatedLinks); err != nil {
 		return result, err
 	}
-	if err = applyPageNumbers(c, dest, layout, fonts, names, footer); err != nil {
+	if err = applyPageNumbers(c, dest, a.Parts, a.Fonts, names, a.Footer); err != nil {
 		return result, err
 	}
 	if err = cleanCatalog(dest, compatibility.version, needAppearances); err != nil {

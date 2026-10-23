@@ -60,7 +60,7 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 		position := tc.position
 		t.Run(position, func(t *testing.T) {
 			d := localLink(position, true)
-			f, ds := pdf.Inspect(t.Context(), d.Bytes())
+			f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
 			if status, _ := diag.Outcome(ds); status != "ok" || !f.HasCoordinateDestinations {
 				t.Fatalf("facts %+v: %+v", f, ds)
 			}
@@ -154,7 +154,7 @@ func TestRetainedDestinationRoles(t *testing.T) {
 			tc.doc.Objs[5] = []byte("<< /Subtype /Link /Rect [10 20 30 40] /A << /S /GoTo /D (outside) /Next << /S /GoTo /D [3 0 R /FitH 20] >> >> >>")
 		}
 		t.Run(tc.name, func(t *testing.T) {
-			f, ds := pdf.Inspect(t.Context(), tc.doc.Bytes())
+			f, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), nil)
 			if status, _ := diag.Outcome(ds); status != "ok" || f.HasCoordinateDestinations != tc.want {
 				t.Fatalf("want coordinates=%v: facts %+v ds %+v", tc.want, f, ds)
 			}
@@ -330,13 +330,13 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 				if qpdfCheck(t, path) != 1 {
 					t.Fatal("action-chain source page count")
 				}
-				facts, ds := pdf.Inspect(t.Context(), d.Bytes())
+				facts, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
 				if status, _ := diag.Outcome(ds); status != "ok" || facts.Pages != 1 {
 					t.Fatalf("representation changed accepted action chain: %+v", ds)
 				}
 				// A deep local target must still be observed, not silently truncated.
 				d.Objs[len(d.Objs)-1] = []byte("<< /S /GoTo /D [3 0 R /FitH 20] >>")
-				facts, ds = pdf.Inspect(t.Context(), d.Bytes())
+				facts, _, ds = pdf.Inspect(t.Context(), d.Bytes(), nil)
 				if status, _ := diag.Outcome(ds); status != "ok" || !facts.HasCoordinateDestinations {
 					t.Fatalf("deep target was not inspected: %+v %+v", facts, ds)
 				}
@@ -355,7 +355,7 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 		{"excessive direct nesting", insertEntry(pdffixture.Plain("nested"), 1, "/Private "+strings.Repeat("<< /Private ", 130)+"null"+strings.Repeat(" >>", 130)), diag.SourceInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			facts, ds := pdf.Inspect(t.Context(), tc.doc.Bytes())
+			facts, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), nil)
 			if tc.code != (diag.Code{}) {
 				if !codePresent(ds, tc.code) {
 					t.Fatalf("hierarchy guard did not reject: %+v", ds)
@@ -376,12 +376,12 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 	}
 	cycle := actionChain(1, false)
 	cycle.Objs[6] = []byte("<< /S /URI /URI (https://example.invalid) /Next [7 0 R] >>")
-	if _, ds := pdf.Inspect(t.Context(), cycle.Bytes()); len(ds) != 0 {
+	if _, _, ds := pdf.Inspect(t.Context(), cycle.Bytes(), nil); len(ds) != 0 {
 		t.Fatalf("observer must terminate on cycles accepted by relaxed validation: %+v", ds)
 	}
 	pageCycle := pageTreeWithLink(2)
 	pageCycle.Objs[6] = []byte("<< /Type /Pages /Parent 2 0 R /Kids [2 0 R] /Count 1 >>")
-	if _, ds := pdf.Inspect(t.Context(), pageCycle.Bytes()); !codePresent(ds, diag.SourceDamaged) {
+	if _, _, ds := pdf.Inspect(t.Context(), pageCycle.Bytes(), nil); !codePresent(ds, diag.SourceDamaged) {
 		t.Fatalf("cyclic page tree escaped source guard: %+v", ds)
 	}
 }

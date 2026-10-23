@@ -117,7 +117,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err = original.Decode(); err != nil {
+					if err = original.DecodeWithLimit(s.DecodeLimit()); err != nil {
 						t.Fatal(err)
 					}
 					original.Content = append([]byte("1 0 0 1 3 4 cm 20 30 280 350 re W n\n1 0 0 rg 90 120 30 40 re f\n"), original.Content...)
@@ -174,7 +174,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 						}
 					}
 					prepared, names := preparedFooter(t)
-					if err = applyPageNumbers(t.Context(), s, footerLayout(1), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
+					if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(1)), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
 						t.Fatal(err)
 					}
 					if !reflect.DeepEqual(annotationBefore, annotationSnapshot) {
@@ -304,7 +304,7 @@ func TestFooterCopiesInheritedResourcesAndPreservesSharedContent(t *testing.T) {
 	second["Contents"] = first["Contents"]
 	originalContent := first["Contents"]
 	prepared, names := preparedFooter(t)
-	if err = applyPageNumbers(t.Context(), s, footerLayout(2), prepared, names, footerForLayout(t, footerLayout(2))); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(2)), prepared, names, footerForLayout(t, footerLayout(2))); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(parent["Resources"], originalResources) {
@@ -352,7 +352,7 @@ func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 		{Leaf: packet.Leaf{Kind: "padding"}, FirstPage: 2, LastPage: 2},
 		{Leaf: packet.Leaf{Kind: "page"}, FirstPage: 3, LastPage: 3},
 	}
-	if err = applyPageNumbers(t.Context(), s, layout, prepared, names, footerForLayout(t, layout)); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout)); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(padding, untouched) {
@@ -397,7 +397,7 @@ func TestFooterOnLargeSourceDoesNotImposeGeneratedCanvasLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared, names := preparedFooter(t)
-	if err = applyPageNumbers(t.Context(), s, footerLayout(1), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(1)), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
 		t.Fatal(err)
 	}
 	path := writeFooterContext(t, s, "large")
@@ -444,7 +444,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 			if tc.kind == "source" {
 				layout.Parts[0].Source = "selected.pdf"
 			}
-			err = applyPageNumbers(t.Context(), s, layout, prepared, names, footerForLayout(t, layout))
+			err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout))
 			if err == nil {
 				t.Fatal("lower logical overflow was accepted")
 			}
@@ -470,4 +470,12 @@ func footerForLayout(t *testing.T, layout packet.Layout) *compose.Footer {
 		t.Fatal(err)
 	}
 	return footer
+}
+
+func footerParts(layout packet.Layout) []Part {
+	parts := make([]Part, len(layout.Parts))
+	for i, part := range layout.Parts {
+		parts[i] = Part{Part: part}
+	}
+	return parts
 }

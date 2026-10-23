@@ -72,7 +72,7 @@ func copiedDict(original types.Dict) types.Dict {
 
 // applyPageNumbers adds fresh page-local wrappers and font dictionaries after
 // fitting. Original streams, annotation coordinates and page geometry stay intact.
-func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string, footer *compose.Footer) error {
+func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string, footer *compose.Footer) error {
 
 	if footer == nil {
 		return nil
@@ -95,13 +95,13 @@ func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout,
 		if err = c.Err(); err != nil {
 			return err
 		}
-		for spanIndex < len(layout.Parts) && int64(page) > layout.Parts[spanIndex].LastPage {
+		for spanIndex < len(parts) && int64(page) > parts[spanIndex].LastPage {
 			spanIndex++
 		}
-		if spanIndex >= len(layout.Parts) {
+		if spanIndex >= len(parts) {
 			return ErrInvalidPage
 		}
-		part := layout.Parts[spanIndex]
+		part := parts[spanIndex]
 		if part.Kind == packet.PartPadding {
 			continue
 		}

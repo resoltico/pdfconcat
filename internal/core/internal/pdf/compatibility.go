@@ -19,14 +19,25 @@ type Compatibility struct {
 }
 
 // CheckCompatibility applies rules depending on the complete ordered packet.
-func CheckCompatibility(layout packet.Layout, facts map[string]SourceFacts, occurrences map[string]OccurrenceFacts, fit *packet.Size) Compatibility {
+func CheckCompatibility(a Assembly) Compatibility {
 	result := Compatibility{version: model.V17}
+	for _, part := range a.Parts {
+		if part.Kind == packet.PartSource && (part.Occurrence == nil || part.Occurrence.File == nil || part.Occurrence.Facts == nil) {
+			d := diag.New(diag.SourceInvalid, "Source occurrence facts are unavailable.", part.Ref)
+			d.File = part.Source
+			result.Diagnostics = append(result.Diagnostics, d)
+		}
+	}
+	if len(result.Diagnostics) > 0 {
+		return result
+	}
+
 	versionSource := ""
-	for _, p := range layout.Parts {
+	for _, p := range a.Parts {
 		if p.Source == "" {
 			continue
 		}
-		f := facts[p.Source]
+		f := p.Occurrence.File
 		if f.Version == "2.0" {
 			result.version = model.V20
 			if versionSource == "" {
@@ -34,17 +45,17 @@ func CheckCompatibility(layout packet.Layout, facts map[string]SourceFacts, occu
 			}
 		}
 	}
-	authoredDepths := make(map[string]int, len(layout.Sections))
-	for _, section := range layout.Sections {
+	authoredDepths := make(map[string]int, len(a.Sections))
+	for _, section := range a.Sections {
 		authoredDepths[section.Item] = section.Depth + 1
 	}
 	defaults := ""
-	for _, p := range layout.Parts {
+	for _, p := range a.Parts {
 		if p.Source == "" {
 			continue
 		}
-		f := facts[p.Source]
-		selected := occurrences[p.Ref]
+		f := p.Occurrence.File
+		selected := p.Occurrence.Facts
 		add := func(code diag.Code, message string) {
 			d := diag.New(code, message, p.Ref)
 			d.File = p.Source
@@ -55,10 +66,10 @@ func CheckCompatibility(layout packet.Layout, facts map[string]SourceFacts, occu
 		if authoredDepth+selected.OutlineDepth > model.DefaultResourceLimits().MaxRecursionDepth+1 {
 			add(diag.SourceOutlineDepthUnsupported, "Authored sections and imported bookmarks exceed the PDF backend's supported outline hierarchy; reduce section nesting or source bookmark depth.")
 		}
-		if fit != nil && f.HasWidgets {
+		if a.FitTo != nil && f.HasWidgets {
 			add(diag.FitFormUnsupported, "Fitting source form widgets is unsupported.")
 		}
-		if fit != nil && selected.HasCoordinateDestinations {
+		if a.FitTo != nil && selected.HasCoordinateDestinations {
 			add(diag.FitDestinationUnsupported, "Fitting internal page destinations with numeric position coordinates is unsupported; use the original page sizes.")
 		}
 		if f.HasFields {

@@ -6,7 +6,6 @@ package pdf
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -71,33 +70,6 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 		d.Items = policy.items
 	}
 	return d
-}
-
-// Inspect applies raw-tree/policy refusals before relaxed validation and records facts.
-func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagnostic) {
-	digest := sha256.Sum256(data)
-	defer func() {
-		if value := recover(); value != nil {
-			facts = SourceFacts{}
-			ds = []diag.Diagnostic{diag.New(diag.SourceInvalid, fmt.Sprintf("PDF parser panic: %v", value))}
-		}
-		facts.SHA256 = digest
-		facts.Bytes = int64(len(data))
-	}()
-	s, err := read(c, data)
-	if err != nil {
-		if s != nil {
-			facts.Pages = s.PageCount
-			facts.Version = s.XRefTable.Version().String()
-		}
-		return facts, []diag.Diagnostic{diagnostic(err, diag.SourceInvalid)}
-	}
-	facts, ds, err = observe(c, s)
-	if err != nil {
-		ds = append(ds, diagnostic(err, diag.SourceInvalid))
-		return facts, ds
-	}
-	return facts, ds
 }
 
 func read(c context.Context, data []byte) (s *model.Context, err error) {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
-	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 )
 
 type nativeOutline struct {
@@ -194,8 +193,8 @@ func detachOutlineRoot(s *model.Context, owner string) (importedOutlineRoot, err
 	return importedOutlineRoot{root: root, owner: owner}, nil
 }
 
-func graftOutlines(c context.Context, s *model.Context, layout packet.Layout, imports []importedOutlineRoot) error {
-	if len(layout.Sections) == 0 {
+func graftOutlines(c context.Context, s *model.Context, a Assembly, imports []importedOutlineRoot) error {
+	if len(a.Sections) == 0 {
 		hasOutlines := false
 		for _, imported := range imports {
 			hasOutlines = hasOutlines || len(imported.root) > 0
@@ -209,8 +208,8 @@ func graftOutlines(c context.Context, s *model.Context, layout packet.Layout, im
 		return err
 	}
 	sections := map[string]*nativeOutline{}
-	parents := make(map[string]string, len(layout.Sections))
-	for _, section := range layout.Sections {
+	parents := make(map[string]string, len(a.Sections))
+	for _, section := range a.Sections {
 		title, err := types.EscapedUTF16String(section.Title)
 		if err != nil {
 			return err
@@ -245,7 +244,7 @@ func graftOutlines(c context.Context, s *model.Context, layout packet.Layout, im
 		emitted[item] = true
 	}
 	sourceIndex := 0
-	for _, part := range layout.Parts {
+	for _, part := range a.Parts {
 		emitSection(part.Owner)
 		if part.Source == "" {
 			continue

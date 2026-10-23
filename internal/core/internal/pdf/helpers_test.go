@@ -250,3 +250,35 @@ func wholeOccurrences(layout packet.Layout, facts map[string]pdf.SourceFacts) ma
 	}
 	return result
 }
+
+func testAssembly(layout packet.Layout, files map[string]pdf.SourceFacts, views map[string]pdf.OccurrenceFacts, pages map[int][]compose.Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont) pdf.Assembly {
+	a := pdf.Assembly{Parts: make([]pdf.Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: fonts, Footer: nil}
+	facts := map[string]*pdf.SourceFacts{}
+	for path, file := range files {
+		facts[path] = &file
+	}
+	for i, part := range layout.Parts {
+		a.Parts[i] = pdf.Part{Part: part, Generated: pages[i], Repeat: 1}
+		switch part.Kind {
+		case packet.PartSource:
+			view := views[part.Ref]
+			file := facts[part.Source]
+			if file == nil {
+				file = &pdf.SourceFacts{}
+			}
+			a.Parts[i].Occurrence = &pdf.Occurrence{File: file, Facts: &view}
+		case packet.PartPage, packet.PartDivider:
+			a.Parts[i].Repeat = part.Count
+		case packet.PartContents, packet.PartPadding:
+		}
+	}
+	return a
+}
+
+func fontResources(fonts map[typeset.Digest]typeset.EmbeddedFont) []typeset.EmbeddedFont {
+	resources := make([]typeset.EmbeddedFont, 0, len(fonts))
+	for _, font := range fonts {
+		resources = append(resources, font)
+	}
+	return resources
+}

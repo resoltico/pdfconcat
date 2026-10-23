@@ -22,17 +22,24 @@ import (
 // build owns the complete staging lifecycle, including abort on every failure.
 type buildOutcome struct {
 	output      result.Output
-	renames     map[int][]packet.FieldRename
+	renames     [][]packet.FieldRename
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j packet.Plan, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
+func build(c context.Context, j packet.Plan, composition compositionOutcome, overwrite bool) buildOutcome {
 	out := buildOutcome{output: result.Output{Path: j.Output}}
-	layout, pages, facts, occurrences := composition.layout, composition.pages, prepared.facts, prepared.occurrences
-	placements := compose.PlacedTexts(pages)
+	layout, assembly := composition.layout, composition.assembly
+	var placements []*typeset.Placed
+	for _, part := range assembly.Parts {
+		for _, page := range part.Generated {
+			for _, block := range page.Blocks {
+				placements = append(placements, block.Text)
+			}
+		}
+	}
 
-	if composition.footer != nil {
-		union, e := composition.footer.Union()
+	if assembly.Footer != nil {
+		union, e := assembly.Footer.Union()
 		if e != nil {
 			out.diagnostics = append(out.diagnostics, compose.Diagnostic(e, "/page_numbers"))
 			return out
@@ -57,9 +64,10 @@ func build(c context.Context, j packet.Plan, prepared preparationOutcome, compos
 	defer staged.Abort()
 	hash := sha256.New()
 	counter := &countWriter{Writer: staged}
-	assembled, err := pdf.Assemble(c, layout, facts, occurrences, pages, j.FitTo, embedded, composition.footer, io.MultiWriter(counter, hash))
+	assembly.Fonts = embedded
+	assembled, err := pdf.Assemble(c, assembly, io.MultiWriter(counter, hash))
 	out.diagnostics = append(out.diagnostics, assembled.Diagnostics...)
-	out.renames = assembled.FieldsRenamed
+	out.renames = assembled.Renames
 	if err != nil {
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out

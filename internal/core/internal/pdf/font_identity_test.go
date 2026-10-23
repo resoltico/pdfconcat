@@ -130,7 +130,7 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 		if err = source.WriteFile(path); err != nil {
 			t.Fatal(err)
 		}
-		facts, ds := pdf.Inspect(t.Context(), source.Bytes())
+		facts, _, ds := pdf.Inspect(t.Context(), source.Bytes(), nil)
 		if status, _ := diag.Outcome(ds); status != "ok" {
 			t.Fatal(ds)
 		}
@@ -151,7 +151,7 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 		var previous map[string]int
 		for repeat := range 2 {
 			var out bytes.Buffer
-			if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), generated, nil, prepared, nil, &out); err != nil {
+			if _, err = pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), generated, nil, prepared), &out); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, fmt.Sprintf("packet%d.pdf", repeat))
@@ -284,7 +284,7 @@ func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset
 		t.Fatal(ds)
 	}
 	var out bytes.Buffer
-	if _, err = pdf.Assemble(t.Context(), layout, nil, nil, pages, nil, prepared, nil, &out); err != nil {
+	if _, err = pdf.Assemble(t.Context(), testAssembly(layout, nil, nil, pages, nil, prepared), &out); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "packet.pdf")
@@ -369,7 +369,7 @@ func TestFullEmbeddingPreservesOriginalNameAndProgram(t *testing.T) {
 			if original {
 				_, err = pdf.Write(t.Context(), &out, []compose.Page{page})
 			} else {
-				_, err = pdf.WriteRepeated(t.Context(), &out, page, 1, prepared)
+				_, err = pdf.WriteRepeated(t.Context(), &out, page, 1, fontResources(prepared))
 			}
 			if err != nil {
 				t.Fatal(err)

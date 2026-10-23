@@ -94,21 +94,6 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 
 func rect(r typeset.Rect) [4]float64 { return [4]float64{r.X, r.Y, r.X + r.Width, r.Y + r.Height} }
 
-// PlacedTexts returns the placements used to prepare font resources.
-func PlacedTexts(pages map[int][]Page) []*typeset.Placed {
-	var placed []*typeset.Placed
-	for _, batch := range pages {
-		for _, p := range batch {
-			for _, block := range p.Blocks {
-				if block.Text != nil {
-					placed = append(placed, block.Text)
-				}
-			}
-		}
-	}
-	return placed
-}
-
 func anchor(value packet.Anchor) typeset.Anchor {
 	switch value {
 	case packet.AnchorTopLeft:

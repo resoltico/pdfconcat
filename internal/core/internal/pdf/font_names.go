@@ -78,10 +78,13 @@ func importedSubsetPrefixes(c context.Context, s *model.Context) ([]string, erro
 
 // generatedFontNames reserves imported tags before allocating once per font identity.
 // Sorted original-byte identities make allocation independent of map and item order.
-func generatedFontNames(fonts map[typeset.Digest]typeset.EmbeddedFont, sources map[string]SourceFacts) (map[typeset.Digest]string, error) {
+func generatedFontNames(fonts map[typeset.Digest]typeset.EmbeddedFont, parts []Part) (map[typeset.Digest]string, error) {
 	reserved := map[string]bool{}
-	for _, source := range sources {
-		for _, prefix := range source.SubsetPrefixes {
+	for _, part := range parts {
+		if part.Occurrence == nil || part.Occurrence.File == nil {
+			continue
+		}
+		for _, prefix := range part.Occurrence.File.SubsetPrefixes {
 			reserved[prefix] = true
 		}
 	}

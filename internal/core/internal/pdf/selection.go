@@ -21,10 +21,10 @@ type SelectionRequest struct {
 	MeasureFooter bool
 }
 
-// InspectSelections reads and validates a whole source once. Each ephemeral view
+// Inspect reads and validates a whole source once. Each ephemeral view
 // owns its containers; stream bytes stay immutable and shared during inspection.
-func InspectSelections(c context.Context, data []byte, requests []SelectionRequest) (facts SourceFacts, occurrences map[string]OccurrenceFacts, ds []diag.Diagnostic) {
-	occurrences = map[string]OccurrenceFacts{}
+func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
+	occurrences = make([]*OccurrenceFacts, len(requests))
 	defer func() {
 		facts.SHA256 = sha256.Sum256(data)
 		facts.Bytes = int64(len(data))
@@ -44,7 +44,7 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
-	for _, request := range requests {
+	for index, request := range requests {
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
 		if err == nil && !wholeSelection(ranges, s.PageCount) && (facts.HasFields || facts.HasWidgets) {
 			err = refuse(diag.SourceSelectionFormUnsupported, "Partial selection of sources containing form fields or widgets is unsupported; select the whole source or flatten it with a suitable PDF tool.")
@@ -115,7 +115,8 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 				facts.PageSizes[number] = size
 			}
 		}
-		occurrences[request.Item] = selected.OccurrenceFacts
+		selectedFacts := selected.OccurrenceFacts
+		occurrences[index] = &selectedFacts
 		if removed {
 			ds = append(ds, diag.New(diag.SourceNavigationRemoved, "Navigation targets omitted from this source occurrence were removed.", request.Item))
 		}

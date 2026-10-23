@@ -45,7 +45,7 @@ func boundaryPageBytes(t *testing.T, mode string, page compose.Page) ([]byte, er
 		}
 	}
 
-	_, err := pdf.WriteRepeated(t.Context(), &data, page, 1, prepared)
+	_, err := pdf.WriteRepeated(t.Context(), &data, page, 1, fontResources(prepared))
 	return data.Bytes(), err
 }
 
@@ -151,7 +151,7 @@ func TestRepeatedPageLimitAndCancellation(t *testing.T) {
 	canceled, stop := context.WithCancel(ctx)
 	stop()
 	for _, count := range []int{100000, 100001} {
-		_, err := pdf.WriteRepeated(canceled, io.Discard, compose.Page{Width: 100, Height: 100}, count, nil)
+		_, err := pdf.WriteRepeated(canceled, io.Discard, compose.Page{Width: 100, Height: 100}, count, fontResources(nil))
 		if count == 100000 && !errors.Is(err, context.Canceled) {
 			t.Fatalf("accepted count lost cancellation: %v", err)
 		}
@@ -160,7 +160,7 @@ func TestRepeatedPageLimitAndCancellation(t *testing.T) {
 		}
 	}
 	page := textPage(t, defaultFont(t), "font")
-	if _, err := pdf.WriteRepeated(t.Context(), io.Discard, page, 1, nil); !errors.Is(err, pdf.ErrInvalidPage) {
+	if _, err := pdf.WriteRepeated(t.Context(), io.Discard, page, 1, fontResources(nil)); !errors.Is(err, pdf.ErrInvalidPage) {
 		t.Fatalf("missing job-wide font accepted: %v", err)
 	}
 }

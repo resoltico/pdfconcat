@@ -4,6 +4,7 @@
 package pdf_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -51,7 +52,7 @@ func TestAssemblyReportsActualWriterFailures(t *testing.T) {
 	if err := doc.WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	facts, ds := pdf.Inspect(t.Context(), doc.Bytes())
+	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
@@ -68,10 +69,19 @@ func TestAssemblyReportsActualWriterFailures(t *testing.T) {
 		{"short write", shortOutputWriter{}, io.ErrShortWrite},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, nil, tc.writer)
+			_, err := pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), tc.writer)
 			if !errors.Is(err, tc.err) || pdf.Diagnostic(err).Code != diag.OutputWriteFailed {
 				t.Fatalf("writer failure misclassified: %v", err)
 			}
 		})
+	}
+}
+
+func TestAssemblyRejectsMissingOccurrenceBeforeReadingOrWriting(t *testing.T) {
+	var output bytes.Buffer
+	assembly := pdf.Assembly{Parts: []pdf.Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: filepath.Join(t.TempDir(), "absent.pdf")}, Pages: 1}}}}
+	_, err := pdf.Assemble(t.Context(), assembly, &output)
+	if err == nil || pdf.Diagnostic(err).Code != diag.SourceInvalid || output.Len() != 0 {
+		t.Fatalf("missing inspection facts were consumed: %v, bytes=%d", err, output.Len())
 	}
 }

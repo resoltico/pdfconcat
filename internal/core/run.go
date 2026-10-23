@@ -22,7 +22,7 @@ func Execute(c context.Context, request Request) Result {
 		composition := composePacket(c, admission.plan, prepared, r, request.operation)
 		r = composition.result
 		if !hasErrors(r.Diagnostics) && request.operation == Build {
-			built := build(c, admission.plan, prepared, composition, request.options.Overwrite)
+			built := build(c, admission.plan, composition, request.options.Overwrite)
 			r.Output = &built.output
 			r.Diagnostics = append(r.Diagnostics, built.diagnostics...)
 			for i, names := range built.renames {

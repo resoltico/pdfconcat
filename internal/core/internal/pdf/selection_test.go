@@ -25,7 +25,16 @@ import (
 
 func inspectSelection(t *testing.T, doc *pdffixture.Doc, requests []SelectionRequest) (SourceFacts, map[string]OccurrenceFacts) {
 	t.Helper()
-	source, occurrences, ds := InspectSelections(t.Context(), doc.Bytes(), requests)
+	source, slots, ds := Inspect(t.Context(), doc.Bytes(), requests)
+	occurrences := map[string]OccurrenceFacts{}
+	if len(slots) != len(requests) {
+		t.Fatalf("inspection returned %d slots for %d requests", len(slots), len(requests))
+	}
+	for index := 0; index < len(slots) && index < len(requests); index++ {
+		if slots[index] != nil {
+			occurrences[requests[index].Item] = *slots[index]
+		}
+	}
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		t.Fatalf("inspection: %+v", ds)
 	}
@@ -64,7 +73,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 		t.Fatal(ds)
 	}
 	var output bytes.Buffer
-	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, fit, nil, nil, &output)
+	_, err := Assemble(t.Context(), testAssembly(layout, map[string]SourceFacts{path: facts}, occurrences, fit), &output)
 	if err != nil {
 		return "", []diag.Diagnostic{Diagnostic(err)}
 	}
@@ -131,7 +140,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 		doc  *pdffixture.Doc
 		code diag.Code
 	}{{pdffixture.Form("form"), diag.SourceSelectionFormUnsupported}, {signed, diag.SourceSigned}} {
-		facts, _, ds := InspectSelections(t.Context(), tc.doc.Bytes(), []SelectionRequest{{Item: "part", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
+		facts, _, ds := Inspect(t.Context(), tc.doc.Bytes(), []SelectionRequest{{Item: "part", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 		found := false
 		for _, d := range ds {
 			found = found || d.Code == tc.code
@@ -369,8 +378,8 @@ func TestGroupedFooterMeasurementsUseOnlyRequestedOriginalPages(t *testing.T) {
 	if ordinary.PageSizes != nil {
 		t.Fatal("ordinary inspection allocated footer geometry")
 	}
-	invalid, occurrences, ds := InspectSelections(t.Context(), doc.Bytes(), []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureFooter: true}})
-	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || invalid.PageSizes != nil || len(occurrences) != 0 {
+	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureFooter: true}})
+	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || invalid.PageSizes != nil || (len(occurrences) != 1 || occurrences[0] != nil) {
 		t.Fatalf("invalid selection invented geometry: %+v %+v %+v", invalid.PageSizes, occurrences, ds)
 	}
 }
@@ -402,7 +411,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, nil, nil, nil, &output)
+	_, err := Assemble(t.Context(), testAssembly(layout, map[string]SourceFacts{path: facts}, occurrences, nil), &output)
 	if err == nil || Diagnostic(err).Code != diag.SourceChanged || output.Len() != 0 {
 		t.Fatalf("changed omitted bytes were not refused before writing: err=%v bytes=%d", err, output.Len())
 	}
@@ -583,7 +592,7 @@ func TestRepeatedWholeFormRetainsFieldOnlyActions(t *testing.T) {
 	if !reflect.DeepEqual(got, []int{2, 4}) {
 		t.Fatalf("field actions %v want [2 4]", got)
 	}
-	_, _, refused := InspectSelections(t.Context(), d.Bytes(), []SelectionRequest{{Item: "partial", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
+	_, _, refused := Inspect(t.Context(), d.Bytes(), []SelectionRequest{{Item: "partial", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 	found := false
 	for _, d := range refused {
 		if d.Code == diag.SourceSelectionFormUnsupported {
@@ -676,4 +685,28 @@ func TestOnPagePopupRetainsSoleParentActionsAcrossOccurrences(t *testing.T) {
 			t.Fatalf("sole Popup.Parent page %d: got %v want %v", page+1, targets, want)
 		}
 	}
+}
+
+func testAssembly(layout packet.Layout, files map[string]SourceFacts, views map[string]OccurrenceFacts, fit *packet.Size) Assembly {
+	a := Assembly{Parts: make([]Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: nil, Footer: nil}
+	facts := map[string]*SourceFacts{}
+	for path, file := range files {
+		facts[path] = &file
+	}
+	for i, part := range layout.Parts {
+		a.Parts[i] = Part{Part: part, Repeat: 1}
+		switch part.Kind {
+		case packet.PartSource:
+			view := views[part.Ref]
+			file := facts[part.Source]
+			if file == nil {
+				file = &SourceFacts{}
+			}
+			a.Parts[i].Occurrence = &Occurrence{File: file, Facts: &view}
+		case packet.PartPage, packet.PartDivider:
+			a.Parts[i].Repeat = part.Count
+		case packet.PartContents, packet.PartPadding:
+		}
+	}
+	return a
 }

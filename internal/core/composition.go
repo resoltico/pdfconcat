@@ -7,20 +7,21 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 type compositionOutcome struct {
-	layout packet.Layout
-	pages  map[int][]compose.Page
-	result result.Result
-	footer *compose.Footer
+	layout   packet.Layout
+	assembly pdf.Assembly
+	result   result.Result
 }
 
 func composePacket(c context.Context, j packet.Plan, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
-	fonts, facts, occurrences, domain := prepared.fonts, prepared.facts, prepared.occurrences, prepared.domain
+	fonts, facts, domain := prepared.fonts, prepared.facts, prepared.domain
 	leaves, _ := j.Leaves(), j.Sections()
 	for i, leaf := range leaves {
 		if f, ok := facts[leaf.Source]; leaf.Kind == packet.PartSource && ok {
@@ -54,7 +55,8 @@ func composePacket(c context.Context, j packet.Plan, prepared preparationOutcome
 	}
 	layout, ds := packet.Resolve(j, domain, contentsCount)
 	r.Diagnostics = append(r.Diagnostics, ds...)
-	r.Diagnostics = append(r.Diagnostics, resolvePolicies(layout, facts, occurrences, j.FitTo, operation == Check)...)
+	assembly := pdf.Assembly{Parts: assemblyParts(layout, prepared), Sections: layout.Sections, FitTo: j.FitTo, Footer: footer}
+	r.Diagnostics = append(r.Diagnostics, resolvePolicies(assembly, operation == Check)...)
 	if hasErrors(r.Diagnostics) {
 		return compositionOutcome{result: r}
 	}
@@ -146,5 +148,28 @@ func composePacket(c context.Context, j packet.Plan, prepared preparationOutcome
 	if hasErrors(r.Diagnostics) {
 		return compositionOutcome{result: r}
 	}
-	return compositionOutcome{layout: layout, pages: pages, result: r, footer: footer}
+	for i, batch := range pages {
+		assembly.Parts[i].Generated = batch
+	}
+	return compositionOutcome{layout: layout, assembly: assembly, result: r}
+}
+
+func assemblyParts(layout packet.Layout, prepared preparationOutcome) []pdf.Part {
+	parts := make([]pdf.Part, len(layout.Parts))
+	fileFacts := map[string]*pdf.SourceFacts{}
+	for path, facts := range prepared.facts {
+		fileFacts[path] = &facts
+	}
+	for i, part := range layout.Parts {
+		parts[i] = pdf.Part{Part: part, Repeat: 1}
+		switch part.Kind {
+		case packet.PartSource:
+			view := prepared.occurrences[part.Ref]
+			parts[i].Occurrence = &pdf.Occurrence{File: fileFacts[part.Source], Facts: &view}
+		case packet.PartPage, packet.PartDivider:
+			parts[i].Repeat = part.Count
+		case packet.PartContents, packet.PartPadding:
+		}
+	}
+	return parts
 }

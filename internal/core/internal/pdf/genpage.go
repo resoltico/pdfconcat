@@ -123,7 +123,14 @@ func Write(c context.Context, w io.Writer, pages []compose.Page) (int64, error) 
 }
 
 // WriteRepeated serializes a repeated native generated item with its job union.
-func WriteRepeated(c context.Context, w io.Writer, page compose.Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont) (int64, error) {
+func WriteRepeated(c context.Context, w io.Writer, page compose.Page, count int, resources []typeset.EmbeddedFont) (int64, error) {
+	prepared := map[typeset.Digest]typeset.EmbeddedFont{}
+	for _, font := range resources {
+		if font.Font == nil {
+			return 0, ErrInvalidPage
+		}
+		prepared[font.Font.Identity()] = font
+	}
 	names, err := generatedFontNames(prepared, nil)
 	if err != nil {
 		return 0, err

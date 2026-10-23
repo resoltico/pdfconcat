@@ -25,7 +25,7 @@ func assembleSourceBytes(t *testing.T, data []byte) string {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.pdf")
 	out := filepath.Join(dir, "output.pdf")
-	facts, ds := pdf.Inspect(t.Context(), data)
+	facts, _, ds := pdf.Inspect(t.Context(), data, nil)
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		t.Fatalf("inspect: %+v", ds)
 	}
@@ -34,7 +34,7 @@ func assembleSourceBytes(t *testing.T, data []byte) string {
 	}
 	layout, _ := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: source, Ref: source}}), map[string]packet.SourceFacts{source: facts.SourceFacts}, 0)
 	var b bytes.Buffer
-	if _, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil, nil, &b); err != nil {
+	if _, err := pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil), &b); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(out, b.Bytes(), 0600); err != nil {
@@ -162,7 +162,7 @@ func TestLiteralHashFontResourceRetainsVisibleText(t *testing.T) {
 func TestWrongGenerationCannotExposeContent(t *testing.T) {
 	d := pdffixture.Plain("WRONG-GENERATION-CONTENT")
 	d.Objs[2] = bytes.ReplaceAll(d.Objs[2], []byte("/Contents 4 0 R"), []byte("/Contents 4 1 R"))
-	_, ds := pdf.Inspect(t.Context(), d.Bytes())
+	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		return
 	}

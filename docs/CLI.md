@@ -16,6 +16,7 @@ including the command but excluding the executable.
 | Option | Meaning |
 | --- | --- |
 | `--plan FILE`, `--plan -` | Named plan or stdin; excludes source/blank operands |
+| `--blank` | Insert one generated page; size comes from a source or `--fit-to SIZE` |
 | `-o FILE`, `--output FILE` | Output PDF; overrides plan output, relative to cwd |
 | `--base-dir DIR` | Base for stdin plans only |
 | `--fit-to SIZE` | Overrides plan fitting; paper name or dimensions |
@@ -41,6 +42,15 @@ when one is provided it also checks its role/existence. Both load and validate
 fonts, inspect every distinct source, resolve sizes/ranges and lay out text.
 `check` writes no PDF but may write its requested report. Passing check predicts
 assembly; merge, pruning, fitting, I/O or publication can still fail later.
+
+A direct blank inherits the last selected page size of the nearest preceding
+source, or the first selected page size of the first following source. With no
+source, supply a fit target:
+
+```sh
+pdfconcat check --blank --fit-to A4
+pdfconcat build --blank --fit-to A4 -o blank.pdf
+```
 
 `--fit-to` accepts the sheet grammar in [PLAN](PLAN.md#generated-pages-and-layering).
 See [PDF policy](PDF-POLICY.md#forms-fitting-and-catalog) for fitting refusals,

@@ -35,8 +35,10 @@ pdfconcat check cover.pdf --blank appendix.pdf
 pdfconcat build -o packet.pdf cover.pdf --blank appendix.pdf --report packet.report.json
 ```
 
-`--blank` inserts one generated page with default style. Options may interleave
-with operands; `--` makes following arguments literal paths. Text summaries go
+`--blank` inserts one generated page with default style. Its size comes from a
+source or `--fit-to SIZE`; for example, `pdfconcat check --blank --fit-to A4`
+checks a source-free blank. Options may interleave with operands; `--` makes
+following arguments literal paths. Text summaries go
 to stdout and diagnostics to stderr. Add `--json` for one machine-readable result.
 
 For a generated divider, save `packet.json` beside the source PDFs:

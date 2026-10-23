@@ -85,10 +85,10 @@ removed. Selection composes visible pages; it is not redaction and does not
 promise that every omitted-page byte or private object is erased.
 
 A genuinely partial selection of a source with nonempty form fields or any
-widgets is `source_selection_form_unsupported`. Full-range forms keep the
-existing form rules. Fitting and effective-PDF-2.0 appearance compatibility use
-the retained selected view, so omitted annotations and targets do not create
-those compatibility refusals. See [PDF policy and limitations](PDF-POLICY.md).
+widgets is `source_selection_form_unsupported`. Full-range forms follow the
+[form rules](PDF-POLICY.md#forms-fitting-and-catalog). Fitting and effective-PDF-2.0
+appearance compatibility use the retained selected view, so omitted annotations
+and targets do not create those compatibility refusals.
 
 Local links and destinations to omitted pages are removed within their own
 occurrence; they never jump into a different occurrence of the same source.
@@ -291,8 +291,8 @@ Limits: 64 MiB original JSON, 64 group levels, 100,000 authored item nodes
 (including groups), and 100,000 explicit selection pairs across the plan.
 `count` is 1–100,000. The actual generated-page total is at most 100,000,
 including dividers, contents and automatic padding. Source selections and
-repeated generated runs stay compact; selected source pages have no arbitrary
-new page-count cap. Actual totals must fit the backend's representable page
+repeated generated runs stay compact; selected source pages have no fixed
+page-count cap. Actual totals must fit the backend's representable page
 index. These limits are not a constant-memory guarantee.
 
 `count`, page indexes and `version` need integer tokens: `3.0` and `3e0` are

@@ -28,10 +28,10 @@ NOTICE are both retained.
 
 The executable embeds Noto Sans Regular, Copyright 2022 The Noto Project Authors,
 under the [SIL Open Font License 1.1](third_party/licenses/NotoSans-OFL-1.1.txt).
-The same notice accompanies the asset in `internal/typeset/fontdata/OFL.txt`.
+The same notice accompanies the asset in `internal/core/internal/typeset/fontdata/OFL.txt`.
 Generated PDFs normally embed a glyph-pruned copy with stable glyph IDs. A font
-whose embedding permission prohibits subsetting is embedded unchanged. The
-bundled font asset itself is unchanged; the font is not sold separately.
+whose embedding permission prohibits subsetting is embedded unchanged. The font
+is not sold separately.
 
 ## Source-only test corpus
 

@@ -22,8 +22,9 @@ are documented in [PLAN](PLAN.md) and [CLI](CLI.md).
 | `internal/pdffixture`, `internal/oracle` | Test-only synthetic inputs and independent PDF observations |
 
 Go's nested `internal/` rule confines domain packages and adapters to the core
-tree. Production CLI code imports core and performs no file, process or network
-I/O. Depguard confines pdfcpu to pdf, go-text to typeset, native calls to files,
+tree. Production CLI code imports core and uses supplied streams and host
+capabilities. It opens no files or network connections and launches no processes.
+Depguard confines pdfcpu to pdf, go-text to typeset, native calls to files,
 and test support to tests. See [contributor checks](../CONTRIBUTING.md).
 
 Allowed production dependencies within the core tree are:
@@ -39,6 +40,28 @@ files   -> diag
 typeset -> external font libraries
 diag    -> standard library
 ```
+
+## Frontend contract
+
+`core.Execute(ctx, request)` accepts `Check` or `Build`, an absolute `WorkingDir`,
+and one sealed input variant:
+
+- `PlanFile{Path}` reads a named plan relative to `WorkingDir`.
+- `PlanBytes{Data, Label, BaseDir}` decodes supplied bytes; `Label` supplies display
+  provenance, and `BaseDir` resolves relative to `WorkingDir` when supplied.
+- `Items` contains `SourceItem{Ref, Path}` and `BlankItem{Ref}` values. Each ref
+  must be nonempty and unique within the request.
+
+`Output`, `Report`, `Overwrite` and an optional `FitTo` supply execution overrides.
+`core.ParseSheet` constructs a validated fitting size. Invalid request metadata
+returns `request_invalid` before file I/O. Input storage must remain stable during
+execution. The core belongs to this repository's internal Go API; the CLI and
+the plan/result schemas define the external interfaces.
+
+`core.Schema` returns an owned copy of the plan or result schema. `core.Version`
+reads build metadata, and `core.ExitCode` classifies the complete result without
+presentation caps. Frontends translate acquisition failures through
+`core.InvocationFailure`; the CLI owns stdin acquisition before calling Execute.
 
 ## Vocabulary and declarations
 

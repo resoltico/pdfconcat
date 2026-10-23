@@ -24,12 +24,12 @@ type buildOutcome struct {
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j packet.Job, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
+func build(c context.Context, j packet.Plan, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
 	out := buildOutcome{output: result.Output{Path: j.Output}}
 	layout, pages, facts, occurrences, fonts := composition.layout, composition.pages, prepared.facts, prepared.occurrences, prepared.fonts
 	placements := placedTexts(pages)
 	if j.PageNumbers != nil {
-		digits, e := typeset.NewDigits(fonts["default"], j.PageNumbers.Size)
+		digits, e := typeset.NewDigits(fonts[packet.Font{}], j.PageNumbers.Size)
 		if e != nil {
 			out.diagnostics = append(out.diagnostics, textDiagnostic(e, "/page_numbers"))
 			return out

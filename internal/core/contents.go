@@ -29,9 +29,9 @@ type contentsLayout struct {
 
 // prepareContents wraps titles with a conservative fixed digit column, before
 // any parity or section target is known. There is no pagination fixed point.
-func prepareContents(c context.Context, j packet.Job, facts map[string]packet.SourceFacts, fonts map[string]*typeset.Font) (*contentsLayout, []diag.Diagnostic) {
-	leaves, sections := packet.Declarations(j)
-	var contents *packet.ContentsStyle
+func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.SourceFacts, fonts map[packet.Font]*typeset.Font) (*contentsLayout, []diag.Diagnostic) {
+	leaves, sections := j.Leaves(), j.Sections()
+	var contents *packet.ContentsItem
 	pointer := ""
 	bound := int64(0)
 	addBound := func(n int64) {
@@ -43,12 +43,12 @@ func prepareContents(c context.Context, j packet.Job, facts map[string]packet.So
 	}
 	for _, leaf := range leaves {
 		switch leaf.Kind {
-		case "source":
-			addBound(int64(facts[leaf.Pointer].Pages))
-		case "contents":
+		case packet.PartSource:
+			addBound(int64(facts[leaf.Ref].Pages))
+		case packet.PartContents:
 			contents = leaf.Contents
-			pointer = leaf.Pointer
-		default:
+			pointer = leaf.Ref
+		case packet.PartPage, packet.PartDivider, packet.PartPadding:
 			addBound(int64(leaf.Count))
 		}
 	}
@@ -56,16 +56,7 @@ func prepareContents(c context.Context, j packet.Job, facts map[string]packet.So
 		return nil, nil
 	}
 	addBound(int64(len(sections)))
-	var boundaries func([]packet.Part)
-	boundaries = func(parts []packet.Part) {
-		for _, p := range parts {
-			if p.StartOn == "odd" {
-				addBound(1)
-			}
-			boundaries(p.Items)
-		}
-	}
-	boundaries(j.Parts)
+	addBound(int64(j.OddStarts()))
 	fail := func(message string, item string) (*contentsLayout, []diag.Diagnostic) {
 		return nil, []diag.Diagnostic{diag.New(diag.TextOverflow, message, pointer, item)}
 	}
@@ -79,7 +70,7 @@ func prepareContents(c context.Context, j packet.Job, facts map[string]packet.So
 			size = *j.FitTo
 		}
 	}
-	font := fonts["default"]
+	font := fonts[packet.Font{}]
 	digits, err := typeset.NewDigits(font, 12)
 	if err != nil {
 		return nil, []diag.Diagnostic{textDiagnostic(err, pointer)}
@@ -202,7 +193,7 @@ func (contents *contentsLayout) finish(layout packet.Layout, pages map[int][]pdf
 		contents.pages[row.page].Links = append(contents.pages[row.page].Links, pdf.PageLink{Rect: row.bounds, TargetPage: target})
 	}
 	for i, part := range layout.Parts {
-		if part.Kind == "contents" && part.Pointer == contents.pointer {
+		if part.Kind == packet.PartContents && part.Ref == contents.pointer {
 			pages[i] = contents.pages
 			return nil
 		}

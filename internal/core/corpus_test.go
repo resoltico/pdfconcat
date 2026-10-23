@@ -186,7 +186,7 @@ func actualProfileSequence(r core.Result) string {
 			}
 		} else if p.Pages != nil {
 			for range *p.Pages {
-				sequence = append(sequence, p.Kind)
+				sequence = append(sequence, p.Kind.String())
 			}
 		}
 	}

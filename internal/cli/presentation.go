@@ -106,8 +106,8 @@ func diagnosticText(d core.Diagnostic) string {
 		b.WriteByte(']')
 	}
 	pointer := ""
-	if d.Location != nil && d.Location.Pointer != "" {
-		pointer = d.Location.Pointer
+	if d.Location != nil && d.Location.Ref != "" {
+		pointer = d.Location.Ref
 		fmt.Fprintf(&b, " [pointer %s]", strconv.Quote(pointer))
 	}
 	var items []string
@@ -166,7 +166,7 @@ func previewRows(r core.Result) ([]string, int) {
 			break
 		}
 		switch part.Kind {
-		case "source":
+		case core.PartSource:
 			source := "unknown"
 			if part.Spans != nil {
 				mapping := *part.Spans
@@ -180,9 +180,9 @@ func previewRows(r core.Result) ([]string, int) {
 				}
 			}
 			rows = append(rows, fmt.Sprintf("Source %s: selected %s → pages %s", strconv.Quote(part.Path), source, pages(part.OutputPages)))
-		case "padding":
+		case core.PartPadding:
 			rows = append(rows, fmt.Sprintf("Padding before %s: pages %s (odd_start)", strconv.Quote(part.BeforeItem), pages(part.OutputPages)))
-		default:
+		case core.PartPage, core.PartDivider, core.PartContents:
 			rows = append(rows, fmt.Sprintf("%s %s: pages %s", part.Kind, strconv.Quote(part.Item), pages(part.OutputPages)))
 		}
 	}

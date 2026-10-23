@@ -15,17 +15,20 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []diag.Diagnostic) {
+func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font, []diag.Diagnostic) {
 	r := result.New("")
-	fonts := map[string]*typeset.Font{}
-	var fontOrder []string
-	fontItems := map[string][]string{}
-	fontPointers := map[string]map[string]bool{}
-	type textKey struct{ font, value string }
+	fonts := map[packet.Font]*typeset.Font{}
+	var fontOrder []packet.Font
+	fontItems := map[packet.Font][]string{}
+	fontPointers := map[packet.Font]map[string]bool{}
+	type textKey struct {
+		font  packet.Font
+		value string
+	}
 	var textOrder []textKey
 	textItems := map[textKey][]string{}
 	textPointers := map[textKey]map[string]bool{}
-	register := func(name, value string, pointers ...string) {
+	register := func(name packet.Font, value string, pointers ...string) {
 		if _, ok := fontPointers[name]; !ok {
 			fontOrder = append(fontOrder, name)
 			fontPointers[name] = map[string]bool{}
@@ -51,20 +54,20 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 			}
 		}
 	}
-	leaves, sections := packet.Declarations(j)
+	leaves, sections := j.Leaves(), j.Sections()
 	for _, p := range leaves {
 		if p.Page != nil {
-			register(p.Page.Text.Font, p.Page.Text.Value, p.Page.Origins["value"], p.Page.Origins["font"], p.Pointer)
+			register(p.Page.Text.Font.Value, p.Page.Text.Value.Value, p.Page.Text.Value.From, p.Page.Text.Font.From, p.Ref)
 		}
 		if p.Contents != nil {
-			register("default", p.Contents.Title, p.Pointer)
+			register(packet.Font{}, p.Contents.Title, p.Ref)
 			for _, section := range sections {
-				register("default", section.Title, section.Item+"/title", p.Pointer)
+				register(packet.Font{}, section.Title, section.Item+"/title", p.Ref)
 			}
 		}
 	}
 	if j.PageNumbers != nil {
-		register("default", "0123456789", "/page_numbers")
+		register(packet.Font{}, "0123456789", "/page_numbers")
 	}
 	for _, name := range fontOrder {
 		if c.Err() != nil {
@@ -73,13 +76,13 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 		}
 		var font *typeset.Font
 		var err error
-		if name == "default" {
+		if name == (packet.Font{}) {
 			font, err = typeset.LoadDefaultFont()
 		} else {
 			var data []byte
-			data, err = files.Read(c, name, 0)
+			data, err = files.Read(c, name.Path, 0)
 			if err != nil {
-				d := ioDiagnostic(diag.FontUnreadable, err, name)
+				d := ioDiagnostic(diag.FontUnreadable, err, name.Path)
 				d.Items = fontItems[name]
 				r.Diagnostics = append(r.Diagnostics, d)
 				continue
@@ -96,8 +99,8 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 				code = diag.FontNotEmbeddable
 			}
 			d := diag.New(code, err.Error(), fontItems[name]...)
-			if name != "default" {
-				d.File = name
+			if name != (packet.Font{}) {
+				d.File = name.Path
 			}
 			r.Diagnostics = append(r.Diagnostics, d)
 		} else {
@@ -114,8 +117,8 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 			if err := shaper.ValidateText(font, key.value); err != nil {
 				d := textDiagnostic(err, "")
 				d.Items = textItems[key]
-				if key.font != "default" {
-					d.File = key.font
+				if key.font != (packet.Font{}) {
+					d.File = key.font.Path
 				}
 				r.Diagnostics = append(r.Diagnostics, d)
 			}

@@ -30,7 +30,7 @@ func TestInvalidItemTypeExplainsShapesAtExactLocation(t *testing.T) {
 						t.Fatalf("wrong item type: %+v", ds)
 					}
 					d := ds[0]
-					if d.Location == nil || d.Location.Pointer != container.pointer || d.Location.Offset != int64(len(prefix)) || d.Location.Line != 2 || d.Location.Column != container.column || d.File != "packet.json" || len(d.Items) != 1 || d.Items[0] != container.pointer {
+					if d.Location == nil || d.Location.Ref != container.pointer || d.Location.Offset != int64(len(prefix)) || d.Location.Line != 2 || d.Location.Column != container.column || d.File != "packet.json" || len(d.Items) != 1 || d.Items[0] != container.pointer {
 						t.Fatalf("item location changed: %+v", d)
 					}
 					for _, want := range []string{"source object", "generated page object", "contents object", "container object", `{"source":"source.pdf"}`} {
@@ -62,7 +62,7 @@ func TestItemBoundaryRetainsNullSyntaxAndMemberErrors(t *testing.T) {
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			_, ds := plan.Decode([]byte(tc.input), "packet.json", t.TempDir())
-			if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Pointer != tc.pointer {
+			if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.pointer {
 				t.Fatalf("fault semantics changed: %+v", ds)
 			}
 			if strings.Contains(ds[0].Message, `{"source":"source.pdf"}`) {
@@ -78,8 +78,8 @@ func TestCurrentItemShapesRemainAccepted(t *testing.T) {
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}
-	leaves, sections := packet.Declarations(j)
-	if len(j.Parts) != 4 || len(leaves) != 4 || len(sections) != 1 || leaves[0].Kind != "source" || leaves[1].Kind != "page" || leaves[2].Kind != "contents" || j.Parts[3].Title != "Section" {
+	leaves, sections := j.Leaves(), j.Sections()
+	if len(j.Items) != 4 || len(leaves) != 4 || len(sections) != 1 || leaves[0].Kind != "source" || leaves[1].Kind != "page" || leaves[2].Kind != "contents" || itemAs[*packet.GroupItem](t, j.Items[3]).Title != "Section" {
 		t.Fatalf("current item shapes changed: %+v", j)
 	}
 	var instance any

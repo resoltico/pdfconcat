@@ -62,7 +62,7 @@ func TestLocatedFirstFaults(t *testing.T) {
 				t.Fatalf("expected one error, got %+v", ds)
 			}
 			d := ds[0]
-			if d.Code != tc.code || d.Location == nil || d.Location.Pointer != tc.pointer {
+			if d.Code != tc.code || d.Location == nil || d.Location.Ref != tc.pointer {
 				t.Fatalf("got %+v location %+v; want %s %s", d, d.Location, tc.code, tc.pointer)
 			}
 			l := d.Location
@@ -85,25 +85,25 @@ func TestBOMOffsets(t *testing.T) {
 	}
 }
 
-func TestLayeringOriginsAndPaths(t *testing.T) {
+func TestLayeringSettingRefsAndPaths(t *testing.T) {
 	base := t.TempDir()
 	input := `{"version":3,"output":"packet.pdf","dir":"sources","page":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm"},"background":"#abc"},"items":[{"dir":"chapters","items":[{"source":"a.pdf"},{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":""}}}]},{"page":{"text":{"font":"default"}}}]}`
 	j, ds := plan.Decode([]byte(input), "p", base)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	if len(j.Parts) != 2 || j.Output != filepath.Join(base, "packet.pdf") || j.Parts[0].Items[0].Source != filepath.Join(base, "sources/chapters/a.pdf") {
+	if len(j.Items) != 2 || j.Output != filepath.Join(base, "packet.pdf") || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, j.Items[0]).Items[0]).Path != filepath.Join(base, "sources/chapters/a.pdf") {
 		t.Fatalf("job %+v", j)
 	}
-	a, b := j.Parts[0].Items[1].Page, j.Parts[1].Page
-	if a.Background != nil || a.Text.Value != "" || a.Text.Font != filepath.Join(base, "sources/chapters/local.ttf") || b.Text.Font != "default" || b.Text.Value != "default" || b.Background == nil {
+	a, b := itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, j.Items[0]).Items[1]).Style, itemAs[*packet.PageItem](t, j.Items[1]).Style
+	if a.Background.Value != nil || a.Text.Value.Value != "" || a.Text.Font.Value.Path != filepath.Join(base, "sources/chapters/local.ttf") || b.Text.Font.Value != (packet.Font{}) || b.Text.Value.Value != "default" || b.Background.Value == nil {
 		t.Fatalf("layered: %+v %+v", a, b)
 	}
-	if a.Origins["font"] != "/items/0/items/1/page/text/font" || a.Origins["width"] != "/page/text/width" || b.Origins["background"] != "/page/background" {
-		t.Fatalf("origins %+v %+v", a.Origins, b.Origins)
+	if a.Text.Font.From != "/items/0/items/1/page/text/font" || a.Text.Width.From != "/page/text/width" || b.Background.From != "/page/background" {
+		t.Fatalf("origins %+v %+v", a, b)
 	}
 	top, ds := plan.Decode([]byte(`{"version":3,"page":{"text":{"font":{"file":"top.ttf"}}},"items":[{"dir":"elsewhere","items":[{"page":{}}]}]}`), "p", base)
-	if len(ds) > 0 || top.Parts[0].Items[0].Page.Text.Font != filepath.Join(base, "top.ttf") {
+	if len(ds) > 0 || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, top.Items[0]).Items[0]).Style.Text.Font.Value.Path != filepath.Join(base, "top.ttf") {
 		t.Fatalf("top font scope %+v %+v", top, ds)
 	}
 }
@@ -112,8 +112,8 @@ func TestLimits(t *testing.T) {
 	for _, n := range []int{100000, 100001} {
 		input := `{"version":3,"items":[` + strings.Repeat(`{"source":"a"},`, n-1) + `{"source":"a"}]}`
 		j, ds := plan.Decode([]byte(input), "p", ".")
-		if n == 100000 && (len(ds) > 0 || len(j.Parts) != n) || n == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
-			t.Fatalf("entry boundary %d: %d %+v", n, len(j.Parts), ds)
+		if n == 100000 && (len(ds) > 0 || len(j.Items) != n) || n == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+			t.Fatalf("entry boundary %d: %d %+v", n, len(j.Items), ds)
 		}
 	}
 	for _, count := range []string{"100000", "100001"} {
@@ -242,7 +242,7 @@ func TestNumericVersionAndLengthFaultClasses(t *testing.T) {
 		{`{"version":3,"items":[{"page":{"text":{"leading":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/leading"},
 	} {
 		_, ds := plan.Decode([]byte(tc.input), "p", ".")
-		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Pointer != tc.pointer {
+		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.pointer {
 			t.Fatalf("numeric fault %s: %+v", tc.input, ds)
 		}
 	}
@@ -260,25 +260,25 @@ func TestPacketShapesScopesAndDefaults(t *testing.T) {
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}
-	leaves, sections := packet.Declarations(j)
-	if len(j.Parts) != 3 || len(leaves) != 5 || len(sections) != 2 || sections[0].Title != "  Rīga Ελληνικά Кириллица  " || sections[1].Title != "漢字" {
+	leaves, sections := j.Leaves(), j.Sections()
+	if len(j.Items) != 3 || len(leaves) != 5 || len(sections) != 2 || sections[0].Title != "  Rīga Ελληνικά Кириллица  " || sections[1].Title != "漢字" {
 		t.Fatalf("lost declared structure: %+v %+v", j, sections)
 	}
-	section := j.Parts[1]
-	if section.Dir != "chapter" || section.Divider.Text.Font != filepath.Join(base, "inputs/title.ttf") || section.Items[0].Source != filepath.Join(base, "inputs/chapter/source.pdf") || section.Items[1].Page.Text.Font != filepath.Join(base, "top.ttf") {
+	section := j.Items[1]
+	if itemAs[*packet.GroupItem](t, section).Divider.Text.Font.Value.Path != filepath.Join(base, "inputs/title.ttf") || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Path != filepath.Join(base, "inputs/chapter/source.pdf") || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Text.Font.Value.Path != filepath.Join(base, "top.ttf") {
 		t.Fatalf("declaration path scope: %+v", section)
 	}
-	if len(section.Items[0].Selection) != 2 || section.Items[0].Selection[0] != (packet.PageRange{First: 2, Last: 4}) || section.Items[0].Selection[1] != (packet.PageRange{First: 8, Last: 8}) {
-		t.Fatalf("normalized ranges: %+v", section.Items[0].Selection)
+	if len(itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection) != 2 || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection[0] != (packet.PageRange{First: 2, Last: 4}) || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection[1] != (packet.PageRange{First: 8, Last: 8}) {
+		t.Fatalf("normalized ranges: %+v", itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection)
 	}
-	if leaves[1].Kind != "divider" || leaves[1].Owner != "/items/1" || leaves[1].Page.Text.Value != section.Title || section.Divider.Text.Value != "inherited" || leaves[1].Pointer != "/items/1/divider" {
+	if leaves[1].Kind != "divider" || leaves[1].Owner != "/items/1" || leaves[1].Page.Text.Value.Value != itemAs[*packet.GroupItem](t, section).Title || itemAs[*packet.GroupItem](t, section).Divider.Text.Value.Value != "inherited" || leaves[1].Ref != "/items/1/divider" {
 		t.Fatalf("divider title derivation: %+v", leaves[1])
 	}
-	if j.PageNumbers == nil || j.PageNumbers.Size != 9 || j.PageNumbers.Margin != 8*72/25.4 || j.Parts[0].Contents.Title != "Contents" || j.Parts[0].Contents.Size != (packet.Size{}) {
+	if j.PageNumbers == nil || j.PageNumbers.Size != 9 || j.PageNumbers.Margin != 8*72/25.4 || itemAs[*packet.ContentsItem](t, j.Items[0]).Title != "Contents" || itemAs[*packet.ContentsItem](t, j.Items[0]).Size != (packet.Size{}) {
 		t.Fatalf("packet defaults: %+v", j)
 	}
-	if section.Items[1].Page.Background != nil || section.Items[1].Page.Text.Value != "" || section.Items[1].Page.Origins["value"] != "/items/1/items/1/page/text/value" {
-		t.Fatalf("style presence lost: %+v", section.Items[1].Page)
+	if itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Background.Value != nil || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Text.Value.Value != "" || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Text.Value.From != "/items/1/items/1/page/text/value" {
+		t.Fatalf("style presence lost: %+v", itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style)
 	}
 	var instance any
 	if err := json.Unmarshal([]byte(input), &instance); err != nil {
@@ -323,7 +323,7 @@ func TestPacketRejectingContracts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
 			_, ds := plan.Decode([]byte(tc.input), "packet.json", t.TempDir())
-			if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Pointer != tc.pointer {
+			if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.pointer {
 				t.Fatalf("want %s %s: %+v", tc.code, tc.pointer, ds)
 			}
 		})
@@ -335,7 +335,7 @@ func TestPacketRejectingContracts(t *testing.T) {
 		}
 		input := `{"version":3,"items":[{"title":` + string(encoded) + `,"items":[{"source":"x"}]}]}`
 		_, ds := plan.Decode([]byte(input), "packet.json", t.TempDir())
-		if len(ds) != 1 || ds[0].Code != diag.PlanValue || ds[0].Location.Pointer != "/items/0/title" {
+		if len(ds) != 1 || ds[0].Code != diag.PlanValue || ds[0].Location.Ref != "/items/0/title" {
 			t.Fatalf("invalid title %q accepted: %+v", title, ds)
 		}
 		var instance any
@@ -366,8 +366,17 @@ func TestAggregateContainerAndSelectionBudgets(t *testing.T) {
 		}
 		input := `{"version":3,"items":[{"source":"x","pages":[` + pairs.String() + `]}]}`
 		j, ds := plan.Decode([]byte(input), "p", ".")
-		if count == 100000 && (len(ds) > 0 || len(j.Parts[0].Selection) != 1 || j.Parts[0].Selection[0].Last != count) || count == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+		if count == 100000 && (len(ds) > 0 || len(itemAs[*packet.SourceItem](t, j.Items[0]).Selection) != 1 || itemAs[*packet.SourceItem](t, j.Items[0]).Selection[0].Last != count) || count == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
 			t.Fatalf("selection pair budget %d: %+v", count, ds)
 		}
 	}
+}
+
+func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
+	t.Helper()
+	value, ok := item.(T)
+	if !ok {
+		t.Fatalf("item has type %T, expected %T", item, value)
+	}
+	return value
 }

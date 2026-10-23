@@ -213,7 +213,7 @@ func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout,
 			return ErrInvalidPage
 		}
 		part := layout.Parts[spanIndex]
-		if part.Kind == "padding" {
+		if part.Kind == packet.PartPadding {
 			continue
 		}
 		d, viewport, e := pageViewport(c, s, page)
@@ -223,7 +223,7 @@ func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout,
 		placed, e := footerPlacement(digits, viewport.size, int64(page), layout.PageNumbers.Margin)
 		if e != nil {
 			diagnostic := Diagnostic(e)
-			return &policyError{code: diagnostic.Code, err: e, file: part.Source, items: []string{part.Pointer, "/page_numbers"}}
+			return &policyError{code: diagnostic.Code, err: e, file: part.Source, items: []string{part.Ref, "/page_numbers"}}
 		}
 		_, _, attrs, e := s.PageDict(c, page, false)
 		if e != nil {

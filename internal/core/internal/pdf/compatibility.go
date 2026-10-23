@@ -44,9 +44,9 @@ func CheckCompatibility(layout packet.Layout, facts map[string]SourceFacts, occu
 			continue
 		}
 		f := facts[p.Source]
-		selected := occurrences[p.Pointer]
+		selected := occurrences[p.Ref]
 		add := func(code diag.Code, message string) {
-			d := diag.New(code, message, p.Pointer)
+			d := diag.New(code, message, p.Ref)
 			d.File = p.Source
 			result.Diagnostics = append(result.Diagnostics, d)
 		}

@@ -14,14 +14,14 @@ import (
 )
 
 type preparationOutcome struct {
-	fonts       map[string]*typeset.Font
+	fonts       map[packet.Font]*typeset.Font
 	facts       map[string]pdf.SourceFacts
 	occurrences map[string]pdf.OccurrenceFacts
 	domain      map[string]packet.SourceFacts
 	diagnostics []diag.Diagnostic
 }
 
-func prepare(c context.Context, j packet.Job) preparationOutcome {
+func prepare(c context.Context, j packet.Plan) preparationOutcome {
 	fonts, ds := loadFonts(c, j)
 	if hasErrors(ds) {
 		return preparationOutcome{fonts: fonts, diagnostics: ds}
@@ -63,12 +63,12 @@ type sourceUse struct {
 	requests []pdf.SelectionRequest
 }
 
-func sourceUses(j packet.Job) []sourceUse {
+func sourceUses(j packet.Plan) []sourceUse {
 	var uses []sourceUse
 	index := map[string]int{}
-	leaves, _ := packet.Declarations(j)
+	leaves, _ := j.Leaves(), j.Sections()
 	for _, p := range leaves {
-		if p.Kind != "source" {
+		if p.Kind != packet.PartSource {
 			continue
 		}
 		i, ok := index[p.Source]
@@ -77,8 +77,8 @@ func sourceUses(j packet.Job) []sourceUse {
 			index[p.Source] = i
 			uses = append(uses, sourceUse{path: p.Source})
 		}
-		uses[i].items = append(uses[i].items, p.Pointer)
-		uses[i].requests = append(uses[i].requests, pdf.SelectionRequest{Item: p.Pointer, Pages: p.Selection, MeasureFooter: j.PageNumbers != nil && j.FitTo == nil})
+		uses[i].items = append(uses[i].items, p.Ref)
+		uses[i].requests = append(uses[i].requests, pdf.SelectionRequest{Item: p.Ref, Pages: p.Selection, MeasureFooter: j.PageNumbers != nil && j.FitTo == nil})
 	}
 	return uses
 }

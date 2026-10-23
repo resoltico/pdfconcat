@@ -64,16 +64,16 @@ func TestValueGrammars(t *testing.T) {
 func TestResolveCanvasesAndRanges(t *testing.T) {
 	a, b := packet.Size{Width: 200, Height: 300}, packet.Size{Width: 400, Height: 500}
 	explicit := packet.Defaults()
-	explicit.Size = packet.Size{Width: 123, Height: 456}
+	explicit.Size.Value = packet.Size{Width: 123, Height: 456}
 	inherited := packet.Defaults()
-	parts := []packet.Part{{Pointer: "lead", Page: &inherited, Count: 2}, {Pointer: "source", Source: "a"}, {Pointer: "after", Page: &inherited, Count: 3}, {Pointer: "explicit", Page: &explicit, Count: 1}}
+	parts := []packet.Item{&packet.PageItem{Ref: "lead", Style: inherited, Count: 2}, &packet.SourceItem{Ref: "source", Path: "a"}, &packet.PageItem{Ref: "after", Style: inherited, Count: 3}, &packet.PageItem{Ref: "explicit", Style: explicit, Count: 1}}
 	facts := map[string]packet.SourceFacts{"source": {Pages: 4, FirstSize: a, LastSize: b}}
-	j := packet.Job{Parts: parts}
-	layout, ds := packet.Resolve(j, facts, 0)
+	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, parts)
+	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	if layout.SourcePages != 4 || layout.GeneratedPages != 6 || layout.TotalPages != 10 || layout.Parts[0].Size != a || layout.Parts[2].Size != b || layout.Parts[3].Size != explicit.Size {
+	if layout.SourcePages != 4 || layout.GeneratedPages != 6 || layout.TotalPages != 10 || layout.Parts[0].Size != a || layout.Parts[2].Size != b || layout.Parts[3].Size != explicit.Size.Value {
 		t.Fatalf("layout %+v", layout)
 	}
 	for i, want := range [][2]int64{{1, 2}, {3, 6}, {7, 9}, {10, 10}} {
@@ -84,23 +84,23 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 	}
 	fit := packet.Size{Width: 612, Height: 792}
 	j.FitTo = &fit
-	layout, ds = packet.Resolve(j, facts, 0)
-	if len(ds) > 0 || layout.Parts[0].Size != fit || layout.Parts[2].Size != fit || layout.Parts[3].Size != explicit.Size {
+	layout, ds = packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
+	if len(ds) > 0 || layout.Parts[0].Size != fit || layout.Parts[2].Size != fit || layout.Parts[3].Size != explicit.Size.Value {
 		t.Fatalf("fit %+v %+v", layout, ds)
 	}
-	_, ds = packet.Resolve(packet.Job{Parts: []packet.Part{{Page: &inherited, Count: 1}}}, nil, 0)
+	_, ds = packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.PageItem{Style: inherited, Count: 1}}), nil, 0)
 	if len(ds) != 1 || ds[0].Code != diag.PageSizeRequired {
 		t.Fatal(ds)
 	}
 	facts["source"] = packet.SourceFacts{Pages: 1, FirstSize: packet.Size{Width: 14401, Height: 300}, LastSize: b}
-	_, ds = packet.Resolve(packet.Job{Parts: parts}, facts, 0)
+	_, ds = packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, parts), facts, 0)
 	if len(ds) != 1 || ds[0].Code != diag.PageSizeTooLarge {
 		t.Fatal(ds)
 	}
 }
 
 func TestRangesUseInt64(t *testing.T) {
-	layout, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Source: "a", Pointer: "a0"}, {Source: "a", Pointer: "a1"}}}, map[string]packet.SourceFacts{"a0": {Pages: 2_000_000_000}, "a1": {Pages: 2_000_000_000}}, 0)
+	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: "a", Ref: "a0"}, &packet.SourceItem{Path: "a", Ref: "a1"}}), map[string]packet.SourceFacts{"a0": {Pages: 2_000_000_000}, "a1": {Pages: 2_000_000_000}}, 0)
 	if len(ds) > 0 || layout.TotalPages != 4_000_000_000 || layout.Parts[1].FirstPage != 2_000_000_001 {
 		t.Fatalf("ranges %+v %+v", layout, ds)
 	}
@@ -108,28 +108,28 @@ func TestRangesUseInt64(t *testing.T) {
 
 func TestInheritedSizeBelowGeneratedMinimumIsRefused(t *testing.T) {
 	page := packet.Defaults()
-	_, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Source: "tiny", Pointer: "tiny"}, {Page: &page, Count: 1, Pointer: "/items/1"}}}, map[string]packet.SourceFacts{"tiny": {Pages: 1, FirstSize: packet.Size{Width: .5, Height: 100}, LastSize: packet.Size{Width: .5, Height: 100}}}, 0)
+	_, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: "tiny", Ref: "tiny"}, &packet.PageItem{Style: page, Count: 1, Ref: "/items/1"}}), map[string]packet.SourceFacts{"tiny": {Pages: 1, FirstSize: packet.Size{Width: .5, Height: 100}, LastSize: packet.Size{Width: .5, Height: 100}}}, 0)
 	if len(ds) != 1 || ds[0].Code != diag.PlanValue {
 		t.Fatalf("unusable inherited canvas: %+v", ds)
 	}
 }
 
-func explicitPage(pointer string, size packet.Size, count int) packet.Part {
+func explicitPage(pointer string, size packet.Size, count int) packet.Item {
 	style := packet.Defaults()
-	style.Size = size
-	return packet.Part{Pointer: pointer, Page: &style, Count: count}
+	style.Size.Value = size
+	return &packet.PageItem{Ref: pointer, Style: style, Count: count}
 }
 
 func TestNestedPaddingRangesAndTargets(t *testing.T) {
 	size := packet.Size{Width: 200, Height: 300}
 	cover := explicitPage("cover", size, 1)
 	for _, alignedParent := range []bool{false, true} {
-		parent := packet.Part{Pointer: "parent", Title: "Repeated", Items: []packet.Part{{Pointer: "child", Title: "Repeated", StartOn: "odd", Items: []packet.Part{explicitPage("body", size, 1)}}}}
+		parent := &packet.GroupItem{Ref: "parent", Title: "Repeated", Items: []packet.Item{&packet.GroupItem{Ref: "child", Title: "Repeated", StartOn: "odd", Items: []packet.Item{explicitPage("body", size, 1)}}}}
 		if alignedParent {
 			parent.StartOn = "odd"
 		}
-		j := packet.Job{Parts: []packet.Part{cover, parent}}
-		layout, ds := packet.Resolve(j, nil, 0)
+		j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{cover, parent})
+		layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -158,27 +158,27 @@ func TestOddStartBeforeEveryEmissionKind(t *testing.T) {
 	for _, kind := range []string{"source", "page", "divider", "contents"} {
 		t.Run(kind, func(t *testing.T) {
 			child := explicitPage("body", size, 1)
-			section := packet.Part{Pointer: "section", Title: "Title", StartOn: "odd"}
+			section := &packet.GroupItem{Ref: "section", Title: "Title", StartOn: "odd"}
 			facts := map[string]packet.SourceFacts{}
 			contentsCount := 0
 			switch kind {
 			case "source":
-				child = packet.Part{Pointer: "body", Source: "input"}
+				child = &packet.SourceItem{Ref: "body", Path: "input"}
 				facts["body"] = packet.SourceFacts{Pages: 1, FirstSize: size, LastSize: size}
 			case "divider":
 				style := packet.Defaults()
-				style.Size = size
+				style.Size.Value = size
 				section.Divider = &style
 			case "contents":
-				child = packet.Part{Pointer: "body", Contents: &packet.ContentsStyle{Title: "Contents", Size: size}}
+				child = &packet.ContentsItem{Ref: "body", Title: "Contents", Size: size}
 				contentsCount = 2
 			}
-			section.Items = []packet.Part{child}
-			layout, ds := packet.Resolve(packet.Job{Parts: []packet.Part{explicitPage("cover", size, 1), section}}, facts, contentsCount)
+			section.Items = []packet.Item{child}
+			layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{explicitPage("cover", size, 1), section}), facts, contentsCount)
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			if layout.Parts[1].Kind != "padding" || layout.Parts[2].Kind != kind || layout.Parts[2].FirstPage != 3 || layout.Sections[0].Target != 3 {
+			if layout.Parts[1].Kind != "padding" || layout.Parts[2].Kind.String() != kind || layout.Parts[2].FirstPage != 3 || layout.Sections[0].Target != 3 {
 				t.Fatalf("layout %+v", layout)
 			}
 			if kind == "contents" && layout.Parts[2].Pages != 2 {
@@ -192,12 +192,12 @@ func TestPaddingUsesPreviousPhysicalSheetWhileOtherPagesUseSourceNeighbor(t *tes
 	sourceSize := packet.Size{Width: 100, Height: 200}
 	previousPhysical := packet.Size{Width: 500, Height: 600}
 	style := packet.Defaults()
-	j := packet.Job{Parts: []packet.Part{{Pointer: "source", Source: "input"}, explicitPage("middle", packet.Size{Width: 300, Height: 400}, 2), {Pointer: "aligned", StartOn: "odd", Items: []packet.Part{{Pointer: "inherited", Page: &style, Count: 1}}}}}
+	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}, explicitPage("middle", packet.Size{Width: 300, Height: 400}, 2), &packet.GroupItem{Ref: "aligned", StartOn: "odd", Items: []packet.Item{&packet.PageItem{Ref: "inherited", Style: style, Count: 1}}}})
 	facts := map[string]packet.SourceFacts{"source": {Pages: 1, FirstSize: sourceSize, LastSize: sourceSize}}
-	j.Parts[1].Page.Size = previousPhysical
+	itemAs[*packet.PageItem](t, j.Items[1]).Style.Size.Value = previousPhysical
 	for _, fit := range []*packet.Size{nil, {Width: 612, Height: 792}} {
 		j.FitTo = fit
-		layout, ds := packet.Resolve(j, facts, 0)
+		layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -210,25 +210,25 @@ func TestPaddingUsesPreviousPhysicalSheetWhileOtherPagesUseSourceNeighbor(t *tes
 		}
 	}
 	facts["source"] = packet.SourceFacts{Pages: 1, FirstSize: sourceSize, LastSize: packet.Size{Width: .5, Height: 200}}
-	j = packet.Job{Parts: []packet.Part{{Pointer: "source", Source: "input"}, {Pointer: "boundary", StartOn: "odd", Items: []packet.Part{explicitPage("body", sourceSize, 1)}}}}
-	layout, ds := packet.Resolve(j, facts, 0)
+	j = packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}, &packet.GroupItem{Ref: "boundary", StartOn: "odd", Items: []packet.Item{explicitPage("body", sourceSize, 1)}}})
+	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) != 1 || ds[0].Items[0] != "boundary" || !strings.Contains(ds[0].Message, "fit") || len(layout.Parts) != 0 {
 		t.Fatalf("unusable parity canvas: %+v %+v", layout, ds)
 	}
 }
 
-func TestCompactMappingsAndDeclarations(t *testing.T) {
+func TestCompactMappingsAndSections(t *testing.T) {
 	size := packet.Size{Width: 200, Height: 300}
 	divider := packet.Defaults()
-	divider.Size = size
-	divider.Text.Value = "not a stored title"
-	j := packet.Job{Parts: []packet.Part{{Pointer: "outer", Title: "Outer", Divider: &divider, Items: []packet.Part{{Pointer: "inner", Title: "Inner", Items: []packet.Part{{Pointer: "input", Source: "same.pdf", Selection: []packet.PageRange{{First: 2, Last: 4}, {First: 7, Last: 7}}}}}, explicitPage("after-inner", size, 2)}}, {Pointer: "sibling", Title: "Sibling", Items: []packet.Part{explicitPage("bulk", size, 99997)}}}, PageNumbers: &packet.PageNumbers{Size: 9, Margin: 0}}
-	leaves, sections := packet.Declarations(j)
-	if len(leaves) != 4 || len(sections) != 3 || leaves[2].Owner != "outer" || sections[2].Parent != "" || sections[2].Depth != 0 || leaves[0].Page.Text.Value != "Outer" || divider.Text.Value != "not a stored title" {
+	divider.Size.Value = size
+	divider.Text.Value.Value = "not a stored title"
+	j := packet.NewPlan("", nil, &packet.PageNumbers{Size: 9, Margin: 0}, packet.PageStyle{}, []packet.Item{&packet.GroupItem{Ref: "outer", Title: "Outer", Divider: &divider, Items: []packet.Item{&packet.GroupItem{Ref: "inner", Title: "Inner", Items: []packet.Item{&packet.SourceItem{Ref: "input", Path: "same.pdf", Selection: []packet.PageRange{{First: 2, Last: 4}, {First: 7, Last: 7}}}}}, explicitPage("after-inner", size, 2)}}, &packet.GroupItem{Ref: "sibling", Title: "Sibling", Items: []packet.Item{explicitPage("bulk", size, 99997)}}})
+	leaves, sections := j.Leaves(), j.Sections()
+	if len(leaves) != 4 || len(sections) != 3 || leaves[2].Owner != "outer" || sections[2].Parent != "" || sections[2].Depth != 0 || leaves[0].Page.Text.Value.Value != "Outer" || divider.Text.Value.Value != "not a stored title" {
 		t.Fatalf("declarations %+v %+v", leaves, sections)
 	}
 	facts := map[string]packet.SourceFacts{"input": {Pages: 4, FirstSize: size, LastSize: size, Selection: []packet.PageRange{{First: 2, Last: 4}, {First: 7, Last: 7}}}}
-	layout, ds := packet.Resolve(j, facts, 0)
+	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -253,23 +253,29 @@ func TestCompactMappingsAndDeclarations(t *testing.T) {
 
 func TestLayoutLimitsAndNoInventedPartialSequence(t *testing.T) {
 	size := packet.Size{Width: 100, Height: 200}
-	for _, j := range []packet.Job{
-		{Parts: []packet.Part{explicitPage("bulk", size, 100000), {Pointer: "contents", Contents: &packet.ContentsStyle{Title: "Contents", Size: size}}}},
-		{Parts: []packet.Part{{Pointer: "source", Source: "input"}, explicitPage("bulk", size, 100000), {Pointer: "odd", StartOn: "odd", Items: []packet.Part{explicitPage("body", size, 1)}}}},
-		{Parts: []packet.Part{{Pointer: "source", Source: "input"}, {Pointer: "source2", Source: "input"}}},
-	} {
+	for _, j := range []packet.Plan{packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{explicitPage("bulk", size, 100000), &packet.ContentsItem{Ref: "contents", Title: "Contents", Size: size}}), packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}, explicitPage("bulk", size, 100000), &packet.GroupItem{Ref: "odd", StartOn: "odd", Items: []packet.Item{explicitPage("body", size, 1)}}}), packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}, &packet.SourceItem{Ref: "source2", Path: "input"}})} {
 		facts := map[string]packet.SourceFacts{"source": {Pages: 1, FirstSize: size, LastSize: size}}
-		if len(j.Parts) == 2 && j.Parts[1].Source != "" {
+		_, isSource := j.Items[1].(*packet.SourceItem)
+		if len(j.Items) == 2 && isSource {
 			facts["source"] = packet.SourceFacts{Pages: int(packet.MaxPageIndex)}
 			facts["source2"] = packet.SourceFacts{Pages: 1}
 		}
-		layout, ds := packet.Resolve(j, facts, 1)
+		layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 1)
 		if len(ds) == 0 || ds[0].Code != diag.PlanLimit || len(layout.Parts) != 0 || layout.TotalPages != 0 || len(layout.Sections) != 0 {
 			t.Fatalf("invented partial layout: %+v %+v", layout, ds)
 		}
 	}
-	layout, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Pointer: "source", Source: "input"}}}, map[string]packet.SourceFacts{"source": {Pages: 3, Selection: []packet.PageRange{{First: 1, Last: 2}}}}, 0)
+	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}}), map[string]packet.SourceFacts{"source": {Pages: 3, Selection: []packet.PageRange{{First: 1, Last: 2}}}}, 0)
 	if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || layout.TotalPages != 0 {
 		t.Fatalf("inconsistent occurrence facts: %+v %+v", layout, ds)
 	}
+}
+
+func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
+	t.Helper()
+	value, ok := item.(T)
+	if !ok {
+		t.Fatalf("item has type %T, expected %T", item, value)
+	}
+	return value
 }

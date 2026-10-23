@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/plan"
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
@@ -234,11 +236,11 @@ func TestDocumentedPythonRecipeRuns(t *testing.T) {
 		t.Fatal(ds)
 	}
 	slices.Sort(names)
-	if len(j.Parts) != len(names) {
+	if len(j.Items) != len(names) {
 		t.Fatalf("recipe lost files: %s", generated)
 	}
 	for i, name := range names {
-		if j.Parts[i].Source != filepath.Join(chapterDir, name) {
+		if itemAs[*packet.SourceItem](t, j.Items[i]).Path != filepath.Join(chapterDir, name) {
 			t.Fatalf("recipe filename/order changed: %s", generated)
 		}
 	}

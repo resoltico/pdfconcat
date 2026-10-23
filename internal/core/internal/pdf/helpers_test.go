@@ -242,7 +242,7 @@ func wholeOccurrences(layout packet.Layout, facts map[string]pdf.SourceFacts) ma
 	result := map[string]pdf.OccurrenceFacts{}
 	for _, part := range layout.Parts {
 		if part.Source != "" {
-			result[part.Pointer] = facts[part.Source].OccurrenceFacts
+			result[part.Ref] = facts[part.Source].OccurrenceFacts
 		}
 	}
 	return result

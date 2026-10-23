@@ -105,15 +105,15 @@ func acquirePlan(c context.Context, s PlanSource, cwd string) (data []byte, labe
 	}
 	return data, label, base, origin, nil
 }
-func inputPaths(j packet.Job) []string {
-	leaves, _ := packet.Declarations(j)
+func inputPaths(j packet.Plan) []string {
+	leaves, _ := j.Leaves(), j.Sections()
 	var paths []string
 	for _, leaf := range leaves {
-		if leaf.Kind == "source" {
+		if leaf.Kind == packet.PartSource {
 			paths = append(paths, leaf.Source)
 		}
-		if leaf.Page != nil && leaf.Page.Text.Font != "default" {
-			paths = append(paths, leaf.Page.Text.Font)
+		if leaf.Page != nil && leaf.Page.Text.Font.Value != (packet.Font{}) {
+			paths = append(paths, leaf.Page.Text.Font.Value.Path)
 		}
 	}
 	return paths

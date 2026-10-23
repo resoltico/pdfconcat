@@ -17,12 +17,12 @@ func Execute(c context.Context, request Request) Result {
 	admission := admit(c, request)
 	r := admission.result
 	if !hasErrors(r.Diagnostics) {
-		prepared := prepare(c, admission.job)
+		prepared := prepare(c, admission.plan)
 		r.Diagnostics = append(r.Diagnostics, prepared.diagnostics...)
-		composition := compose(c, admission.job, prepared, r, request.operation)
+		composition := compose(c, admission.plan, prepared, r, request.operation)
 		r = composition.result
 		if !hasErrors(r.Diagnostics) && request.operation == Build {
-			built := build(c, admission.job, prepared, composition, request.options.Overwrite)
+			built := build(c, admission.plan, prepared, composition, request.options.Overwrite)
 			r.Output = &built.output
 			r.Diagnostics = append(r.Diagnostics, built.diagnostics...)
 			for i, names := range built.renames {

@@ -53,7 +53,7 @@ func preparedFooter(t *testing.T) (map[typeset.Digest]typeset.EmbeddedFont, map[
 	return prepared, names
 }
 func footerLayout(count int) packet.Layout {
-	return packet.Layout{PageNumbers: &packet.PageNumbers{Size: 9, Margin: 24}, Parts: []packet.PlacedPart{{Leaf: packet.Leaf{Part: packet.Part{Pointer: "/items/0"}, Kind: "source"}, FirstPage: 1, LastPage: int64(count)}}}
+	return packet.Layout{PageNumbers: &packet.PageNumbers{Size: 9, Margin: 24}, Parts: []packet.Part{{Leaf: packet.Leaf{Ref: "/items/0", Kind: "source"}, FirstPage: 1, LastPage: int64(count)}}}
 }
 func writeFooterContext(t *testing.T, s *model.Context, name string) string {
 	t.Helper()
@@ -385,7 +385,7 @@ func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 	}
 	untouched := padding.Clone()
 	layout := footerLayout(3)
-	layout.Parts = []packet.PlacedPart{
+	layout.Parts = []packet.Part{
 		{Leaf: packet.Leaf{Kind: "page"}, FirstPage: 1, LastPage: 1},
 		{Leaf: packet.Leaf{Kind: "padding"}, FirstPage: 2, LastPage: 2},
 		{Leaf: packet.Leaf{Kind: "page"}, FirstPage: 3, LastPage: 3},
@@ -550,8 +550,8 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 			}
 			layout := footerLayout(s.PageCount)
 			layout.PageNumbers.Margin = 0
-			layout.Parts[0].Kind = tc.kind
-			layout.Parts[0].Pointer = "/items/1"
+			layout.Parts[0].Kind = packet.PartKind(tc.kind)
+			layout.Parts[0].Ref = "/items/1"
 			if tc.kind == "source" {
 				layout.Parts[0].Source = "selected.pdf"
 			}

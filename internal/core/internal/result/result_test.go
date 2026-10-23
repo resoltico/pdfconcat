@@ -109,7 +109,7 @@ func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
 	r := result.New("build")
 	d := diag.New(diag.SourceUnreadable, message, "/items/0", "/items/1")
 	d.File = path
-	d.Location = &diag.Location{File: path, Line: 3, Column: 7, Pointer: "/items/0"}
+	d.Location = &diag.Location{File: path, Line: 3, Column: 7, Ref: "/items/0"}
 	r.Diagnostics = []diag.Diagnostic{d}
 	r.Output = &result.Output{Path: path}
 	r.Report = &result.Report{Path: path}

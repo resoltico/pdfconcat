@@ -54,7 +54,7 @@ func silentLibraryBuild(t *testing.T) error {
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		return fmt.Errorf("inspection: %+v", ds)
 	}
-	layout, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Source: path, Pointer: path}, {Source: path, Pointer: path}}}, map[string]packet.SourceFacts{path: facts.SourceFacts}, 0)
+	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: path}, &packet.SourceItem{Path: path, Ref: path}}), map[string]packet.SourceFacts{path: facts.SourceFacts}, 0)
 	if len(ds) > 0 {
 		return fmt.Errorf("layout: %+v", ds)
 	}

@@ -5,59 +5,15 @@ package packet
 
 import "github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
-// Declarations derives leaves and preorder section metadata from the declared tree.
-// It never predicts padding or unresolved page ranges.
-func Declarations(j Job) ([]Leaf, []Section) {
-	var leaves []Leaf
-	var sections []Section
-	var walk func([]Part, string, int)
-	walk = func(parts []Part, owner string, depth int) {
-		for _, part := range parts {
-			if part.Items != nil {
-				if part.Title != "" {
-					sections = append(sections, Section{Item: part.Pointer, Title: part.Title, Parent: owner, Depth: depth})
-					if part.Divider != nil {
-						leaves = append(leaves, dividerLeaf(part, part.Pointer))
-					}
-					walk(part.Items, part.Pointer, depth+1)
-				} else {
-					walk(part.Items, owner, depth)
-				}
-				continue
-			}
-			leaves = append(leaves, declaredLeaf(part, owner))
-		}
-	}
-	walk(j.Parts, "", 0)
-	return leaves, sections
-}
-
-func declaredLeaf(part Part, owner string) Leaf {
-	kind := "source"
-	if part.Page != nil {
-		kind = "page"
-	} else if part.Contents != nil {
-		kind = "contents"
-	}
-	return Leaf{Part: part, Kind: kind, Owner: owner}
-}
-
-func dividerLeaf(part Part, owner string) Leaf {
-	style := Layer(*part.Divider, PageStyle{Text: TextStyle{Value: part.Title}, Origins: map[string]string{"value": part.Pointer + "/title"}})
-	return Leaf{Part: Part{Pointer: part.Pointer + "/divider", Page: &style, Count: 1}, Kind: "divider", Owner: owner}
-}
-
-// Resolve computes the final sequence once the independently measured contents
-// count is known. Source facts are keyed by the declared occurrence pointer.
-// Failure returns no partial physical sequence; declarations remain in Job.
-func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []diag.Diagnostic) {
+// Resolve maps the cached declaration traversal to physical spans.
+func Resolve(j Plan, facts map[string]SourceFacts, contentsCount int) (Layout, []diag.Diagnostic) {
 	layout := Layout{PageNumbers: j.PageNumbers}
 	var ds []diag.Diagnostic
-	leaves, _ := Declarations(j)
+	leaves := j.Leaves()
 	var sourceSize, physicalSize Size
 	for _, leaf := range leaves {
-		if leaf.Kind == "source" {
-			if f, ok := facts[leaf.Pointer]; ok {
+		if leaf.Kind == PartSource {
+			if f, ok := facts[leaf.Ref]; ok {
 				sourceSize = f.FirstSize
 				break
 			}
@@ -87,19 +43,19 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 	}
 	emit := func(leaf Leaf, padding bool) {
 		if layout.TotalPages == MaxPageIndex {
-			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Pointer)
+			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Ref)
 			return
 		}
-		p := PlacedPart{Leaf: leaf, FirstPage: layout.TotalPages + 1}
-		if leaf.Kind == "source" {
-			f, ok := facts[leaf.Pointer]
+		p := Part{Leaf: leaf, FirstPage: layout.TotalPages + 1}
+		if leaf.Kind == PartSource {
+			f, ok := facts[leaf.Ref]
 			if !ok || f.Pages < 1 {
-				add(diag.SourceInvalid, "Source page facts are unavailable.", leaf.Pointer)
+				add(diag.SourceInvalid, "Source page facts are unavailable.", leaf.Ref)
 				return
 			}
 			p.Pages = f.Pages
 			if int64(p.Pages) > MaxPageIndex-layout.TotalPages {
-				add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Pointer)
+				add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Ref)
 				return
 			}
 			ranges := f.Selection
@@ -109,21 +65,21 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 			var selected int64
 			for _, span := range ranges {
 				if span.First < 1 || span.Last < span.First || int64(span.Last-span.First) >= MaxPageIndex-selected {
-					add(diag.PlanLimit, "Selected source page count exceeds the supported page-index range.", leaf.Pointer)
+					add(diag.PlanLimit, "Selected source page count exceeds the supported page-index range.", leaf.Ref)
 					return
 				}
 				p.Mapping = append(p.Mapping, SourceMapping{SourceFirst: span.First, SourceLast: span.Last, OutputFirst: p.FirstPage + selected})
 				selected += int64(span.Last-span.First) + 1
 			}
 			if selected != int64(p.Pages) {
-				add(diag.SourceInvalid, "Selected source ranges and page count disagree.", leaf.Pointer)
+				add(diag.SourceInvalid, "Selected source ranges and page count disagree.", leaf.Ref)
 				return
 			}
 			sourceSize, physicalSize = f.LastSize, f.LastSize
 		} else {
 			p.Pages = leaf.Count
 			switch leaf.Kind {
-			case "contents":
+			case PartContents:
 				p.Pages = contentsCount
 				p.Size = leaf.Contents.Size
 				if p.Size == (Size{}) {
@@ -132,11 +88,11 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 						p.Size = *j.FitTo
 					}
 				}
-			case "padding":
+			case PartPadding:
 				p.Pages, p.Size = 1, physicalSize
-				p.Reason, p.BeforeItem = "odd_start", leaf.Pointer
-			default:
-				p.Size = leaf.Page.Size
+				p.Reason, p.BeforeItem = "odd_start", leaf.Ref
+			case PartSource, PartPage, PartDivider:
+				p.Size = leaf.Page.Size.Value
 				if p.Size == (Size{}) {
 					p.Size = sourceSize
 					if j.FitTo != nil {
@@ -144,17 +100,17 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 					}
 				}
 			}
-			if !canvas(p.Size, leaf.Pointer, padding) {
+			if !canvas(p.Size, leaf.Ref, padding) {
 				return
 			}
 			if p.Pages < 1 || p.Pages > MaxGeneratedPages || layout.GeneratedPages+int64(p.Pages) > MaxGeneratedPages {
-				add(diag.PlanLimit, "Generated pages exceed 100000 or the contents page count is unavailable.", leaf.Pointer)
+				add(diag.PlanLimit, "Generated pages exceed 100000 or the contents page count is unavailable.", leaf.Ref)
 				return
 			}
 			physicalSize = p.Size
 		}
 		if int64(p.Pages) > MaxPageIndex-layout.TotalPages {
-			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Pointer)
+			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Ref)
 			return
 		}
 		if j.FitTo != nil {
@@ -162,7 +118,7 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 		}
 		layout.TotalPages += int64(p.Pages)
 		p.LastPage = layout.TotalPages
-		if leaf.Kind == "source" {
+		if leaf.Kind == PartSource {
 			layout.SourcePages += int64(p.Pages)
 		} else {
 			layout.GeneratedPages += int64(p.Pages)
@@ -176,35 +132,30 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 			}
 		}
 	}
-	var walk func([]Part, string, int)
-	walk = func(parts []Part, owner string, depth int) {
-		for _, part := range parts {
-			if part.Items == nil {
-				emit(declaredLeaf(part, owner), false)
-				continue
-			}
-			if part.StartOn == "odd" && layout.TotalPages%2 == 1 {
-				emit(Leaf{Part: Part{Pointer: part.Pointer}, Kind: "padding", Owner: owner}, true)
-			}
-			childOwner, childDepth := owner, depth
-			index := -1
-			if part.Title != "" {
-				index = len(layout.Sections)
-				layout.Sections = append(layout.Sections, Section{Item: part.Pointer, Title: part.Title, Parent: owner, Depth: depth, FirstPage: layout.TotalPages + 1})
-				active = append(active, index)
-				childOwner, childDepth = part.Pointer, depth+1
-				if part.Divider != nil {
-					emit(dividerLeaf(part, childOwner), false)
-				}
-			}
-			walk(part.Items, childOwner, childDepth)
-			if index >= 0 {
-				layout.Sections[index].LastPage = layout.TotalPages
+
+	for _, e := range j.events {
+		if e.leaf >= 0 {
+			emit(leaves[e.leaf], false)
+			continue
+		}
+		if e.end {
+			if e.section >= 0 {
+				layout.Sections[e.section].LastPage = layout.TotalPages
 				active = active[:len(active)-1]
 			}
+			continue
+		}
+		if e.group.StartOn == StartOdd && layout.TotalPages%2 == 1 {
+			emit(Leaf{Index: -1, Ref: e.group.Ref, Kind: PartPadding, Owner: e.owner}, true)
+		}
+		if e.section >= 0 {
+			section := j.sections[e.section]
+			section.FirstPage = layout.TotalPages + 1
+			layout.Sections = append(layout.Sections, section)
+			active = append(active, e.section)
 		}
 	}
-	walk(j.Parts, "", 0)
+
 	if len(ds) > 0 {
 		return Layout{}, ds
 	}

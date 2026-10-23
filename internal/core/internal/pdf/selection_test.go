@@ -31,31 +31,35 @@ func inspectSelection(t *testing.T, doc *pdffixture.Doc, requests []SelectionReq
 	}
 	return source, occurrences
 }
-func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Part, fit *packet.Size) (string, []diag.Diagnostic) {
+func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit *packet.Size) (string, []diag.Diagnostic) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "source.pdf")
 	if err := doc.WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	var replace func([]packet.Part)
+	var replace func([]packet.Item)
 	requests := []SelectionRequest{}
-	replace = func(parts []packet.Part) {
-		for i := range parts {
-			if parts[i].Source != "" {
-				parts[i].Source = path
-				requests = append(requests, SelectionRequest{Item: parts[i].Pointer, Pages: parts[i].Selection})
+
+	replace = func(parts []packet.Item) {
+		for _, part := range parts {
+			switch item := part.(type) {
+			case *packet.SourceItem:
+				item.Path = path
+				requests = append(requests, SelectionRequest{Item: item.Ref, Pages: item.Selection})
+			case *packet.GroupItem:
+				replace(item.Items)
 			}
-			replace(parts[i].Items)
 		}
 	}
+
 	replace(parts)
 	facts, occurrences := inspectSelection(t, doc, requests)
 	domain := map[string]packet.SourceFacts{}
 	for item, f := range occurrences {
 		domain[item] = f.SourceFacts
 	}
-	layout, ds := packet.Resolve(packet.Job{Parts: parts, FitTo: fit}, domain, 0)
+	layout, ds := packet.Resolve(packet.NewPlan("", fit, nil, packet.PageStyle{}, parts), domain, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -81,7 +85,7 @@ func TestGroupedSelectionsRetainIndependentGeometryAndIdentity(t *testing.T) {
 	if facts.Version != "2.0" || facts.Pages != 3 || facts.Bytes != int64(len(doc.Bytes())) || views["a"].Pages != 2 || views["b"].Pages != 1 || views["full"].Pages != 3 || views["a"].FirstSize != facts.FirstSize || views["a"].LastSize != facts.LastSize {
 		t.Fatalf("facts %+v views %+v", facts, views)
 	}
-	path, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "a", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}}, {Pointer: "b", Source: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, nil)
+	path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "a", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}}, &packet.SourceItem{Ref: "b", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -143,7 +147,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 	if !source.HasCoordinateDestinations || views["one"].HasCoordinateDestinations || views["two"].HasCoordinateDestinations {
 		t.Fatalf("omitted links still restrict fitting: %+v", views)
 	}
-	_, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "one", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, {Pointer: "two", Source: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 400})
+	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "one", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "two", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 400})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -160,7 +164,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 
 func TestSelectedProjectionPrunesOnlyOwnOccurrenceTargets(t *testing.T) {
 	for _, doc := range []*pdffixture.Doc{pdffixture.Links("links"), pdffixture.NamedDests("named"), pdffixture.LegacyDests("legacy")} {
-		path, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "one", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, {Pointer: "two", Source: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, nil)
+		path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "one", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "two", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, nil)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -185,7 +189,7 @@ func TestNativeSourceOutlinesRemainStyledAndNested(t *testing.T) {
 			doc.Objs[i] = bytes.Replace(b, []byte(">>"), []byte(" /C [1 0 0] /F 3 >>"), 1)
 		}
 	}
-	path, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "section", Title: "Ā Evidence", Items: []packet.Part{{Pointer: "section/source", Source: "source"}}}}, nil)
+	path, ds := selectedPacket(t, doc, []packet.Item{&packet.GroupItem{Ref: "section", Title: "Ā Evidence", Items: []packet.Item{&packet.SourceItem{Ref: "section/source", Path: "source"}}}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -232,7 +236,7 @@ func TestSelectedOutlinesKeepNativeClosedContainerAndActions(t *testing.T) {
 		[]byte(fmt.Sprintf("<< /Title (Container) /Parent %d 0 R /Dest [4 0 R /Fit] /First %d 0 R /Last %d 0 R /Count -2 /C [1 0 0] /F 3 >>", root, child, leaf)),
 		[]byte(fmt.Sprintf("<< /Title (Retained) /Parent %d 0 R /Next %d 0 R /A << /S /URI /URI (https://example.invalid) /Next << /S /GoTo /D [6 0 R /FitH 20] >> >> >>", parent, leaf)),
 		[]byte(fmt.Sprintf("<< /Title (Omitted) /Parent %d 0 R /Prev %d 0 R /Dest [8 0 R /Fit] >>", parent, child)))
-	path, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "outer", Title: "Outer", Items: []packet.Part{{Pointer: "inner", Title: "Inner", Items: []packet.Part{{Pointer: "selected", Source: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}}}}}, nil)
+	path, ds := selectedPacket(t, doc, []packet.Item{&packet.GroupItem{Ref: "outer", Title: "Outer", Items: []packet.Item{&packet.GroupItem{Ref: "inner", Title: "Inner", Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}}}}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -346,7 +350,7 @@ func TestComposedOutlineHierarchyUsesBackendBoundary(t *testing.T) {
 	if views["source"].OutlineDepth != levels {
 		t.Fatal(views)
 	}
-	_, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "section", Title: "Wrapper", Items: []packet.Part{{Pointer: "source", Source: "source"}}}}, nil)
+	_, ds := selectedPacket(t, doc, []packet.Item{&packet.GroupItem{Ref: "section", Title: "Wrapper", Items: []packet.Item{&packet.SourceItem{Ref: "source", Path: "source"}}}}, nil)
 	if len(ds) != 1 || ds[0].Code != diag.SourceOutlineDepthUnsupported {
 		t.Fatalf("composed hierarchy not refused: %+v", ds)
 	}
@@ -377,7 +381,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 	request := []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}}
 	facts, occurrences := inspectSelection(t, doc, request)
 	path := filepath.Join(t.TempDir(), "source.pdf")
-	layout, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Pointer: "selected", Source: path, Selection: request[0].Pages}}}, map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts}, 0)
+	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts}, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -450,7 +454,7 @@ func TestSelectedAdditionalActionsRemoveOmittedTargets(t *testing.T) {
 			for _, siblings := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/siblings=%v", owner, encoding, siblings), func(t *testing.T) {
 					doc := additionalActionSelection(owner, encoding, siblings)
-					path, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "selected", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, nil)
+					path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, nil)
 					if len(ds) > 0 {
 						t.Fatal(ds)
 					}
@@ -503,7 +507,7 @@ func TestSelectedAdditionalActionsDoNotRetainNumericFitRestriction(t *testing.T)
 			if !whole.HasCoordinateDestinations || views["selected"].HasCoordinateDestinations {
 				t.Fatalf("omitted additional action still restricts fitting: %+v", views)
 			}
-			_, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "selected", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, &packet.Size{Width: 300, Height: 400})
+			_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, &packet.Size{Width: 300, Height: 400})
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -541,7 +545,7 @@ func TestSharedNavigationOwnersAcrossInterleavedOccurrences(t *testing.T) {
 			t.Fatalf("%s: %v", item, views[item].DestNames)
 		}
 	}
-	path, ds := selectedPacket(t, d, []packet.Part{{Pointer: "first", Source: "source", Selection: requests[0].Pages}, {Pointer: "whole", Source: "source"}, {Pointer: "second", Source: "source", Selection: requests[2].Pages}, {Pointer: "again", Source: "source"}}, nil)
+	path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "first", Path: "source", Selection: requests[0].Pages}, &packet.SourceItem{Ref: "whole", Path: "source"}, &packet.SourceItem{Ref: "second", Path: "source", Selection: requests[2].Pages}, &packet.SourceItem{Ref: "again", Path: "source"}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -564,7 +568,7 @@ func TestRepeatedWholeFormRetainsFieldOnlyActions(t *testing.T) {
 			d.Objs[i] = bytes.Replace(b, []byte("/FT /Tx"), []byte("/AA << /K << /S /GoTo /D [4 0 R /Fit] >> >> /FT /Tx"), 1)
 		}
 	}
-	path, ds := selectedPacket(t, d, []packet.Part{{Pointer: "first", Source: "source"}, {Pointer: "again", Source: "source"}}, nil)
+	path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "first", Path: "source"}, &packet.SourceItem{Ref: "again", Path: "source"}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -591,7 +595,7 @@ func TestRepeatedWholeFormRetainsFieldOnlyActions(t *testing.T) {
 	}
 }
 func TestNativeOutlinesGraftedUnderAuthoredSections(t *testing.T) {
-	path, ds := selectedPacket(t, pdffixture.Outlined("NATIVE"), []packet.Part{{Pointer: "section", Title: "Authored", Items: []packet.Part{{Pointer: "source", Source: "source"}}}}, nil)
+	path, ds := selectedPacket(t, pdffixture.Outlined("NATIVE"), []packet.Item{&packet.GroupItem{Ref: "section", Title: "Authored", Items: []packet.Item{&packet.SourceItem{Ref: "source", Path: "source"}}}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -620,7 +624,7 @@ func TestLinkedAnnotationOwnersRemainOccurrenceLocal(t *testing.T) {
 		}
 	}
 	d.Objs = append(d.Objs, fmt.Appendf(nil, "<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] /Popup %d 0 R /IRT %d 0 R >>", base+1, base+2), fmt.Appendf(nil, "<< /Type /Annot /Subtype /Popup /Rect [0 0 20 20] /Parent %d 0 R /AA << /O << /S /GoTo /D [6 0 R /Fit] >> >> >>", base), []byte("<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] /AA << /E << /S /GoTo /D [4 0 R /Fit] >> >> >>"))
-	path, ds := selectedPacket(t, d, []packet.Part{{Pointer: "partial", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, {Pointer: "whole", Source: "source"}, {Pointer: "again", Source: "source"}}, nil)
+	path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "partial", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "whole", Path: "source"}, &packet.SourceItem{Ref: "again", Path: "source"}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -654,7 +658,7 @@ func TestOnPagePopupRetainsSoleParentActionsAcrossOccurrences(t *testing.T) {
 	// Only the Popup is on-page. Both relevant actions live solely on its Parent;
 	// deleting Parent traversal in either production or oracle must lose evidence.
 	d.Objs = append(d.Objs, fmt.Appendf(nil, "<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] /Popup %d 0 R /AA << /E << /S /GoTo /D [6 0 R /Fit] >> /X << /S /GoTo /D [4 0 R /Fit] >> >> >>", popup), fmt.Appendf(nil, "<< /Type /Annot /Subtype /Popup /Rect [0 0 20 20] /Parent %d 0 R >>", parent))
-	path, ds := selectedPacket(t, d, []packet.Part{{Pointer: "partial", Source: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, {Pointer: "whole", Source: "source"}, {Pointer: "again", Source: "source"}}, nil)
+	path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "partial", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "whole", Path: "source"}, &packet.SourceItem{Ref: "again", Path: "source"}}, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}

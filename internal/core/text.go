@@ -20,7 +20,7 @@ type pageKey struct {
 	filled     bool
 }
 
-func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.Font, r *result.Result) map[int][]pdf.Page {
+func layOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font, r *result.Result) map[int][]pdf.Page {
 	pages := map[int][]pdf.Page{}
 	type cached struct {
 		page pdf.Page
@@ -29,7 +29,7 @@ func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.F
 	cache := map[pageKey]cached{}
 	var shaper typeset.Shaper
 	for i, p := range layout.Parts {
-		if p.Kind == "padding" {
+		if p.Kind == packet.PartPadding {
 			pages[i] = []pdf.Page{{Width: p.Size.Width, Height: p.Size.Height}}
 			continue
 		}
@@ -41,48 +41,48 @@ func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.F
 			break
 		}
 		style := p.Page
-		key := pageKey{size: p.Size, text: style.Text, filled: style.Background != nil}
-		if style.Background != nil {
-			key.background = *style.Background
+		key := pageKey{size: p.Size, text: style.Text, filled: style.Background.Value != nil}
+		if style.Background.Value != nil {
+			key.background = *style.Background.Value
 		}
 		value, ok := cache[key]
 		if !ok {
-			value.page = pdf.Page{Width: p.Size.Width, Height: p.Size.Height, TextColor: pdf.Color{R: style.Text.Color.R, G: style.Text.Color.G, B: style.Text.Color.B}}
-			if style.Background != nil {
-				value.page.Background = &pdf.Color{R: style.Background.R, G: style.Background.G, B: style.Background.B}
+			value.page = pdf.Page{Width: p.Size.Width, Height: p.Size.Height, TextColor: pdf.Color{R: style.Text.Color.Value.R, G: style.Text.Color.Value.G, B: style.Text.Color.Value.B}}
+			if style.Background.Value != nil {
+				value.page.Background = &pdf.Color{R: style.Background.Value.R, G: style.Background.Value.G, B: style.Background.Value.B}
 			}
-			if style.Text.Value != "" {
-				width := style.Text.Width
-				if _, explicit := style.Origins["width"]; !explicit {
+			if style.Text.Value.Value != "" {
+				width := style.Text.Width.Value
+				if style.Text.Width.From == "" {
 					width = p.Size.Width - 72
 				}
 				if width < 1 {
-					r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflow, "Default margins leave no usable text width; give an explicit width of at least 1 point or a wider page.", p.Pointer))
+					r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflow, "Default margins leave no usable text width; give an explicit width of at least 1 point or a wider page.", p.Ref))
 					continue
 				}
-				params := typeset.Params{Text: style.Text.Value, Size: style.Text.Size, PageWidth: p.Size.Width, PageHeight: p.Size.Height, OffsetX: style.Text.X, OffsetY: style.Text.Y, WrapWidth: width, LineSpacing: style.Text.Leading, Anchor: anchor(style.Text.Anchor), Align: alignment(style.Text.Align)}
-				if style.Text.Overflow == "allow" {
+				params := typeset.Params{Text: style.Text.Value.Value, Size: style.Text.Size.Value, PageWidth: p.Size.Width, PageHeight: p.Size.Height, OffsetX: style.Text.X.Value, OffsetY: style.Text.Y.Value, WrapWidth: width, LineSpacing: style.Text.Leading.Value, Anchor: anchor(style.Text.Anchor.Value), Align: alignment(style.Text.Align.Value)}
+				if style.Text.Overflow.Value == packet.OverflowAllow {
 					params.Overflow = typeset.OverflowAllow
 				}
-				value.page.Text, value.err = shaper.Place(fonts[style.Text.Font], params)
+				value.page.Text, value.err = shaper.Place(fonts[style.Text.Font.Value], params)
 			}
 			cache[key] = value
 		}
 		pages[i] = []pdf.Page{value.page}
 		if placed := value.page.Text; placed != nil {
-			text := &result.Text{Font: style.Text.Font, FontSize: placed.Size, Bounds: rect(placed.Bounds), Overflow: len(placed.Findings) > 0}
+			text := &result.Text{Font: style.Text.Font.Value.String(), FontSize: placed.Size, Bounds: rect(placed.Bounds), Overflow: len(placed.Findings) > 0}
 			if placed.InkBounds != nil {
 				bounds := rect(*placed.InkBounds)
 				text.InkBounds = &bounds
 			}
 			r.Parts[i].Text = text
 			if len(placed.Findings) > 0 && value.err == nil {
-				r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflowAllowed, "Measured text extends outside the page or text block.", p.Pointer))
+				r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflowAllowed, "Measured text extends outside the page or text block.", p.Ref))
 			}
 		}
 		if value.err != nil {
-			d := textDiagnostic(value.err, p.Pointer)
-			if origin := style.Origins["width"]; origin != "" {
+			d := textDiagnostic(value.err, p.Ref)
+			if origin := style.Text.Width.From; origin != "" {
 				d.Message += " Width from " + origin + "."
 			}
 			r.Diagnostics = append(r.Diagnostics, d)
@@ -109,51 +109,53 @@ func placedTexts(pages map[int][]pdf.Page) []*typeset.Placed {
 	return placed
 }
 
-func anchor(value string) typeset.Anchor {
+func anchor(value packet.Anchor) typeset.Anchor {
 	switch value {
-	case "top-left":
+	case packet.AnchorTopLeft:
 		return typeset.AnchorTopLeft
-	case "top":
+	case packet.AnchorTop:
 		return typeset.AnchorTopCenter
-	case "top-right":
+	case packet.AnchorTopRight:
 		return typeset.AnchorTopRight
-	case "left":
+	case packet.AnchorLeft:
 		return typeset.AnchorMiddleLeft
-	case "right":
+	case packet.AnchorRight:
 		return typeset.AnchorMiddleRight
-	case "bottom-left":
+	case packet.AnchorBottomLeft:
 		return typeset.AnchorBottomLeft
-	case "bottom":
+	case packet.AnchorBottom:
 		return typeset.AnchorBottomCenter
-	case "bottom-right":
+	case packet.AnchorBottomRight:
 		return typeset.AnchorBottomRight
-	default:
+	case packet.AnchorCenter:
 		return typeset.AnchorCenter
 	}
+	return typeset.AnchorCenter
 }
-func alignment(value string) typeset.Align {
+func alignment(value packet.Align) typeset.Align {
 	switch value {
-	case "left":
+	case packet.AlignLeft:
 		return typeset.AlignLeft
-	case "right":
+	case packet.AlignRight:
 		return typeset.AlignRight
-	case "justify":
+	case packet.AlignJustify:
 		return typeset.AlignJustify
-	default:
+	case packet.AlignCenter:
 		return typeset.AlignCenter
 	}
+	return typeset.AlignCenter
 }
 
 func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occurrences map[string]pdf.OccurrenceFacts, fit *packet.Size, predict bool) []diag.Diagnostic {
 	ds := pdf.CheckCompatibility(layout, facts, occurrences, fit).Diagnostics
 	names := map[string]bool{}
 	for i, p := range layout.Parts {
-		if p.Kind != "source" {
+		if p.Kind != packet.PartSource {
 			continue
 		}
 		f := facts[p.Source]
 		add := func(code diag.Code, message string) {
-			d := diag.New(code, message, p.Pointer)
+			d := diag.New(code, message, p.Ref)
 			d.File = p.Source
 			ds = append(ds, d)
 		}
@@ -163,7 +165,7 @@ func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occ
 			}
 		}
 		collision := false
-		for _, name := range occurrences[p.Pointer].DestNames {
+		for _, name := range occurrences[p.Ref].DestNames {
 			if names[name] {
 				collision = true
 			}

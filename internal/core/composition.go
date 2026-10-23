@@ -19,11 +19,11 @@ type compositionOutcome struct {
 	result result.Result
 }
 
-func compose(c context.Context, j packet.Job, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
+func compose(c context.Context, j packet.Plan, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
 	fonts, facts, occurrences, domain := prepared.fonts, prepared.facts, prepared.occurrences, prepared.domain
-	leaves, _ := packet.Declarations(j)
+	leaves, _ := j.Leaves(), j.Sections()
 	for i, leaf := range leaves {
-		if f, ok := facts[leaf.Source]; leaf.Kind == "source" && ok {
+		if f, ok := facts[leaf.Source]; leaf.Kind == packet.PartSource && ok {
 			r.Parts[i].SHA256 = fmt.Sprintf("%x", f.SHA256)
 			r.Parts[i].Bytes = knownCount(f.Bytes)
 			if f.Pages > 0 {
@@ -50,13 +50,13 @@ func compose(c context.Context, j packet.Job, prepared preparationOutcome, r res
 		return compositionOutcome{result: r}
 	}
 	if j.PageNumbers != nil {
-		digits, e := typeset.NewDigits(fonts["default"], j.PageNumbers.Size)
+		digits, e := typeset.NewDigits(fonts[packet.Font{}], j.PageNumbers.Size)
 		if e != nil {
 			r.Diagnostics = append(r.Diagnostics, textDiagnostic(e, "/page_numbers"))
 			return compositionOutcome{result: r}
 		}
 		for _, part := range layout.Parts {
-			if part.Kind == "padding" {
+			if part.Kind == packet.PartPadding {
 				continue
 			}
 			var err error
@@ -68,7 +68,7 @@ func compose(c context.Context, j packet.Job, prepared preparationOutcome, r res
 				size := part.Size
 				if j.FitTo != nil {
 					size = *j.FitTo
-				} else if part.Kind == "source" {
+				} else if part.Kind == packet.PartSource {
 					number := part.FirstPage + int64(offset)
 					for mappingIndex+1 < len(part.Mapping) && number >= part.Mapping[mappingIndex+1].OutputFirst {
 						mappingIndex++
@@ -83,8 +83,8 @@ func compose(c context.Context, j packet.Job, prepared preparationOutcome, r res
 			}
 			if err != nil {
 				d := pdf.Diagnostic(err)
-				d.Items = []string{part.Pointer, "/page_numbers"}
-				if part.Kind == "source" {
+				d.Items = []string{part.Ref, "/page_numbers"}
+				if part.Kind == packet.PartSource {
 					d.File = part.Source
 				}
 				r.Diagnostics = append(r.Diagnostics, d)
@@ -103,8 +103,8 @@ func compose(c context.Context, j packet.Job, prepared preparationOutcome, r res
 	}
 	r.Parts = nil
 	for _, part := range layout.Parts {
-		entry, ok := declared[part.Pointer]
-		if !ok || part.Kind == "padding" {
+		entry, ok := declared[part.Ref]
+		if !ok || part.Kind == packet.PartPadding {
 			entry = declaredReportPart(part.Leaf)
 		}
 		entry.Kind = part.Kind
@@ -113,7 +113,7 @@ func compose(c context.Context, j packet.Job, prepared preparationOutcome, r res
 		entry.Section = part.Owner
 		entry.Reason = part.Reason
 		entry.BeforeItem = part.BeforeItem
-		if part.Kind == "source" {
+		if part.Kind == packet.PartSource {
 			spans := make([]result.Span, 0, len(part.Mapping))
 			for _, mapping := range part.Mapping {
 				spans = append(spans, result.Span{Source: [2]int{mapping.SourceFirst, mapping.SourceLast}, Output: [2]int64{mapping.OutputFirst, mapping.OutputFirst + int64(mapping.SourceLast-mapping.SourceFirst)}})

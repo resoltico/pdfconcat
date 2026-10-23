@@ -15,19 +15,19 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-func contentsRecipe(t *testing.T, leading, count int, size packet.Size) (packet.Job, map[string]*typeset.Font) {
+func contentsRecipe(t *testing.T, leading, count int, size packet.Size) (packet.Plan, map[packet.Font]*typeset.Font) {
 	t.Helper()
 	font, err := typeset.LoadDefaultFont()
 	if err != nil {
 		t.Fatal(err)
 	}
 	style := packet.Defaults()
-	style.Size = packet.Size{Width: 595, Height: 842}
-	j := packet.Job{Parts: []packet.Part{{Pointer: "cover", Page: &style, Count: leading}, {Pointer: "toc", Contents: &packet.ContentsStyle{Title: "Contents", Size: size}}}}
+	style.Size.Value = packet.Size{Width: 595, Height: 842}
+	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.PageItem{Ref: "cover", Style: style, Count: leading}, &packet.ContentsItem{Ref: "toc", Title: "Contents", Size: size}})
 	for i := range count {
-		j.Parts = append(j.Parts, packet.Part{Pointer: fmt.Sprintf("section%d", i), Title: fmt.Sprintf("Pielikums Ā ļ ķ Ελληνικά Кириллица %d", i), Items: []packet.Part{{Pointer: fmt.Sprintf("page%d", i), Page: &style, Count: 1}}})
+		j.Items = append(j.Items, &packet.GroupItem{Ref: fmt.Sprintf("section%d", i), Title: fmt.Sprintf("Pielikums Ā ļ ķ Ελληνικά Кириллица %d", i), Items: []packet.Item{&packet.PageItem{Ref: fmt.Sprintf("page%d", i), Style: style, Count: 1}}})
 	}
-	return j, map[string]*typeset.Font{"default": font}
+	return j, map[packet.Font]*typeset.Font{{}: font}
 }
 
 func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
@@ -35,11 +35,11 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 		var heights []float64
 		for delta := range 2 {
 			j, fonts := contentsRecipe(t, leading+delta, 12, packet.Size{Width: 595, Height: 842})
-			c, ds := prepareContents(t.Context(), j, nil, fonts)
+			c, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts)
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			layout, ds := packet.Resolve(j, nil, len(c.pages))
+			layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, len(c.pages))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -86,14 +86,14 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 80, authored)
 	j.FitTo = &fit
 	j.PageNumbers = &packet.PageNumbers{Size: 9, Margin: 50 * 72 / 25.4}
-	c, ds := prepareContents(t.Context(), j, nil, fonts)
+	c, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	if len(c.pages) < 2 || len(c.pages) > 80 {
 		t.Fatalf("contents count%d", len(c.pages))
 	}
-	digits, err := typeset.NewDigits(fonts["default"], 9)
+	digits, err := typeset.NewDigits(fonts[packet.Font{}], 9)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,32 +106,41 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 		}
 	}
 	j.PageNumbers.Margin = fit.Height
-	if _, ds = prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds = prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("impossible footer space accepted: %+v", ds)
 	}
 }
 
 func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 1, packet.Size{Width: 109.152, Height: 200})
-	j.Parts[1].Contents.Title = "ffffff"
-	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	itemAs[*packet.ContentsItem](t, j.Items[1]).Title = "ffffff"
+	if _, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("heading ink margin was ignored: %+v", ds)
 	}
 	j, fonts = contentsRecipe(t, 1, 1, packet.Size{Width: 200, Height: 150})
-	j.Parts[2].Title = strings.Repeat("Long wrapped title ", 20)
-	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	itemAs[*packet.GroupItem](t, j.Items[2]).Title = strings.Repeat("Long wrapped title ", 20)
+	if _, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("oversized whole row accepted: %+v", ds)
 	}
-	nested := j.Parts[2]
+	nested := j.Items[2]
 	for i := range 20 {
-		nested = packet.Part{Pointer: fmt.Sprintf("ancestor%d", i), Title: "Ancestor", Items: []packet.Part{nested}}
+		nested = &packet.GroupItem{Ref: fmt.Sprintf("ancestor%d", i), Title: "Ancestor", Items: []packet.Item{nested}}
 	}
-	j.Parts[2] = nested
-	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 {
+	j.Items[2] = nested
+	if _, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 {
 		t.Fatal("unusable indented column accepted")
 	}
-	j.Parts = j.Parts[:1]
-	if c, ds := prepareContents(t.Context(), j, nil, fonts); c != nil || len(ds) > 0 {
+	j.Items = j.Items[:1]
+	if c, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); c != nil || len(ds) > 0 {
 		t.Fatalf("absent contents must mean C=0: %+v %+v", c, ds)
 	}
+}
+
+func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
+	t.Helper()
+	value, ok := item.(T)
+	if !ok {
+		t.Fatalf("item has type %T, expected %T", item, value)
+	}
+	return value
 }

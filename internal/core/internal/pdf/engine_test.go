@@ -137,7 +137,7 @@ func TestEncryptedSources(t *testing.T) {
 func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (string, pdf.Assembly, []diag.Diagnostic) {
 	t.Helper()
 	dir := t.TempDir()
-	j := packet.Job{FitTo: fit}
+	j := packet.NewPlan("", fit, nil, packet.PageStyle{}, nil)
 	facts := map[string]pdf.SourceFacts{}
 	domain := map[string]packet.SourceFacts{}
 	var warnings []diag.Diagnostic
@@ -153,9 +153,9 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 		warnings = append(warnings, ds...)
 		facts[path] = f
 		domain[fmt.Sprintf("/items/%d", i)] = f.SourceFacts
-		j.Parts = append(j.Parts, packet.Part{Pointer: fmt.Sprintf("/items/%d", i), Source: path})
+		j.Items = append(j.Items, &packet.SourceItem{Ref: fmt.Sprintf("/items/%d", i), Path: path})
 	}
-	layout, ds := packet.Resolve(j, domain, 0)
+	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), domain, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -327,7 +327,7 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	layout, _ := packet.Resolve(packet.Job{Parts: []packet.Part{{Source: path, Pointer: path}}}, map[string]packet.SourceFacts{path: facts.SourceFacts}, 0)
+	layout, _ := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: path}}), map[string]packet.SourceFacts{path: facts.SourceFacts}, 0)
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +470,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		t.Fatal(ds)
 	}
 	font := defaultFont(t)
-	j := packet.Job{Parts: []packet.Part{{Source: source, Pointer: "source"}}}
+	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: source, Ref: "source"}})
 	pages := map[int][]pdf.Page{}
 	var placements []*typeset.Placed
 	for i, text := range []string{"Ā ļ ķ", "Ελληνικά", "Кириллица ā"} {
@@ -478,14 +478,14 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		pages[i+1] = []pdf.Page{page}
 		placements = append(placements, page.Text)
 		style := packet.Defaults()
-		style.Size = packet.Size{Width: 300, Height: 200}
-		j.Parts = append(j.Parts, packet.Part{Page: &style, Count: 1, Pointer: fmt.Sprintf("page%d", i)})
+		style.Size.Value = packet.Size{Width: 300, Height: 200}
+		j.Items = append(j.Items, &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})
 	}
 	fonts, err := typeset.PrepareFonts(placements)
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := packet.Resolve(j, map[string]packet.SourceFacts{"source": facts.SourceFacts}, 0)
+	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), map[string]packet.SourceFacts{"source": facts.SourceFacts}, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}

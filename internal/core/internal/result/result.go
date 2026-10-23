@@ -73,7 +73,7 @@ type Part struct {
 	Section       string               `json:"section,omitempty"`
 	Reason        string               `json:"reason,omitempty"`
 	BeforeItem    string               `json:"before_item,omitempty"`
-	Kind          string               `json:"kind"`
+	Kind          packet.PartKind      `json:"kind"`
 	Path          string               `json:"path,omitempty"`
 	SHA256        string               `json:"sha256,omitempty"`
 	Bytes         *int64               `json:"bytes,omitempty"`

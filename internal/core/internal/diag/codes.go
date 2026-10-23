@@ -79,11 +79,11 @@ type Definition struct {
 
 // Location identifies a zero-based byte offset and one-based byte line/column.
 type Location struct {
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	Column  int    `json:"column"`
-	Offset  int64  `json:"offset"`
-	Pointer string `json:"pointer"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+	Offset int64  `json:"offset"`
+	Ref    string `json:"pointer"`
 }
 
 // Diagnostic is a located error or warning with its consuming plan entries.

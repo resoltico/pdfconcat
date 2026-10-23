@@ -30,6 +30,19 @@ const MaxBytes = 64 << 20
 //go:embed plan.schema.json
 var Schema []byte
 
+type node struct {
+	Ref         packet.Ref
+	Source, Dir string
+	Selection   []packet.PageRange
+	Page        *packet.PageStyle
+	Count       int
+	Contents    *packet.ContentsItem
+	Items       []node
+	Title       string
+	StartOn     packet.StartOn
+	Divider     *packet.PageStyle
+}
+
 type fault struct {
 	code             diag.Code
 	message, pointer string
@@ -50,10 +63,10 @@ type decoder struct {
 
 // Decode charges the original input bytes, including an optional leading BOM.
 // The caller owns file/stream I/O and cancellation; this function reads no files.
-func Decode(data []byte, file, base string) (packet.Job, []diag.Diagnostic) {
+func Decode(data []byte, file, base string) (packet.Plan, []diag.Diagnostic) {
 	p := decoder{data: data}
 	if len(data) > MaxBytes {
-		return packet.Job{}, []diag.Diagnostic{diag.New(diag.PlanTooLarge, "Plan exceeds 64 MiB.")}
+		return packet.Plan{}, []diag.Diagnostic{diag.New(diag.PlanTooLarge, "Plan exceeds 64 MiB.")}
 	}
 	input := data
 	if bytes.HasPrefix(input, []byte{0xef, 0xbb, 0xbf}) {
@@ -71,7 +84,7 @@ func Decode(data []byte, file, base string) (packet.Job, []diag.Diagnostic) {
 		}
 	}
 	if err != nil {
-		return packet.Job{}, []diag.Diagnostic{p.diagnostic(err, file)}
+		return packet.Plan{}, []diag.Diagnostic{p.diagnostic(err, file)}
 	}
 	return result, nil
 }
@@ -101,7 +114,7 @@ func (p *decoder) diagnostic(err error, file string) diag.Diagnostic {
 	last := bytes.LastIndexByte(before, '\n')
 	d := diag.New(f.code, f.message)
 	d.File = file
-	d.Location = &diag.Location{File: file, Pointer: f.pointer, Offset: offset, Line: line, Column: int(offset) - last}
+	d.Location = &diag.Location{File: file, Ref: f.pointer, Offset: offset, Line: line, Column: int(offset) - last}
 	if f.pointer != "" {
 		d.Items = []string{f.pointer}
 	}
@@ -182,10 +195,10 @@ func (p *decoder) unknown(name string) error {
 	return p.fail(diag.PlanUnknownMember, fmt.Sprintf("Unknown member %q (names are case-sensitive).", name))
 }
 
-func (p *decoder) document(base string) (packet.Job, error) {
-	var result packet.Job
+func (p *decoder) document(base string) (packet.Plan, error) {
+	var result packet.Plan
 	var defaults packet.PageStyle
-	var nodes []packet.Part
+	var nodes []node
 	var dir string
 	seenVersion, seenItems := false, false
 	err := p.object(func(name string) error {
@@ -244,18 +257,17 @@ func (p *decoder) document(base string) (packet.Job, error) {
 	if result.Output != "" {
 		result.Output, _ = packet.Path(base, result.Output)
 	}
-	if defaults.Text.Font != "" && defaults.Text.Font != "default" {
-		defaults.Text.Font, _ = packet.Path(base, defaults.Text.Font)
+	if defaults.Text.Font.Value.Path != "" {
+		defaults.Text.Font.Value.Path, _ = packet.Path(base, defaults.Text.Font.Value.Path)
 	}
-	defaults = packet.Layer(packet.Defaults(), defaults)
+	defaults = defaults.Over(packet.Defaults())
 	scope := base
 	if dir != "" {
 		scope, _ = packet.Path(base, dir)
 	}
-	result.Parts = nodes
-	p.resolveDeclarations(result.Parts, scope, defaults)
+	result = packet.NewPlan(result.Output, result.FitTo, result.PageNumbers, defaults, p.resolveItems(nodes, scope, defaults))
 	if p.contents > 0 {
-		_, sections := packet.Declarations(result)
+		sections := result.Sections()
 		if len(sections) == 0 {
 			return result, &fault{code: diag.PlanValue, message: "Contents requires at least one titled section.", pointer: p.contentsPointer, offset: p.contentsOffset}
 		}
@@ -263,14 +275,14 @@ func (p *decoder) document(base string) (packet.Job, error) {
 	return result, nil
 }
 
-func (p *decoder) items(depth int) ([]packet.Part, error) {
+func (p *decoder) items(depth int) ([]node, error) {
 	if depth > 64 {
 		return nil, p.fail(diag.PlanLimit, "Group nesting exceeds 64.")
 	}
 	if err := p.expect('['); err != nil {
 		return nil, err
 	}
-	var nodes []packet.Part
+	var nodes []node
 	for p.d.PeekKind() != ']' {
 		n, err := p.item(depth)
 		if err != nil {
@@ -285,8 +297,8 @@ func (p *decoder) items(depth int) ([]packet.Part, error) {
 	return nodes, err
 }
 
-func (p *decoder) item(depth int) (packet.Part, error) {
-	n := packet.Part{Count: 1}
+func (p *decoder) item(depth int) (node, error) {
+	n := node{Count: 1}
 	if p.d.PeekKind() != '{' {
 		err := p.expect('{')
 		var typeFault *fault
@@ -317,7 +329,7 @@ func (p *decoder) item(depth int) (packet.Part, error) {
 		case "title":
 			n.Title, err = p.title()
 		case "start_on":
-			n.StartOn, err = p.enum("any", "odd")
+			err = p.enumeration(&n.StartOn)
 		case "divider":
 			var style packet.PageStyle
 			style, err = p.style(true)
@@ -338,7 +350,7 @@ func (p *decoder) item(depth int) (packet.Part, error) {
 		}
 		return err
 	})
-	n.Pointer = string(p.d.StackPointer())
+	n.Ref = string(p.d.StackPointer())
 	if err != nil {
 		return n, err
 	}
@@ -386,8 +398,8 @@ func (p *decoder) title() (string, error) {
 	return value, nil
 }
 
-func (p *decoder) contentsStyle() (*packet.ContentsStyle, error) {
-	style := &packet.ContentsStyle{Title: "Contents"}
+func (p *decoder) contentsStyle() (*packet.ContentsItem, error) {
+	style := &packet.ContentsItem{Title: "Contents"}
 	err := p.object(func(name string) error {
 		var err error
 		switch name {
@@ -520,33 +532,40 @@ func (p *decoder) count() (int, error) {
 	return int(n), nil
 }
 
-func (p *decoder) resolveDeclarations(parts []packet.Part, base string, defaults packet.PageStyle) {
-	style := func(authored *packet.PageStyle) *packet.PageStyle {
+func (p *decoder) resolveItems(nodes []node, base string, defaults packet.PageStyle) []packet.Item {
+	style := func(authored *packet.PageStyle) packet.PageStyle {
 		result := *authored
-		if result.Text.Font != "" && result.Text.Font != "default" {
-			result.Text.Font, _ = packet.Path(base, result.Text.Font)
+		if result.Text.Font.Value.Path != "" {
+			result.Text.Font.Value.Path, _ = packet.Path(base, result.Text.Font.Value.Path)
 		}
-		result = packet.Layer(defaults, result)
-		return &result
+		return result.Over(defaults)
 	}
-	for index := range parts {
-		part := &parts[index]
+	items := make([]packet.Item, 0, len(nodes))
+	for _, n := range nodes {
 		switch {
-		case part.Source != "":
-			part.Source, _ = packet.Path(base, part.Source)
-		case part.Page != nil:
-			part.Page = style(part.Page)
-		case part.Items != nil:
-			if part.Divider != nil {
-				part.Divider = style(part.Divider)
-			}
+		case n.Source != "":
+			path, _ := packet.Path(base, n.Source)
+			items = append(items, &packet.SourceItem{Ref: n.Ref, Path: path, Selection: n.Selection})
+		case n.Page != nil:
+			items = append(items, &packet.PageItem{Ref: n.Ref, Style: style(n.Page), Count: n.Count})
+		case n.Contents != nil:
+			item := *n.Contents
+			item.Ref = n.Ref
+			items = append(items, &item)
+		case n.Items != nil:
 			scope := base
-			if part.Dir != "" {
-				scope, _ = packet.Path(base, part.Dir)
+			if n.Dir != "" {
+				scope, _ = packet.Path(base, n.Dir)
 			}
-			p.resolveDeclarations(part.Items, scope, defaults)
+			group := &packet.GroupItem{Ref: n.Ref, Title: n.Title, StartOn: n.StartOn, Items: p.resolveItems(n.Items, scope, defaults)}
+			if n.Divider != nil {
+				divider := style(n.Divider)
+				group.Divider = &divider
+			}
+			items = append(items, group)
 		}
 	}
+	return items
 }
 
 func (p *decoder) size(inherit bool) (packet.Size, error) {
@@ -591,17 +610,20 @@ func (p *decoder) length(positive bool) (float64, error) {
 }
 
 func (p *decoder) style(titleDivider bool) (packet.PageStyle, error) {
-	s := packet.PageStyle{Origins: map[string]string{}}
+	var s packet.PageStyle
 	err := p.object(func(name string) error {
 		var err error
+		var from *packet.Ref
 		switch name {
 		case "size":
-			s.Size, err = p.size(true)
+			s.Size.Value, err = p.size(true)
+			from = &s.Size.From
 		case "background":
+			from = &s.Background.From
 			var value string
 			value, err = p.text()
 			if err == nil {
-				s.Background, err = packet.ParseColor(value, true)
+				s.Background.Value, err = packet.ParseColor(value, true)
 				if err != nil {
 					err = p.fail(diag.PlanValue, err.Error())
 				}
@@ -612,7 +634,7 @@ func (p *decoder) style(titleDivider bool) (packet.PageStyle, error) {
 			return p.unknown(name)
 		}
 		if err == nil {
-			s.Origins[name] = string(p.d.StackPointer())
+			*from = string(p.d.StackPointer())
 		}
 		return err
 	})
@@ -622,55 +644,66 @@ func (p *decoder) style(titleDivider bool) (packet.PageStyle, error) {
 func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
 	return p.object(func(name string) error {
 		var err error
-		originName := name
+		var from *packet.Ref
 		switch name {
 		case "value":
+			from = &s.Text.Value.From
 			if titleDivider {
 				return &fault{code: diag.PlanValue, message: "Divider text.value is supplied by its section title.", pointer: string(p.d.StackPointer()), offset: p.start()}
 			}
-			s.Text.Value, err = p.text()
-			if err == nil && utf8.RuneCountInString(s.Text.Value) > 10000 {
+			s.Text.Value.Value, err = p.text()
+			if err == nil && utf8.RuneCountInString(s.Text.Value.Value) > 10000 {
 				err = p.fail(diag.PlanLimit, "Text exceeds 10000 characters.")
 			}
 		case "font":
-			s.Text.Font, err = p.font()
+			from = &s.Text.Font.From
+			s.Text.Font.Value, err = p.font()
 		case "size":
-			originName = "font_size"
-			s.Text.Size, err = p.length(true)
+			from = &s.Text.Size.From
+
+			s.Text.Size.Value, err = p.length(true)
 		case "color":
+			from = &s.Text.Color.From
 			var value string
 			value, err = p.text()
 			if err == nil {
 				var c *packet.Color
 				c, err = packet.ParseColor(value, false)
 				if err == nil {
-					s.Text.Color = *c
+					s.Text.Color.Value = *c
 				} else {
 					err = p.fail(diag.PlanValue, err.Error())
 				}
 			}
 		case "x":
-			s.Text.X, err = p.length(false)
+			from = &s.Text.X.From
+			s.Text.X.Value, err = p.length(false)
 		case "y":
-			s.Text.Y, err = p.length(false)
+			from = &s.Text.Y.From
+			s.Text.Y.Value, err = p.length(false)
 		case "width":
-			s.Text.Width, err = p.length(true)
+			from = &s.Text.Width.From
+			s.Text.Width.Value, err = p.length(true)
 		case "leading":
-			s.Text.Leading, err = p.number()
-			if err == nil && (s.Text.Leading < 1 || s.Text.Leading > 10) {
+			from = &s.Text.Leading.From
+			s.Text.Leading.Value, err = p.number()
+			if err == nil && (s.Text.Leading.Value < 1 || s.Text.Leading.Value > 10) {
 				err = p.fail(diag.PlanValue, "leading must be 1–10.")
 			}
 		case "anchor":
-			s.Text.Anchor, err = p.enum("top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right")
+			from = &s.Text.Anchor.From
+			err = p.enumeration(&s.Text.Anchor.Value)
 		case "align":
-			s.Text.Align, err = p.enum("left", "center", "right", "justify")
+			from = &s.Text.Align.From
+			err = p.enumeration(&s.Text.Align.Value)
 		case "overflow":
-			s.Text.Overflow, err = p.enum("error", "allow")
+			from = &s.Text.Overflow.From
+			err = p.enumeration(&s.Text.Overflow.Value)
 		default:
 			return p.unknown(name)
 		}
 		if err == nil {
-			s.Origins[originName] = string(p.d.StackPointer())
+			*from = string(p.d.StackPointer())
 		}
 		return err
 	})
@@ -687,9 +720,23 @@ func (p *decoder) enum(values ...string) (string, error) {
 	}
 	return "", p.fail(diag.PlanValue, "Expected one of: "+strings.Join(values, ", "))
 }
-func (p *decoder) font() (string, error) {
+func (p *decoder) enumeration(value interface {
+	UnmarshalText([]byte) error
+	Values() []string
+}) error {
+	text, err := p.text()
+	if err != nil {
+		return err
+	}
+	if err = value.UnmarshalText([]byte(text)); err != nil {
+		return p.fail(diag.PlanValue, "Expected one of: "+strings.Join(value.Values(), ", "))
+	}
+	return nil
+}
+func (p *decoder) font() (packet.Font, error) {
 	if p.d.PeekKind() == '"' {
-		return p.enum("default")
+		_, err := p.enum("default")
+		return packet.Font{}, err
 	}
 	var file string
 	err := p.object(func(name string) error {
@@ -703,7 +750,7 @@ func (p *decoder) font() (string, error) {
 	if err == nil && file == "" {
 		err = p.fail(diag.PlanType, "font requires a file member.")
 	}
-	return file, err
+	return packet.Font{Path: file}, err
 }
 
 func (p *decoder) number() (float64, error) {
@@ -714,4 +761,16 @@ func (p *decoder) number() (float64, error) {
 		return 0, p.fail(diag.PlanValue, "Number is outside the supported finite range.")
 	}
 	return n, err
+}
+
+func charge(entries, generated *int, count int) string {
+	*entries++
+	if *entries > packet.MaxEntries {
+		return "Plan exceeds 100000 authored items."
+	}
+	*generated += count
+	if *generated > packet.MaxGeneratedPages {
+		return "Plan generates more than 100000 pages before contents and padding."
+	}
+	return ""
 }

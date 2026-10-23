@@ -28,12 +28,13 @@ func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
 }
 
 func declaredReportPart(leaf packet.Leaf) result.Part {
-	p := result.Part{Item: leaf.Pointer, Kind: leaf.Kind, Path: leaf.Source, Section: leaf.Owner}
+	p := result.Part{Item: leaf.Ref, Kind: leaf.Kind, Path: leaf.Source, Section: leaf.Owner}
 	switch leaf.Kind {
-	case "source":
+	case packet.PartSource:
 		p.FieldsRenamed = []packet.FieldRename{}
-	case "page", "divider":
+	case packet.PartPage, packet.PartDivider:
 		p.Count = leaf.Count
+	case packet.PartContents, packet.PartPadding:
 	}
 	return p
 }

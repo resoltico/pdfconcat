@@ -139,7 +139,7 @@ func TestReachabilityKeepsIndirectObjectChainsFromReadContext(t *testing.T) {
 	// The source reader admits this graph, but the pinned native writer cannot
 	// serialize an indirect reference used as an object body. Cleanup must keep
 	// the graph intact and preserve the backend's failed outcome.
-	_, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "source", Source: "source"}}, nil)
+	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "source", Path: "source"}}, nil)
 	if len(ds) != 1 || ds[0].Code != diag.AssemblyFailed {
 		t.Fatalf("backend graph failure changed classification: %+v", ds)
 	}

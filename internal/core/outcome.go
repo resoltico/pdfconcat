@@ -10,6 +10,8 @@ import (
 )
 
 type (
+	// PartKind names a resolved physical span.
+	PartKind = packet.PartKind
 	// Status is the complete execution outcome.
 	Status = diag.Status
 	// Result is a complete normalized execution outcome.
@@ -89,3 +91,12 @@ func InvocationFailure(hint Operation, kind InvocationFaultKind, message, refere
 
 // ExitCode uses complete diagnostics, independently of presentation caps.
 func ExitCode(r Result) int { _, exit := diag.Outcome(r.Diagnostics); return exit }
+
+// Physical part kinds used in result presentation.
+const (
+	PartSource   = packet.PartSource
+	PartPage     = packet.PartPage
+	PartDivider  = packet.PartDivider
+	PartContents = packet.PartContents
+	PartPadding  = packet.PartPadding
+)

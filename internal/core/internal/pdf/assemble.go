@@ -30,14 +30,14 @@ type Assembly struct {
 
 // Assemble imports each occurrence independently and writes only after final validation.
 func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFacts, occurrences map[string]OccurrenceFacts, pages map[int][]Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, w io.Writer) (result Assembly, err error) {
-	var current *packet.PlacedPart
+	var current *packet.Part
 	defer func() {
 		if value := recover(); value != nil {
 			err = refuse(diag.AssemblyFailed, fmt.Sprintf("PDF backend panic: %v", value))
 		}
 		if err != nil && current != nil {
 			d := diagnostic(err, diag.AssemblyFailed)
-			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Pointer}}
+			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Ref}}
 		}
 	}()
 	names, nameErr := generatedFontNames(fonts, facts)
@@ -57,7 +57,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 	}
 	needAppearances := false
 	add := func(code diag.Code, message string, index int) {
-		d := diag.New(code, message, layout.Parts[index].Pointer)
+		d := diag.New(code, message, layout.Parts[index].Ref)
 		d.File = layout.Parts[index].Source
 		result.Diagnostics = append(result.Diagnostics, d)
 	}
@@ -80,7 +80,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 			if err != nil {
 				return result, err
 			}
-			occurrence, ok := occurrences[part.Pointer]
+			occurrence, ok := occurrences[part.Ref]
 			if !ok {
 				return result, errors.New("source occurrence was not inspected")
 			}

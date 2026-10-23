@@ -5,6 +5,8 @@ package core
 
 import (
 	"context"
+	"runtime"
+	"sync"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
@@ -36,8 +38,33 @@ func inspect(ctx context.Context, p packet.Plan) *inspection {
 	if hasErrors(ds) {
 		return out
 	}
-	for _, use := range sourceUses(p) {
-		measured := inspectSource(ctx, use)
+
+	uses := sourceUses(p)
+	results := make([]sourceInspection, len(uses))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(uses)) {
+		workers.Go(func() {
+			for index := range jobs {
+				results[index] = inspectSource(ctx, uses[index])
+			}
+		})
+	}
+dispatch:
+	for index := range uses {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			break dispatch
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	for index, use := range uses {
+		measured := results[index]
 		out.diagnostics = append(out.diagnostics, measured.diagnostics...)
 		if measured.file != nil {
 			for index, leaf := range use.leaves {
@@ -51,10 +78,8 @@ func inspect(ctx context.Context, p packet.Plan) *inspection {
 				}
 			}
 		}
-		if ctx.Err() != nil {
-			break
-		}
 	}
+
 	return out
 }
 func inspectSource(ctx context.Context, use sourceUse) sourceInspection {

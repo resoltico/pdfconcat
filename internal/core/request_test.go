@@ -267,3 +267,33 @@ func TestInvocationFailureOmitsEmptyConsumersAndKeepsMetadataStrict(t *testing.T
 		}
 	}
 }
+
+func TestSourceInspectionDiagnosticsFollowFirstUse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "broken.pdf"), []byte("not a PDF"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	request := core.Request{Operation: core.Check, WorkingDir: dir, Input: core.Items{
+		core.SourceItem{Ref: "first", Path: "missing-first.pdf"},
+		core.SourceItem{Ref: "broken", Path: "broken.pdf"},
+		core.SourceItem{Ref: "repeat", Path: "missing-first.pdf"},
+		core.SourceItem{Ref: "last", Path: "missing-last.pdf"},
+	}}
+	result := core.Execute(t.Context(), request)
+	if len(result.Diagnostics) != 3 {
+		t.Fatal(result.Diagnostics)
+	}
+	for i, want := range []struct {
+		file, code string
+		items      []string
+	}{
+		{"missing-first.pdf", "source_unreadable", []string{"first", "repeat"}},
+		{"broken.pdf", "source_invalid", []string{"broken"}},
+		{"missing-last.pdf", "source_unreadable", []string{"last"}},
+	} {
+		got := result.Diagnostics[i]
+		if filepath.Base(got.File) != want.file || got.Code.String() != want.code || !slices.Equal(got.Items, want.items) {
+			t.Fatalf("finding %d: %+v", i, got)
+		}
+	}
+}

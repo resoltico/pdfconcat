@@ -7,33 +7,27 @@ Notable changes to this project are documented in this file. The format is based
 ### Changed
 
 - **Breaking:** plans require `"version": 4`, and the plan-wide default page style moves from root `page` to `page_defaults`. Item `page`, `count` and source `pages` are unchanged. Update saved plans; see [PLAN](docs/PLAN.md).
-- **Breaking:** results and reports use `format_version: 5`. The diagnostic code `report_identity_unverified` is removed; `working_directory_unavailable`, `output_inspection_failed` and `report_inspection_failed` are added; a missing working directory no longer reports `plan_unreadable`, and destination inspection failures no longer report `output_write_failed`/`report_write_failed`. Update code consumers; see [CLI](docs/CLI.md#diagnostic-codes).
-- **Breaking:** the CLI prints human-readable text by default, with diagnostics on stderr. `--json` prints one JSON result on stdout and replaces `--format json|text`, which is removed. Scripts that parsed default stdout must add `--json`.
-- **Breaking:** a failure while reading a plan from standard input is reported like an argument error and no longer writes a requested report.
-- Report destinations are checked against existing inputs and the output by file identity, and against missing inputs by path spelling only. Reports can no longer be refused because separation from a missing input could not be proven.
-
+- **Breaking:** results, reports and JSON version objects use `format_version: 5`. The diagnostic code `report_identity_unverified` is removed; `working_directory_unavailable`, `output_inspection_failed` and `report_inspection_failed` are added. A missing working directory no longer reports `plan_unreadable`, and destination inspection failures no longer report `output_write_failed`/`report_write_failed`. Update JSON and diagnostic-code consumers; see [CLI](docs/CLI.md#diagnostic-codes).
+- **Breaking:** the CLI prints human-readable text by default, with diagnostics on stderr. `--json` prints one JSON result on stdout and replaces `--format json|text`, which is removed. Scripts that parsed default stdout must add `--json`; text-mode usage errors leave stdout empty and include a help hint on stderr.
+- **Breaking:** failure or cancellation while acquiring a plan from standard input returns `plan_unreadable` or `interrupted` without writing a requested report. Plan decoding failures after successful acquisition still support reports.
+- Report destinations are checked against existing inputs and the output by file identity, and against missing inputs by cleaned path spelling only. Alternative spellings of missing paths are not reserved. Reports can no longer be refused because separation from a missing input could not be proven; reports are rechecked after PDF publication. See [publication limits](docs/CLI.md#reports-and-committed-state).
+- Distinct source paths are inspected concurrently with at most `GOMAXPROCS` workers and findings merged in first-use order. Font preparation and PDF assembly remain sequential; parsing and assembly still have no universal time or memory bound.
 - Updated the PDF engine to pdfcpu v0.16.3 and its selected dependency versions.
-
-- Source and tool builds require Go 1.27.3.
-
-### Added
-
-- Distinct source PDFs are inspected concurrently with a bounded worker count and deterministic diagnostic order. Assembly remains sequential.
+- Source and development-tool builds require Go 1.27.3. Upgrade the Go toolchain before building.
+- Editor-schema source paths are `internal/core/internal/plan/plan.schema.json` and `internal/core/internal/result/result.schema.json`. Update source-tree schema URLs, or obtain matching schemas with `pdfconcat schema plan|result`; binary archives still contain them under `schemas/`.
 
 ### Removed
 
-- The optional pdfcpu comparison script and its contributor instructions.
+- The optional pdfcpu comparison script.
 
 ### Fixed
 
-- Page and annotation JavaScript actions are retained as documented instead of being falsely refused as `source_damaged`.
-- `--blank` help and `page_size_required` explain source inheritance, explicit plan page sizes and the `--fit-to SIZE` remedy.
+- Valid page and annotation JavaScript actions are retained instead of being falsely refused as `source_damaged`. Document-level actions are still removed; output is not sanitized. See [PDF policy](docs/PDF-POLICY.md#source-policy).
 
 ### Internal
 
-- Frontends can reach only the application core; adapters live under `internal/core/internal/` and the compiler enforces the boundary, replacing the custom architecture command.
-- Diagnostic codes are typed identifiers from one ordered registry, and plan items, page styles and result parts use typed domain values shared by decoding, layout, assembly and reporting.
-- Documentation is reorganised into README, PLAN, CLI, PDF-POLICY and ARCHITECTURE.
+- Packet adapters are confined to the core tree by Go's nested `internal/` rules. Stock depguard checks enforce third-party adapter and CLI I/O boundaries, replacing the custom architecture command. Diagnostic codes use one ordered typed registry.
+- Opt-in scale and staged-build signal workloads use `TestScale`; ordinary tests and CI exclude these workloads. Use the commands in [CONTRIBUTING](CONTRIBUTING.md#scale).
 
 ## [0.4.0] - 2026-10-16
 

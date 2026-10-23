@@ -120,8 +120,6 @@ form rules. Fitting refuses interactive form fields and internal page
 destinations with explicit numeric position coordinates, including destinations
 used by links and bookmarks. See [PDF behavior and limits](docs/DESIGN.md).
 
-The optional [same-input comparison](CONTRIBUTING.md#comparison-and-scale) uses
-the pdfcpu CLI version pinned in this project.
 
 ## Build from source
 

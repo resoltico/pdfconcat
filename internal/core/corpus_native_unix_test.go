@@ -148,10 +148,7 @@ func TestCorpusPendingStdinSIGINT(t *testing.T) {
 		})
 	}
 }
-func TestCorpusStagedBuildSIGINT(t *testing.T) {
-	if os.Getenv("PDFCONCAT_SCALE") != "1" {
-		t.Skip("opt-in concrete native staging workload: PDFCONCAT_SCALE=1")
-	}
+func corpusStagedBuildSIGINT(t *testing.T) {
 	for _, race := range []bool{false, true} {
 		t.Run(fmt.Sprintf("race=%t", race), func(t *testing.T) {
 			binary := corpusSignalBinary(t, race)

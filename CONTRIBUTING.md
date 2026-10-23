@@ -96,7 +96,7 @@ Use an unused absolute output directory outside the checkout for retention:
 ```sh
 mkdir -p /absolute/fresh/pdfconcat-artifacts
 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestCorpus' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
-PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestCorpusScaleProfiles$|^TestCorpusStagedBuildSIGINT$' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
+PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestScale$' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
 ```
 
 The large scale and staged-build workloads are opt-in; ordinary tests and CI
@@ -118,24 +118,12 @@ Regeneration is reviewed authoring, not CI setup. Inspect every source page,
 metadata/action/attachment content and prior form revision, retain complete font
 notices, and refresh independent facts/hashes only after visual/structural review.
 
-## Comparison and scale
+## Scale
 
-The comparison uses the pdfcpu CLI matching the runtime module pin, Python 3.9+
-and the oracle tools. It requires the exact reported pdfcpu version before
-exporting fixtures. It creates a fresh child directory, checks expected
-success/refusal exits and preserves stdout/stderr for failures. It exports only
-small fixtures from `internal/pdffixture`. It installs the bundled Noto Sans into
-an isolated pdfcpu configuration for the Unicode comparison and checks blank divider
-page counts and dimensions in both tools.
-
-```sh
-scripts/run-comparison.sh /absolute/path/to/pdfconcat /tmp/pdfconcat-comparisons
-```
-
-`TestScale` is an opt-in measurement, separate from the corpus scale profiles
-above. It builds 2,000 sources interleaved with 2,000 generated items, then one
-item with 100,000 generated pages. Run it when investigating a concrete scale
-question:
+`TestScale` is the opt-in runner for source-and-generated measurements, corpus
+scale profiles, and staged-build SIGINT checks. The signal subtest runs on
+Linux/macOS and skips on Windows. Run it when investigating a concrete scale or
+staging question:
 
 ```sh
 go test -c -o /tmp/pdfconcat-scale.test ./internal/core

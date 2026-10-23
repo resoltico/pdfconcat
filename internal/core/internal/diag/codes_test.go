@@ -4,6 +4,8 @@
 package diag_test
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
@@ -67,6 +69,49 @@ func TestCodeTextContract(t *testing.T) {
 	for _, name := range []string{"", "source_encryptedd"} {
 		if err := code.UnmarshalText([]byte(name)); err == nil {
 			t.Fatalf("accepted unknown code %q", name)
+		}
+	}
+}
+
+func TestDocumentedCodesEqualRegistry(t *testing.T) {
+	data, err := os.ReadFile("../../../../docs/CLI.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[diag.Code]diag.Definition{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "| `") {
+			continue
+		}
+		columns := strings.Split(line, "|")
+		if len(columns) != 6 {
+			continue
+		}
+		severity := strings.TrimSpace(columns[2])
+		if severity != "error" && severity != "warning" {
+			continue
+		}
+		var code diag.Code
+		if err := code.UnmarshalText([]byte(strings.Trim(strings.TrimSpace(columns[1]), "`"))); err != nil {
+			t.Fatal(err)
+		}
+		class := strings.TrimSpace(columns[3])
+		if class == "—" {
+			class = ""
+		}
+		if _, duplicate := found[code]; duplicate {
+			t.Fatalf("duplicate code row %s", code)
+		}
+		found[code] = diag.Definition{Severity: diag.Severity(severity), Class: diag.Class(class), Description: strings.TrimSpace(columns[4])}
+	}
+	registry := diag.Registry()
+	if len(found) != len(registry) {
+		t.Fatalf("documented codes=%d registry=%d", len(found), len(registry))
+	}
+	for code, definition := range registry {
+		documented, ok := found[code]
+		if !ok || documented.Severity != definition.Severity || documented.Class != definition.Class || documented.Description != strings.ReplaceAll(definition.Description, "|", " / ") {
+			t.Fatalf("registry/table mismatch %s: %+v / %+v", code, definition, documented)
 		}
 	}
 }

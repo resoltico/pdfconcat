@@ -44,14 +44,18 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 	for _, format := range []string{"json", "text"} {
 		t.Run(format, func(t *testing.T) {
 			report := filepath.Join(dir, "absent-parent", format+".json")
-			cmd := exec.CommandContext(t.Context(), binary, append(append([]string{}, args...), "--report", report, "--format", format)...)
+			commandArgs := append(append([]string{}, args...), "--report", report)
+			if format == "json" {
+				commandArgs = append(commandArgs, "--json")
+			}
+			cmd := exec.CommandContext(t.Context(), binary, commandArgs...)
 			cmd.Dir = dir
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 			err := cmd.Run()
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stderr.Len() != 0 {
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 || format == "json" && stderr.Len() != 0 {
 				t.Fatalf("late failed-class exit: %v %s %s", err, &stdout, &stderr)
 			}
 			if format == "json" {
@@ -67,7 +71,7 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 						t.Fatal("late failure incorrectly substituted for visible prefix", r)
 					}
 				}
-			} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stdout.String(), "2 more diagnostics") {
+			} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stderr.String(), "2 more diagnostics") {
 				t.Fatal(stdout.String())
 			}
 			if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "stdout"), stdout.Bytes(), 0600); err != nil {

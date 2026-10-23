@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-package result_test
+package cli_test
 
 import (
 	"bytes"
@@ -12,16 +12,18 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/cli"
-	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
-	"github.com/resoltico/pdfconcat/internal/core/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func validate(t *testing.T, value any) {
 	t.Helper()
 	var document, instance any
-	if err := json.Unmarshal(result.Schema, &document); err != nil {
+	schemaBytes, err := core.Schema(core.ResultSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(schemaBytes, &document); err != nil {
 		t.Fatal(err)
 	}
 	data, err := json.Marshal(value)
@@ -45,20 +47,20 @@ func validate(t *testing.T, value any) {
 }
 
 func TestCapsCoalescingAndFullReport(t *testing.T) {
-	r := result.New("check")
+	r := newResult(t, "check")
 	for i := range 25 {
-		r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflowAllowed, strconv.Itoa(i), fmt.Sprintf("/items/%d", i)))
+		r.Diagnostics = append(r.Diagnostics, diagnostic(t, "warning", "text_overflow_allowed", strconv.Itoa(i), fmt.Sprintf("/items/%d", i)))
 	}
 	var items []string
 	for i := range 100 {
 		items = append(items, fmt.Sprintf("/items/%d", i))
 	}
-	warning := diag.New(diag.SourcePageLabelsRemoved, "labels", items...)
+	warning := diagnostic(t, "warning", "source_page_labels_removed", "labels", items...)
 	warning.File = "/abs/source.pdf"
-	r.Diagnostics = append(r.Diagnostics, warning, warning, diag.New(diag.PlanValue, "bad value", "/page/text/size"))
+	r.Diagnostics = append(r.Diagnostics, warning, warning, diagnostic(t, "error", "plan_value", "bad value", "/page/text/size"))
 	full := r.Full()
 	summary := cli.Summary(r)
-	if len(full.Diagnostics) != 27 || len(summary.Diagnostics) != 20 || summary.DiagnosticsOmitted != 7 || summary.Diagnostics[0].Code != diag.PlanValue {
+	if len(full.Diagnostics) != 27 || len(summary.Diagnostics) != 20 || summary.DiagnosticsOmitted != 7 || summary.Diagnostics[0].Code.String() != "plan_value" {
 		t.Fatalf("caps/order %+v", summary)
 	}
 	if len(full.Diagnostics[26].Items) != 100 || full.Diagnostics[26].ItemsOmitted != 0 {
@@ -69,8 +71,8 @@ func TestCapsCoalescingAndFullReport(t *testing.T) {
 	}
 	validate(t, full)
 	validate(t, summary)
-	one := result.New("check")
-	one.Diagnostics = []diag.Diagnostic{warning}
+	one := newResult(t, "check")
+	one.Diagnostics = []core.Diagnostic{warning}
 	capped := cli.Summary(one)
 	if len(capped.Diagnostics[0].Items) != 20 || capped.Diagnostics[0].ItemsOmitted != 80 {
 		t.Fatalf("consumer cap %+v", capped.Diagnostics[0])
@@ -79,13 +81,13 @@ func TestCapsCoalescingAndFullReport(t *testing.T) {
 }
 
 func TestJSONAndTextOutcomes(t *testing.T) {
-	r := result.New("build")
-	r.Diagnostics = []diag.Diagnostic{diag.New(diag.SourceUnreadable, "not readable")}
+	r := newResult(t, "build")
+	r.Diagnostics = []core.Diagnostic{diagnostic(t, "error", "source_unreadable", "not readable")}
 	var b bytes.Buffer
-	if err := cli.Render(&b, r, "json"); err != nil {
+	if err := cli.Render(&b, &b, r, true); err != nil {
 		t.Fatal(err)
 	}
-	var value result.Result
+	var value core.Result
 	if err := json.Unmarshal(b.Bytes(), &value); err != nil {
 		t.Fatalf("not one JSON document: %v", err)
 	}
@@ -94,27 +96,27 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	}
 	validate(t, value)
 	b.Reset()
-	if err := cli.Render(&b, r, "text"); err != nil {
+	if err := cli.Render(&b, &b, r, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), diag.SourceUnreadable.String()) {
+	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, result.Version{FormatVersion: 5, Command: "version", Version: "devel", Go: "go1.27.2", Platform: "linux/amd64"})
+	validate(t, core.VersionInfo{FormatVersion: 5, Command: "version", Version: "devel", Go: "go1.27.2", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
 	path := "/abs/Rīga-Ελλάδα-Київ\n\r\t\x1b.pdf"
 	message := "Cannot read " + path
-	r := result.New("build")
-	d := diag.New(diag.SourceUnreadable, message, "/items/0", "/items/1")
+	r := newResult(t, "build")
+	d := diagnostic(t, "error", "source_unreadable", message, "/items/0", "/items/1")
 	d.File = path
-	d.Location = &diag.Location{File: path, Line: 3, Column: 7, Ref: "/items/0"}
-	r.Diagnostics = []diag.Diagnostic{d}
-	r.Output = &result.Output{Path: path}
-	r.Report = &result.Report{Path: path}
+	d.Location = &core.Location{File: path, Line: 3, Column: 7, Ref: "/items/0"}
+	r.Diagnostics = []core.Diagnostic{d}
+	r.Output = &core.Output{Path: path}
+	r.Report = &core.Report{Path: path}
 	var text bytes.Buffer
-	if err := cli.Render(&text, r, "text"); err != nil {
+	if err := cli.Render(&text, &text, r, false); err != nil {
 		t.Fatal(err)
 	}
 	got := text.String()
@@ -127,10 +129,10 @@ func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
 		t.Fatalf("unsafe terminal output: %q", got)
 	}
 	var encoded bytes.Buffer
-	if err := cli.Render(&encoded, r, "json"); err != nil {
+	if err := cli.Render(&encoded, &encoded, r, true); err != nil {
 		t.Fatal(err)
 	}
-	var roundtrip result.Result
+	var roundtrip core.Result
 	if err := json.Unmarshal(encoded.Bytes(), &roundtrip); err != nil {
 		t.Fatal(err)
 	}
@@ -140,16 +142,16 @@ func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
 }
 
 func TestTextOmissionCounts(t *testing.T) {
-	r := result.New("check")
+	r := newResult(t, "check")
 	var items []string
 	for i := range 23 {
 		items = append(items, fmt.Sprintf("/items/%d", i))
 	}
 	for i := range 22 {
-		r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflow, fmt.Sprintf("overflow %d", i), items...))
+		r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "text_overflow", fmt.Sprintf("overflow %d", i), items...))
 	}
 	var text bytes.Buffer
-	if err := cli.Render(&text, r, "text"); err != nil {
+	if err := cli.Render(&text, &text, r, false); err != nil {
 		t.Fatal(err)
 	}
 	got := text.String()
@@ -159,21 +161,21 @@ func TestTextOmissionCounts(t *testing.T) {
 }
 
 func TestCompositionPreviewCapsRowsWithoutChangingMachineValues(t *testing.T) {
-	r := result.New("check")
+	r := newResult(t, "check")
 	title := "Rīga Ελληνικά Кириллица\n\x1b"
-	r.Sections = []result.Section{{Item: "/items/0", Title: title}}
+	r.Sections = []core.Section{{Item: "/items/0", Title: title}}
 	for i := range 25 {
-		r.Parts = append(r.Parts, result.Part{Item: fmt.Sprintf("/items/%d", i+1), Kind: "source", Path: fmt.Sprintf("path%d\n.pdf", i), FieldsRenamed: []packet.FieldRename{}})
+		r.Parts = append(r.Parts, core.Part{Item: fmt.Sprintf("/items/%d", i+1), Kind: "source", Path: fmt.Sprintf("path%d\n.pdf", i), FieldsRenamed: []core.FieldRename{}})
 	}
 	var text bytes.Buffer
-	if err := cli.Render(&text, r, "text"); err != nil {
+	if err := cli.Render(&text, &text, r, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(text.String(), "6 more preview rows; use --report") || strings.Count(text.String(), "Source ") != 19 || strings.ContainsRune(text.String(), '\x1b') || !strings.Contains(text.String(), strconv.Quote(title)) {
 		t.Fatalf("unsafe or uncapped preview: %q", text.String())
 	}
 	var machine bytes.Buffer
-	if err := cli.Render(&machine, r, "json"); err != nil {
+	if err := cli.Render(&machine, &machine, r, true); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(machine.String(), `"parts"`) || strings.Contains(machine.String(), `"sections"`) {
@@ -183,7 +185,7 @@ func TestCompositionPreviewCapsRowsWithoutChangingMachineValues(t *testing.T) {
 	if err := cli.JSON(&full, r.Full()); err != nil {
 		t.Fatal(err)
 	}
-	var decoded result.Result
+	var decoded core.Result
 	if err := json.Unmarshal(full.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
@@ -192,4 +194,45 @@ func TestCompositionPreviewCapsRowsWithoutChangingMachineValues(t *testing.T) {
 	}
 	validate(t, r.Full())
 	validate(t, cli.Summary(r))
+}
+
+func newResult(t *testing.T, command string) core.Result {
+	t.Helper()
+	version, err := core.Version("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return core.Result{FormatVersion: version.FormatVersion, Command: command, Status: "ok", Diagnostics: []core.Diagnostic{}}
+}
+func diagnostic(t *testing.T, severity core.Severity, name, message string, items ...string) core.Diagnostic {
+	t.Helper()
+	var code core.Code
+	if err := code.UnmarshalText([]byte(name)); err != nil {
+		t.Fatal(err)
+	}
+	return core.Diagnostic{Severity: severity, Code: code, Message: message, Items: items}
+}
+
+func TestResultStreams(t *testing.T) {
+	r := newResult(t, "check")
+	r.Diagnostics = []core.Diagnostic{diagnostic(t, "error", "source_unreadable", "not readable")}
+	var stdout, stderr bytes.Buffer
+	if err := cli.Render(&stdout, &stderr, r, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "check failed") || strings.Contains(stdout.String(), "source_unreadable") || strings.Count(stderr.String(), "\n") != 1 || !strings.Contains(stderr.String(), "source_unreadable") {
+		t.Fatalf("text streams: %q / %q", stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := cli.Render(&stdout, &stderr, r, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded core.Result
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal("not exactly one document", err)
+	}
+	if stderr.Len() != 0 || decoded.Status != "failed" {
+		t.Fatalf("JSON streams: %q / %q", stdout.String(), stderr.String())
+	}
 }

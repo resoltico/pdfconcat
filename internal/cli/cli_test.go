@@ -25,8 +25,8 @@ func TestInterleavedOperandsAndDelimiter(t *testing.T) {
 			t.Fatalf("operand %d: %+v", i, got)
 		}
 	}
-	c, failure = cli.Parse([]string{"check", "--plan=-", "--base-dir=here", "--fit-to", "297x210mm", "--overwrite", "--format=text"})
-	if failure != nil || c.Plan != "-" || c.BaseDir != "here" || c.Format != "text" || !c.Overwrite {
+	c, failure = cli.Parse([]string{"check", "--plan=-", "--base-dir=here", "--fit-to", "297x210mm", "--overwrite"})
+	if failure != nil || c.Plan != "-" || c.BaseDir != "here" || c.JSON || !c.Overwrite {
 		t.Fatalf("options %+v %+v", c, failure)
 	}
 }
@@ -38,7 +38,7 @@ func TestUsageDiagnostics(t *testing.T) {
 	}{
 		{[]string{"other"}, "usage_unknown_command"}, {[]string{"report"}, "usage_unknown_command"},
 		{[]string{"build", "--jobs", "2"}, "usage_unknown_option"}, {[]string{"build", "--progress"}, "usage_unknown_option"},
-		{[]string{"build", "--plan"}, "usage_missing_value"}, {[]string{"build", "--format=xml"}, "usage_invalid_value"},
+		{[]string{"build", "--plan"}, "usage_missing_value"}, {[]string{"build", "--json=true"}, "usage_invalid_value"},
 		{[]string{"build", "--fit-to=inherit", "a"}, "usage_invalid_value"}, {[]string{"build", "--overwrite=true", "a"}, "usage_invalid_value"},
 		{[]string{"build", "--plan=x", "a"}, "usage_conflict"}, {[]string{"build", "--plan=x", "--blank"}, "usage_conflict"},
 		{[]string{"check", "--base-dir=x", "a"}, "usage_conflict"}, {[]string{"build", "-o", "a", "--output=b", "c"}, "usage_conflict"},
@@ -62,14 +62,14 @@ func TestHelpAndVersionForms(t *testing.T) {
 			t.Fatalf("help %v: %+v %+v", args, c, failure)
 		}
 	}
-	for _, args := range [][]string{{"version"}, {"--version"}, {"version", "--format=text"}} {
+	for _, args := range [][]string{{"version"}, {"--version"}, {"version", "--json"}} {
 		c, failure := cli.Parse(args)
 		if failure != nil || c.Name != "version" {
 			t.Fatalf("version %v: %+v %+v", args, c, failure)
 		}
 	}
 	help := cli.Help("build")
-	for _, option := range []string{"--plan", "--output", "--base-dir", "--fit-to", "--report", "--overwrite", "--format", "--help"} {
+	for _, option := range []string{"--plan", "--output", "--base-dir", "--fit-to", "--report", "--overwrite", "--json", "--help"} {
 		if !strings.Contains(help, option) {
 			t.Fatalf("help omits %s", option)
 		}
@@ -81,44 +81,32 @@ func TestHelpAndVersionForms(t *testing.T) {
 	}
 }
 
-func TestUsageErrorFormatAndFirstFailure(t *testing.T) {
+func TestUsageJSONSelectionAndFirstFailure(t *testing.T) {
 	for _, tc := range []struct {
-		args   []string
-		format string
-		code   string
-		item   string
+		args       []string
+		json       bool
+		code, item string
 	}{
-		{[]string{"check", "--bad", "--format", "text"}, "text", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--format", "text", "--bad"}, "text", "usage_unknown_option", "argv:3"},
-		{[]string{"check", "--report=", "--format=text"}, "text", "usage_invalid_value", "argv:1"},
-		{[]string{"check", "--format=text", "--report="}, "text", "usage_invalid_value", "argv:2"},
-		{[]string{"check", "--report", "", "--format", "text"}, "text", "usage_invalid_value", "argv:2"},
-		{[]string{"check", "--report", "--format", "text"}, "text", "usage_missing_value", "argv:1"},
-		{[]string{"check", "--format", "text", "--report"}, "text", "usage_missing_value", "argv:3"},
-		{[]string{"check", "--overwrite=yes", "--format=text"}, "text", "usage_invalid_value", "argv:1"},
-		{[]string{"check", "--bad=--format", "text"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--report=--format", "text"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--report", "--", "--format=text"}, "text", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--", "--format=text"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--format", "xml"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--format="}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--format"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--bad", "--format=text", "--format=text"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"check", "--format=text", "--format=json"}, "json", "usage_conflict", "argv:2"},
-		{[]string{"check", "--format=json", "--format=text"}, "json", "usage_conflict", "argv:2"},
-		{[]string{"check", "--format=text", "--format"}, "json", "usage_conflict", "argv:2"},
-		{[]string{"check", "--format", "--report", "x", "--format=text"}, "json", "usage_missing_value", "argv:1"},
-		{[]string{"check", "--report=x", "--report", "--", "--format=text"}, "text", "usage_conflict", "argv:2"},
-		{[]string{"version", "--report", "--", "--format=text"}, "json", "usage_unknown_option", "argv:1"},
-		{[]string{"version", "--bad", "--format=text"}, "text", "usage_unknown_option", "argv:1"},
-		{[]string{"--version", "--bad", "--format=text"}, "text", "usage_unknown_option", "argv:1"},
-		{[]string{"schema", "--bad", "--format=text"}, "json", "usage_invalid_value", "argv:1"},
-		{[]string{"unknown", "--format=text"}, "json", "usage_unknown_command", "argv:0"},
+		{[]string{"check", "--bad", "--json"}, true, "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--json", "--bad"}, true, "usage_unknown_option", "argv:2"},
+		{[]string{"check", "--report=", "--json"}, true, "usage_invalid_value", "argv:1"},
+		{[]string{"check", "--report", "--json"}, true, "usage_missing_value", "argv:1"},
+		{[]string{"check", "--json", "--report"}, true, "usage_missing_value", "argv:2"},
+		{[]string{"check", "--bad=--json"}, false, "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--report=--json"}, false, "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--bad", "--", "--json"}, false, "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--json=true"}, false, "usage_invalid_value", "argv:1"},
+		{[]string{"check", "--json", "--json"}, true, "usage_conflict", "argv:2"},
+		{[]string{"version", "--bad", "--json"}, true, "usage_unknown_option", "argv:1"},
+		{[]string{"--version", "--bad", "--json"}, true, "usage_unknown_option", "argv:1"},
+		{[]string{"schema", "--bad", "--json"}, false, "usage_invalid_value", "argv:1"},
+		{[]string{"unknown", "--json"}, false, "usage_unknown_command", "argv:0"},
+		{[]string{"check", "--format", "text", "--json"}, true, "usage_unknown_option", "argv:1"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			c, failure := cli.Parse(tc.args)
-			if c.Format != tc.format || failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != tc.code || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != tc.item {
-				t.Fatalf("want %s/%s/%s, got %+v %+v", tc.format, tc.code, tc.item, c, failure)
+			if c.JSON != tc.json || failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != tc.code || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != tc.item {
+				t.Fatalf("%+v / %+v", c, failure)
 			}
 		})
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 )
 
 func corpusCLIContracts(t *testing.T, binary string) {
-	for _, args := range [][]string{nil, {"help", "build"}, {"build", "--help"}, {"help", "version"}, {"--version"}, {"version"}, {"version", "--format", "text"}, {"schema", "plan"}, {"schema", "result"}} {
+	for _, args := range [][]string{nil, {"help", "build"}, {"build", "--help"}, {"help", "version"}, {"--version", "--json"}, {"version", "--json"}, {"version"}, {"schema", "plan"}, {"schema", "result"}} {
 		t.Run("query-"+strings.Join(args, "_"), func(t *testing.T) {
 			cmd := exec.CommandContext(t.Context(), binary, args...)
 			var stderr bytes.Buffer
@@ -34,17 +35,18 @@ func corpusCLIContracts(t *testing.T, binary string) {
 					}
 				}
 			}
-			if len(args) > 0 && args[0] == "version" && len(args) > 2 && args[2] == "text" {
-				if !bytes.HasPrefix(raw, []byte("pdfconcat ")) || bytes.Count(raw, []byte("\n")) != 1 || !bytes.Contains(raw, []byte("darwin/")) && !bytes.Contains(raw, []byte("linux/")) && !bytes.Contains(raw, []byte("windows/")) {
-					t.Fatalf("useful one-line native version identity absent: %s", raw)
+
+			if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
+				if slices.Contains(args, "--json") {
+					var version core.VersionInfo
+					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 5 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
+						t.Fatalf("installed version facts: %s %v", raw, err)
+					}
+				} else if !bytes.HasPrefix(raw, []byte("pdfconcat ")) || bytes.Count(raw, []byte("\n")) != 1 || !bytes.Contains(raw, []byte("darwin/")) && !bytes.Contains(raw, []byte("linux/")) && !bytes.Contains(raw, []byte("windows/")) {
+					t.Fatalf("native version identity absent: %s", raw)
 				}
 			}
-			if len(args) > 0 && (args[0] == "--version" || args[0] == "version" && len(args) == 1) {
-				var version core.VersionInfo
-				if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 5 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
-					t.Fatalf("installed version facts: %s %v", raw, err)
-				}
-			}
+
 			if len(args) > 0 && args[0] == "schema" {
 				expected, err := core.Schema(core.SchemaKind(args[1]))
 				if err != nil {
@@ -82,19 +84,29 @@ func corpusCLIContracts(t *testing.T, binary string) {
 			if tc.ID == "missing-value" {
 				args = tc.Args
 			}
+			asJSON := args[0] == "check" || args[0] == "build" || args[0] == "version"
+			if asJSON {
+				args = append(args, "--json")
+			}
 			cmd := exec.CommandContext(t.Context(), binary, args...)
 			cmd.Dir = dir
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			raw, err := cmd.Output()
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 2 || stderr.Len() != 0 {
+			if !errors.As(err, &exit) || exit.ExitCode() != 2 || asJSON && stderr.Len() != 0 {
 				t.Fatalf("usage exit %v %s %s", err, raw, &stderr)
 			}
-			var r core.Result
-			if err = json.Unmarshal(raw, &r); err != nil || !code(r, tc.Code) || r.Status != "invalid" || r.Report != nil {
-				t.Fatalf("usage before I/O %s %v", raw, err)
+
+			if asJSON {
+				var r core.Result
+				if err = json.Unmarshal(raw, &r); err != nil || !code(r, tc.Code) || r.Status != "invalid" || r.Report != nil {
+					t.Fatalf("usage before I/O %s %v", raw, err)
+				}
+			} else if len(raw) != 0 || !strings.Contains(stderr.String(), tc.Code) {
+				t.Fatalf("usage text %q / %q", raw, stderr.String())
 			}
+
 			entries, err := os.ReadDir(dir)
 			if err != nil || len(entries) != 0 {
 				t.Fatal("usage wrote files", entries, err)
@@ -105,7 +117,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 		t.Run("literal-"+name, func(t *testing.T) {
 			dir := corpusStage(t, "business-report.pdf")
 			corpusCopy(t, filepath.Join(dir, "business-report.pdf"), filepath.Join(dir, name))
-			cmd := exec.CommandContext(t.Context(), binary, "check", "--", name)
+			cmd := exec.CommandContext(t.Context(), binary, "check", "--json", "--", name)
 			cmd.Dir = dir
 			raw, err := cmd.Output()
 			if err != nil {
@@ -120,7 +132,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 	t.Run("stdin-check-source-scope", func(t *testing.T) {
 		dir := corpusStage(t, "business-report.pdf")
 		report := filepath.Join(dir, "report.json")
-		cmd := exec.CommandContext(t.Context(), binary, "check", "--plan", "-", "--base-dir", dir, "--report", report)
+		cmd := exec.CommandContext(t.Context(), binary, "check", "--plan", "-", "--base-dir", dir, "--report", report, "--json")
 		cmd.Dir = t.TempDir()
 		cmd.Stdin = strings.NewReader(`{"version":4,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
 		raw, err := cmd.CombinedOutput()
@@ -145,7 +157,7 @@ func corpusCLIConcurrentPublication(t *testing.T, binary string) {
 	dir := t.ArtifactDir()
 	plan := filepath.Join(dir, "plan.json")
 	corpusJSON(t, plan, map[string]any{"version": 4, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
-	commands := []*exec.Cmd{exec.CommandContext(t.Context(), binary, "build", "--plan", plan), exec.CommandContext(t.Context(), binary, "build", "--plan", plan)}
+	commands := []*exec.Cmd{exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json"), exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json")}
 	var outputs, errorsOut [2]bytes.Buffer
 	for n, cmd := range commands {
 		cmd.Dir = dir

@@ -4,7 +4,7 @@
 pdfconcat build [options] (--plan FILE|- | PDF... [--blank]...)
 pdfconcat check [options] (--plan FILE|- | PDF... [--blank]...)
 pdfconcat schema plan|result
-pdfconcat version [--format json|text]
+pdfconcat version [--json]
 pdfconcat help [COMMAND]
 ```
 
@@ -21,7 +21,7 @@ including the command but excluding the executable.
 | `--fit-to SIZE` | Overrides plan fitting; paper name or dimensions |
 | `--report FILE` | Full JSON report, relative to cwd |
 | `--overwrite` | Permit replacement of existing regular output/report files |
-| `--format json\|text` | Stdout format, default JSON |
+| `--json` | Print one JSON result on stdout; text is the default |
 | `--help`, `-h` | Help |
 
 Values accept `--option=value` or separate arguments. Each ordinary option is
@@ -30,7 +30,7 @@ worker-count option, report-query command or inline-plan JSON option.
 
 A separate required value cannot be a recognized option token (including
 `--blank`); an omitted value is refused before input or report I/O. To name a
-file like an option, use `--report=--format` or `--report ./--format`. A literal
+file like an option, use `--report=--json` or `--report ./--json`. A literal
 `--` can be an option value; it ends options only when encountered between
 options or operands.
 
@@ -80,15 +80,15 @@ See [plan syntax](PLAN.md) and the [composition example](../examples/plans/packe
 
 ## Output
 
-Stdout contains one result JSON object, text result, version object, help text or
-schema. Stderr is quiet in normal operation. `schema result` covers result,
-report and version. JSON member order is stable in the implementation but is not
-a consumer contract.
+Text is the default: stdout holds the result summary, and stderr holds one line
+per diagnostic. With `--json`, stdout holds exactly one capped JSON result and
+stderr is empty unless writing stdout fails. `schema result` covers results,
+reports and JSON version objects. JSON member order is not a consumer contract.
 
-For commands accepting `--format`, a single valid explicit format also controls
-usage errors, regardless of option order. The first parsing error and its
-location are retained. Invalid or repeated format requests use JSON. Format-like
-text inside option values or after the `--` delimiter is not a format request.
+Usage errors print diagnostics and a help hint on stderr, with empty stdout.
+For build, check and version, an exact `--json` before the first `--` delimiter
+selects JSON even when argument parsing fails. The first error and its location
+are retained.
 
 ```json
 {
@@ -128,7 +128,7 @@ pages. Warnings do not make an outcome invalid.
 | `interrupted` | 130 | Cancelled |
 
 Interrupted takes precedence over failed, then invalid. Errors precede warnings
-in stdout, in stage order. Stdout shows at most 20 diagnostics, with
+in their output stream, in stage order. The summary shows at most 20 diagnostics, with
 `diagnostics_omitted` for the rest. Each diagnostic shows at most 20 consumer
 pointers, with `items_omitted`. A full report has no such caps.
 
@@ -264,7 +264,7 @@ if not files:
     raise SystemExit("no PDF files in chapters/")
 plan = {"version": 4, "items": [{"source": path} for path in files]}
 pathlib.Path("job.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-raise SystemExit(subprocess.run(["pdfconcat", "build", "--plan", "job.json", "-o", "book.pdf"]).returncode)
+raise SystemExit(subprocess.run(["pdfconcat", "build", "--json", "--plan", "job.json", "-o", "book.pdf"]).returncode)
 ```
 
 ### bash and zsh

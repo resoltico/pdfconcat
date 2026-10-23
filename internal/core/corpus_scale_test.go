@@ -65,7 +65,7 @@ func TestCorpusScaleProfiles(t *testing.T) {
 			var r core.Result
 			if tc.Sections {
 				report := filepath.Join(dir, "report.json")
-				cmd := exec.CommandContext(t.Context(), cli, "build", "--plan", path, "--report", report)
+				cmd := exec.CommandContext(t.Context(), cli, "build", "--plan", path, "--report", report, "--json")
 				cmd.Dir = dir
 				var stdout, stderr bytes.Buffer
 				cmd.Stdout = &stdout

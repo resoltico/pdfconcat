@@ -31,8 +31,8 @@ Add that directory (`go env GOBIN`, or `bin` under `go env GOPATH` when GOBIN is
 ## First packet
 
 ```sh
-pdfconcat check --format text cover.pdf --blank appendix.pdf
-pdfconcat build --format text -o packet.pdf cover.pdf --blank appendix.pdf --report packet.report.json
+pdfconcat check cover.pdf --blank appendix.pdf
+pdfconcat build -o packet.pdf cover.pdf --blank appendix.pdf --report packet.report.json
 ```
 
 `--blank` inserts one plain page that inherits the neighboring source's displayed
@@ -67,11 +67,11 @@ For a divider with text, save this as `packet.json` next to the source PDFs:
 ```
 
 ```sh
-pdfconcat check --format text --plan packet.json
-pdfconcat build --format text --plan packet.json --report packet-with-divider.report.json
+pdfconcat check --plan packet.json
+pdfconcat build --plan packet.json --report packet-with-divider.report.json
 ```
 
-Results are JSON by default. Use `--format text` for a human-readable result.
+Results are text by default. Add `--json` for one machine-readable result.
 `--report` saves all diagnostics and per-part ranges, hashes, layout and actual
 form-name mappings. `check` writes no PDF; it can write its requested report.
 Passing check does not guarantee that a later build will succeed.

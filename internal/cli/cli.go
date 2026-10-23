@@ -21,29 +21,30 @@ type Operand struct {
 
 // Command is a parsed request; parsing performs no filesystem I/O.
 type Command struct {
-	Name, Plan, Output, BaseDir, FitTo, Report, Format, Schema string
-	Overwrite, Help                                            bool
-	Operands                                                   []Operand
+	Name, Plan, Output, BaseDir, FitTo, Report, Schema string
+	Overwrite, Help, JSON                              bool
+	Operands                                           []Operand
 }
 type option struct{ name, alias, value, description string }
 
 var options = []option{
+	{"--blank", "", "", "Insert one generated page with default style."},
 	{"--plan", "", "FILE|-", "Read a plan v4 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
 	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; refuses widgets and numeric local destinations."},
 	{"--report", "", "FILE", "Write a full JSON report."},
 	{"--overwrite", "", "", "Replace existing output/report files."},
-	{"--format", "", "json|text", "Standard-output format (default json)."},
+	{"--json", "", "", "Print one JSON result to standard output."},
 	{"--help", "-h", "", "Show help."},
 }
 
 // Parse returns command intent and an optional complete normalized failure.
 // Token validation and error-format discovery perform no I/O.
 func Parse(args []string) (Command, *core.Result) {
-	c := Command{Format: "json"}
+	c := Command{}
 	failure := func(kind core.InvocationFaultKind, message string, index int) (Command, *core.Result) {
-		c.Format = errorFormat(args)
+		c.JSON = wantsJSON(args)
 		r := core.InvocationFailure(operationHint(c.Name), kind, message, fmt.Sprintf("argv:%d", index))
 		return c, &r
 	}
@@ -151,11 +152,8 @@ func Parse(args []string) (Command, *core.Result) {
 				c.Report = value
 			case "--overwrite":
 				c.Overwrite = true
-			case "--format":
-				if value != "json" && value != "text" {
-					return failure("usage_invalid_value", "--format must be json or text.", i)
-				}
-				c.Format = value
+			case "--json":
+				c.JSON = true
 			case "--help":
 				c.Help = true
 			}
@@ -195,7 +193,7 @@ func optionToken(arg string) (*option, string, bool) {
 }
 
 func optionAllowed(command string, spec *option) bool {
-	return spec != nil && (command != "version" && command != "--version" || spec.name == "--format" || spec.name == "--help")
+	return spec != nil && (command != "version" && command != "--version" || spec.name == "--json" || spec.name == "--help")
 }
 
 func separateValueIndex(args []string, index int) (int, bool) {
@@ -210,41 +208,25 @@ func separateValueIndex(args []string, index int) (int, bool) {
 	return next, true
 }
 
-// errorFormat chooses presentation without changing the first parsing failure.
-// Invalid or repeated format requests fall back to JSON, independent of order.
-func errorFormat(args []string) string {
+// wantsJSON locates the exact machine-output flag before the first delimiter.
+func wantsJSON(args []string) bool {
 	if len(args) == 0 {
-		return "json"
+		return false
 	}
 	switch args[0] {
 	case "build", "check", "version", "--version":
 	default:
-		return "json"
+		return false
 	}
-	format, count := "json", 0
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--" {
+	for _, arg := range args[1:] {
+		if arg == "--" {
 			break
 		}
-		spec, value, equals := optionToken(args[i])
-		if !optionAllowed(args[0], spec) {
-			continue
-		}
-		if spec.value != "" && !equals {
-			if next, ok := separateValueIndex(args, i); ok {
-				i = next
-				value = args[i]
-			}
-		}
-		if spec.name == "--format" {
-			count++
-			if count > 1 || value != "json" && value != "text" {
-				return "json"
-			}
-			format = value
+		if arg == "--json" {
+			return true
 		}
 	}
-	return format
+	return false
 }
 
 func knownCommand(name string) bool {
@@ -261,7 +243,7 @@ func Help(command string) string {
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"
 	case "version":
-		b.WriteString("Usage: pdfconcat version [--format json|text]\n")
+		b.WriteString("Usage: pdfconcat version [--json]\n")
 	default:
 		fmt.Fprintf(&b, "Usage: pdfconcat %s [options] (--plan FILE|- | PDF... [--blank]...)\n", command)
 		b.WriteString("Options may interleave with operands; -- ends options.\n")

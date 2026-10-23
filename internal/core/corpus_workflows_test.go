@@ -269,7 +269,7 @@ func corpusWorkflows(t *testing.T, cli string) {
 		if _, err := os.Stat(old); !os.IsNotExist(err) {
 			t.Fatal("old project still exists")
 		}
-		cmd := exec.CommandContext(t.Context(), cli, "build", "--plan", filepath.Join(moved, "plan.json"), "--output", filepath.Join(moved, "override.pdf"), "--report", filepath.Join(moved, "report.json"))
+		cmd := exec.CommandContext(t.Context(), cli, "build", "--plan", filepath.Join(moved, "plan.json"), "--output", filepath.Join(moved, "override.pdf"), "--report", filepath.Join(moved, "report.json"), "--json")
 		cmd.Dir = root
 		if data, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("relocated CLI: %s %v", data, err)
@@ -405,7 +405,7 @@ func TestCorpusContentsSpecimens(t *testing.T) {
 func corpusBlankNeighbors(t *testing.T, cli string) {
 	dir := corpusStage(t, "business-report.pdf")
 	report := filepath.Join(dir, "report.json")
-	cmd := exec.CommandContext(t.Context(), cli, "build", "--blank", filepath.Join(dir, "business-report.pdf"), "--blank", "-o", filepath.Join(dir, "packet.pdf"), "--report", report)
+	cmd := exec.CommandContext(t.Context(), cli, "build", "--blank", filepath.Join(dir, "business-report.pdf"), "--blank", "-o", filepath.Join(dir, "packet.pdf"), "--report", report, "--json")
 	cmd.Dir = dir
 	if raw, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("direct blank neighbors %s %v", raw, err)

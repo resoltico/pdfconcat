@@ -343,8 +343,8 @@ func corpusTransports(t *testing.T, p corpusProfile, cli string) {
 			var err error
 			if strings.HasPrefix(mode, "cli-") {
 				args := []string{"build", "--plan", plan, "--output", output, "--report", report}
-				if mode == "cli-text" {
-					args = append(args, "--format", "text")
+				if mode != "cli-text" {
+					args = append(args, "--json")
 				}
 				if mode == "cli-stdin" {
 					args[2] = "-"

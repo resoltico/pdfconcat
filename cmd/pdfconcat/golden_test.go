@@ -21,9 +21,8 @@ func TestGoldenResultsAndReport(t *testing.T) {
 		stdin string
 	}{
 		{"check", []string{"check", "--plan", "-"}, plan},
-		{"usage", []string{"unknown"}, ""},
 	} {
-		_, _, output := invoke(t, tc.args, tc.stdin)
+		_, _, output := invokeJSON(t, tc.args, tc.stdin)
 		expected, err := os.ReadFile(filepath.Join("testdata", tc.name+".json"))
 		if err != nil {
 			t.Fatal(err)
@@ -34,7 +33,7 @@ func TestGoldenResultsAndReport(t *testing.T) {
 		}
 	}
 	report := filepath.Join(t.TempDir(), "report.json")
-	invoke(t, []string{"check", "--plan", "-", "--report", report}, plan)
+	invokeJSON(t, []string{"check", "--plan", "-", "--report", report}, plan)
 	data, err := os.ReadFile(report)
 	if err != nil {
 		t.Fatal(err)
@@ -59,9 +58,21 @@ func TestInterruptedCommandIsOneJSONOutcome(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var stdout, stderr bytes.Buffer
-	code := runContext(ctx, []string{"check", "--plan", "-"}, strings.NewReader(""), &stdout, &stderr)
+	code := runContext(ctx, []string{"check", "--plan", "-", "--json"}, strings.NewReader(""), &stdout, &stderr)
 	if code != 130 || stderr.Len() > 0 {
 		t.Fatalf("interruption exit %d stderr %q", code, stderr.String())
 	}
 	validateResult(t, stdout.Bytes())
+}
+
+func TestGoldenUsageText(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{"unknown"}, strings.NewReader(""), &stdout, &stderr)
+	expected, err := os.ReadFile(filepath.Join("testdata", "usage.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit != 2 || stdout.Len() != 0 || !bytes.Equal(stderr.Bytes(), expected) {
+		t.Fatalf("usage streams: %d %q %q", exit, stdout.String(), stderr.String())
+	}
 }

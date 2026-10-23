@@ -54,7 +54,7 @@ func TestPaintedTitleDiagnosticsRetainDeclarationAndConsumers(t *testing.T) {
 			dir := t.TempDir()
 			report := filepath.Join(dir, "report.json")
 			input := titlePlan(t, 2, tc.contents, tc.dividers, "")
-			summary, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, input)
+			summary, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, input)
 			if exit != 2 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code.String() != "text_unsupported_character" {
 				t.Fatalf("painted title refusal: %+v %d", summary, exit)
 			}
@@ -87,7 +87,7 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 	dir := t.TempDir()
 	report := filepath.Join(dir, "report.json")
 	input := titlePlan(t, 25, true, true, "")
-	summary, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, input)
+	summary, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, input)
 	if exit != 2 || len(summary.Diagnostics) != 1 || len(summary.Diagnostics[0].Items) != 20 || summary.Diagnostics[0].ItemsOmitted != 31 {
 		t.Fatalf("title consumer caps: %+v %d", summary, exit)
 	}
@@ -113,12 +113,12 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"check", "--plan", "-", "--base-dir", dir, "--format", "text"}, strings.NewReader(input), &stdout, &stderr); code != 2 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "31 more; use --report") {
+	if code := run([]string{"check", "--plan", "-", "--base-dir", dir}, strings.NewReader(input), &stdout, &stderr); code != 2 || stderr.Len() == 0 || !strings.Contains(stderr.String(), "31 more; use --report") {
 		t.Fatalf("human title omission hint: %d %q %q", code, stdout.String(), stderr.String())
 	}
 	fontReport := filepath.Join(t.TempDir(), "font-report.json")
 	missing := "missing-Ā-Ελληνικά.ttf"
-	summary, exit, _ = invoke(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", fontReport}, titlePlan(t, 2, false, true, missing))
+	summary, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", fontReport}, titlePlan(t, 2, false, true, missing))
 	if exit != 1 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code.String() != "font_unreadable" {
 		t.Fatalf("selected-font refusal: %+v %d", summary, exit)
 	}
@@ -143,7 +143,7 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 func TestBookmarkOnlyTitleDoesNotRequireGlyphValidation(t *testing.T) {
 	dir := t.TempDir()
 	report := filepath.Join(dir, "report.json")
-	r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, titlePlan(t, 2, false, false, ""))
+	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, titlePlan(t, 2, false, false, ""))
 	if exit != 0 || r.Status != "ok" || len(r.Diagnostics) != 0 {
 		t.Fatalf("unpainted title incorrectly shaped: %+v %d", r, exit)
 	}

@@ -116,7 +116,7 @@ func TestCorpusPendingStdinSIGINT(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, binary, "check", "--plan", "-")
+			cmd := exec.CommandContext(ctx, binary, "check", "--plan", "-", "--json")
 			cmd.Stdin = reader
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout
@@ -160,7 +160,7 @@ func TestCorpusStagedBuildSIGINT(t *testing.T) {
 			corpusJSON(t, plan, map[string]any{"version": 4, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4"}, "count": 50000}}})
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, binary, "build", "--plan", plan)
+			cmd := exec.CommandContext(ctx, binary, "build", "--plan", plan, "--json")
 			cmd.Dir = dir
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout

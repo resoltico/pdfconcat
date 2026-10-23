@@ -42,9 +42,9 @@ func JSON(w io.Writer, value any) error {
 	return err
 }
 
-// Render writes the capped JSON or text stdout view.
-func Render(w io.Writer, r core.Result, format string) error {
-	if format != "text" {
+// Render writes a capped JSON document or a text summary with separate diagnostics.
+func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
+	if asJSON {
 		return JSON(w, Summary(r))
 	}
 	rows, omitted := previewRows(r)
@@ -73,12 +73,12 @@ func Render(w io.Writer, r core.Result, format string) error {
 		}
 	}
 	for _, d := range r.Diagnostics {
-		if _, err := fmt.Fprintln(w, diagnosticText(d)); err != nil {
+		if _, err := fmt.Fprintln(stderr, diagnosticText(d)); err != nil {
 			return err
 		}
 	}
 	if r.DiagnosticsOmitted > 0 {
-		if _, err := fmt.Fprintf(w, "%d more diagnostics; use --report for full details.\n", r.DiagnosticsOmitted); err != nil {
+		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; use --report for full details.\n", r.DiagnosticsOmitted); err != nil {
 			return err
 		}
 	}

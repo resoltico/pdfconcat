@@ -33,14 +33,29 @@ func operationHint(name string) core.Operation {
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, host Host) int {
 	command, failure := Parse(args)
 	render := func(r core.Result) int {
-		if err := Render(stdout, r, command.Format); err != nil {
+		if err := Render(stdout, stderr, r, command.JSON); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
 		return core.ExitCode(r)
 	}
 	if failure != nil {
-		return render(*failure)
+		if command.JSON {
+			return render(*failure)
+		}
+		for _, d := range Summary(*failure).Diagnostics {
+			if _, err := fmt.Fprintln(stderr, diagnosticText(d)); err != nil {
+				return 1
+			}
+		}
+		help := "pdfconcat help"
+		if knownCommand(command.Name) {
+			help += " " + command.Name
+		}
+		if _, err := fmt.Fprintf(stderr, "Run %q for usage.\n", help); err != nil {
+			return 1
+		}
+		return core.ExitCode(*failure)
 	}
 	query := func(err error) int {
 		if err != nil {
@@ -63,7 +78,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if command.Name == "version" {
 		v, err := core.Version(host.ReleaseOverride)
 		if err == nil {
-			if command.Format == "text" {
+			if !command.JSON {
 				_, err = fmt.Fprintf(stdout, "pdfconcat %s (%s, %s, %s)\n", v.Version, v.Commit, v.Go, v.Platform)
 			} else {
 				err = JSON(stdout, v)

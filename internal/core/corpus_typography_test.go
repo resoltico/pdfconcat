@@ -292,7 +292,7 @@ func TestCorpusTypography(t *testing.T) {
 				path := filepath.Join(dir, "plan.json")
 				corpusJSON(t, path, plan)
 				for _, op := range []core.Operation{core.Check, core.Build} {
-					r := core.Execute(t.Context(), core.NewRequest(op, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+					r := core.Execute(t.Context(), core.Request{Operation: op, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 					if !code(r, tc.want) {
 						t.Fatal(r)
 					}

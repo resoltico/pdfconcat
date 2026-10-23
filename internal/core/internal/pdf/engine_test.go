@@ -156,7 +156,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 		domain[fmt.Sprintf("/items/%d", i)] = f.SourceFacts
 		j.Items = append(j.Items, &packet.SourceItem{Ref: fmt.Sprintf("/items/%d", i), Path: path})
 	}
-	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), domain, 0)
+	layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -328,7 +328,7 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	layout, _ := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: path}}), map[string]packet.SourceFacts{path: facts.SourceFacts}, 0)
+	layout, _ := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: path}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +486,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), map[string]packet.SourceFacts{"source": facts.SourceFacts}, 0)
+	layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), map[string]packet.SourceFacts{"source": facts.SourceFacts})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}

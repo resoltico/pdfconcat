@@ -19,9 +19,9 @@ type pageKey struct {
 }
 
 // LayOut prepares page-item text and retains its measured facts.
-func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font) (map[int][]Page, map[int]*TextFacts, []diag.Diagnostic) {
-	pages := map[int][]Page{}
-	facts := map[int]*TextFacts{}
+func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font) ([][]Page, []*TextFacts, []diag.Diagnostic) {
+	pages := make([][]Page, len(layout.Parts))
+	facts := make([]*TextFacts, len(layout.Parts))
 	var ds []diag.Diagnostic
 	type cached struct {
 		page Page

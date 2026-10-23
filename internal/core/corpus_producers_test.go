@@ -39,7 +39,7 @@ func corpusProducers(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			dir := corpusStage(t, tc.Name)
 			source := filepath.Join(dir, tc.Name)
-			r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromItems(core.Source(source, "producer")), core.Options{WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf"), Report: filepath.Join(dir, "report.json")}))
+			r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.Items{core.SourceItem{Path: source, Ref: "producer"}}, WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf"), Report: filepath.Join(dir, "report.json")})
 			if r.Status != "ok" || r.Pages == nil || r.Pages.Total == nil || *r.Pages.Total != int64(tc.Pages) {
 				t.Fatalf("producer outcome %+v", r)
 			}
@@ -93,7 +93,7 @@ func corpusProducers(t *testing.T) {
 	}
 	t.Run("mixed-office-scan-technical", func(t *testing.T) {
 		dir := corpusStage(t, "office-report.pdf", "scan-invoice.pdf", "technical-note.pdf")
-		r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromItems(core.Source("office-report.pdf", "office"), core.Source("scan-invoice.pdf", "scan"), core.Source("technical-note.pdf", "note")), core.Options{WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf")}))
+		r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.Items{core.SourceItem{Path: "office-report.pdf", Ref: "office"}, core.SourceItem{Path: "scan-invoice.pdf", Ref: "scan"}, core.SourceItem{Path: "technical-note.pdf", Ref: "note"}}, WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf")})
 		if r.Status != "ok" || *r.Pages.Total != 5 {
 			t.Fatal(r)
 		}

@@ -195,7 +195,7 @@ func TestCompatibilityRefusesBeforePublication(t *testing.T) {
 					if err := d.WriteFile(filepath.Join(dir, name)); err != nil {
 						t.Fatal(err)
 					}
-					operands = append(operands, core.Source(name, fmt.Sprintf("argv:%d", i+1)))
+					operands = append(operands, core.SourceItem{Path: name, Ref: fmt.Sprintf("argv:%d", i+1)})
 				}
 				output := filepath.Join(dir, "packet.pdf")
 				before := []byte("preserve existing output")
@@ -203,12 +203,12 @@ func TestCompatibilityRefusesBeforePublication(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, command := range []string{"check", "build"} {
-					options := core.Options{WorkingDir: dir, Output: output, Overwrite: true}
+					options := core.Request{WorkingDir: dir, Output: output, Overwrite: true}
 					if fit != "" {
 						sheet, _ := core.ParseSheet(fit)
 						options.FitTo = &sheet
 					}
-					r := core.Execute(t.Context(), core.NewRequest(core.Operation(command), core.FromItems(operands...), options))
+					r := core.Execute(t.Context(), core.Request{Operation: core.Operation(command), Input: core.Items(operands), WorkingDir: options.WorkingDir, Output: options.Output, Report: options.Report, FitTo: options.FitTo, Overwrite: options.Overwrite})
 					if r.Status != "invalid" || !codePresent(r.Diagnostics, code) || r.Output.Published {
 						t.Fatalf("%s: %+v", command, r)
 					}

@@ -69,7 +69,7 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 	parts := []packet.Item{&packet.PageItem{Ref: "lead", Style: inherited, Count: 2}, &packet.SourceItem{Ref: "source", Path: "a"}, &packet.PageItem{Ref: "after", Style: inherited, Count: 3}, &packet.PageItem{Ref: "explicit", Style: explicit, Count: 1}}
 	facts := map[string]packet.SourceFacts{"source": {Pages: 4, FirstSize: a, LastSize: b}}
 	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, parts)
-	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
+	layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -84,23 +84,23 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 	}
 	fit := packet.Size{Width: 612, Height: 792}
 	j.FitTo = &fit
-	layout, ds = packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
+	layout, ds = resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) > 0 || layout.Parts[0].Size != fit || layout.Parts[2].Size != fit || layout.Parts[3].Size != explicit.Size.Value {
 		t.Fatalf("fit %+v %+v", layout, ds)
 	}
-	_, ds = packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.PageItem{Style: inherited, Count: 1}}), nil, 0)
+	_, ds = resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.PageItem{Style: inherited, Count: 1}}), nil, 0)
 	if len(ds) != 1 || ds[0].Code != diag.PageSizeRequired {
 		t.Fatal(ds)
 	}
 	facts["source"] = packet.SourceFacts{Pages: 1, FirstSize: packet.Size{Width: 14401, Height: 300}, LastSize: b}
-	_, ds = packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, parts), facts, 0)
+	_, ds = resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, parts), facts, 0)
 	if len(ds) != 1 || ds[0].Code != diag.PageSizeTooLarge {
 		t.Fatal(ds)
 	}
 }
 
 func TestRangesUseInt64(t *testing.T) {
-	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: "a", Ref: "a0"}, &packet.SourceItem{Path: "a", Ref: "a1"}}), map[string]packet.SourceFacts{"a0": {Pages: 2_000_000_000}, "a1": {Pages: 2_000_000_000}}, 0)
+	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: "a", Ref: "a0"}, &packet.SourceItem{Path: "a", Ref: "a1"}}), map[string]packet.SourceFacts{"a0": {Pages: 2_000_000_000}, "a1": {Pages: 2_000_000_000}}, 0)
 	if len(ds) > 0 || layout.TotalPages != 4_000_000_000 || layout.Parts[1].FirstPage != 2_000_000_001 {
 		t.Fatalf("ranges %+v %+v", layout, ds)
 	}
@@ -108,7 +108,7 @@ func TestRangesUseInt64(t *testing.T) {
 
 func TestInheritedSizeBelowGeneratedMinimumIsRefused(t *testing.T) {
 	page := packet.Defaults()
-	_, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: "tiny", Ref: "tiny"}, &packet.PageItem{Style: page, Count: 1, Ref: "/items/1"}}), map[string]packet.SourceFacts{"tiny": {Pages: 1, FirstSize: packet.Size{Width: .5, Height: 100}, LastSize: packet.Size{Width: .5, Height: 100}}}, 0)
+	_, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: "tiny", Ref: "tiny"}, &packet.PageItem{Style: page, Count: 1, Ref: "/items/1"}}), map[string]packet.SourceFacts{"tiny": {Pages: 1, FirstSize: packet.Size{Width: .5, Height: 100}, LastSize: packet.Size{Width: .5, Height: 100}}}, 0)
 	if len(ds) != 1 || ds[0].Code != diag.PlanValue {
 		t.Fatalf("unusable inherited canvas: %+v", ds)
 	}
@@ -129,7 +129,7 @@ func TestNestedPaddingRangesAndTargets(t *testing.T) {
 			parent.StartOn = "odd"
 		}
 		j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{cover, parent})
-		layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, 0)
+		layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -174,7 +174,7 @@ func TestOddStartBeforeEveryEmissionKind(t *testing.T) {
 				contentsCount = 2
 			}
 			section.Items = []packet.Item{child}
-			layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{explicitPage("cover", size, 1), section}), facts, contentsCount)
+			layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{explicitPage("cover", size, 1), section}), facts, contentsCount)
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -197,7 +197,7 @@ func TestPaddingUsesPreviousPhysicalSheetWhileOtherPagesUseSourceNeighbor(t *tes
 	itemAs[*packet.PageItem](t, j.Items[1]).Style.Size.Value = previousPhysical
 	for _, fit := range []*packet.Size{nil, {Width: 612, Height: 792}} {
 		j.FitTo = fit
-		layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
+		layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -211,7 +211,7 @@ func TestPaddingUsesPreviousPhysicalSheetWhileOtherPagesUseSourceNeighbor(t *tes
 	}
 	facts["source"] = packet.SourceFacts{Pages: 1, FirstSize: sourceSize, LastSize: packet.Size{Width: .5, Height: 200}}
 	j = packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}, &packet.GroupItem{Ref: "boundary", StartOn: "odd", Items: []packet.Item{explicitPage("body", sourceSize, 1)}}})
-	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
+	layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) != 1 || ds[0].Items[0] != "boundary" || !strings.Contains(ds[0].Message, "fit") || len(layout.Parts) != 0 {
 		t.Fatalf("unusable parity canvas: %+v %+v", layout, ds)
 	}
@@ -228,7 +228,7 @@ func TestCompactMappingsAndSections(t *testing.T) {
 		t.Fatalf("declarations %+v %+v", leaves, sections)
 	}
 	facts := map[string]packet.SourceFacts{"input": {Pages: 4, FirstSize: size, LastSize: size, Selection: []packet.PageRange{{First: 2, Last: 4}, {First: 7, Last: 7}}}}
-	layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
+	layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -260,12 +260,12 @@ func TestLayoutLimitsAndNoInventedPartialSequence(t *testing.T) {
 			facts["source"] = packet.SourceFacts{Pages: int(packet.MaxPageIndex)}
 			facts["source2"] = packet.SourceFacts{Pages: 1}
 		}
-		layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 1)
+		layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), facts, 1)
 		if len(ds) == 0 || ds[0].Code != diag.PlanLimit || len(layout.Parts) != 0 || layout.TotalPages != 0 || len(layout.Sections) != 0 {
 			t.Fatalf("invented partial layout: %+v %+v", layout, ds)
 		}
 	}
-	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}}), map[string]packet.SourceFacts{"source": {Pages: 3, Selection: []packet.PageRange{{First: 1, Last: 2}}}}, 0)
+	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}}), map[string]packet.SourceFacts{"source": {Pages: 3, Selection: []packet.PageRange{{First: 1, Last: 2}}}}, 0)
 	if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || layout.TotalPages != 0 {
 		t.Fatalf("inconsistent occurrence facts: %+v %+v", layout, ds)
 	}
@@ -278,4 +278,12 @@ func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
 		t.Fatalf("item has type %T, expected %T", item, value)
 	}
 	return value
+}
+
+func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts, contents int) (packet.Layout, []diag.Diagnostic) {
+	shapes := make([]packet.SourceFacts, len(p.Leaves()))
+	for i, item := range p.Leaves() {
+		shapes[i] = facts[item.Ref]
+	}
+	return packet.Resolve(p, shapes, contents)
 }

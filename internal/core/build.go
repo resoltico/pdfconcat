@@ -26,7 +26,7 @@ type buildOutcome struct {
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j packet.Plan, composition compositionOutcome, overwrite bool) buildOutcome {
+func build(c context.Context, j packet.Plan, composition *composition, overwrite bool) buildOutcome {
 	out := buildOutcome{output: result.Output{Path: j.Output}}
 	layout, assembly := composition.layout, composition.assembly
 	var placements []*typeset.Placed

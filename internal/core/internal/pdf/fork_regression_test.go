@@ -32,7 +32,7 @@ func assembleSourceBytes(t *testing.T, data []byte) string {
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	layout, _ := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: source, Ref: source}}), map[string]packet.SourceFacts{source: facts.SourceFacts}, 0)
+	layout, _ := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: source, Ref: source}}), map[string]packet.SourceFacts{source: facts.SourceFacts})
 	var b bytes.Buffer
 	if _, err := pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil), &b); err != nil {
 		t.Fatal(err)

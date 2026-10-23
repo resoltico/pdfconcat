@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"os/exec"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
@@ -281,4 +283,12 @@ func fontResources(fonts map[typeset.Digest]typeset.EmbeddedFont) []typeset.Embe
 		resources = append(resources, font)
 	}
 	return resources
+}
+
+func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts) (packet.Layout, []diag.Diagnostic) {
+	shapes := make([]packet.SourceFacts, len(p.Leaves()))
+	for i, item := range p.Leaves() {
+		shapes[i] = facts[item.Ref]
+	}
+	return packet.Resolve(p, shapes, 0)
 }

@@ -68,7 +68,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 	for item, f := range occurrences {
 		domain[item] = f.SourceFacts
 	}
-	layout, ds := packet.Resolve(packet.NewPlan("", fit, nil, packet.PageStyle{}, parts), domain, 0)
+	layout, ds := resolvePacket(packet.NewPlan("", fit, nil, packet.PageStyle{}, parts), domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -390,7 +390,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 	request := []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}}
 	facts, occurrences := inspectSelection(t, doc, request)
 	path := filepath.Join(t.TempDir(), "source.pdf")
-	layout, ds := packet.Resolve(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts}, 0)
+	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -709,4 +709,12 @@ func testAssembly(layout packet.Layout, files map[string]SourceFacts, views map[
 		}
 	}
 	return a
+}
+
+func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts) (packet.Layout, []diag.Diagnostic) {
+	shapes := make([]packet.SourceFacts, len(p.Leaves()))
+	for i, item := range p.Leaves() {
+		shapes[i] = facts[item.Ref]
+	}
+	return packet.Resolve(p, shapes, 0)
 }

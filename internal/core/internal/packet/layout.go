@@ -6,14 +6,20 @@ package packet
 import "github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
 // Resolve maps the cached declaration traversal to physical spans.
-func Resolve(j Plan, facts map[string]SourceFacts, contentsCount int) (Layout, []diag.Diagnostic) {
+func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Diagnostic) {
 	layout := Layout{PageNumbers: j.PageNumbers}
+	source := func(leaf Leaf) (SourceFacts, bool) {
+		if leaf.Index < 0 || leaf.Index >= len(facts) {
+			return SourceFacts{}, false
+		}
+		return facts[leaf.Index], true
+	}
 	var ds []diag.Diagnostic
 	leaves := j.Leaves()
 	var sourceSize, physicalSize Size
 	for _, leaf := range leaves {
 		if leaf.Kind == PartSource {
-			if f, ok := facts[leaf.Ref]; ok {
+			if f, ok := source(leaf); ok {
 				sourceSize = f.FirstSize
 				break
 			}
@@ -48,7 +54,7 @@ func Resolve(j Plan, facts map[string]SourceFacts, contentsCount int) (Layout, [
 		}
 		p := Part{Leaf: leaf, FirstPage: layout.TotalPages + 1}
 		if leaf.Kind == PartSource {
-			f, ok := facts[leaf.Ref]
+			f, ok := source(leaf)
 			if !ok || f.Pages < 1 {
 				add(diag.SourceInvalid, "Source page facts are unavailable.", leaf.Ref)
 				return

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
@@ -38,7 +40,7 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			layout, ds := packet.Resolve(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, len(c.pages))
+			layout, ds := resolvePacket(packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, len(c.pages))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -158,4 +160,12 @@ func testFooter(t *testing.T, p packet.Plan) *Footer {
 		t.Fatal(err)
 	}
 	return footer
+}
+
+func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts, contents int) (packet.Layout, []diag.Diagnostic) {
+	shapes := make([]packet.SourceFacts, len(p.Leaves()))
+	for i, item := range p.Leaves() {
+		shapes[i] = facts[item.Ref]
+	}
+	return packet.Resolve(p, shapes, contents)
 }

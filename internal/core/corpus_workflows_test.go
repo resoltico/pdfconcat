@@ -32,11 +32,11 @@ func corpusRecipe(t *testing.T, dir string, plan map[string]any) (core.Result, c
 	plan["output"] = "packet.pdf"
 	path := filepath.Join(dir, "plan.json")
 	corpusJSON(t, path, plan)
-	check := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "check.json")}))
+	check := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: filepath.Join(dir, "check.json")})
 	if check.Status != "ok" || check.Output.Published {
 		t.Fatal(check)
 	}
-	build := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "build.json")}))
+	build := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: filepath.Join(dir, "build.json")})
 	if build.Status != "ok" {
 		t.Fatal(build)
 	}
@@ -450,10 +450,7 @@ func TestCorpusSourceRefresh(t *testing.T) {
 	closing["start_on"] = "odd"
 	path := filepath.Join(dir, "plan.json")
 	corpusJSON(t, path, map[string]any{"version": 4, "output": "ignored.pdf", "items": []any{map[string]any{"contents": map[string]any{}}, corpusSection("Opening", corpusSource("evolving.pdf")), closing}})
-	document, ds := core.ReadPlan(t.Context(), core.FilePlan(path), dir)
-	if len(ds) > 0 {
-		t.Fatal(ds)
-	}
+
 	hashes := map[string]bool{}
 	for _, tc := range []struct{ Pages, Total, Padding, Closing int }{{2, 5, 4, 5}, {3, 5, 0, 5}, {4, 7, 6, 7}} {
 		t.Run(strconv.Itoa(tc.Pages), func(t *testing.T) {
@@ -461,7 +458,7 @@ func TestCorpusSourceRefresh(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, fmt.Sprintf("version-%d.pdf", tc.Pages))
-			r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromDocument(document), core.Options{WorkingDir: dir, Output: output, Report: filepath.Join(dir, fmt.Sprintf("version-%d.json", tc.Pages))}))
+			r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Output: output, Report: filepath.Join(dir, fmt.Sprintf("version-%d.json", tc.Pages))})
 			if r.Status != "ok" || *r.Pages.Total != int64(tc.Total) || *r.Sections[0].TargetPage != 2 || *r.Sections[1].TargetPage != int64(tc.Closing) {
 				t.Fatal(r)
 			}

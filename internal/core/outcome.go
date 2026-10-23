@@ -4,6 +4,9 @@
 package core
 
 import (
+	"context"
+	"errors"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
@@ -62,6 +65,8 @@ const (
 	Conflict                    InvocationFaultKind = "usage_conflict"
 	MissingInput                InvocationFaultKind = "usage_missing_input"
 	WorkingDirectoryUnavailable InvocationFaultKind = "working_directory_unavailable"
+	PlanUnreadable              InvocationFaultKind = "plan_unreadable"
+	Interrupted                 InvocationFaultKind = "interrupted"
 )
 
 // InvocationFailure adapts closed transport failures without execution or I/O.
@@ -70,13 +75,14 @@ func InvocationFailure(hint Operation, kind InvocationFaultKind, message, refere
 		return invalidRequest(hint)
 	}
 	switch kind {
-	case UnknownCommand, UnknownOption, MissingValue, InvalidValue, Conflict, MissingInput, WorkingDirectoryUnavailable:
+	case UnknownCommand, UnknownOption, MissingValue, InvalidValue, Conflict, MissingInput, WorkingDirectoryUnavailable, PlanUnreadable, Interrupted:
 		r := result.New(string(hint))
 		codes := map[InvocationFaultKind]diag.Code{
 			UnknownCommand: diag.UsageUnknownCommand, UnknownOption: diag.UsageUnknownOption,
 			MissingValue: diag.UsageMissingValue, InvalidValue: diag.UsageInvalidValue,
 			Conflict: diag.UsageConflict, MissingInput: diag.UsageMissingInput,
 			WorkingDirectoryUnavailable: diag.WorkingDirectoryUnavailable,
+			PlanUnreadable:              diag.PlanUnreadable, Interrupted: diag.Interrupted,
 		}
 		d := diag.New(codes[kind], message)
 		if reference != "" {
@@ -100,3 +106,36 @@ const (
 	PartContents = packet.PartContents
 	PartPadding  = packet.PartPadding
 )
+
+func knownCount(n int64) *int64           { return &n }
+func hasErrors(ds []diag.Diagnostic) bool { status, _ := diag.Outcome(ds); return status != "ok" }
+func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		code = diag.Interrupted
+	}
+	d := diag.New(code, err.Error())
+	if file != "<stdin>" {
+		d.File = file
+	}
+	return d
+}
+
+func noteCancellation(c context.Context, r *result.Result) {
+	if err := c.Err(); err != nil {
+		for _, d := range r.Diagnostics {
+			if d.Code == diag.Interrupted {
+				return
+			}
+		}
+		r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
+	}
+}
+
+func invalidRequest(hint Operation) Result {
+	if hint != Check && hint != Build {
+		hint = ""
+	}
+	r := result.New(string(hint))
+	r.Diagnostics = []Diagnostic{diag.New(diag.RequestInvalid, "Invalid application request.")}
+	return r.Full()
+}

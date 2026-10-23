@@ -144,7 +144,7 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 			recipe.Items = append(recipe.Items, &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})
 			generated[i+1] = []compose.Page{page}
 		}
-		layout, ds := packet.Resolve(packet.NewPlan(recipe.Output, recipe.FitTo, recipe.PageNumbers, recipe.PageDefaults, recipe.Items), map[string]packet.SourceFacts{"source": facts.SourceFacts}, 0)
+		layout, ds := resolvePacket(packet.NewPlan(recipe.Output, recipe.FitTo, recipe.PageNumbers, recipe.PageDefaults, recipe.Items), map[string]packet.SourceFacts{"source": facts.SourceFacts})
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -279,7 +279,7 @@ func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := packet.Resolve(packet.NewPlan(recipe.Output, recipe.FitTo, recipe.PageNumbers, recipe.PageDefaults, recipe.Items), nil, 0)
+	layout, ds := resolvePacket(packet.NewPlan(recipe.Output, recipe.FitTo, recipe.PageNumbers, recipe.PageDefaults, recipe.Items), nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -438,7 +438,7 @@ func TestHashEscapeFontNamesAreRefusedBeforePublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, command := range []string{"check", "build"} {
-				result := core.Execute(t.Context(), core.NewRequest(core.Operation(command), core.FromPlan(core.FilePlan(plan)), core.Options{WorkingDir: dir, Overwrite: true}))
+				result := core.Execute(t.Context(), core.Request{Operation: core.Operation(command), Input: core.PlanFile{Path: plan}, WorkingDir: dir, Overwrite: true})
 				if result.Status != "invalid" || result.Output.Published || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diag.FontInvalid || result.Diagnostics[0].File != fontPath || !strings.Contains(result.Diagnostics[0].Message, "different PostScript name") {
 					t.Fatalf("%s did not refuse name early: %+v", command, result)
 				}

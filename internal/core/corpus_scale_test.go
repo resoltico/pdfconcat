@@ -93,7 +93,7 @@ func TestCorpusScaleProfiles(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				r = core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "report.json")}))
+				r = core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: filepath.Join(dir, "report.json")})
 			}
 
 			if r.Status != "ok" {

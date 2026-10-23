@@ -4,6 +4,7 @@
 package core_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json/v2"
 	"errors"
@@ -276,7 +277,6 @@ func profileOracle(t *testing.T, p corpusProfile, r core.Result) {
 }
 func TestCorpus(t *testing.T) {
 	cli := corpusBinary(t, "pdfconcat", "../../cmd/pdfconcat")
-	client := corpusBinary(t, "core-client", "./testdata/client")
 	if err := profileCoverage(corpusProfiles); err != nil {
 		t.Fatal(err)
 	}
@@ -287,19 +287,19 @@ func TestCorpus(t *testing.T) {
 			plan := filepath.Join(dir, "plan.json")
 			corpusJSON(t, plan, profilePlan(p))
 			matrix = append(matrix, corpusRecord{ID: p.ID, Boundary: "core check/build", ArtifactDir: dir, Factors: &p.Factors, ExpectedSequence: p.Sequence, ExpectedOutlines: p.Outlines})
-			check := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromPlan(core.FilePlan(plan)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "check.json")}))
+			check := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanFile{Path: plan}, WorkingDir: dir, Report: filepath.Join(dir, "check.json")})
 			checkProfileFacts(t, p, check)
 			if check.Output.Published {
 				t.Fatal("check published output")
 			}
-			build := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(plan)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "build.json")}))
+			build := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: plan}, WorkingDir: dir, Report: filepath.Join(dir, "build.json")})
 			checkProfileFacts(t, p, build)
 			corpusArtifact(t, build)
 			schemaValid(t, build)
 			corpusJSON(t, filepath.Join(dir, "complete.json"), build)
 			t.Run("oracle", func(t *testing.T) { profileOracle(t, p, build) })
 			if p.ID == "all-profiles" {
-				t.Run("transports", func(t *testing.T) { corpusTransports(t, p, cli, client) })
+				t.Run("transports", func(t *testing.T) { corpusTransports(t, p, cli) })
 			}
 		})
 	}
@@ -330,15 +330,17 @@ func TestCorpus(t *testing.T) {
 	})
 	corpusJSON(t, filepath.Join(t.ArtifactDir(), "matrix.json"), matrix)
 }
-func corpusTransports(t *testing.T, p corpusProfile, cli, client string) {
+func corpusTransports(t *testing.T, p corpusProfile, cli string) {
 	var first core.Result
-	for _, mode := range []string{"file", "bytes", "loader", "document", "cli-json", "cli-text", "cli-stdin"} {
+	for _, mode := range []string{"file", "bytes", "cli-json", "cli-text", "cli-stdin"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := corpusStage(t, "business-report.pdf", "business-report-object-streams.pdf", "fonts/Go-Italic.ttf", "fonts/Go-Mono.ttf")
 			plan := filepath.Join(dir, "plan.json")
 			corpusJSON(t, plan, profilePlan(p))
 			output, report := filepath.Join(dir, "packet.pdf"), filepath.Join(dir, "report.json")
-			cmd := exec.CommandContext(t.Context(), client, mode, plan, dir, output, report)
+
+			var raw []byte
+			var err error
 			if strings.HasPrefix(mode, "cli-") {
 				args := []string{"build", "--plan", plan, "--output", output, "--report", report}
 				if mode == "cli-text" {
@@ -348,20 +350,35 @@ func corpusTransports(t *testing.T, p corpusProfile, cli, client string) {
 					args[2] = "-"
 					args = append(args, "--base-dir", dir)
 				}
-				cmd = exec.CommandContext(t.Context(), cli, args...)
+				cmd := exec.CommandContext(t.Context(), cli, args...)
+				cmd.Dir = dir
 				if mode == "cli-stdin" {
-					data, err := os.ReadFile(plan)
-					if err != nil {
-						t.Fatal(err)
+					data, readErr := os.ReadFile(plan)
+					if readErr != nil {
+						t.Fatal(readErr)
 					}
-					cmd.Stdin = strings.NewReader(string(data))
+					cmd.Stdin = bytes.NewReader(data)
 				}
+				raw, err = cmd.Output()
+			} else {
+				var input core.Input = core.PlanFile{Path: plan}
+				if mode == "bytes" {
+					data, readErr := os.ReadFile(plan)
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					input = core.PlanBytes{Data: data, Label: plan, BaseDir: dir}
+				}
+				complete := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: input, WorkingDir: dir, Output: output, Report: report})
+				if complete.Status != "ok" {
+					t.Fatal(complete)
+				}
+				raw, err = json.Marshal(complete)
 			}
-			cmd.Dir = dir
-			raw, err := cmd.Output()
 			if err != nil {
 				t.Fatalf("%s: %s %v", mode, raw, err)
 			}
+
 			if err = os.WriteFile(filepath.Join(dir, "stdout"), raw, 0600); err != nil {
 				t.Fatal(err)
 			}

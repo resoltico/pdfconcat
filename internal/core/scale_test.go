@@ -67,7 +67,7 @@ func TestScale(t *testing.T) {
 			plan := writePlan(t, dir, items)
 			fixtureTime := time.Since(fixtureStart)
 			start := time.Now()
-			r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(plan)), core.Options{WorkingDir: dir}))
+			r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: plan}, WorkingDir: dir})
 			elapsed := time.Since(start)
 			if r.Status != "ok" || r.Output == nil || !r.Output.Published || r.Pages == nil || r.Pages.Total == nil || *r.Pages.Total != scenario.pages {
 				t.Fatalf("scale outcome: %+v", r)
@@ -92,7 +92,7 @@ func BenchmarkBuild(b *testing.B) {
 		b.Fatal(err)
 	}
 	plan := writePlan(b, dir, []any{map[string]any{"source": "source.pdf"}, map[string]any{"page": map[string]any{"text": map[string]any{"value": "Pielikums Ā ļ ķ Ελληνικά"}}}})
-	request := core.NewRequest(core.Build, core.FromPlan(core.FilePlan(plan)), core.Options{WorkingDir: dir, Overwrite: true})
+	request := core.Request{Operation: core.Build, Input: core.PlanFile{Path: plan}, WorkingDir: dir, Overwrite: true}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

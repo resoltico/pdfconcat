@@ -4,56 +4,12 @@
 package core
 
 import (
-	"context"
 	"encoding/json/v2"
-	"errors"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
-	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
-
-func knownCount(n int64) *int64           { return &n }
-func hasErrors(ds []diag.Diagnostic) bool { status, _ := diag.Outcome(ds); return status != "ok" }
-func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		code = diag.Interrupted
-	}
-	d := diag.New(code, err.Error())
-	if file != "<stdin>" {
-		d.File = file
-	}
-	return d
-}
-
-func declaredReportPart(leaf packet.Leaf) result.Part {
-	p := result.Part{Item: leaf.Ref, Kind: leaf.Kind, Path: leaf.Source, Section: leaf.Owner}
-	switch leaf.Kind {
-	case packet.PartSource:
-		p.FieldsRenamed = []packet.FieldRename{}
-	case packet.PartPage, packet.PartDivider:
-		p.Count = leaf.Count
-	case packet.PartContents, packet.PartPadding:
-	}
-	return p
-}
-func reportSections(sections []packet.Section, resolved bool) []result.Section {
-	resultSections := make([]result.Section, 0, len(sections))
-	for _, section := range sections {
-		s := result.Section{Item: section.Item, Title: section.Title}
-		if section.Parent != "" {
-			parent := section.Parent
-			s.Parent = &parent
-		}
-		if resolved {
-			s.TargetPage = knownCount(section.Target)
-			s.OutputPages = &[2]int64{section.FirstPage, section.LastPage}
-		}
-		resultSections = append(resultSections, s)
-	}
-	return resultSections
-}
 
 func writeReport(r *result.Result, roles files.Files) {
 	if r.Report == nil {
@@ -84,16 +40,5 @@ func writeReport(r *result.Result, roles files.Files) {
 		d := diag.New(diag.ReportWriteFailed, err.Error())
 		d.File = roles.Report
 		r.Diagnostics = append(r.Diagnostics, d)
-	}
-}
-
-func noteCancellation(c context.Context, r *result.Result) {
-	if err := c.Err(); err != nil {
-		for _, d := range r.Diagnostics {
-			if d.Code == diag.Interrupted {
-				return
-			}
-		}
-		r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
 	}
 }

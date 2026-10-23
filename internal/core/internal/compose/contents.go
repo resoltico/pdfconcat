@@ -30,7 +30,7 @@ type Contents struct {
 
 // PrepareContents wraps titles with a conservative fixed digit column, before
 // any parity or section target is known. There is no pagination fixed point.
-func PrepareContents(c context.Context, j packet.Plan, facts map[string]packet.SourceFacts, fonts map[packet.Font]*typeset.Font, footer *Footer) (*Contents, []diag.Diagnostic) {
+func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFacts, fonts map[packet.Font]*typeset.Font, footer *Footer) (*Contents, []diag.Diagnostic) {
 	leaves, sections := j.Leaves(), j.Sections()
 	var contents *packet.ContentsItem
 	pointer := ""
@@ -45,7 +45,9 @@ func PrepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 	for _, leaf := range leaves {
 		switch leaf.Kind {
 		case packet.PartSource:
-			addBound(int64(facts[leaf.Ref].Pages))
+			if leaf.Index < len(facts) {
+				addBound(int64(facts[leaf.Index].Pages))
+			}
 		case packet.PartContents:
 			contents = leaf.Contents
 			pointer = leaf.Ref

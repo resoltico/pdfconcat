@@ -47,11 +47,11 @@ func TestCompositionReportPartitionsPhysicalPacket(t *testing.T) {
 		map[string]any{"page": map[string]any{}, "count": 2},
 	}}
 	path := packetPlan(t, dir, recipe)
-	checked := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+	checked := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 	if checked.Status != "ok" || checked.Output.Published {
 		t.Fatalf("check: %+v", checked.Diagnostics)
 	}
-	built := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+	built := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 	if built.Status != "ok" || !built.Output.Published {
 		t.Fatalf("build: %+v", built.Diagnostics)
 	}
@@ -176,7 +176,7 @@ func TestRefusedCompositionRetainsOnlyEstablishedFacts(t *testing.T) {
 			if kind == "font" {
 				report = filepath.Join(t.TempDir(), "report.json")
 			}
-			r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: report}))
+			r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: report})
 			if r.Status == "ok" || r.Output.Published || !r.Report.Written {
 				t.Fatalf("refusal/report: %+v", r)
 			}

@@ -13,12 +13,11 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font, []diag.Diagnostic) {
-	r := result.New("")
+	var ds []diag.Diagnostic
 	fonts := map[packet.Font]*typeset.Font{}
 	var fontOrder []packet.Font
 	fontItems := map[packet.Font][]string{}
@@ -73,8 +72,8 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 	}
 	for _, name := range fontOrder {
 		if c.Err() != nil {
-			noteCancellation(c, &r)
-			return fonts, r.Diagnostics
+			ds = append(ds, diag.New(diag.Interrupted, c.Err().Error()))
+			return fonts, ds
 		}
 		var font *typeset.Font
 		var err error
@@ -86,7 +85,7 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 			if err != nil {
 				d := ioDiagnostic(diag.FontUnreadable, err, name.Path)
 				d.Items = fontItems[name]
-				r.Diagnostics = append(r.Diagnostics, d)
+				ds = append(ds, d)
 				continue
 			}
 			font, err = typeset.LoadFont(data)
@@ -104,7 +103,7 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 			if name != (packet.Font{}) {
 				d.File = name.Path
 			}
-			r.Diagnostics = append(r.Diagnostics, d)
+			ds = append(ds, d)
 		} else {
 			fonts[name] = font
 		}
@@ -112,8 +111,8 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 	var shaper typeset.Shaper
 	for _, key := range textOrder {
 		if c.Err() != nil {
-			noteCancellation(c, &r)
-			return fonts, r.Diagnostics
+			ds = append(ds, diag.New(diag.Interrupted, c.Err().Error()))
+			return fonts, ds
 		}
 		if font := fonts[key.font]; font != nil {
 			if err := shaper.ValidateText(font, key.value); err != nil {
@@ -122,13 +121,13 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 				if key.font != (packet.Font{}) {
 					d.File = key.font.Path
 				}
-				r.Diagnostics = append(r.Diagnostics, d)
+				ds = append(ds, d)
 			}
 		}
 		if err := c.Err(); err != nil {
-			r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
+			ds = append(ds, diag.New(diag.Interrupted, err.Error()))
 			break
 		}
 	}
-	return fonts, r.Diagnostics
+	return fonts, ds
 }

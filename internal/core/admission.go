@@ -5,120 +5,119 @@ package core
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/plan"
-	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
-// admissionOutcome retains known physical roles even if declaration acquisition fails.
-type admissionOutcome struct {
-	plan          packet.Plan
+type admission struct {
+	plan          *packet.Plan
 	roles         files.Files
-	result        result.Result
+	diagnostics   []diag.Diagnostic
 	reportRefused bool
 }
 
-func admit(c context.Context, request Request) admissionOutcome {
-	o := request.options
-	input := request.input
-	a := admissionOutcome{roles: files.Files{Overwrite: o.Overwrite}, result: result.New(string(request.operation))}
-	// Reservations must precede cancellation and acquisition failures.
-	switch input.kind {
-	case 1:
-		if input.source.kind == 1 {
-			if path, err := packet.Path(o.WorkingDir, input.source.path); err == nil {
-				a.roles.Inputs = append(a.roles.Inputs, path)
-			}
+func admit(ctx context.Context, req Request) *admission {
+	a := &admission{roles: files.Files{Overwrite: req.Overwrite}}
+	// Reserve physical inputs before cancellation or acquisition can fail.
+	switch input := req.Input.(type) {
+	case PlanFile:
+		if path, err := packet.Path(req.WorkingDir, input.Path); err == nil {
+			a.roles.Inputs = append(a.roles.Inputs, path)
 		}
-	case 2:
-		a.roles.Inputs = append(a.roles.Inputs, input.document.reservations...)
-		if input.document.origin != "" {
-			a.roles.Inputs = append(a.roles.Inputs, input.document.origin)
-		}
-	case 3:
-		for _, item := range input.items {
-			if item.kind == 1 {
-				if path, err := packet.Path(o.WorkingDir, item.path); err == nil {
+	case Items:
+		for _, item := range input {
+			if source, ok := item.(SourceItem); ok {
+				if path, err := packet.Path(req.WorkingDir, source.Path); err == nil {
 					a.roles.Inputs = append(a.roles.Inputs, path)
 				}
 			}
 		}
 	}
-	if o.Report != "" {
-		path, err := packet.Path(o.WorkingDir, o.Report)
+	if req.Report != "" {
+		path, err := packet.Path(req.WorkingDir, req.Report)
 		if err != nil {
-			a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.PathInvalid, err.Error()))
+			a.diagnostics = append(a.diagnostics, diag.New(diag.PathInvalid, err.Error()))
 			return a
 		}
 		a.roles.Report = path
-		a.result.Report = &result.Report{Path: path}
 	}
-	if o.Output != "" {
-		path, err := packet.Path(o.WorkingDir, o.Output)
+	if req.Output != "" {
+		path, err := packet.Path(req.WorkingDir, req.Output)
 		if err != nil {
-			a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.PathInvalid, err.Error()))
+			a.diagnostics = append(a.diagnostics, diag.New(diag.PathInvalid, err.Error()))
 			return a
 		}
 		a.roles.Output = path
-		a.result.Output = &result.Output{Path: path}
 	}
-	if err := c.Err(); err != nil {
-		a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.Interrupted, err.Error()))
+	if err := ctx.Err(); err != nil {
+		a.diagnostics = append(a.diagnostics, diag.New(diag.Interrupted, err.Error()))
 		return a
 	}
+	var declared packet.Plan
 	var ds []diag.Diagnostic
-	switch input.kind {
-	case 1:
-		data, label, base, _, faults := acquirePlan(c, input.source, o.WorkingDir)
-		ds = faults
-		if len(ds) == 0 {
-			a.plan, ds = plan.Decode(data, label, base)
+	switch input := req.Input.(type) {
+	case PlanFile:
+		path, err := packet.Path(req.WorkingDir, input.Path)
+		if err != nil {
+			ds = []diag.Diagnostic{diag.New(diag.PathInvalid, err.Error())}
+			break
 		}
-	case 2:
-		a.plan, ds = plan.Decode(input.document.data, input.document.label, input.document.base)
-	case 3:
-		items := directReferences(input.items)
-		direct := make([]directItem, len(items))
-		for n, i := range items {
-			direct[n] = directItem{Path: i.path, Reference: i.reference, Blank: i.kind == 2}
+		data, err := files.Read(ctx, path, MaxPlanBytes)
+		if err != nil {
+			code := diag.PlanUnreadable
+			if errors.Is(err, files.ErrTooLarge) {
+				code = diag.PlanTooLarge
+			}
+			ds = []diag.Diagnostic{ioDiagnostic(code, err, path)}
+			break
 		}
-		a.plan, ds = directPlan(direct, o.WorkingDir)
+		declared, ds = plan.Decode(data, path, filepath.Dir(path))
+	case PlanBytes:
+		base := req.WorkingDir
+		var err error
+		if input.BaseDir != "" {
+			base, err = packet.Path(req.WorkingDir, input.BaseDir)
+		}
+		if err != nil {
+			ds = []diag.Diagnostic{diag.New(diag.PathInvalid, err.Error())}
+			break
+		}
+		if len(input.Data) > MaxPlanBytes {
+			ds = []diag.Diagnostic{ioDiagnostic(diag.PlanTooLarge, files.ErrTooLarge, input.Label)}
+			break
+		}
+		declared, ds = plan.Decode(slices.Clone(input.Data), input.Label, base)
+	case Items:
+		declared, ds = directPlan(input, req.WorkingDir)
 	}
-	a.result.Diagnostics = append(a.result.Diagnostics, ds...)
+	a.diagnostics = append(a.diagnostics, ds...)
 	if hasErrors(ds) {
 		return a
 	}
+	a.plan = &declared
 	a.roles.InputsKnown = true
-	a.roles.Inputs = append(a.roles.Inputs, inputPaths(a.plan)...)
-	if o.Output != "" {
-		a.plan.Output = a.roles.Output
+	a.roles.Inputs = append(a.roles.Inputs, inputPaths(declared)...)
+	if req.Output != "" {
+		declared.Output = a.roles.Output
 	} else {
-		a.roles.Output = a.plan.Output
+		a.roles.Output = declared.Output
 	}
-	if a.plan.Output != "" {
-		a.result.Output = &result.Output{Path: a.plan.Output}
+	if req.FitTo != nil {
+		size := req.FitTo.size
+		declared.FitTo = &size
 	}
-	if o.FitTo != nil {
-		size := o.FitTo.size
-		a.plan.FitTo = &size
-	}
-	a.result.FitTo = a.plan.FitTo
-	a.result.PageNumbers = a.plan.PageNumbers
-	leaves, sections := a.plan.Leaves(), a.plan.Sections()
-	a.result.Pages = &result.Pages{}
-	a.result.Sections = reportSections(sections, false)
-	for _, leaf := range leaves {
-		a.result.Parts = append(a.result.Parts, declaredReportPart(leaf))
-	}
-	if request.operation == Build && a.plan.Output == "" {
-		a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.UsageMissingOutput, "Give -o FILE or plan output."))
+	if req.Operation == Build && declared.Output == "" {
+		a.diagnostics = append(a.diagnostics, diag.New(diag.UsageMissingOutput, "Give -o FILE or plan output."))
 	}
 	refusals := a.roles.Check()
-	a.result.Diagnostics = append(a.result.Diagnostics, refusals...)
+	a.diagnostics = append(a.diagnostics, refusals...)
 	for _, d := range refusals {
 		if strings.HasPrefix(d.Code.String(), "report_") {
 			a.reportRefused = true
@@ -126,35 +125,51 @@ func admit(c context.Context, request Request) admissionOutcome {
 	}
 	return a
 }
-
-// directItem is the frontend's source or blank operand.
-type directItem struct {
-	Path, Reference string
-	Blank           bool
-}
-
-func directPlan(items []directItem, base string) (packet.Plan, []diag.Diagnostic) {
+func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 	var declared []packet.Item
 	var ds []diag.Diagnostic
 	generated := 0
 	for index, item := range items {
-		if item.Blank {
+		blank, isBlank := item.(BlankItem)
+		if isBlank {
 			generated++
 		}
 		if index >= packet.MaxEntries || generated > packet.MaxGeneratedPages {
-			ds = append(ds, diag.New(diag.PlanLimit, "Direct items exceed the authored item or generated-page budget.", item.Reference))
+			ref := ""
+			if isBlank {
+				ref = blank.Ref
+			} else if source, ok := item.(SourceItem); ok {
+				ref = source.Ref
+			}
+			ds = append(ds, diag.New(diag.PlanLimit, "Direct items exceed the authored item or generated-page budget.", ref))
 			break
 		}
-		if item.Blank {
-			declared = append(declared, &packet.PageItem{Ref: item.Reference, Style: packet.Defaults(), Count: 1})
+		if isBlank {
+			declared = append(declared, &packet.PageItem{Ref: blank.Ref, Style: packet.Defaults(), Count: 1})
 			continue
 		}
-		path, err := packet.Path(base, item.Path)
+		source, ok := item.(SourceItem)
+		if !ok {
+			continue
+		} // Request validation seals the variants.
+		path, err := packet.Path(base, source.Path)
 		if err != nil {
-			ds = append(ds, diag.New(diag.PathInvalid, err.Error(), item.Reference))
+			ds = append(ds, diag.New(diag.PathInvalid, err.Error(), source.Ref))
 			continue
 		}
-		declared = append(declared, &packet.SourceItem{Ref: item.Reference, Path: path})
+		declared = append(declared, &packet.SourceItem{Ref: source.Ref, Path: path})
 	}
 	return packet.NewPlan("", nil, nil, packet.Defaults(), declared), ds
+}
+func inputPaths(p packet.Plan) []string {
+	var paths []string
+	for _, item := range p.Leaves() {
+		if item.Kind == packet.PartSource {
+			paths = append(paths, item.Source)
+		}
+		if item.Page != nil && item.Page.Text.Font.Value.Path != "" {
+			paths = append(paths, item.Page.Text.Font.Value.Path)
+		}
+	}
+	return paths
 }

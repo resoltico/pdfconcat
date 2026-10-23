@@ -53,23 +53,23 @@ func CheckCompatibility(layout packet.Layout, facts map[string]SourceFacts, occu
 		authoredDepth := authoredDepths[p.Owner]
 		// The backend counts the first native item at depth zero.
 		if authoredDepth+selected.OutlineDepth > model.DefaultResourceLimits().MaxRecursionDepth+1 {
-			add("source_outline_depth_unsupported", "Authored sections and imported bookmarks exceed the PDF backend's supported outline hierarchy; reduce section nesting or source bookmark depth.")
+			add(diag.SourceOutlineDepthUnsupported, "Authored sections and imported bookmarks exceed the PDF backend's supported outline hierarchy; reduce section nesting or source bookmark depth.")
 		}
 		if fit != nil && f.HasWidgets {
-			add("fit_form_unsupported", "Fitting source form widgets is unsupported.")
+			add(diag.FitFormUnsupported, "Fitting source form widgets is unsupported.")
 		}
 		if fit != nil && selected.HasCoordinateDestinations {
-			add("fit_destination_unsupported", "Fitting internal page destinations with numeric position coordinates is unsupported; use the original page sizes.")
+			add(diag.FitDestinationUnsupported, "Fitting internal page destinations with numeric position coordinates is unsupported; use the original page sizes.")
 		}
 		if f.HasFields {
 			if defaults != "" && defaults != f.FormDefaultsDigest {
-				add("source_form_unsupported", "Nonempty forms require identical resolved DR/DA/Q representations; these differ; assemble separately or flatten with a suitable PDF tool.")
+				add(diag.SourceFormUnsupported, "Nonempty forms require identical resolved DR/DA/Q representations; these differ; assemble separately or flatten with a suitable PDF tool.")
 			} else {
 				defaults = f.FormDefaultsDigest
 			}
 		}
 		if result.version >= model.V20 && selected.PDF20AppearanceIssue != "" {
-			add("source_output_incompatible", fmt.Sprintf("%s; source %q requires PDF 2.0 output. Supply complete annotation appearances or assemble the affected source separately.", selected.PDF20AppearanceIssue, versionSource))
+			add(diag.SourceOutputIncompatible, fmt.Sprintf("%s; source %q requires PDF 2.0 output. Supply complete annotation appearances or assemble the affected source separately.", selected.PDF20AppearanceIssue, versionSource))
 		}
 	}
 	return result

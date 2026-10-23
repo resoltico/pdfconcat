@@ -65,7 +65,7 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 				t.Fatalf("facts %+v: %+v", f, ds)
 			}
 			_, _, ds = assembleDocs(t, []*pdffixture.Doc{d}, &packet.Size{Width: 300, Height: 400})
-			if !codePresent(ds, "fit_destination_unsupported") {
+			if !codePresent(ds, diag.FitDestinationUnsupported) {
 				t.Fatal(ds)
 			}
 			path, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, nil)
@@ -163,7 +163,7 @@ func TestRetainedDestinationRoles(t *testing.T) {
 				docs = append(docs, tc.doc)
 			}
 			_, _, ds = assembleDocs(t, docs, &packet.Size{Width: 300, Height: 400})
-			if codePresent(ds, "fit_destination_unsupported") != tc.want {
+			if codePresent(ds, diag.FitDestinationUnsupported) != tc.want {
 				t.Fatal(ds)
 			}
 		})
@@ -176,14 +176,14 @@ func TestCompatibilityRefusesBeforePublication(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/reverse=%v", kind, reverse), func(t *testing.T) {
 				dir := t.TempDir()
 				docs := []*pdffixture.Doc{localLink("/FitH 20", false)}
-				code := diag.Code("fit_destination_unsupported")
+				code := diag.FitDestinationUnsupported
 				fit := "A4"
 				if strings.HasPrefix(kind, "Screen") {
 					docs = []*pdffixture.Doc{screenAction(kind == "Screen chained")}
 				}
 				if kind == "appearance" {
 					docs = []*pdffixture.Doc{defaultForm("FORM", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0), pdffixture.Versioned("plain", "2.0", "")}
-					code = "source_output_incompatible"
+					code = diag.SourceOutputIncompatible
 					fit = ""
 				}
 				if reverse && len(docs) == 2 {
@@ -348,22 +348,22 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 		doc  *pdffixture.Doc
 		code diag.Code
 	}{
-		{"page tree at depth 64 with link", pageTreeWithLink(64), ""},
-		{"page tree over depth 64", pageTreeWithLink(65), "source_damaged"},
-		{"field tree at depth 64 with widget", fieldTreeWithWidget(64), ""},
-		{"field tree over depth 64", fieldTreeWithWidget(65), "source_invalid"},
-		{"excessive direct nesting", insertEntry(pdffixture.Plain("nested"), 1, "/Private "+strings.Repeat("<< /Private ", 130)+"null"+strings.Repeat(" >>", 130)), "source_invalid"},
+		{"page tree at depth 64 with link", pageTreeWithLink(64), diag.Code{}},
+		{"page tree over depth 64", pageTreeWithLink(65), diag.SourceDamaged},
+		{"field tree at depth 64 with widget", fieldTreeWithWidget(64), diag.Code{}},
+		{"field tree over depth 64", fieldTreeWithWidget(65), diag.SourceInvalid},
+		{"excessive direct nesting", insertEntry(pdffixture.Plain("nested"), 1, "/Private "+strings.Repeat("<< /Private ", 130)+"null"+strings.Repeat(" >>", 130)), diag.SourceInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			facts, ds := pdf.Inspect(t.Context(), tc.doc.Bytes())
-			if tc.code != "" {
+			if tc.code != (diag.Code{}) {
 				if !codePresent(ds, tc.code) {
 					t.Fatalf("hierarchy guard did not reject: %+v", ds)
 				}
 			} else if status, _ := diag.Outcome(ds); status != "ok" || facts.Pages != 1 {
 				t.Fatalf("observer narrowed page-tree boundary: %+v", ds)
 			}
-			if tc.code == "" {
+			if tc.code == (diag.Code{}) {
 				path := filepath.Join(t.TempDir(), "source.pdf")
 				if err := tc.doc.WriteFile(path); err != nil {
 					t.Fatal(err)
@@ -381,7 +381,7 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 	}
 	pageCycle := pageTreeWithLink(2)
 	pageCycle.Objs[6] = []byte("<< /Type /Pages /Parent 2 0 R /Kids [2 0 R] /Count 1 >>")
-	if _, ds := pdf.Inspect(t.Context(), pageCycle.Bytes()); !codePresent(ds, "source_damaged") {
+	if _, ds := pdf.Inspect(t.Context(), pageCycle.Bytes()); !codePresent(ds, diag.SourceDamaged) {
 		t.Fatalf("cyclic page tree escaped source guard: %+v", ds)
 	}
 }

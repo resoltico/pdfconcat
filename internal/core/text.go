@@ -37,7 +37,7 @@ func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.F
 			continue
 		}
 		if err := c.Err(); err != nil {
-			r.Diagnostics = append(r.Diagnostics, diag.New("interrupted", err.Error()))
+			r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
 			break
 		}
 		style := p.Page
@@ -57,7 +57,7 @@ func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.F
 					width = p.Size.Width - 72
 				}
 				if width < 1 {
-					r.Diagnostics = append(r.Diagnostics, diag.New("text_overflow", "Default margins leave no usable text width; give an explicit width of at least 1 point or a wider page.", p.Pointer))
+					r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflow, "Default margins leave no usable text width; give an explicit width of at least 1 point or a wider page.", p.Pointer))
 					continue
 				}
 				params := typeset.Params{Text: style.Text.Value, Size: style.Text.Size, PageWidth: p.Size.Width, PageHeight: p.Size.Height, OffsetX: style.Text.X, OffsetY: style.Text.Y, WrapWidth: width, LineSpacing: style.Text.Leading, Anchor: anchor(style.Text.Anchor), Align: alignment(style.Text.Align)}
@@ -77,7 +77,7 @@ func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.F
 			}
 			r.Parts[i].Text = text
 			if len(placed.Findings) > 0 && value.err == nil {
-				r.Diagnostics = append(r.Diagnostics, diag.New("text_overflow_allowed", "Measured text extends outside the page or text block.", p.Pointer))
+				r.Diagnostics = append(r.Diagnostics, diag.New(diag.TextOverflowAllowed, "Measured text extends outside the page or text block.", p.Pointer))
 			}
 		}
 		if value.err != nil {
@@ -159,7 +159,7 @@ func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occ
 		}
 		if f.HasFields {
 			if predict && i > 0 {
-				add("form_fields_renamed", "Predicted: pdfcpu may namespace this later form, including distinct names; build records actual mappings.")
+				add(diag.FormFieldsRenamed, "Predicted: pdfcpu may namespace this later form, including distinct names; build records actual mappings.")
 			}
 		}
 		collision := false
@@ -170,7 +170,7 @@ func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occ
 			names[name] = true
 		}
 		if predict && collision {
-			add("destinations_renamed", "Predicted: colliding destination names will be renamed for affected occurrences.")
+			add(diag.DestinationsRenamed, "Predicted: colliding destination names will be renamed for affected occurrences.")
 		}
 	}
 	return ds

@@ -79,7 +79,7 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 			var data []byte
 			data, err = files.Read(c, name, 0)
 			if err != nil {
-				d := ioDiagnostic("font_unreadable", err, name)
+				d := ioDiagnostic(diag.FontUnreadable, err, name)
 				d.Items = fontItems[name]
 				r.Diagnostics = append(r.Diagnostics, d)
 				continue
@@ -90,10 +90,10 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 			err = pdf.ValidateFontName(font)
 		}
 		if err != nil {
-			code := diag.Code("font_invalid")
+			code := diag.FontInvalid
 			var embedding *typeset.EmbeddingError
 			if errors.As(err, &embedding) {
-				code = "font_not_embeddable"
+				code = diag.FontNotEmbeddable
 			}
 			d := diag.New(code, err.Error(), fontItems[name]...)
 			if name != "default" {
@@ -121,7 +121,7 @@ func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []dia
 			}
 		}
 		if err := c.Err(); err != nil {
-			r.Diagnostics = append(r.Diagnostics, diag.New("interrupted", err.Error()))
+			r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
 			break
 		}
 	}

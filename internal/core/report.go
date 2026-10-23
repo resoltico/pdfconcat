@@ -18,7 +18,7 @@ func knownCount(n int64) *int64           { return &n }
 func hasErrors(ds []diag.Diagnostic) bool { status, _ := diag.Outcome(ds); return status != "ok" }
 func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		code = "interrupted"
+		code = diag.Interrupted
 	}
 	d := diag.New(code, err.Error())
 	if file != "<stdin>" {
@@ -80,7 +80,7 @@ func writeReport(r *result.Result, roles files.Files) {
 		}
 	}
 	if err != nil {
-		d := diag.New("report_write_failed", err.Error())
+		d := diag.New(diag.ReportWriteFailed, err.Error())
 		d.File = roles.Report
 		r.Diagnostics = append(r.Diagnostics, d)
 	}
@@ -89,10 +89,10 @@ func writeReport(r *result.Result, roles files.Files) {
 func noteCancellation(c context.Context, r *result.Result) {
 	if err := c.Err(); err != nil {
 		for _, d := range r.Diagnostics {
-			if d.Code == "interrupted" {
+			if d.Code == diag.Interrupted {
 				return
 			}
 		}
-		r.Diagnostics = append(r.Diagnostics, diag.New("interrupted", err.Error()))
+		r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
 	}
 }

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -468,7 +470,7 @@ func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
 				t.Fatal("overflow was accepted")
 			}
 			diagnostic := Diagnostic(err)
-			if diagnostic.Code != "text_overflow" {
+			if diagnostic.Code != diag.TextOverflow {
 				t.Fatalf("overflow classification: %+v", diagnostic)
 			}
 			assertFooterMarginHintFits(t, digits, tc.size, tc.number, diagnostic.Message)
@@ -510,7 +512,7 @@ func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
 	if err = CheckNumberPlacement(tight, tightSize, 1, minimum); err != nil {
 		t.Fatalf("rounded advice left the narrow usable interval: %g: %v", minimum, err)
 	}
-	if err = CheckNumberPlacement(digits, packet.Size{Width: 300, Height: math.NaN()}, 1, 24); err == nil || Diagnostic(err).Code != "text_overflow" {
+	if err = CheckNumberPlacement(digits, packet.Size{Width: 300, Height: math.NaN()}, 1, 24); err == nil || Diagnostic(err).Code != diag.TextOverflow {
 		t.Fatalf("nonfinite physical height escaped the guard: %v", err)
 	}
 }
@@ -558,7 +560,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 				t.Fatal("lower logical overflow was accepted")
 			}
 			d := Diagnostic(err)
-			if d.Code != "text_overflow" || !strings.Contains(d.Message, "Increase page_numbers.margin") || !reflect.DeepEqual(d.Items, []string{"/items/1", "/page_numbers"}) || d.File != layout.Parts[0].Source {
+			if d.Code != diag.TextOverflow || !strings.Contains(d.Message, "Increase page_numbers.margin") || !reflect.DeepEqual(d.Items, []string{"/items/1", "/page_numbers"}) || d.File != layout.Parts[0].Source {
 				t.Fatalf("physical footer advice/context: %+v", d)
 			}
 		})

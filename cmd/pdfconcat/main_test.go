@@ -180,7 +180,7 @@ func TestBuildBinarySmoke(t *testing.T) {
 
 func hasDiagnostic(r core.Result, code string) bool {
 	for _, d := range r.Diagnostics {
-		if string(d.Code) == code {
+		if d.Code.String() == code {
 			return true
 		}
 	}

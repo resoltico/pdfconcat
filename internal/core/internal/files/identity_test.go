@@ -54,7 +54,7 @@ func TestIdentityQueryErrorsRefuseReport(t *testing.T) {
 				roles := Files{Report: report, Inputs: []string{input}, InputsKnown: true, Overwrite: true}
 				ds := roles.checkReport(true, query)
 				status, exit := diag.Outcome(ds)
-				if len(ds) != 1 || ds[0].Code != "report_write_failed" || !roleErrors(ds) || status != "failed" || exit != 1 {
+				if len(ds) != 1 || ds[0].Code != diag.ReportInspectionFailed || !roleErrors(ds) || status != "failed" || exit != 1 {
 					t.Fatalf("identity failure authorized publication or became a collision/separation: %+v", ds)
 				}
 				if ds[0].File != report || !strings.Contains(ds[0].Message, operation) || !strings.Contains(ds[0].Message, failurePath) {

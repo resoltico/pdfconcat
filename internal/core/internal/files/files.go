@@ -35,12 +35,12 @@ func (f Files) checkReport(final bool, query identityQuery) []diag.Diagnostic {
 	if f.Report != "" && f.Output != "" && !hasNonregularReport(ds) {
 		same, err := samePathOrFile(f.Report, f.Output, query)
 		if err != nil {
-			d := diag.New("report_write_failed", err.Error())
+			d := diag.New(diag.ReportInspectionFailed, err.Error())
 			d.File = f.Report
 			ds = append(ds, d)
 		}
 		if same {
-			d := diag.New("report_is_output", "Report and output must be different files.")
+			d := diag.New(diag.ReportIsOutput, "Report and output must be different files.")
 			d.File = f.Report
 			ds = append(ds, d)
 		}
@@ -52,20 +52,20 @@ func (f Files) checkReport(final bool, query identityQuery) []diag.Diagnostic {
 			if err == nil && len(reserved.missing) > 0 {
 				collision, unproved, err = missingInputRelation(f.Report, reserved, query)
 			}
-			code := diag.Code("")
+			code := diag.Code{}
 			message := ""
 			switch {
 			case err != nil:
-				code = "report_write_failed"
+				code = diag.ReportInspectionFailed
 				message = err.Error()
 			case collision:
-				code = "report_is_input"
+				code = diag.ReportIsInput
 				message = "Destination aliases an input: " + input
 			case unproved:
-				code = "report_identity_unverified"
+				code = diag.ReportIdentityUnverified
 				message = "Cannot establish report separation from input: " + input + ". Use a different existing report directory."
 			}
-			if code != "" {
+			if code != (diag.Code{}) {
 				d := diag.New(code, message)
 				d.File = f.Report
 				ds = append(ds, d)
@@ -77,7 +77,7 @@ func (f Files) checkReport(final bool, query identityQuery) []diag.Diagnostic {
 }
 func hasNonregularReport(ds []diag.Diagnostic) bool {
 	for _, d := range ds {
-		if d.Code == "report_not_regular" {
+		if d.Code == diag.ReportNotRegular {
 			return true
 		}
 	}
@@ -90,18 +90,22 @@ func (f Files) checkTarget(path, role string, overwrite bool, query identityQuer
 		return nil
 	}
 	var ds []diag.Diagnostic
+	exists, notRegular, isInput, inspection := diag.OutputExists, diag.OutputNotRegular, diag.OutputIsInput, diag.OutputInspectionFailed
+	if role == "report" {
+		exists, notRegular, isInput, inspection = diag.ReportExists, diag.ReportNotRegular, diag.ReportIsInput, diag.ReportInspectionFailed
+	}
 	add := func(code diag.Code, message string) { d := diag.New(code, message); d.File = path; ds = append(ds, d) }
 	info, err := os.Lstat(path)
 	switch {
 	case err == nil:
 		if !info.Mode().IsRegular() {
-			add(diag.Code(role+"_not_regular"), "Destination must be a regular file; symlinks, directories and devices are refused.")
+			add(notRegular, "Destination must be a regular file; symlinks, directories and devices are refused.")
 		}
 		if !overwrite {
-			add(diag.Code(role+"_exists"), "Destination exists; use --overwrite (reports with unknown inputs always require a new path).")
+			add(exists, "Destination exists; use --overwrite (reports with unknown inputs always require a new path).")
 		}
 	case !errors.Is(err, fs.ErrNotExist):
-		add(diag.Code(role+"_write_failed"), "Cannot inspect destination: "+err.Error())
+		add(inspection, "Cannot inspect destination: "+err.Error())
 	}
 	if err == nil && !info.Mode().IsRegular() {
 		return ds
@@ -109,11 +113,11 @@ func (f Files) checkTarget(path, role string, overwrite bool, query identityQuer
 	for _, input := range f.Inputs {
 		same, identityErr := samePathOrFile(path, input, query)
 		if identityErr != nil {
-			add(diag.Code(role+"_write_failed"), identityErr.Error())
+			add(inspection, identityErr.Error())
 			break
 		}
 		if same {
-			add(diag.Code(role+"_is_input"), "Destination aliases an input: "+input)
+			add(isInput, "Destination aliases an input: "+input)
 			break
 		}
 	}

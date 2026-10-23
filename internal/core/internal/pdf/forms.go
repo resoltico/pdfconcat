@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
@@ -75,11 +77,11 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			return err
 		}
 		if depth > 64 {
-			return refuse("source_invalid", "Form field tree exceeds depth 64.")
+			return refuse(diag.SourceInvalid, "Form field tree exceeds depth 64.")
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if seen[ref] {
-				return refuse("source_invalid", "Form field tree repeats a node.")
+				return refuse(diag.SourceInvalid, "Form field tree repeats a node.")
 			}
 			seen[ref] = true
 		}
@@ -110,7 +112,7 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			return err
 		}
 		if ft == types.Name("Sig") && value != nil {
-			return refuse("source_signed", "Signature values are not supported; unsigned signature fields are allowed.")
+			return refuse(diag.SourceSigned, "Signature values are not supported; unsigned signature fields are allowed.")
 		}
 		kids, err := s.DereferenceArray(d["Kids"])
 		if err != nil {
@@ -186,11 +188,11 @@ func resourceIdentity(s *model.Context, o types.Object) (string, error) {
 	var visit func(types.Object, int) error
 	visit = func(o types.Object, depth int) error {
 		if depth > 64 {
-			return refuse("source_form_unsupported", "Form default resources are nested too deeply for compatibility comparison.")
+			return refuse(diag.SourceFormUnsupported, "Form default resources are nested too deeply for compatibility comparison.")
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if active[ref] {
-				return refuse("source_form_unsupported", "Cyclic form default resources are unsupported for compatibility comparison.")
+				return refuse(diag.SourceFormUnsupported, "Cyclic form default resources are unsupported for compatibility comparison.")
 			}
 			active[ref] = true
 			resolved, err := s.Dereference(ref)

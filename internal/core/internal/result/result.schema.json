@@ -28,7 +28,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 4
+          "const": 5
         },
         "command": {
           "enum": [
@@ -190,7 +190,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 4
+          "const": 5
         },
         "command": {
           "const": "version"

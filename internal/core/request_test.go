@@ -56,7 +56,7 @@ func schemaValid(t *testing.T, r core.Result) {
 }
 func code(r core.Result, want string) bool {
 	for _, d := range r.Diagnostics {
-		if string(d.Code) == want {
+		if d.Code.String() == want {
 			return true
 		}
 	}

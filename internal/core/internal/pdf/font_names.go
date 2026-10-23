@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
@@ -28,7 +30,7 @@ func ValidateFontName(font *typeset.Font) error {
 			continue
 		}
 		if _, err := hex.DecodeString(name[index+1 : index+3]); err == nil {
-			return refuse("font_invalid", fmt.Sprintf("Font PostScript name %q contains a literal hash followed by two hexadecimal digits that the PDF backend may decode again; use a font with a different PostScript name.", name))
+			return refuse(diag.FontInvalid, fmt.Sprintf("Font PostScript name %q contains a literal hash followed by two hexadecimal digits that the PDF backend may decode again; use a font with a different PostScript name.", name))
 		}
 	}
 	return nil

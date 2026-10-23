@@ -69,13 +69,13 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 	}
 	canvas := func(size Size, pointer string, padding bool) bool {
 		message := "Give an explicit page size when no source is available."
-		code := diag.Code("page_size_required")
+		code := diag.PageSizeRequired
 		switch {
 		case size == (Size{}):
 		case !(size.Width >= 1) || !(size.Height >= 1):
-			code, message = "plan_value", "Inherited generated-page sides must be at least 1 point; give an explicit size."
+			code, message = diag.PlanValue, "Inherited generated-page sides must be at least 1 point; give an explicit size."
 		case size.Width > MaxSide || size.Height > MaxSide:
-			code, message = "page_size_too_large", "Inherited page exceeds 14400 points; give an explicit size."
+			code, message = diag.PageSizeTooLarge, "Inherited page exceeds 14400 points; give an explicit size."
 		default:
 			return true
 		}
@@ -87,19 +87,19 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 	}
 	emit := func(leaf Leaf, padding bool) {
 		if layout.TotalPages == MaxPageIndex {
-			add("plan_limit", "Packet exceeds the supported page-index range.", leaf.Pointer)
+			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Pointer)
 			return
 		}
 		p := PlacedPart{Leaf: leaf, FirstPage: layout.TotalPages + 1}
 		if leaf.Kind == "source" {
 			f, ok := facts[leaf.Pointer]
 			if !ok || f.Pages < 1 {
-				add("source_invalid", "Source page facts are unavailable.", leaf.Pointer)
+				add(diag.SourceInvalid, "Source page facts are unavailable.", leaf.Pointer)
 				return
 			}
 			p.Pages = f.Pages
 			if int64(p.Pages) > MaxPageIndex-layout.TotalPages {
-				add("plan_limit", "Packet exceeds the supported page-index range.", leaf.Pointer)
+				add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Pointer)
 				return
 			}
 			ranges := f.Selection
@@ -109,14 +109,14 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 			var selected int64
 			for _, span := range ranges {
 				if span.First < 1 || span.Last < span.First || int64(span.Last-span.First) >= MaxPageIndex-selected {
-					add("plan_limit", "Selected source page count exceeds the supported page-index range.", leaf.Pointer)
+					add(diag.PlanLimit, "Selected source page count exceeds the supported page-index range.", leaf.Pointer)
 					return
 				}
 				p.Mapping = append(p.Mapping, SourceMapping{SourceFirst: span.First, SourceLast: span.Last, OutputFirst: p.FirstPage + selected})
 				selected += int64(span.Last-span.First) + 1
 			}
 			if selected != int64(p.Pages) {
-				add("source_invalid", "Selected source ranges and page count disagree.", leaf.Pointer)
+				add(diag.SourceInvalid, "Selected source ranges and page count disagree.", leaf.Pointer)
 				return
 			}
 			sourceSize, physicalSize = f.LastSize, f.LastSize
@@ -148,13 +148,13 @@ func Resolve(j Job, facts map[string]SourceFacts, contentsCount int) (Layout, []
 				return
 			}
 			if p.Pages < 1 || p.Pages > MaxGeneratedPages || layout.GeneratedPages+int64(p.Pages) > MaxGeneratedPages {
-				add("plan_limit", "Generated pages exceed 100000 or the contents page count is unavailable.", leaf.Pointer)
+				add(diag.PlanLimit, "Generated pages exceed 100000 or the contents page count is unavailable.", leaf.Pointer)
 				return
 			}
 			physicalSize = p.Size
 		}
 		if int64(p.Pages) > MaxPageIndex-layout.TotalPages {
-			add("plan_limit", "Packet exceeds the supported page-index range.", leaf.Pointer)
+			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Pointer)
 			return
 		}
 		if j.FitTo != nil {

@@ -26,7 +26,7 @@ func TestInvalidItemTypeExplainsShapesAtExactLocation(t *testing.T) {
 				t.Run(container.name+value+bom, func(t *testing.T) {
 					prefix := bom + container.prefix
 					_, ds := plan.Decode([]byte(prefix+value+container.suffix), "packet.json", t.TempDir())
-					if len(ds) != 1 || ds[0].Code != "plan_type" {
+					if len(ds) != 1 || ds[0].Code != diag.PlanType {
 						t.Fatalf("wrong item type: %+v", ds)
 					}
 					d := ds[0]
@@ -50,15 +50,15 @@ func TestItemBoundaryRetainsNullSyntaxAndMemberErrors(t *testing.T) {
 		code    diag.Code
 		pointer string
 	}{
-		{`{"version":3,"items":[null]}`, "plan_null", "/items/0"},
-		{`{"version":3,"items":[{"title":"Section","items":[null]}]}`, "plan_null", "/items/0/items/0"},
-		{`{"version":3,"items":["unterminated]}`, "plan_syntax", "/items/0"},
-		{`{"version":3,"items":[tru]}`, "plan_syntax", "/items/0"},
-		{`{"version":3,"items":[nul]}`, "plan_syntax", "/items/0"},
-		{`{"version":3,"items":[1e]}`, "plan_syntax", "/items/0"},
-		{`{"version":3,"items":[{"source":7}]}`, "plan_type", "/items/0/source"},
-		{`{"version":3,"items":[{"page":false}]}`, "plan_type", "/items/0/page"},
-		{`{"version":3,"items":[{}]}`, "plan_item_shape", "/items/0"},
+		{`{"version":3,"items":[null]}`, diag.PlanNull, "/items/0"},
+		{`{"version":3,"items":[{"title":"Section","items":[null]}]}`, diag.PlanNull, "/items/0/items/0"},
+		{`{"version":3,"items":["unterminated]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":3,"items":[tru]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":3,"items":[nul]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":3,"items":[1e]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":3,"items":[{"source":7}]}`, diag.PlanType, "/items/0/source"},
+		{`{"version":3,"items":[{"page":false}]}`, diag.PlanType, "/items/0/page"},
+		{`{"version":3,"items":[{}]}`, diag.PlanItemShape, "/items/0"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			_, ds := plan.Decode([]byte(tc.input), "packet.json", t.TempDir())

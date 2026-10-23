@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -138,7 +140,7 @@ func TestReachabilityKeepsIndirectObjectChainsFromReadContext(t *testing.T) {
 	// serialize an indirect reference used as an object body. Cleanup must keep
 	// the graph intact and preserve the backend's failed outcome.
 	_, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "source", Source: "source"}}, nil)
-	if len(ds) != 1 || ds[0].Code != "assembly_failed" {
+	if len(ds) != 1 || ds[0].Code != diag.AssemblyFailed {
 		t.Fatalf("backend graph failure changed classification: %+v", ds)
 	}
 }

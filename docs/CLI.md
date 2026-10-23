@@ -92,7 +92,7 @@ text inside option values or after the `--` delimiter is not a format request.
 
 ```json
 {
-  "format_version": 4,
+  "format_version": 5,
   "command": "build",
   "status": "ok",
   "output": {
@@ -184,7 +184,7 @@ contents item or automatic padding span:
 
 ```json
 {
-  "format_version": 4,
+  "format_version": 5,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -351,6 +351,9 @@ The registry in `internal/diag/codes.go` is authoritative. Warning class is empt
 | `report_not_regular` | error | invalid | same for the report |
 | `report_write_failed` | error | failed | the report could not be written |
 | `request_invalid` | error | invalid | invalid application request envelope |
+| `report_inspection_failed` | error | failed | The report destination could not be inspected |
+| `output_inspection_failed` | error | failed | The output destination could not be inspected |
+| `working_directory_unavailable` | error | failed | The process working directory could not be determined |
 | `source_changed` | error | failed | source bytes at merge time differ from the inspected bytes |
 | `source_damaged` | error | invalid | broken page tree (missing/empty kid, wrong count) or content-replacing repair |
 | `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
@@ -364,7 +367,7 @@ The registry in `internal/diag/codes.go` is authoritative. Warning class is empt
 | `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
 | `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
 | `usage_conflict` | error | invalid | `--plan` with PDF operands; `--base-dir` without `--plan -`; repeated single-use option |
-| `usage_invalid_value` | error | invalid | option value not allowed (`--format`, `--fit-to`, `schema` name, …) |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
 | `usage_missing_input` | error | invalid | neither `--plan` nor PDF operands |
 | `usage_missing_output` | error | invalid | `build` without `-o` and without plan `output` |
 | `usage_missing_value` | error | invalid | option needs a value |

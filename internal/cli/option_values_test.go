@@ -26,7 +26,7 @@ func TestRequiredValuesStopBeforeRecognizedOptions(t *testing.T) {
 			for _, boundary := range boundaries {
 				t.Run(name+"/"+boundary, func(t *testing.T) {
 					_, failure := Parse([]string{"check", name, boundary, "source.pdf"})
-					if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "usage_missing_value" || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != "argv:1" {
+					if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_missing_value" || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != "argv:1" {
 						t.Fatalf("missing value at owning option: %+v", failure)
 					}
 				})
@@ -47,7 +47,7 @@ func TestSeparateValueLiterals(t *testing.T) {
 		t.Fatalf("explicit literal: %+v %+v", c, failure)
 	}
 	_, failure = Parse([]string{"check", "--report", "", "--format", "text"})
-	if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "usage_invalid_value" || failure.Diagnostics[0].Items[0] != "argv:2" {
+	if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_invalid_value" || failure.Diagnostics[0].Items[0] != "argv:2" {
 		t.Fatalf("empty value classification: %+v", failure)
 	}
 }

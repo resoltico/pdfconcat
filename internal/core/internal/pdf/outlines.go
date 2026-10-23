@@ -6,6 +6,8 @@ package pdf
 import (
 	"context"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -46,7 +48,7 @@ func readOutlineList(c context.Context, s *model.Context, first types.Object) ([
 			}
 			ref, ok := o.(types.IndirectRef)
 			if !ok || seen[ref] {
-				return nil, refuse("source_invalid", "Outline nodes must be distinct indirect objects.")
+				return nil, refuse(diag.SourceInvalid, "Outline nodes must be distinct indirect objects.")
 			}
 			seen[ref] = true
 			d, err := s.DereferenceDict(ref)

@@ -178,7 +178,7 @@ func invalidRequest(hint Operation) Result {
 		hint = ""
 	}
 	r := result.New(string(hint))
-	r.Diagnostics = []Diagnostic{diag.New("request_invalid", "Invalid application request.")}
+	r.Diagnostics = []Diagnostic{diag.New(diag.RequestInvalid, "Invalid application request.")}
 	return r.Full()
 }
 func directReferences(items []Item) []Item {

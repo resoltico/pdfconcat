@@ -31,10 +31,10 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 					if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
 						t.Fatal(err)
 					}
-					if r.Status != "failed" || r.Command != "check" || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "plan_unreadable" || len(r.Diagnostics[0].Items) != 0 || r.Diagnostics[0].Message != "Cannot determine working directory: "+tc.want {
+					if r.Status != "failed" || r.Command != "check" || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code.String() != "working_directory_unavailable" || len(r.Diagnostics[0].Items) != 0 || r.Diagnostics[0].Message != "Cannot determine working directory: "+tc.want {
 						t.Fatal(r)
 					}
-				} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stdout.String(), "plan_unreadable") || strings.Contains(stdout.String(), "[items") {
+				} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stdout.String(), "working_directory_unavailable") || strings.Contains(stdout.String(), "[items") {
 					t.Fatalf("host text failure: %q", stdout.String())
 				}
 				if _, err := os.Stat(report); !errors.Is(err, os.ErrNotExist) {
@@ -46,7 +46,7 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 }
 func TestParserRetainsCompleteNormalizedFailure(t *testing.T) {
 	command, failure := cli.Parse([]string{"check", "--bad", "--format=text"})
-	if command.Format != "text" || failure == nil || failure.FormatVersion != 4 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
+	if command.Format != "text" || failure == nil || failure.FormatVersion != 5 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
 		t.Fatalf("complete parse outcome: %+v %+v", command, failure)
 	}
 }

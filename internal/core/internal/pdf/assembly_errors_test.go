@@ -22,7 +22,7 @@ func TestMixedPDF20AndFormWithoutAppearancesIsIncompatible(t *testing.T) {
 	plain := pdffixture.Versioned("plain", "2.0", "")
 	for _, docs := range [][]*pdffixture.Doc{{form, plain}, {plain, form}} {
 		_, _, ds := assembleDocs(t, docs, nil)
-		if !codePresent(ds, "source_output_incompatible") || codePresent(ds, "output_write_failed") {
+		if !codePresent(ds, diag.SourceOutputIncompatible) || codePresent(ds, diag.OutputWriteFailed) {
 			t.Fatalf("appearance incompatibility misclassified: %+v", ds)
 		}
 		if len(ds) != 1 || ds[0].File == "" || len(ds[0].Items) != 1 || !strings.Contains(ds[0].Message, "requires an appearance dictionary") {
@@ -69,7 +69,7 @@ func TestAssemblyReportsActualWriterFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, tc.writer)
-			if !errors.Is(err, tc.err) || pdf.Diagnostic(err).Code != "output_write_failed" {
+			if !errors.Is(err, tc.err) || pdf.Diagnostic(err).Code != diag.OutputWriteFailed {
 				t.Fatalf("writer failure misclassified: %v", err)
 			}
 		})

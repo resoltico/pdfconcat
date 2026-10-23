@@ -32,7 +32,7 @@ func prepare(c context.Context, j packet.Job) preparationOutcome {
 	for _, use := range sourceUses(j) {
 		data, err := files.Read(c, use.path, 0)
 		if err != nil {
-			d := ioDiagnostic("source_unreadable", err, use.path)
+			d := ioDiagnostic(diag.SourceUnreadable, err, use.path)
 			d.Items = use.items
 			ds = append(ds, d)
 		} else {

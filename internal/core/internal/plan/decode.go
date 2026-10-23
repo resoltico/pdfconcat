@@ -53,7 +53,7 @@ type decoder struct {
 func Decode(data []byte, file, base string) (packet.Job, []diag.Diagnostic) {
 	p := decoder{data: data}
 	if len(data) > MaxBytes {
-		return packet.Job{}, []diag.Diagnostic{diag.New("plan_too_large", "Plan exceeds 64 MiB.")}
+		return packet.Job{}, []diag.Diagnostic{diag.New(diag.PlanTooLarge, "Plan exceeds 64 MiB.")}
 	}
 	input := data
 	if bytes.HasPrefix(input, []byte{0xef, 0xbb, 0xbf}) {
@@ -67,7 +67,7 @@ func Decode(data []byte, file, base string) (packet.Job, []diag.Diagnostic) {
 		if errors.Is(err, io.EOF) {
 			err = nil
 		} else if err == nil {
-			err = p.fail("plan_syntax", "Expected one JSON object; trailing data is not allowed.")
+			err = p.fail(diag.PlanSyntax, "Expected one JSON object; trailing data is not allowed.")
 		}
 	}
 	if err != nil {
@@ -77,7 +77,7 @@ func Decode(data []byte, file, base string) (packet.Job, []diag.Diagnostic) {
 }
 
 func (p *decoder) diagnostic(err error, file string) diag.Diagnostic {
-	f := &fault{code: "plan_syntax", message: err.Error(), pointer: string(p.d.StackPointer()), offset: p.d.InputOffset()}
+	f := &fault{code: diag.PlanSyntax, message: err.Error(), pointer: string(p.d.StackPointer()), offset: p.d.InputOffset()}
 	var own *fault
 	var syntax *jsontext.SyntacticError
 	var semantic *json.SemanticError
@@ -88,10 +88,10 @@ func (p *decoder) diagnostic(err error, file string) diag.Diagnostic {
 		f.offset = syntax.ByteOffset
 		f.pointer = string(syntax.JSONPointer)
 		if errors.Is(err, jsontext.ErrDuplicateName) {
-			f.code = "plan_duplicate_member"
+			f.code = diag.PlanDuplicateMember
 		}
 	case errors.As(err, &semantic):
-		f.code = "plan_type"
+		f.code = diag.PlanType
 		f.offset = semantic.ByteOffset
 		f.pointer = string(semantic.JSONPointer)
 	}
@@ -128,10 +128,10 @@ func (p *decoder) expect(kind jsontext.Kind) error {
 		return err
 	}
 	if t.Kind() == 'n' {
-		return &fault{code: "plan_null", message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+		return &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
 	}
 	if t.Kind() != kind {
-		return &fault{code: "plan_type", message: fmt.Sprintf("Expected %q, received %q.", kind, t.Kind()), pointer: string(p.d.StackPointer()), offset: start}
+		return &fault{code: diag.PlanType, message: fmt.Sprintf("Expected %q, received %q.", kind, t.Kind()), pointer: string(p.d.StackPointer()), offset: start}
 	}
 	return nil
 }
@@ -146,7 +146,7 @@ func (p *decoder) object(member func(string) error) error {
 			return err
 		}
 		if t.Kind() != '"' {
-			return p.fail("plan_type", "Expected an object member.")
+			return p.fail(diag.PlanType, "Expected an object member.")
 		}
 		if err = member(t.String()); err != nil {
 			return err
@@ -174,12 +174,12 @@ func (p *decoder) path() (string, error) {
 		return "", err
 	}
 	if err = packet.ValidatePath(s); err != nil {
-		return "", p.fail("path_invalid", err.Error())
+		return "", p.fail(diag.PathInvalid, err.Error())
 	}
 	return s, nil
 }
 func (p *decoder) unknown(name string) error {
-	return p.fail("plan_unknown_member", fmt.Sprintf("Unknown member %q (names are case-sensitive).", name))
+	return p.fail(diag.PlanUnknownMember, fmt.Sprintf("Unknown member %q (names are case-sensitive).", name))
 }
 
 func (p *decoder) document(base string) (packet.Job, error) {
@@ -201,13 +201,13 @@ func (p *decoder) document(base string) (packet.Job, error) {
 			if err == nil {
 				switch {
 				case token.Kind() == 'n':
-					err = &fault{code: "plan_null", message: "null is not allowed.", pointer: "/version", offset: start}
+					err = &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: "/version", offset: start}
 				case token.Kind() == '0':
 					if token.String() != "3" {
-						err = &fault{code: "plan_version_unsupported", message: "Supported plan version is 3.", pointer: "/version", offset: start}
+						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 3.", pointer: "/version", offset: start}
 					}
 				default:
-					err = p.fail("plan_type", "version must be the JSON integer 3.")
+					err = p.fail(diag.PlanType, "version must be the JSON integer 3.")
 				}
 			}
 		case "output":
@@ -236,10 +236,10 @@ func (p *decoder) document(base string) (packet.Job, error) {
 		return result, err
 	}
 	if !seenVersion {
-		return result, p.fail("plan_version_unsupported", "Missing version; supported plan version is 3.")
+		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 3.")
 	}
 	if !seenItems {
-		return result, p.fail("plan_type", "Required member items is missing.")
+		return result, p.fail(diag.PlanType, "Required member items is missing.")
 	}
 	if result.Output != "" {
 		result.Output, _ = packet.Path(base, result.Output)
@@ -257,7 +257,7 @@ func (p *decoder) document(base string) (packet.Job, error) {
 	if p.contents > 0 {
 		_, sections := packet.Declarations(result)
 		if len(sections) == 0 {
-			return result, &fault{code: "plan_value", message: "Contents requires at least one titled section.", pointer: p.contentsPointer, offset: p.contentsOffset}
+			return result, &fault{code: diag.PlanValue, message: "Contents requires at least one titled section.", pointer: p.contentsPointer, offset: p.contentsOffset}
 		}
 	}
 	return result, nil
@@ -265,7 +265,7 @@ func (p *decoder) document(base string) (packet.Job, error) {
 
 func (p *decoder) items(depth int) ([]packet.Part, error) {
 	if depth > 64 {
-		return nil, p.fail("plan_limit", "Group nesting exceeds 64.")
+		return nil, p.fail(diag.PlanLimit, "Group nesting exceeds 64.")
 	}
 	if err := p.expect('['); err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (p *decoder) items(depth int) ([]packet.Part, error) {
 		nodes = append(nodes, n)
 	}
 	if len(nodes) == 0 {
-		return nil, p.fail("plan_value", "items must not be empty.")
+		return nil, p.fail(diag.PlanValue, "items must not be empty.")
 	}
 	_, err := p.d.ReadToken()
 	return nodes, err
@@ -290,7 +290,7 @@ func (p *decoder) item(depth int) (packet.Part, error) {
 	if p.d.PeekKind() != '{' {
 		err := p.expect('{')
 		var typeFault *fault
-		if errors.As(err, &typeFault) && typeFault.code == "plan_type" {
+		if errors.As(err, &typeFault) && typeFault.code == diag.PlanType {
 			typeFault.message = `An item must be a source object, generated page object, contents object, or container object; for example {"source":"source.pdf"}.`
 		}
 		return n, err
@@ -328,7 +328,7 @@ func (p *decoder) item(depth int) (packet.Part, error) {
 			if err == nil {
 				p.contents++
 				if p.contents > 1 {
-					err = &fault{code: "plan_value", message: "A packet may contain at most one contents item.", pointer: pointer, offset: start}
+					err = &fault{code: diag.PlanValue, message: "A packet may contain at most one contents item.", pointer: pointer, offset: start}
 				} else {
 					p.contentsPointer, p.contentsOffset = pointer, start
 				}
@@ -350,7 +350,7 @@ func (p *decoder) item(depth int) (packet.Part, error) {
 		container = container && !seen[key]
 	}
 	if !source && !page && !contents && !container {
-		return n, p.fail("plan_item_shape", "An item must be a source, generated page, contents item, or useful container; divider requires a title.")
+		return n, p.fail(diag.PlanItemShape, "An item must be a source, generated page, contents item, or useful container; divider requires a title.")
 	}
 	generated := 0
 	if n.Page != nil {
@@ -360,7 +360,7 @@ func (p *decoder) item(depth int) (packet.Part, error) {
 		generated++
 	}
 	if message := charge(&p.entries, &p.generated, generated); message != "" {
-		return n, p.fail("plan_limit", message)
+		return n, p.fail(diag.PlanLimit, message)
 	}
 	return n, nil
 }
@@ -371,17 +371,17 @@ func (p *decoder) title() (string, error) {
 		return "", err
 	}
 	if utf8.RuneCountInString(value) > 10000 {
-		return "", p.fail("plan_limit", "Title exceeds 10000 characters.")
+		return "", p.fail(diag.PlanLimit, "Title exceeds 10000 characters.")
 	}
 	visible := false
 	for _, r := range value {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
-			return "", p.fail("plan_value", "Titles must be single-line text without control or format characters.")
+			return "", p.fail(diag.PlanValue, "Titles must be single-line text without control or format characters.")
 		}
 		visible = visible || !unicode.IsSpace(r)
 	}
 	if !visible {
-		return "", p.fail("plan_value", "Title must not be empty or whitespace-only.")
+		return "", p.fail(diag.PlanValue, "Title must not be empty or whitespace-only.")
 	}
 	return value, nil
 }
@@ -413,7 +413,7 @@ func (p *decoder) pageNumbers() (*packet.PageNumbers, error) {
 		case "margin":
 			numbers.Margin, err = p.length(false)
 			if err == nil && numbers.Margin < 0 {
-				err = p.fail("plan_value", "Page-number margin must not be negative.")
+				err = p.fail(diag.PlanValue, "Page-number margin must not be negative.")
 			}
 		default:
 			err = p.unknown(name)
@@ -430,20 +430,20 @@ func (p *decoder) pageIndex() (int, error) {
 		return 0, err
 	}
 	if t.Kind() == 'n' {
-		return 0, &fault{code: "plan_null", message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+		return 0, &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
 	}
 	if t.Kind() != '0' {
-		return 0, p.fail("plan_type", "Source page indexes must be JSON integers.")
+		return 0, p.fail(diag.PlanType, "Source page indexes must be JSON integers.")
 	}
 	if strings.ContainsAny(t.String(), ".eE") {
-		return 0, p.fail("plan_value", "Source page indexes must use positive integer tokens.")
+		return 0, p.fail(diag.PlanValue, "Source page indexes must use positive integer tokens.")
 	}
 	n, err := strconv.ParseUint(t.String(), 10, 64)
 	if err != nil || n > math.MaxInt {
-		return 0, p.fail("plan_value", "Source page index is outside the supported positive range.")
+		return 0, p.fail(diag.PlanValue, "Source page index is outside the supported positive range.")
 	}
 	if n == 0 {
-		return 0, p.fail("plan_value", "Source page indexes start at 1.")
+		return 0, p.fail(diag.PlanValue, "Source page indexes start at 1.")
 	}
 	return int(n), nil
 }
@@ -469,16 +469,16 @@ func (p *decoder) selection() ([]packet.PageRange, error) {
 			return nil, err
 		}
 		if first > last {
-			return nil, p.fail("plan_value", "Source page ranges must be ascending inclusive pairs.")
+			return nil, p.fail(diag.PlanValue, "Source page ranges must be ascending inclusive pairs.")
 		}
 		p.pairs++
 		if p.pairs > packet.MaxSelectionPairs {
-			return nil, p.fail("plan_limit", "Plan exceeds 100000 source selection pairs.")
+			return nil, p.fail(diag.PlanLimit, "Plan exceeds 100000 source selection pairs.")
 		}
 		if len(ranges) > 0 {
 			previous := &ranges[len(ranges)-1]
 			if first <= previous.Last {
-				return nil, p.fail("plan_value", "Source page ranges must be ascending and disjoint.")
+				return nil, p.fail(diag.PlanValue, "Source page ranges must be ascending and disjoint.")
 			}
 			if previous.Last < math.MaxInt && first == previous.Last+1 {
 				previous.Last = last
@@ -488,7 +488,7 @@ func (p *decoder) selection() ([]packet.PageRange, error) {
 		ranges = append(ranges, packet.PageRange{First: first, Last: last})
 	}
 	if len(ranges) == 0 {
-		return nil, p.fail("plan_value", "Source pages selection must not be empty.")
+		return nil, p.fail(diag.PlanValue, "Source pages selection must not be empty.")
 	}
 	_, err := p.d.ReadToken()
 	return ranges, err
@@ -501,21 +501,21 @@ func (p *decoder) count() (int, error) {
 		return 0, err
 	}
 	if t.Kind() == 'n' {
-		return 0, &fault{code: "plan_null", message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+		return 0, &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
 	}
 	if t.Kind() != '0' {
-		return 0, p.fail("plan_type", "count must be a JSON number.")
+		return 0, p.fail(diag.PlanType, "count must be a JSON number.")
 	}
 	s := t.String()
 	if strings.ContainsAny(s, ".eE") {
-		return 0, p.fail("plan_value", "count must use an integer token, such as 3 (not 3.0 or 3e0).")
+		return 0, p.fail(diag.PlanValue, "count must use an integer token, such as 3 (not 3.0 or 3e0).")
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || n > packet.MaxGeneratedPages {
-		return 0, p.fail("plan_limit", "count exceeds 100000.")
+		return 0, p.fail(diag.PlanLimit, "count exceeds 100000.")
 	}
 	if n < 1 {
-		return 0, p.fail("plan_value", "count must be at least 1.")
+		return 0, p.fail(diag.PlanValue, "count must be at least 1.")
 	}
 	return int(n), nil
 }
@@ -556,7 +556,7 @@ func (p *decoder) size(inherit bool) (packet.Size, error) {
 	}
 	size, err := packet.ParseSize(s, inherit)
 	if err != nil {
-		return packet.Size{}, p.fail("plan_value", err.Error())
+		return packet.Size{}, p.fail(diag.PlanValue, err.Error())
 	}
 	return size, nil
 }
@@ -582,10 +582,10 @@ func (p *decoder) length(positive bool) (float64, error) {
 		if errors.As(err, &semantic) {
 			return 0, err
 		}
-		return 0, p.fail("plan_value", err.Error())
+		return 0, p.fail(diag.PlanValue, err.Error())
 	}
 	if n < -packet.MaxSide || n > packet.MaxSide || positive && n < 1 {
-		return 0, p.fail("plan_value", "Length is outside its point range (positive lengths must be at least 1).")
+		return 0, p.fail(diag.PlanValue, "Length is outside its point range (positive lengths must be at least 1).")
 	}
 	return n, nil
 }
@@ -603,7 +603,7 @@ func (p *decoder) style(titleDivider bool) (packet.PageStyle, error) {
 			if err == nil {
 				s.Background, err = packet.ParseColor(value, true)
 				if err != nil {
-					err = p.fail("plan_value", err.Error())
+					err = p.fail(diag.PlanValue, err.Error())
 				}
 			}
 		case "text":
@@ -626,11 +626,11 @@ func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
 		switch name {
 		case "value":
 			if titleDivider {
-				return &fault{code: "plan_value", message: "Divider text.value is supplied by its section title.", pointer: string(p.d.StackPointer()), offset: p.start()}
+				return &fault{code: diag.PlanValue, message: "Divider text.value is supplied by its section title.", pointer: string(p.d.StackPointer()), offset: p.start()}
 			}
 			s.Text.Value, err = p.text()
 			if err == nil && utf8.RuneCountInString(s.Text.Value) > 10000 {
-				err = p.fail("plan_limit", "Text exceeds 10000 characters.")
+				err = p.fail(diag.PlanLimit, "Text exceeds 10000 characters.")
 			}
 		case "font":
 			s.Text.Font, err = p.font()
@@ -646,7 +646,7 @@ func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
 				if err == nil {
 					s.Text.Color = *c
 				} else {
-					err = p.fail("plan_value", err.Error())
+					err = p.fail(diag.PlanValue, err.Error())
 				}
 			}
 		case "x":
@@ -658,7 +658,7 @@ func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
 		case "leading":
 			s.Text.Leading, err = p.number()
 			if err == nil && (s.Text.Leading < 1 || s.Text.Leading > 10) {
-				err = p.fail("plan_value", "leading must be 1–10.")
+				err = p.fail(diag.PlanValue, "leading must be 1–10.")
 			}
 		case "anchor":
 			s.Text.Anchor, err = p.enum("top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right")
@@ -685,7 +685,7 @@ func (p *decoder) enum(values ...string) (string, error) {
 			return s, nil
 		}
 	}
-	return "", p.fail("plan_value", "Expected one of: "+strings.Join(values, ", "))
+	return "", p.fail(diag.PlanValue, "Expected one of: "+strings.Join(values, ", "))
 }
 func (p *decoder) font() (string, error) {
 	if p.d.PeekKind() == '"' {
@@ -701,7 +701,7 @@ func (p *decoder) font() (string, error) {
 		return err
 	})
 	if err == nil && file == "" {
-		err = p.fail("plan_type", "font requires a file member.")
+		err = p.fail(diag.PlanType, "font requires a file member.")
 	}
 	return file, err
 }
@@ -711,7 +711,7 @@ func (p *decoder) number() (float64, error) {
 	err := p.scalar(&n)
 	var semantic *json.SemanticError
 	if errors.As(err, &semantic) && semantic.JSONKind == '0' {
-		return 0, p.fail("plan_value", "Number is outside the supported finite range.")
+		return 0, p.fail(diag.PlanValue, "Number is outside the supported finite range.")
 	}
 	return n, err
 }

@@ -78,7 +78,7 @@ func acquirePlan(c context.Context, s PlanSource, cwd string) (data []byte, labe
 		base, err = packet.Path(cwd, s.base)
 	}
 	if err != nil {
-		return nil, label, base, origin, []Diagnostic{diag.New("path_invalid", err.Error())}
+		return nil, label, base, origin, []Diagnostic{diag.New(diag.PathInvalid, err.Error())}
 	}
 	if err = c.Err(); err == nil {
 		switch s.kind {
@@ -91,13 +91,13 @@ func acquirePlan(c context.Context, s PlanSource, cwd string) (data []byte, labe
 			data = slices.Clone(data)
 		}
 	}
-	code := diag.Code("plan_unreadable")
+	code := diag.PlanUnreadable
 	switch {
 	case c.Err() != nil:
 		err = c.Err()
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 	case len(data) > plan.MaxBytes || errors.Is(err, files.ErrTooLarge):
-		code = "plan_too_large"
+		code = diag.PlanTooLarge
 		err = files.ErrTooLarge
 	}
 	if err != nil {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 )
 
@@ -87,12 +89,12 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 		t.Fatalf("fit %+v %+v", layout, ds)
 	}
 	_, ds = packet.Resolve(packet.Job{Parts: []packet.Part{{Page: &inherited, Count: 1}}}, nil, 0)
-	if len(ds) != 1 || ds[0].Code != "page_size_required" {
+	if len(ds) != 1 || ds[0].Code != diag.PageSizeRequired {
 		t.Fatal(ds)
 	}
 	facts["source"] = packet.SourceFacts{Pages: 1, FirstSize: packet.Size{Width: 14401, Height: 300}, LastSize: b}
 	_, ds = packet.Resolve(packet.Job{Parts: parts}, facts, 0)
-	if len(ds) != 1 || ds[0].Code != "page_size_too_large" {
+	if len(ds) != 1 || ds[0].Code != diag.PageSizeTooLarge {
 		t.Fatal(ds)
 	}
 }
@@ -107,7 +109,7 @@ func TestRangesUseInt64(t *testing.T) {
 func TestInheritedSizeBelowGeneratedMinimumIsRefused(t *testing.T) {
 	page := packet.Defaults()
 	_, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Source: "tiny", Pointer: "tiny"}, {Page: &page, Count: 1, Pointer: "/items/1"}}}, map[string]packet.SourceFacts{"tiny": {Pages: 1, FirstSize: packet.Size{Width: .5, Height: 100}, LastSize: packet.Size{Width: .5, Height: 100}}}, 0)
-	if len(ds) != 1 || ds[0].Code != "plan_value" {
+	if len(ds) != 1 || ds[0].Code != diag.PlanValue {
 		t.Fatalf("unusable inherited canvas: %+v", ds)
 	}
 }
@@ -262,12 +264,12 @@ func TestLayoutLimitsAndNoInventedPartialSequence(t *testing.T) {
 			facts["source2"] = packet.SourceFacts{Pages: 1}
 		}
 		layout, ds := packet.Resolve(j, facts, 1)
-		if len(ds) == 0 || ds[0].Code != "plan_limit" || len(layout.Parts) != 0 || layout.TotalPages != 0 || len(layout.Sections) != 0 {
+		if len(ds) == 0 || ds[0].Code != diag.PlanLimit || len(layout.Parts) != 0 || layout.TotalPages != 0 || len(layout.Sections) != 0 {
 			t.Fatalf("invented partial layout: %+v %+v", layout, ds)
 		}
 	}
 	layout, ds := packet.Resolve(packet.Job{Parts: []packet.Part{{Pointer: "source", Source: "input"}}}, map[string]packet.SourceFacts{"source": {Pages: 3, Selection: []packet.PageRange{{First: 1, Last: 2}}}}, 0)
-	if len(ds) != 1 || ds[0].Code != "source_invalid" || layout.TotalPages != 0 {
+	if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || layout.TotalPages != 0 {
 		t.Fatalf("inconsistent occurrence facts: %+v %+v", layout, ds)
 	}
 }

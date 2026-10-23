@@ -33,10 +33,10 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 	var current *packet.PlacedPart
 	defer func() {
 		if value := recover(); value != nil {
-			err = refuse("assembly_failed", fmt.Sprintf("PDF backend panic: %v", value))
+			err = refuse(diag.AssemblyFailed, fmt.Sprintf("PDF backend panic: %v", value))
 		}
 		if err != nil && current != nil {
-			d := diagnostic(err, "assembly_failed")
+			d := diagnostic(err, diag.AssemblyFailed)
 			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Pointer}}
 		}
 	}()
@@ -70,11 +70,11 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 		if part.Source != "" {
 			data, e := files.Read(c, part.Source, 0)
 			if e != nil {
-				return result, &policyError{code: "source_unreadable", err: e}
+				return result, &policyError{code: diag.SourceUnreadable, err: e}
 			}
 			inspected, ok := facts[part.Source]
 			if !ok || sha256.Sum256(data) != inspected.SHA256 {
-				return result, refuse("source_changed", "Source bytes changed after inspection: "+part.Source)
+				return result, refuse(diag.SourceChanged, "Source bytes changed after inspection: "+part.Source)
 			}
 			s, err = read(c, data)
 			if err != nil {
@@ -89,7 +89,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 				return result, e
 			}
 			if removed {
-				add("source_navigation_removed", "Navigation targets omitted from this source occurrence were removed.", index)
+				add(diag.SourceNavigationRemoved, "Navigation targets omitted from this source occurrence were removed.", index)
 			}
 			needAppearances = needAppearances || inspected.NeedAppearances
 		} else {
@@ -113,7 +113,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 			allDests[name] = d
 		}
 		if renamed {
-			add("destinations_renamed", "Colliding destination names were renamed for this occurrence.", index)
+			add(diag.DestinationsRenamed, "Colliding destination names were renamed for this occurrence.", index)
 		}
 		if part.Source != "" {
 			root, e := detachOutlineRoot(s, part.Owner)
@@ -143,7 +143,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 			}
 		}
 		if len(result.FieldsRenamed[index]) > 0 {
-			add("form_fields_renamed", "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", index)
+			add(diag.FormFieldsRenamed, "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", index)
 		}
 	}
 	current = nil
@@ -177,7 +177,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 	output := &outputWriter{writer: w}
 	err = api.WriteContext(c, dest, output)
 	if output.err != nil {
-		return result, &policyError{code: "output_write_failed", err: output.err}
+		return result, &policyError{code: diag.OutputWriteFailed, err: output.err}
 	}
 	return result, err
 }
@@ -237,27 +237,27 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 func Verify(c context.Context, path string, expected int64) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
-			err = refuse("output_invalid", fmt.Sprintf("Output parser panic: %v", value))
+			err = refuse(diag.OutputInvalid, fmt.Sprintf("Output parser panic: %v", value))
 		}
 	}()
 	data, err := files.Read(c, path, 0)
 	if err != nil {
-		return &policyError{code: "output_invalid", err: err}
+		return &policyError{code: diag.OutputInvalid, err: err}
 	}
 	s, err := read(c, data)
 	if err != nil {
-		return &policyError{code: "output_invalid", err: err}
+		return &policyError{code: diag.OutputInvalid, err: err}
 	}
 	if int64(s.PageCount) != expected {
-		return refuse("output_page_count_mismatch", fmt.Sprintf("Expected %d output pages; found %d.", expected, s.PageCount))
+		return refuse(diag.OutputPageCountMismatch, fmt.Sprintf("Expected %d output pages; found %d.", expected, s.PageCount))
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return &policyError{code: "output_invalid", err: err}
+		return &policyError{code: diag.OutputInvalid, err: err}
 	}
 	for key := range cat {
 		if !catalogKeys[key] {
-			return refuse("output_invalid", "Unexpected output catalog key: "+key)
+			return refuse(diag.OutputInvalid, "Unexpected output catalog key: "+key)
 		}
 	}
 	names, err := s.DereferenceDict(cat["Names"])
@@ -266,7 +266,7 @@ func Verify(c context.Context, path string, expected int64) (err error) {
 	}
 	for key := range names {
 		if key != "Dests" {
-			return refuse("output_invalid", "Unexpected output name tree: "+key)
+			return refuse(diag.OutputInvalid, "Unexpected output name tree: "+key)
 		}
 	}
 	form, err := s.DereferenceDict(cat["AcroForm"])
@@ -274,10 +274,10 @@ func Verify(c context.Context, path string, expected int64) (err error) {
 		return err
 	}
 	if form["XFA"] != nil {
-		return refuse("output_invalid", "XFA remains in output.")
+		return refuse(diag.OutputInvalid, "XFA remains in output.")
 	}
 	return nil
 }
 
 // Diagnostic preserves typed product failures at the application boundary.
-func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, "assembly_failed") }
+func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, diag.AssemblyFailed) }

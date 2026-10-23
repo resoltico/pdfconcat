@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/cli"
-	"github.com/resoltico/pdfconcat/internal/core"
 )
 
 func TestInterleavedOperandsAndDelimiter(t *testing.T) {
@@ -35,7 +34,7 @@ func TestInterleavedOperandsAndDelimiter(t *testing.T) {
 func TestUsageDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
-		code core.Code
+		code string
 	}{
 		{[]string{"other"}, "usage_unknown_command"}, {[]string{"report"}, "usage_unknown_command"},
 		{[]string{"build", "--jobs", "2"}, "usage_unknown_option"}, {[]string{"build", "--progress"}, "usage_unknown_option"},
@@ -49,7 +48,7 @@ func TestUsageDiagnostics(t *testing.T) {
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			_, failure := cli.Parse(tc.args)
-			if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != tc.code {
+			if failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != tc.code {
 				t.Fatalf("want %s got %+v", tc.code, failure)
 			}
 		})
@@ -86,7 +85,7 @@ func TestUsageErrorFormatAndFirstFailure(t *testing.T) {
 	for _, tc := range []struct {
 		args   []string
 		format string
-		code   core.Code
+		code   string
 		item   string
 	}{
 		{[]string{"check", "--bad", "--format", "text"}, "text", "usage_unknown_option", "argv:1"},
@@ -118,7 +117,7 @@ func TestUsageErrorFormatAndFirstFailure(t *testing.T) {
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			c, failure := cli.Parse(tc.args)
-			if c.Format != tc.format || failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != tc.code || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != tc.item {
+			if c.Format != tc.format || failure == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != tc.code || len(failure.Diagnostics[0].Items) != 1 || failure.Diagnostics[0].Items[0] != tc.item {
 				t.Fatalf("want %s/%s/%s, got %+v %+v", tc.format, tc.code, tc.item, c, failure)
 			}
 		})

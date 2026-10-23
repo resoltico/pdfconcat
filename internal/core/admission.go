@@ -51,7 +51,7 @@ func admit(c context.Context, request Request) admissionOutcome {
 	if o.Report != "" {
 		path, err := packet.Path(o.WorkingDir, o.Report)
 		if err != nil {
-			a.result.Diagnostics = append(a.result.Diagnostics, diag.New("path_invalid", err.Error()))
+			a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.PathInvalid, err.Error()))
 			return a
 		}
 		a.roles.Report = path
@@ -60,14 +60,14 @@ func admit(c context.Context, request Request) admissionOutcome {
 	if o.Output != "" {
 		path, err := packet.Path(o.WorkingDir, o.Output)
 		if err != nil {
-			a.result.Diagnostics = append(a.result.Diagnostics, diag.New("path_invalid", err.Error()))
+			a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.PathInvalid, err.Error()))
 			return a
 		}
 		a.roles.Output = path
 		a.result.Output = &result.Output{Path: path}
 	}
 	if err := c.Err(); err != nil {
-		a.result.Diagnostics = append(a.result.Diagnostics, diag.New("interrupted", err.Error()))
+		a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.Interrupted, err.Error()))
 		return a
 	}
 	var ds []diag.Diagnostic
@@ -115,12 +115,12 @@ func admit(c context.Context, request Request) admissionOutcome {
 		a.result.Parts = append(a.result.Parts, declaredReportPart(leaf))
 	}
 	if request.operation == Build && a.job.Output == "" {
-		a.result.Diagnostics = append(a.result.Diagnostics, diag.New("usage_missing_output", "Give -o FILE or plan output."))
+		a.result.Diagnostics = append(a.result.Diagnostics, diag.New(diag.UsageMissingOutput, "Give -o FILE or plan output."))
 	}
 	refusals := a.roles.Check()
 	a.result.Diagnostics = append(a.result.Diagnostics, refusals...)
 	for _, d := range refusals {
-		if strings.HasPrefix(string(d.Code), "report_") {
+		if strings.HasPrefix(d.Code.String(), "report_") {
 			a.reportRefused = true
 		}
 	}

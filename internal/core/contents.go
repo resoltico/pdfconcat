@@ -67,7 +67,7 @@ func prepareContents(c context.Context, j packet.Job, facts map[string]packet.So
 	}
 	boundaries(j.Parts)
 	fail := func(message string, item string) (*contentsLayout, []diag.Diagnostic) {
-		return nil, []diag.Diagnostic{diag.New("text_overflow", message, pointer, item)}
+		return nil, []diag.Diagnostic{diag.New(diag.TextOverflow, message, pointer, item)}
 	}
 	if len(sections) == 0 {
 		return fail("Contents requires at least one authored section.", pointer)
@@ -137,7 +137,7 @@ func prepareContents(c context.Context, j packet.Job, facts map[string]packet.So
 	cursor := firstRowTop
 	for _, section := range sections {
 		if err := c.Err(); err != nil {
-			return nil, []diag.Diagnostic{diag.New("interrupted", err.Error())}
+			return nil, []diag.Diagnostic{diag.New(diag.Interrupted, err.Error())}
 		}
 		left := 36 + 12*float64(section.Depth)
 		right := size.Width - 36
@@ -207,7 +207,7 @@ func (contents *contentsLayout) finish(layout packet.Layout, pages map[int][]pdf
 			return nil
 		}
 	}
-	return []diag.Diagnostic{diag.New("assembly_failed", "Resolved contents item is missing.", contents.pointer)}
+	return []diag.Diagnostic{diag.New(diag.AssemblyFailed, "Resolved contents item is missing.", contents.pointer)}
 }
 
 func paintedBounds(p *typeset.Placed) typeset.Rect {

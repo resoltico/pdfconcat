@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 )
 
@@ -27,7 +29,7 @@ func TestFileRoleFIFORefusals(t *testing.T) {
 				roles.Report = path
 			}
 			ds := roles.Check()
-			if role == "output" && !hasCode(ds, "output_not_regular") || role == "report" && !hasCode(ds, "report_not_regular") {
+			if role == "output" && !hasCode(ds, diag.OutputNotRegular) || role == "report" && !hasCode(ds, diag.ReportNotRegular) {
 				t.Fatal(ds)
 			}
 		})

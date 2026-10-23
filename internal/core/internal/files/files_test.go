@@ -50,10 +50,10 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 					f.Report = target
 				}
 				ds := f.Check()
-				if kind != "symlink" && !hasCode(ds, diag.Code(role+"_is_input")) {
+				if kind != "symlink" && !hasCode(ds, roleCode(role, diag.OutputIsInput, diag.ReportIsInput)) {
 					t.Fatalf("alias not refused: %+v", ds)
 				}
-				if kind == "symlink" && !hasCode(ds, diag.Code(role+"_not_regular")) {
+				if kind == "symlink" && !hasCode(ds, roleCode(role, diag.OutputNotRegular, diag.ReportNotRegular)) {
 					t.Fatalf("symlink target not refused: %+v", ds)
 				}
 			})
@@ -68,7 +68,7 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 	}
 	f := files.Files{Output: output, Report: report, InputsKnown: true}
 	ds := f.Check()
-	if !hasCode(ds, "output_exists") || !hasCode(ds, "report_exists") {
+	if !hasCode(ds, diag.OutputExists) || !hasCode(ds, diag.ReportExists) {
 		t.Fatalf("missing overwrite refusals: %+v", ds)
 	}
 	f.Overwrite = true
@@ -76,15 +76,15 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 		t.Fatalf("approved overwrite refused: %+v", ds)
 	}
 	f.InputsKnown = false
-	if ds = f.CheckReport(); !hasCode(ds, "report_exists") {
+	if ds = f.CheckReport(); !hasCode(ds, diag.ReportExists) {
 		t.Fatalf("unknown inputs allowed report overwrite: %+v", ds)
 	}
 	f.Report = f.Output
-	if ds = f.CheckReport(); !hasCode(ds, "report_is_output") {
+	if ds = f.CheckReport(); !hasCode(ds, diag.ReportIsOutput) {
 		t.Fatalf("report/output equality: %+v", ds)
 	}
 	f = files.Files{Output: t.TempDir(), Report: t.TempDir(), Overwrite: true, InputsKnown: true}
-	if ds = f.Check(); !hasCode(ds, "output_not_regular") || !hasCode(ds, "report_not_regular") {
+	if ds = f.Check(); !hasCode(ds, diag.OutputNotRegular) || !hasCode(ds, diag.ReportNotRegular) {
 		t.Fatalf("nonregular destinations: %+v", ds)
 	}
 }
@@ -109,7 +109,7 @@ func TestReportRoleRecheckFindsInitiallyAbsentParentAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds := f.CheckReport()
-	if !hasCode(ds, "report_is_output") {
+	if !hasCode(ds, diag.ReportIsOutput) {
 		t.Fatalf("late report alias missed: %+v", ds)
 	}
 	if status, exit := diag.Outcome(ds); status != "invalid" || exit != 2 {
@@ -137,7 +137,14 @@ func TestCaseAliasOnCaseInsensitiveFilesystem(t *testing.T) {
 		t.Skip("filesystem is case sensitive")
 	}
 	ds := (files.Files{Output: alias, Inputs: []string{input}, Overwrite: true, InputsKnown: true}).Check()
-	if !hasCode(ds, "output_is_input") {
+	if !hasCode(ds, diag.OutputIsInput) {
 		t.Fatalf("case alias was not refused: %+v", ds)
 	}
+}
+
+func roleCode(role string, output, report diag.Code) diag.Code {
+	if role == "report" {
+		return report
+	}
+	return output
 }

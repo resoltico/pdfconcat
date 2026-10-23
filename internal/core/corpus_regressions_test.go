@@ -120,7 +120,7 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 					t.Fatal(r)
 				}
 				for _, d := range r.Diagnostics {
-					if d.Code != "source_invalid" {
+					if d.Code.String() != "source_invalid" {
 						t.Fatal("late failure incorrectly substituted for visible prefix", r)
 					}
 				}
@@ -134,7 +134,7 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 	}
 	badReport := filepath.Join(dir, "absent-parent", "core.json")
 	full := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromItems(items...), core.Options{WorkingDir: dir, Report: badReport}))
-	if len(full.Diagnostics) != 22 || full.Diagnostics[21].Code != "report_write_failed" || full.Status != "failed" || core.ExitCode(full) != 1 {
+	if len(full.Diagnostics) != 22 || full.Diagnostics[21].Code.String() != "report_write_failed" || full.Status != "failed" || core.ExitCode(full) != 1 {
 		t.Fatal(full)
 	}
 	goodReport := filepath.Join(t.TempDir(), "report.json")

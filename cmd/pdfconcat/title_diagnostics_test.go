@@ -55,7 +55,7 @@ func TestPaintedTitleDiagnosticsRetainDeclarationAndConsumers(t *testing.T) {
 			report := filepath.Join(dir, "report.json")
 			input := titlePlan(t, 2, tc.contents, tc.dividers, "")
 			summary, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", report}, input)
-			if exit != 2 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code != "text_unsupported_character" {
+			if exit != 2 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code.String() != "text_unsupported_character" {
 				t.Fatalf("painted title refusal: %+v %d", summary, exit)
 			}
 			items := summary.Diagnostics[0].Items
@@ -119,7 +119,7 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 	fontReport := filepath.Join(t.TempDir(), "font-report.json")
 	missing := "missing-Ā-Ελληνικά.ttf"
 	summary, exit, _ = invoke(t, []string{"check", "--plan", "-", "--base-dir", dir, "--report", fontReport}, titlePlan(t, 2, false, true, missing))
-	if exit != 1 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code != "font_unreadable" {
+	if exit != 1 || len(summary.Diagnostics) != 1 || summary.Diagnostics[0].Code.String() != "font_unreadable" {
 		t.Fatalf("selected-font refusal: %+v %d", summary, exit)
 	}
 	for _, want := range []string{"/page/text/font", "/items/0/title", "/items/0/divider", "/items/1/title", "/items/1/divider"} {

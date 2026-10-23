@@ -1,26 +1,24 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v4 and its complete factual outcomes.
+// Package result defines result v5 and its complete factual outcomes.
 package result
 
 import (
 	_ "embed"
-	"encoding/json/v2"
-	"io"
 	"slices"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 )
 
-// Schema covers result v4, full reports and version objects.
+// Schema covers result v5, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 4
+const WireVersion = 5
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -91,7 +89,7 @@ type Part struct {
 type Result struct {
 	FormatVersion      int                 `json:"format_version"`
 	Command            string              `json:"command"`
-	Status             string              `json:"status"`
+	Status             diag.Status         `json:"status"`
 	Output             *Output             `json:"output"`
 	Pages              *Pages              `json:"pages"`
 	FitTo              *packet.Size        `json:"fit_to"`
@@ -143,7 +141,7 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 			output = append(output, d)
 			continue
 		}
-		key := string(d.Code) + "\x00" + d.File
+		key := d.Code.String() + "\x00" + d.File
 		index, exists := groups[key]
 		if !exists {
 			index = len(output)
@@ -169,15 +167,4 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 		return 1
 	})
 	return output
-}
-
-// JSON writes one complete JSON document followed by a newline.
-func JSON(w io.Writer, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = w.Write(data)
-	return err
 }

@@ -10,6 +10,8 @@ import (
 )
 
 type (
+	// Status is the complete execution outcome.
+	Status = diag.Status
 	// Result is a complete normalized execution outcome.
 	Result = result.Result
 	// Diagnostic is the complete factual contract exposed by core.
@@ -57,7 +59,7 @@ const (
 	InvalidValue                InvocationFaultKind = "usage_invalid_value"
 	Conflict                    InvocationFaultKind = "usage_conflict"
 	MissingInput                InvocationFaultKind = "usage_missing_input"
-	WorkingDirectoryUnavailable InvocationFaultKind = "plan_unreadable"
+	WorkingDirectoryUnavailable InvocationFaultKind = "working_directory_unavailable"
 )
 
 // InvocationFailure adapts closed transport failures without execution or I/O.
@@ -68,7 +70,13 @@ func InvocationFailure(hint Operation, kind InvocationFaultKind, message, refere
 	switch kind {
 	case UnknownCommand, UnknownOption, MissingValue, InvalidValue, Conflict, MissingInput, WorkingDirectoryUnavailable:
 		r := result.New(string(hint))
-		d := diag.New(diag.Code(kind), message)
+		codes := map[InvocationFaultKind]diag.Code{
+			UnknownCommand: diag.UsageUnknownCommand, UnknownOption: diag.UsageUnknownOption,
+			MissingValue: diag.UsageMissingValue, InvalidValue: diag.UsageInvalidValue,
+			Conflict: diag.UsageConflict, MissingInput: diag.UsageMissingInput,
+			WorkingDirectoryUnavailable: diag.WorkingDirectoryUnavailable,
+		}
+		d := diag.New(codes[kind], message)
 		if reference != "" {
 			d.Items = []string{reference}
 		}

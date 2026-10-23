@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -26,7 +28,7 @@ func footerDigits(config packet.PageNumbers) (*typeset.Digits, error) {
 
 func footerPlacement(digits *typeset.Digits, size packet.Size, number int64, margin float64) (*typeset.Placed, error) {
 	if number < 1 || math.IsNaN(margin) || math.IsInf(margin, 0) || margin < 0 {
-		return nil, refuse("text_overflow", "Invalid physical footer placement.")
+		return nil, refuse(diag.TextOverflow, "Invalid physical footer placement.")
 	}
 	text := strconv.FormatInt(number, 10)
 	width := float64(len(text)) * digits.CellWidth
@@ -35,7 +37,7 @@ func footerPlacement(digits *typeset.Digits, size packet.Size, number int64, mar
 		return nil, err
 	}
 	if placed.InkBounds == nil {
-		return nil, refuse("text_overflow", "The physical page number has no painted glyphs.")
+		return nil, refuse(diag.TextOverflow, "The physical page number has no painted glyphs.")
 	}
 	unshifted := placed
 	placed, err = digits.Place(text, (size.Width+width)/2, margin-placed.InkBounds.Y)
@@ -114,7 +116,7 @@ func footerOverflow(digits *typeset.Digits, size packet.Size, number int64, marg
 	if len(advice) == 0 {
 		advice = append(advice, "The measured footer bounds or physical viewport are invalid.")
 	}
-	return refuse("text_overflow", fmt.Sprintf("Physical page %d cannot contain its page number at size %g pt and margin %g pt. %s", number, placed.Size, margin, strings.Join(advice, " ")))
+	return refuse(diag.TextOverflow, fmt.Sprintf("Physical page %d cannot contain its page number at size %g pt and margin %g pt. %s", number, placed.Size, margin, strings.Join(advice, " ")))
 }
 
 // CheckNumberPlacement predicts one footer using the packet's already measured

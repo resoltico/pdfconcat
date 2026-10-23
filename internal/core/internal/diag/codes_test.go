@@ -15,17 +15,17 @@ func TestOutcomePrecedence(t *testing.T) {
 		status string
 		exit   int
 	}{
-		{nil, "ok", 0}, {[]diag.Code{"source_xfa_removed"}, "ok", 0},
-		{[]diag.Code{"plan_null"}, "invalid", 2}, {[]diag.Code{"plan_null", "source_unreadable"}, "failed", 1},
-		{[]diag.Code{"source_unreadable", "plan_null"}, "failed", 1},
-		{[]diag.Code{"source_unreadable", "interrupted", "plan_null"}, "interrupted", 130},
+		{nil, "ok", 0}, {[]diag.Code{diag.SourceXfaRemoved}, "ok", 0},
+		{[]diag.Code{diag.PlanNull}, "invalid", 2}, {[]diag.Code{diag.PlanNull, diag.SourceUnreadable}, "failed", 1},
+		{[]diag.Code{diag.SourceUnreadable, diag.PlanNull}, "failed", 1},
+		{[]diag.Code{diag.SourceUnreadable, diag.Interrupted, diag.PlanNull}, "interrupted", 130},
 	} {
 		var ds []diag.Diagnostic
 		for _, c := range tc.codes {
 			ds = append(ds, diag.New(c, "test"))
 		}
 		status, exit := diag.Outcome(ds)
-		if status != tc.status || exit != tc.exit {
+		if string(status) != tc.status || exit != tc.exit {
 			t.Fatalf("%v: %s %d", tc.codes, status, exit)
 		}
 	}
@@ -40,8 +40,33 @@ func TestRegistryIsCompleteAndImmutable(t *testing.T) {
 			t.Fatal(code)
 		}
 	}
-	delete(registry, "plan_null")
-	if diag.New("plan_null", "test").Severity != "error" {
+	delete(registry, diag.PlanNull)
+	if diag.New(diag.PlanNull, "test").Severity != "error" {
 		t.Fatal("registry mutation reached definitions")
+	}
+}
+
+// TestCodeTextContract verifies every registered code and rejects arbitrary names.
+func TestCodeTextContract(t *testing.T) {
+	seen := map[diag.Code]bool{}
+	for _, entry := range diag.Entries() {
+		if seen[entry.Code] {
+			t.Fatalf("duplicate code %s", entry.Code)
+		}
+		seen[entry.Code] = true
+		wire, err := entry.Code.MarshalText()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded diag.Code
+		if err = decoded.UnmarshalText(wire); err != nil || decoded != entry.Code {
+			t.Fatalf("round trip %s: %v", entry.Code, err)
+		}
+	}
+	var code diag.Code
+	for _, name := range []string{"", "source_encryptedd"} {
+		if err := code.UnmarshalText([]byte(name)); err == nil {
+			t.Fatalf("accepted unknown code %q", name)
+		}
 	}
 }

@@ -41,7 +41,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 			}
 			if len(args) > 0 && (args[0] == "--version" || args[0] == "version" && len(args) == 1) {
 				var version core.VersionInfo
-				if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 4 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
+				if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 5 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
 					t.Fatalf("installed version facts: %s %v", raw, err)
 				}
 			}

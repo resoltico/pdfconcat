@@ -93,10 +93,13 @@ func TestDocumentedCodesEqualRegistry(t *testing.T) {
 		if len(columns) != 6 {
 			continue
 		}
-		code := diag.Code(strings.Trim(strings.TrimSpace(columns[1]), "`"))
 		severity := strings.TrimSpace(columns[2])
 		if severity != "error" && severity != "warning" {
 			continue
+		}
+		var code diag.Code
+		if err := code.UnmarshalText([]byte(strings.Trim(strings.TrimSpace(columns[1]), "`"))); err != nil {
+			t.Fatal(err)
 		}
 		class := strings.TrimSpace(columns[3])
 		if class == "—" {

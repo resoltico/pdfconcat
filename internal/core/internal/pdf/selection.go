@@ -29,7 +29,7 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 		facts.SHA256 = sha256.Sum256(data)
 		facts.Bytes = int64(len(data))
 		if value := recover(); value != nil {
-			ds = append(ds, diag.New("source_invalid", fmt.Sprintf("PDF parser panic: %v", value)))
+			ds = append(ds, diag.New(diag.SourceInvalid, fmt.Sprintf("PDF parser panic: %v", value)))
 		}
 	}()
 	s, err := read(c, data)
@@ -38,40 +38,40 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 			facts.Pages = s.PageCount
 			facts.Version = s.XRefTable.Version().String()
 		}
-		return facts, occurrences, []diag.Diagnostic{diagnostic(err, "source_invalid")}
+		return facts, occurrences, []diag.Diagnostic{diagnostic(err, diag.SourceInvalid)}
 	}
 	facts, ds, err = observe(c, s)
 	if err != nil {
-		return facts, occurrences, append(ds, diagnostic(err, "source_invalid"))
+		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
 	for _, request := range requests {
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
 		if err == nil && !wholeSelection(ranges, s.PageCount) && (facts.HasFields || facts.HasWidgets) {
-			err = refuse("source_selection_form_unsupported", "Partial selection of sources containing form fields or widgets is unsupported; select the whole source or flatten it with a suitable PDF tool.")
+			err = refuse(diag.SourceSelectionFormUnsupported, "Partial selection of sources containing form fields or widgets is unsupported; select the whole source or flatten it with a suitable PDF tool.")
 		}
 		if err != nil {
-			d := diagnostic(err, "source_invalid")
+			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
 		}
 		view, err := selectionView(c, s)
 		if err != nil {
-			d := diagnostic(err, "source_invalid")
+			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
 		}
 		removed, err := projectSelection(c, view, ranges)
 		if err != nil {
-			d := diagnostic(err, "source_invalid")
+			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
 		}
 		selected, _, err := observe(c, view)
 		if err != nil {
-			d := diagnostic(err, "source_invalid")
+			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
@@ -79,7 +79,7 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 		selected.Selection = ranges
 		selected.OutlineDepth, err = outlineDepth(c, view)
 		if err != nil {
-			d := diagnostic(err, "source_invalid")
+			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
@@ -103,7 +103,7 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 				}
 			}
 			if err != nil {
-				d := diagnostic(err, "source_invalid")
+				d := diagnostic(err, diag.SourceInvalid)
 				d.Items = []string{request.Item}
 				ds = append(ds, d)
 				continue
@@ -117,7 +117,7 @@ func InspectSelections(c context.Context, data []byte, requests []SelectionReque
 		}
 		occurrences[request.Item] = selected.OccurrenceFacts
 		if removed {
-			ds = append(ds, diag.New("source_navigation_removed", "Navigation targets omitted from this source occurrence were removed.", request.Item))
+			ds = append(ds, diag.New(diag.SourceNavigationRemoved, "Navigation targets omitted from this source occurrence were removed.", request.Item))
 		}
 	}
 	return facts, occurrences, ds
@@ -130,12 +130,12 @@ func selectionRanges(ranges []packet.PageRange, count int) ([]packet.PageRange, 
 	normalized := []packet.PageRange{}
 	for _, span := range ranges {
 		if span.First < 1 || span.Last < span.First || span.Last > count {
-			return nil, refuse("source_selection_out_of_range", fmt.Sprintf("Selected range [%d,%d] is outside the source's %d pages.", span.First, span.Last, count))
+			return nil, refuse(diag.SourceSelectionOutOfRange, fmt.Sprintf("Selected range [%d,%d] is outside the source's %d pages.", span.First, span.Last, count))
 		}
 		if len(normalized) > 0 {
 			last := &normalized[len(normalized)-1]
 			if span.First <= last.Last {
-				return nil, refuse("source_selection_out_of_range", "Selected ranges must be ascending and disjoint.")
+				return nil, refuse(diag.SourceSelectionOutOfRange, "Selected ranges must be ascending and disjoint.")
 			}
 			if span.First == last.Last+1 {
 				last.Last = span.Last

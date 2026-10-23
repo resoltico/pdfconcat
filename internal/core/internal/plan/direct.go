@@ -26,7 +26,7 @@ func Direct(items []DirectItem, base string) (packet.Job, []diag.Diagnostic) {
 			count = 1
 		}
 		if message := charge(&entries, &generated, count); message != "" {
-			ds = append(ds, diag.New("plan_limit", message, item.Reference))
+			ds = append(ds, diag.New(diag.PlanLimit, message, item.Reference))
 			break
 		}
 		p := packet.Part{Pointer: item.Reference, Count: 1}
@@ -36,7 +36,7 @@ func Direct(items []DirectItem, base string) (packet.Job, []diag.Diagnostic) {
 		} else {
 			path, err := packet.Path(base, item.Path)
 			if err != nil {
-				ds = append(ds, diag.New("path_invalid", err.Error(), item.Reference))
+				ds = append(ds, diag.New(diag.PathInvalid, err.Error(), item.Reference))
 				continue
 			}
 			p.Source = path

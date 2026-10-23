@@ -438,7 +438,7 @@ func TestHashEscapeFontNamesAreRefusedBeforePublication(t *testing.T) {
 			}
 			for _, command := range []string{"check", "build"} {
 				result := core.Execute(t.Context(), core.NewRequest(core.Operation(command), core.FromPlan(core.FilePlan(plan)), core.Options{WorkingDir: dir, Overwrite: true}))
-				if result.Status != "invalid" || result.Output.Published || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "font_invalid" || result.Diagnostics[0].File != fontPath || !strings.Contains(result.Diagnostics[0].Message, "different PostScript name") {
+				if result.Status != "invalid" || result.Output.Published || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diag.FontInvalid || result.Diagnostics[0].File != fontPath || !strings.Contains(result.Diagnostics[0].Message, "different PostScript name") {
 					t.Fatalf("%s did not refuse name early: %+v", command, result)
 				}
 				if data, err = os.ReadFile(output); err != nil || !bytes.Equal(data, sentinel) {

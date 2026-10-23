@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
@@ -56,7 +58,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 				case nil, types.Name, types.Integer, types.Float:
 					dest.tail = append(dest.tail, value)
 				default:
-					return destination{}, refuse("source_invalid", "Unsupported destination coordinate value.")
+					return destination{}, refuse(diag.SourceInvalid, "Unsupported destination coordinate value.")
 				}
 			}
 		}
@@ -77,14 +79,14 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return err
 		}
 		if depth > 64 {
-			return refuse("source_invalid", "Destination name tree exceeds depth 64.")
+			return refuse(diag.SourceInvalid, "Destination name tree exceeds depth 64.")
 		}
 		if o == nil {
 			return nil
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if seen[ref] {
-				return refuse("source_invalid", "Destination name tree repeats a node.")
+				return refuse(diag.SourceInvalid, "Destination name tree repeats a node.")
 			}
 			seen[ref] = true
 		}
@@ -97,7 +99,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return err
 		}
 		if len(a)%2 != 0 {
-			return refuse("source_invalid", "Odd destination name array.")
+			return refuse(diag.SourceInvalid, "Odd destination name array.")
 		}
 		for i := 0; i < len(a); i += 2 {
 			name, err := destinationName(s, a[i])
@@ -109,7 +111,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 				return e
 			}
 			if _, exists := result[name]; exists {
-				return refuse("source_invalid", "Duplicate destination byte-string keys are unsupported.")
+				return refuse(diag.SourceInvalid, "Duplicate destination byte-string keys are unsupported.")
 			}
 			result[name] = dest
 		}
@@ -137,7 +139,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return nil, e
 		}
 		if existing, ok := result[name]; ok && (existing.page != dest.page || !reflect.DeepEqual(existing.tail, dest.tail)) {
-			return nil, refuse("source_invalid", "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
+			return nil, refuse(diag.SourceInvalid, "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
 		}
 		result[name] = dest
 	}

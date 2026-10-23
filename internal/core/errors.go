@@ -11,19 +11,19 @@ import (
 )
 
 func textDiagnostic(err error, item string) diag.Diagnostic {
-	code := diag.Code("font_invalid")
+	code := diag.FontInvalid
 	var text *typeset.TextError
 	var overflow *typeset.OverflowError
 	switch {
 	case errors.As(err, &text):
-		code = "text_unsupported_character"
+		code = diag.TextUnsupportedCharacter
 		if text.GlyphMissingOnly() {
-			code = "text_glyph_missing"
+			code = diag.TextGlyphMissing
 		}
 	case errors.Is(err, typeset.ErrShapingFailed):
-		code = "assembly_failed"
+		code = diag.AssemblyFailed
 	case errors.As(err, &overflow):
-		code = "text_overflow"
+		code = diag.TextOverflow
 	}
 	return diag.New(code, err.Error(), item)
 }

@@ -19,31 +19,31 @@ func TestKnownMissingInputsRequireEstablishedSeparation(t *testing.T) {
 	input := filepath.Join(dir, "missing.pdf")
 	cases := []struct {
 		name, report string
-		want         string
+		want         diag.Code
 	}{
-		{"exact", input, "report_is_input"},
-		{"sibling", filepath.Join(dir, "report.json"), "report_identity_unverified"},
-		{"separate existing directory", filepath.Join(other, "report.json"), ""},
-		{"missing report parent", filepath.Join(dir, "missing-dir", "report.json"), "report_write_failed"},
+		{"exact", input, diag.ReportIsInput},
+		{"sibling", filepath.Join(dir, "report.json"), diag.ReportIdentityUnverified},
+		{"separate existing directory", filepath.Join(other, "report.json"), diag.Code{}},
+		{"missing report parent", filepath.Join(dir, "missing-dir", "report.json"), diag.ReportInspectionFailed},
 	}
 	if err := os.Symlink(dir, filepath.Join(other, "alias")); err == nil {
 		cases = append(cases, struct {
 			name, report string
-			want         string
-		}{"directory alias exact", filepath.Join(other, "alias", "missing.pdf"), "report_is_input"}, struct {
+			want         diag.Code
+		}{"directory alias exact", filepath.Join(other, "alias", "missing.pdf"), diag.ReportIsInput}, struct {
 			name, report string
-			want         string
-		}{"directory alias sibling", filepath.Join(other, "alias", "report.json"), "report_identity_unverified"})
+			want         diag.Code
+		}{"directory alias sibling", filepath.Join(other, "alias", "report.json"), diag.ReportIdentityUnverified})
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			roles := files.Files{Report: tc.report, Inputs: []string{input}, InputsKnown: true, Overwrite: true}
 			ds := roles.CheckReport()
-			if tc.want == "" {
+			if tc.want == (diag.Code{}) {
 				if len(ds) > 0 {
 					t.Fatal(ds)
 				}
-			} else if !hasCode(ds, diag.Code(tc.want)) {
+			} else if !hasCode(ds, tc.want) {
 				t.Fatalf("%v want %s", ds, tc.want)
 			}
 		})
@@ -53,7 +53,7 @@ func TestKnownMissingInputsRequireEstablishedSeparation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds := (files.Files{Report: existing, Inputs: []string{input}, InputsKnown: true, Overwrite: true}).CheckReport()
-	if !hasCode(ds, "report_identity_unverified") {
+	if !hasCode(ds, diag.ReportIdentityUnverified) {
 		t.Fatal(ds)
 	}
 }
@@ -78,7 +78,7 @@ func TestBrokenInputIdentityNeverAuthorizesReport(t *testing.T) {
 				input = filepath.Join(input, "child")
 			}
 			roles := files.Files{Report: filepath.Join(t.TempDir(), "report.json"), Inputs: []string{input}, InputsKnown: true}
-			if ds := roles.CheckReport(); !hasCode(ds, "report_write_failed") {
+			if ds := roles.CheckReport(); !hasCode(ds, diag.ReportInspectionFailed) {
 				t.Fatal(ds)
 			}
 		})
@@ -89,7 +89,7 @@ func TestBrokenInputIdentityNeverAuthorizesReport(t *testing.T) {
 		t.Skip(err)
 	}
 	ds := (files.Files{Report: report, Inputs: []string{filepath.Join(dir, "missing")}, InputsKnown: true, Overwrite: true}).CheckReport()
-	if !hasCode(ds, "report_not_regular") || hasCode(ds, "report_write_failed") {
+	if !hasCode(ds, diag.ReportNotRegular) || hasCode(ds, diag.ReportInspectionFailed) {
 		t.Fatal(ds)
 	}
 }
@@ -113,7 +113,7 @@ func TestInaccessibleInputPrefixDoesNotAuthorizeReport(t *testing.T) {
 		t.Skipf("host does not expose an inaccessible-prefix permission error: %v", err)
 	}
 	ds := (files.Files{Report: filepath.Join(t.TempDir(), "report.json"), Inputs: []string{input}, InputsKnown: true}).CheckReport()
-	if !hasCode(ds, "report_write_failed") {
+	if !hasCode(ds, diag.ReportInspectionFailed) {
 		t.Fatal(ds)
 	}
 }

@@ -63,7 +63,7 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 		code = policy.code
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		code = "interrupted"
+		code = diag.Interrupted
 	}
 	d := diag.New(code, err.Error())
 	if policy != nil {
@@ -79,7 +79,7 @@ func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagn
 	defer func() {
 		if value := recover(); value != nil {
 			facts = SourceFacts{}
-			ds = []diag.Diagnostic{diag.New("source_invalid", fmt.Sprintf("PDF parser panic: %v", value))}
+			ds = []diag.Diagnostic{diag.New(diag.SourceInvalid, fmt.Sprintf("PDF parser panic: %v", value))}
 		}
 		facts.SHA256 = digest
 		facts.Bytes = int64(len(data))
@@ -90,11 +90,11 @@ func Inspect(c context.Context, data []byte) (facts SourceFacts, ds []diag.Diagn
 			facts.Pages = s.PageCount
 			facts.Version = s.XRefTable.Version().String()
 		}
-		return facts, []diag.Diagnostic{diagnostic(err, "source_invalid")}
+		return facts, []diag.Diagnostic{diagnostic(err, diag.SourceInvalid)}
 	}
 	facts, ds, err = observe(c, s)
 	if err != nil {
-		ds = append(ds, diagnostic(err, "source_invalid"))
+		ds = append(ds, diagnostic(err, diag.SourceInvalid))
 		return facts, ds
 	}
 	return facts, ds
@@ -108,12 +108,12 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 	s, err = api.ReadContext(c, bytes.NewReader(data), conf)
 	if err != nil {
 		if errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) {
-			return s, refuse("source_encrypted", "Encrypted sources are not supported (including password-protected input).")
+			return s, refuse(diag.SourceEncrypted, "Encrypted sources are not supported (including password-protected input).")
 		}
 		return s, err
 	}
 	if s.Encrypt != nil {
-		return s, refuse("source_encrypted", "Encrypted sources are not supported.")
+		return s, refuse(diag.SourceEncrypted, "Encrypted sources are not supported.")
 	}
 	pages, err := rawPages(c, s)
 	if err != nil {
@@ -135,7 +135,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 				return e
 			}
 			if resourceType == types.Name("Annot") || resourceFieldType != nil {
-				return refuse("source_invalid", "A resource dictionary shared with an annotation or field is unsupported; upstream validation would discard that role.")
+				return refuse(diag.SourceInvalid, "A resource dictionary shared with an annotation or field is unsupported; upstream validation would discard that role.")
 			}
 		}
 		subtype, e := nameValue(s, d["Subtype"])
@@ -145,7 +145,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 		if subtype == types.Name("Widget") {
 			rect, e := s.DereferenceArray(d["Rect"])
 			if e != nil || len(rect) != 4 {
-				return refuse("source_invalid", "Widget Rect must contain four coordinates.")
+				return refuse(diag.SourceInvalid, "Widget Rect must contain four coordinates.")
 			}
 		}
 		fieldType, e := nameValue(s, d["FT"])
@@ -158,7 +158,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 				return e
 			}
 			if value != nil {
-				return refuse("source_signed", "Signature values are not supported; unsigned null fields are allowed.")
+				return refuse(diag.SourceSigned, "Signature values are not supported; unsigned null fields are allowed.")
 			}
 		}
 		kind, e := nameValue(s, d["Type"])
@@ -166,12 +166,12 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 			return e
 		}
 		if kind == types.Name("Sig") || kind == types.Name("DocTimeStamp") {
-			return refuse("source_signed", "Signature and timestamp values are not supported.")
+			return refuse(diag.SourceSigned, "Signature and timestamp values are not supported.")
 		}
 		for key := range d {
 			decoded, e := types.DecodeName(key)
 			if e == nil && decoded != key {
-				return refuse("source_invalid", fmt.Sprintf("Unsupported literal-hash dictionary key %q; upstream would change its identity.", key))
+				return refuse(diag.SourceInvalid, fmt.Sprintf("Unsupported literal-hash dictionary key %q; upstream would change its identity.", key))
 			}
 		}
 		return nil
@@ -187,9 +187,9 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 		code    diag.Code
 		message string
 	}{
-		{"Perms", "source_signed", "Certified sources are not supported."},
-		{"DocTimeStamp", "source_signed", "Document timestamps are not supported."},
-		{"OCProperties", "source_optional_content", "Optional content is not supported."},
+		{"Perms", diag.SourceSigned, "Certified sources are not supported."},
+		{"DocTimeStamp", diag.SourceSigned, "Document timestamps are not supported."},
+		{"OCProperties", diag.SourceOptionalContent, "Optional content is not supported."},
 	} {
 		value, e := s.Dereference(cat[policy.key])
 		if e != nil {
@@ -204,7 +204,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 		return s, e
 	}
 	if rendering == types.Boolean(true) {
-		return s, refuse("source_dynamic_form", "Dynamic forms are not supported.")
+		return s, refuse(diag.SourceDynamicForm, "Dynamic forms are not supported.")
 	}
 	if _, err = fields(c, s); err != nil {
 		return s, err
@@ -215,7 +215,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 	}
 	for _, n := range report.Notices() {
 		if (n.Disposition == model.NoticeRepaired || n.Disposition == model.NoticeSkipped) && (n.PageNumber > 0 || strings.Contains(strings.ToLower(n.Path), "page") || strings.Contains(strings.ToLower(n.Message), "page")) {
-			return s, refuse("source_damaged", n.Message)
+			return s, refuse(diag.SourceDamaged, n.Message)
 		}
 	}
 	return s, nil
@@ -240,16 +240,16 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			return 0, err
 		}
 		if depth > 64 {
-			return 0, refuse("source_damaged", "Page tree exceeds depth 64.")
+			return 0, refuse(diag.SourceDamaged, "Page tree exceeds depth 64.")
 		}
 		ref, indirect := o.(types.IndirectRef)
 		if !indirect || visited[ref] {
-			return 0, refuse("source_damaged", "Page tree contains a direct, repeated or cyclic node.")
+			return 0, refuse(diag.SourceDamaged, "Page tree contains a direct, repeated or cyclic node.")
 		}
 		visited[ref] = true
 		d, err := s.DereferenceDict(o)
 		if err != nil || len(d) == 0 {
-			return 0, refuse("source_damaged", fmt.Sprintf("Page-tree object %s is missing or empty.", ref))
+			return 0, refuse(diag.SourceDamaged, fmt.Sprintf("Page-tree object %s is missing or empty.", ref))
 		}
 		typ, err := s.Dereference(d["Type"])
 		if err != nil {
@@ -262,14 +262,14 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 				return 0, err
 			}
 			if kids != nil {
-				return 0, refuse("source_damaged", "A Page has non-null Kids; readers may drop its content.")
+				return 0, refuse(diag.SourceDamaged, "A Page has non-null Kids; readers may drop its content.")
 			}
 			pages = append(pages, pageRef{ref: ref, dict: d})
 			return 1, nil
 		case types.Name("Pages"):
 			kids, err := s.DereferenceArray(d["Kids"])
 			if err != nil || len(kids) == 0 {
-				return 0, refuse("source_damaged", "Pages requires nonempty Kids.")
+				return 0, refuse(diag.SourceDamaged, "Pages requires nonempty Kids.")
 			}
 			count := 0
 			for _, kid := range kids {
@@ -281,11 +281,11 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			}
 			v, err := s.Dereference(d["Count"])
 			if err != nil || v != types.Integer(count) {
-				return 0, refuse("source_damaged", fmt.Sprintf("Page-tree Count disagrees with %d leaves.", count))
+				return 0, refuse(diag.SourceDamaged, fmt.Sprintf("Page-tree Count disagrees with %d leaves.", count))
 			}
 			return count, nil
 		default:
-			return 0, refuse("source_damaged", fmt.Sprintf("Page-tree node %s has no supported Type.", ref))
+			return 0, refuse(diag.SourceDamaged, fmt.Sprintf("Page-tree node %s has no supported Type.", ref))
 		}
 	}
 	_, err = walk(catalog["Pages"], 0)
@@ -298,7 +298,7 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 	var walk func(types.Object, int) error
 	walk = func(o types.Object, depth int) error {
 		if depth > 128 {
-			return refuse("source_invalid", "Direct object nesting exceeds 128.")
+			return refuse(diag.SourceInvalid, "Direct object nesting exceeds 128.")
 		}
 		switch v := o.(type) {
 		case types.Dict:
@@ -315,7 +315,7 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 		case types.Name:
 			decoded, err := types.DecodeName(string(v))
 			if err == nil && decoded != string(v) {
-				return refuse("source_invalid", "Unsupported literal-hash name identity; upstream may decode it twice.")
+				return refuse(diag.SourceInvalid, "Unsupported literal-hash name identity; upstream may decode it twice.")
 			}
 		case types.Array:
 			for _, child := range v {
@@ -368,7 +368,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	for _, entry := range []struct {
 		key  string
 		code diag.Code
-	}{{"StructTreeRoot", "source_structure_removed"}, {"PageLabels", "source_page_labels_removed"}, {"OutputIntents", "source_output_intents_removed"}, {"OpenAction", "source_document_actions_removed"}, {"AA", "source_document_actions_removed"}, {"AF", "source_attachments_removed"}} {
+	}{{"StructTreeRoot", diag.SourceStructureRemoved}, {"PageLabels", diag.SourcePageLabelsRemoved}, {"OutputIntents", diag.SourceOutputIntentsRemoved}, {"OpenAction", diag.SourceDocumentActionsRemoved}, {"AA", diag.SourceDocumentActionsRemoved}, {"AF", diag.SourceAttachmentsRemoved}} {
 		if catalog[entry.key] != nil {
 			add(entry.code, entry.key+" will be removed from the output catalog.")
 		}
@@ -378,17 +378,17 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		return facts, ds, err
 	}
 	if names["JavaScript"] != nil {
-		add("source_document_actions_removed", "Document JavaScript will be removed.")
+		add(diag.SourceDocumentActionsRemoved, "Document JavaScript will be removed.")
 	}
 	if names["EmbeddedFiles"] != nil {
-		add("source_attachments_removed", "Embedded-file indexes will be removed.")
+		add(diag.SourceAttachmentsRemoved, "Embedded-file indexes will be removed.")
 	}
 	form, err := s.DereferenceDict(catalog["AcroForm"])
 	if err != nil {
 		return facts, ds, err
 	}
 	if form["XFA"] != nil {
-		add("source_xfa_removed", "XFA will be removed; static fields remain.")
+		add(diag.SourceXfaRemoved, "XFA will be removed; static fields remain.")
 	}
 	rendering, err := s.Dereference(form["NeedAppearances"])
 	if err != nil {
@@ -401,7 +401,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	}
 	facts.HasFields = len(roots) > 0
 	if facts.NeedAppearances && facts.HasFields {
-		add("form_appearance_regeneration_requested", "The source requests viewer-regenerated field appearances.")
+		add(diag.FormAppearanceRegenerationRequested, "The source requests viewer-regenerated field appearances.")
 	}
 	if facts.HasFields {
 		signature := types.Dict{"DR": form["DR"], "DA": form["DA"], "Q": form["Q"]}
@@ -438,7 +438,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 			}
 			u, e := url.Parse(target)
 			if e == nil && !u.IsAbs() {
-				add("source_uri_base_removed", "Source URI Base is removed; retained relative URI actions may resolve differently.")
+				add(diag.SourceURIBaseRemoved, "Source URI Base is removed; retained relative URI actions may resolve differently.")
 			}
 		}
 		return nil
@@ -465,7 +465,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	for name, d := range destinations {
 		facts.DestNames = append(facts.DestNames, name)
 		if d.page < 1 {
-			add("destinations_dropped", "A destination outside its source document will be omitted.")
+			add(diag.DestinationsDropped, "A destination outside its source document will be omitted.")
 		}
 	}
 	facts.HasCoordinateDestinations, err = coordinateDestinations(c, s, destinations)
@@ -507,7 +507,7 @@ func displayedSize(c context.Context, s *model.Context, page int) (packet.Size, 
 		case types.Float:
 			unit = float64(n)
 		default:
-			return packet.Size{}, refuse("source_invalid", "Invalid UserUnit.")
+			return packet.Size{}, refuse(diag.SourceInvalid, "Invalid UserUnit.")
 		}
 	}
 	width, height := box.Width()*unit, box.Height()*unit
@@ -515,7 +515,7 @@ func displayedSize(c context.Context, s *model.Context, page int) (packet.Size, 
 		width, height = height, width
 	}
 	if width <= 0 || height <= 0 || math.IsInf(width, 0) || math.IsInf(height, 0) || math.IsNaN(width) || math.IsNaN(height) {
-		return packet.Size{}, refuse("source_invalid", "Invalid physical page dimensions.")
+		return packet.Size{}, refuse(diag.SourceInvalid, "Invalid physical page dimensions.")
 	}
 	return packet.Size{Width: width, Height: height}, nil
 }

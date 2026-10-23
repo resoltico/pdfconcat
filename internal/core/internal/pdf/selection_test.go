@@ -126,7 +126,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 	for _, tc := range []struct {
 		doc  *pdffixture.Doc
 		code diag.Code
-	}{{pdffixture.Form("form"), "source_selection_form_unsupported"}, {signed, "source_signed"}} {
+	}{{pdffixture.Form("form"), diag.SourceSelectionFormUnsupported}, {signed, diag.SourceSigned}} {
 		facts, _, ds := InspectSelections(t.Context(), tc.doc.Bytes(), []SelectionRequest{{Item: "part", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 		found := false
 		for _, d := range ds {
@@ -347,7 +347,7 @@ func TestComposedOutlineHierarchyUsesBackendBoundary(t *testing.T) {
 		t.Fatal(views)
 	}
 	_, ds := selectedPacket(t, doc, []packet.Part{{Pointer: "section", Title: "Wrapper", Items: []packet.Part{{Pointer: "source", Source: "source"}}}}, nil)
-	if len(ds) != 1 || ds[0].Code != "source_outline_depth_unsupported" {
+	if len(ds) != 1 || ds[0].Code != diag.SourceOutlineDepthUnsupported {
 		t.Fatalf("composed hierarchy not refused: %+v", ds)
 	}
 }
@@ -366,7 +366,7 @@ func TestGroupedFooterMeasurementsUseOnlyRequestedOriginalPages(t *testing.T) {
 		t.Fatal("ordinary inspection allocated footer geometry")
 	}
 	invalid, occurrences, ds := InspectSelections(t.Context(), doc.Bytes(), []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureFooter: true}})
-	if len(ds) != 1 || ds[0].Code != "source_selection_out_of_range" || invalid.PageSizes != nil || len(occurrences) != 0 {
+	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || invalid.PageSizes != nil || len(occurrences) != 0 {
 		t.Fatalf("invalid selection invented geometry: %+v %+v %+v", invalid.PageSizes, occurrences, ds)
 	}
 }
@@ -399,7 +399,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 	}
 	var output bytes.Buffer
 	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, nil, nil, &output)
-	if err == nil || Diagnostic(err).Code != "source_changed" || output.Len() != 0 {
+	if err == nil || Diagnostic(err).Code != diag.SourceChanged || output.Len() != 0 {
 		t.Fatalf("changed omitted bytes were not refused before writing: err=%v bytes=%d", err, output.Len())
 	}
 }
@@ -582,7 +582,7 @@ func TestRepeatedWholeFormRetainsFieldOnlyActions(t *testing.T) {
 	_, _, refused := InspectSelections(t.Context(), d.Bytes(), []SelectionRequest{{Item: "partial", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 	found := false
 	for _, d := range refused {
-		if d.Code == "source_selection_form_unsupported" {
+		if d.Code == diag.SourceSelectionFormUnsupported {
 			found = true
 		}
 	}

@@ -43,16 +43,16 @@ func build(c context.Context, j packet.Job, prepared preparationOutcome, composi
 	}
 	embedded, err := typeset.PrepareFonts(placements)
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New("font_invalid", err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.New(diag.FontInvalid, err.Error()))
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New("interrupted", err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.New(diag.Interrupted, err.Error()))
 		return out
 	}
 	staged, err := files.Create(j.Output)
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic("output_write_failed", err, j.Output))
+		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputWriteFailed, err, j.Output))
 		return out
 	}
 	defer staged.Abort()
@@ -70,7 +70,7 @@ func build(c context.Context, j packet.Job, prepared preparationOutcome, composi
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New("interrupted", err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.New(diag.Interrupted, err.Error()))
 		return out
 	}
 	published, err := staged.Commit(overwrite)
@@ -80,7 +80,7 @@ func build(c context.Context, j packet.Job, prepared preparationOutcome, composi
 		out.output.Bytes = knownCount(counter.n)
 	}
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic("output_publish_failed", err, j.Output))
+		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputPublishFailed, err, j.Output))
 	}
 	return out
 }

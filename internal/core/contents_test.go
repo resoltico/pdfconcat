@@ -106,7 +106,7 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 		}
 	}
 	j.PageNumbers.Margin = fit.Height
-	if _, ds = prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code != "text_overflow" {
+	if _, ds = prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("impossible footer space accepted: %+v", ds)
 	}
 }
@@ -114,12 +114,12 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 1, packet.Size{Width: 109.152, Height: 200})
 	j.Parts[1].Contents.Title = "ffffff"
-	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code != "text_overflow" {
+	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("heading ink margin was ignored: %+v", ds)
 	}
 	j, fonts = contentsRecipe(t, 1, 1, packet.Size{Width: 200, Height: 150})
 	j.Parts[2].Title = strings.Repeat("Long wrapped title ", 20)
-	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code != "text_overflow" {
+	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("oversized whole row accepted: %+v", ds)
 	}
 	nested := j.Parts[2]

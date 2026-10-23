@@ -18,13 +18,13 @@ import (
 
 type admission struct {
 	plan          *packet.Plan
-	roles         files.Files
+	roles         files.Roles
 	diagnostics   []diag.Diagnostic
 	reportRefused bool
 }
 
 func admit(ctx context.Context, req Request) *admission {
-	a := &admission{roles: files.Files{Overwrite: req.Overwrite}}
+	a := &admission{roles: files.Roles{Overwrite: req.Overwrite}}
 	// Reserve physical inputs before cancellation or acquisition can fail.
 	switch input := req.Input.(type) {
 	case PlanFile:

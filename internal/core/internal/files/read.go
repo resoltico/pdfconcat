@@ -47,12 +47,12 @@ func Read(c context.Context, path string, limit int64) ([]byte, error) {
 	if limit > 0 && info.Size() > limit {
 		return nil, ErrTooLarge
 	}
-	return ReadStream(c, f, limit)
+	return readStream(c, f, limit)
 }
 
-// ReadStream bounds retained bytes and checks cancellation between reads.
+// readStream bounds retained bytes and checks cancellation between reads.
 // A caller using a blocking stream must also arrange to unblock it on cancellation.
-func ReadStream(c context.Context, reader io.Reader, limit int64) ([]byte, error) {
+func readStream(c context.Context, reader io.Reader, limit int64) ([]byte, error) {
 	var err error
 	var b bytes.Buffer
 	chunk := make([]byte, 256<<10)

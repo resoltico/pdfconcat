@@ -141,7 +141,7 @@ func TestRealNoReplaceCommit(t *testing.T) {
 func TestPublicationStatePrecedesTrailingErrors(t *testing.T) {
 	late := errors.New("late failure")
 	for _, publicationErr := range []error{nil, late} {
-		f := &File{}
+		f := &Staged{}
 		called := false
 		published, err := f.finishCommit(true, publicationErr, func() error {
 			called = true
@@ -177,7 +177,7 @@ func TestLinkFallbackStateAndNoClobber(t *testing.T) {
 	if data, e := os.ReadFile(target); e != nil || string(data) != "complete" {
 		t.Fatalf("linked target %q %v", data, e)
 	}
-	f := &File{target: target, temp: temp, closed: true, published: published}
+	f := &Staged{target: target, temp: temp, closed: true, published: published}
 	if err = f.Abort(); err != nil {
 		t.Fatal(err)
 	}

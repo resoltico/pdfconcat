@@ -43,7 +43,7 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 						t.Skipf("symlinks unavailable: %v", err)
 					}
 				}
-				f := files.Files{Inputs: []string{input}, InputsKnown: true, Overwrite: true}
+				f := files.Roles{Inputs: []string{input}, InputsKnown: true, Overwrite: true}
 				if role == "output" {
 					f.Output = target
 				} else {
@@ -66,7 +66,7 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	f := files.Files{Output: output, Report: report, InputsKnown: true}
+	f := files.Roles{Output: output, Report: report, InputsKnown: true}
 	ds := f.Check()
 	if !hasCode(ds, diag.OutputExists) || !hasCode(ds, diag.ReportExists) {
 		t.Fatalf("missing overwrite refusals: %+v", ds)
@@ -83,7 +83,7 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 	if ds = f.CheckReport(); !hasCode(ds, diag.ReportIsOutput) {
 		t.Fatalf("report/output equality: %+v", ds)
 	}
-	f = files.Files{Output: t.TempDir(), Report: t.TempDir(), Overwrite: true, InputsKnown: true}
+	f = files.Roles{Output: t.TempDir(), Report: t.TempDir(), Overwrite: true, InputsKnown: true}
 	if ds = f.Check(); !hasCode(ds, diag.OutputNotRegular) || !hasCode(ds, diag.ReportNotRegular) {
 		t.Fatalf("nonregular destinations: %+v", ds)
 	}
@@ -101,7 +101,7 @@ func TestReportRoleRecheckFindsInitiallyAbsentParentAlias(t *testing.T) {
 	}
 	output := filepath.Join(realDir, "packet.pdf")
 	report := filepath.Join(alias, "packet.pdf")
-	f := files.Files{Output: output, Report: report, Overwrite: true, InputsKnown: true}
+	f := files.Roles{Output: output, Report: report, Overwrite: true, InputsKnown: true}
 	if ds := f.Check(); len(ds) > 0 {
 		t.Fatalf("unexpected initial outcome: %+v", ds)
 	}
@@ -136,7 +136,7 @@ func TestCaseAliasOnCaseInsensitiveFilesystem(t *testing.T) {
 	if err != nil || !os.SameFile(first, second) {
 		t.Skip("filesystem is case sensitive")
 	}
-	ds := (files.Files{Output: alias, Inputs: []string{input}, Overwrite: true, InputsKnown: true}).Check()
+	ds := (files.Roles{Output: alias, Inputs: []string{input}, Overwrite: true, InputsKnown: true}).Check()
 	if !hasCode(ds, diag.OutputIsInput) {
 		t.Fatalf("case alias was not refused: %+v", ds)
 	}
@@ -147,4 +147,34 @@ func roleCode(role string, output, report diag.Code) diag.Code {
 		return report
 	}
 	return output
+}
+
+func TestReportMissingInputSpellingAndExistingDirectoryAlias(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "missing.pdf")
+	roles := files.Roles{Report: dir + string(os.PathSeparator) + "." + string(os.PathSeparator) + "missing.pdf", Inputs: []string{input}, InputsKnown: true, Overwrite: true}
+	if ds := roles.CheckReport(); !hasCode(ds, diag.ReportIsInput) {
+		t.Fatal(ds)
+	}
+	roles.Report = filepath.Join(dir, "report.json")
+	if ds := roles.CheckReport(); len(ds) != 0 {
+		t.Fatal("a separate new report was refused", ds)
+	}
+	existing := filepath.Join(dir, "source.pdf")
+	if err := os.WriteFile(existing, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(dir, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	roles.Report = filepath.Join(alias, "source.pdf")
+	roles.Inputs = []string{existing}
+	if ds := roles.CheckReport(); !hasCode(ds, diag.ReportIsInput) {
+		t.Fatal(ds)
+	}
+	after, err := os.ReadFile(existing)
+	if err != nil || string(after) != "preserve" {
+		t.Fatalf("input changed: %q %v", after, err)
+	}
 }

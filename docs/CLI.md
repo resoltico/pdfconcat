@@ -159,15 +159,7 @@ input hidden in a malformed plan. Existing-target and known-collision refusals
 use `report_exists`, `report_not_regular`, `report_is_input` or
 `report_is_output`.
 
-Reports beside known missing plans, sources or consumed fonts can be refused as
-`report_identity_unverified` when separation cannot be established. Use a
-different existing report directory. A font selected for a generated page is an
-input even when its text is empty; an unused default declaration reserves no
-file. Identity inspection errors are `report_write_failed`. Report-parent
-feasibility is checked at report publication, so an output PDF may already be
-published when reporting fails.
-A `check` report does not prove separation from an absent future output under
-alternative path spellings.
+Existing inputs and the output are protected by file identity. Missing inputs are protected only by cleaned path spelling; reports are rechecked after PDF publication.
 
 Output/report files use ordinary umask permissions; replacements keep the old
 mode. Publication uses a sibling temp, sync, no-replace rename (link fallback
@@ -345,7 +337,6 @@ The registry in `internal/diag/codes.go` is authoritative. Warning class is empt
 | `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
 | `plan_version_unsupported` | error | invalid | required plan version is missing or unsupported |
 | `report_exists` | error | invalid | report exists and `--overwrite` not given (or inputs unknown, see CLI.md) |
-| `report_identity_unverified` | error | invalid | report separation from a known missing input cannot be established; use a different existing directory |
 | `report_is_input` | error | invalid | report is (or aliases) an input |
 | `report_is_output` | error | invalid | report and output are the same file |
 | `report_not_regular` | error | invalid | same for the report |

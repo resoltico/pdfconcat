@@ -11,7 +11,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
-func writeReport(r *result.Result, roles files.Files) {
+func writeReport(r *result.Result, roles files.Roles) {
 	if r.Report == nil {
 		return
 	}
@@ -26,7 +26,7 @@ func writeReport(r *result.Result, roles files.Files) {
 	full.Report = &report
 	data, err := json.Marshal(full)
 	if err == nil {
-		var staged *files.File
+		var staged *files.Staged
 		staged, err = files.Create(roles.Report)
 		if err == nil {
 			defer staged.Abort()

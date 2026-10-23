@@ -93,16 +93,7 @@ wire version source. Plan v3 and result/report v4 remain the wire contracts.
 
 ## Input reservations and failure reports
 
-Known missing plan/source/consumed-font paths are protected physical reservations.
-A report in a verified different existing directory is separate. Equal unresolved
-leaf names under an identical native directory identity collide. Other unresolved
-same-directory relationships are refused as `report_identity_unverified`; use a
-different existing report directory. Inspection/identity failures do not authorize
-writing. Native Windows identity errors retain their operation and queried path,
-including an input or ancestor path distinct from the report destination.
-Existing target links/nonregular objects are refused before identity following.
-Unused default font declarations are not physical inputs, while selected fonts
-are inputs even for empty text.
+Existing inputs and the output are protected by file identity. Missing inputs are protected only by cleaned path spelling; reports are rechecked after PDF publication.
 
 Initial checks do not demand a report parent or guess identity between absent
 output/report names. PDF publication can succeed before report publication

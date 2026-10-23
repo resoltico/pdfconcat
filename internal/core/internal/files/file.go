@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 )
 
-// File owns its temporary name. Published state is independent of later errors.
-type File struct {
+// Staged owns its temporary name. Published state is independent of later errors.
+type Staged struct {
 	*os.File
 	target, temp string
 	published    bool
@@ -23,7 +23,7 @@ type File struct {
 
 // Create uses conventional permissions (0666 minus umask). Replacing an existing
 // regular file preserves its mode; symlinks and other nonregular targets are refused.
-func Create(target string) (*File, error) {
+func Create(target string) (*Staged, error) {
 	var mode fs.FileMode
 	existing, err := os.Lstat(target)
 	if err == nil {
@@ -39,7 +39,7 @@ func Create(target string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := &File{File: f, target: target, temp: temp}
+	result := &Staged{File: f, target: target, temp: temp}
 	if existing != nil {
 		if err = f.Chmod(mode); err != nil {
 			_ = result.Abort()
@@ -49,14 +49,14 @@ func Create(target string) (*File, error) {
 	return result, nil
 }
 
-// Path identifies the owned temporary file, for verification before files.
-func (f *File) Path() string { return f.temp }
+// Path identifies the owned temporary file, for verification before publication.
+func (f *Staged) Path() string { return f.temp }
 
 // Published stays true if rename/link succeeded even when Commit also failed.
-func (f *File) Published() bool { return f.published }
+func (f *Staged) Published() bool { return f.published }
 
 // Commit flushes, closes, publishes, then syncs the containing directory.
-func (f *File) Commit(overwrite bool) (bool, error) {
+func (f *Staged) Commit(overwrite bool) (bool, error) {
 	if f.closed {
 		return f.published, errors.New("temporary file is already closed")
 	}
@@ -72,7 +72,7 @@ func (f *File) Commit(overwrite bool) (bool, error) {
 	return f.finishCommit(published, err, func() error { return syncDirectory(filepath.Dir(f.target)) })
 }
 
-func (f *File) finishCommit(published bool, publishErr error, syncDir func() error) (bool, error) {
+func (f *Staged) finishCommit(published bool, publishErr error, syncDir func() error) (bool, error) {
 	f.recordPublication(published)
 	if publishErr != nil {
 		return f.published, publishErr
@@ -81,7 +81,7 @@ func (f *File) finishCommit(published bool, publishErr error, syncDir func() err
 }
 
 // recordPublication is monotonic, including when cleanup/durability fails next.
-func (f *File) recordPublication(published bool) { f.published = f.published || published }
+func (f *Staged) recordPublication(published bool) { f.published = f.published || published }
 
 // publish exposes the namespace transition separately from trailing cleanup.
 // Its narrow function arguments let tests check state/error ordering without
@@ -110,7 +110,7 @@ func publish(temp, target string, overwrite bool, noReplace func(string, string)
 }
 
 // Abort closes/removes only the owned temporary name, never the target.
-func (f *File) Abort() error {
+func (f *Staged) Abort() error {
 	var closeErr error
 	if !f.closed {
 		closeErr = f.Close()

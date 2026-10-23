@@ -8,32 +8,33 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 )
 
-// Files holds the roles known at this point in a run. Unknown inputs force
+// Roles holds the roles known at this point in a run. Unknown inputs force
 // report no-replace even when Overwrite was requested.
-type Files struct {
+type Roles struct {
 	Output, Report         string
 	Inputs                 []string
 	Overwrite, InputsKnown bool
 }
 
 // Check checks initial roles/destinations. Input read failures belong to their stages.
-func (f Files) Check() []diag.Diagnostic {
-	ds := f.checkTarget(f.Output, "output", f.Overwrite, identity)
-	return append(ds, f.checkReport(false, identity)...)
+func (f Roles) Check() []diag.Diagnostic {
+	ds := f.checkTarget(f.Output, "output", f.Overwrite)
+	return append(ds, f.checkReport()...)
 }
 
 // CheckReport must also run immediately before report publication, after any PDF
 // publication, so initially absent aliases cannot overwrite the published PDF.
-func (f Files) CheckReport() []diag.Diagnostic { return f.checkReport(true, identity) }
+func (f Roles) CheckReport() []diag.Diagnostic { return f.checkReport() }
 
-func (f Files) checkReport(final bool, query identityQuery) []diag.Diagnostic {
-	ds := f.checkTarget(f.Report, "report", f.Overwrite && f.InputsKnown, query)
+func (f Roles) checkReport() []diag.Diagnostic {
+	ds := f.checkTarget(f.Report, "report", f.Overwrite && f.InputsKnown)
 	if f.Report != "" && f.Output != "" && !hasNonregularReport(ds) {
-		same, err := samePathOrFile(f.Report, f.Output, query)
+		same, err := samePathOrFile(f.Report, f.Output)
 		if err != nil {
 			d := diag.New(diag.ReportInspectionFailed, err.Error())
 			d.File = f.Report
@@ -45,34 +46,7 @@ func (f Files) checkReport(final bool, query identityQuery) []diag.Diagnostic {
 			ds = append(ds, d)
 		}
 	}
-	if final && f.Report != "" && !roleErrors(ds) {
-		for _, input := range f.Inputs {
-			reserved, err := reserve(input, query)
-			collision, unproved := false, false
-			if err == nil && len(reserved.missing) > 0 {
-				collision, unproved, err = missingInputRelation(f.Report, reserved, query)
-			}
-			code := diag.Code{}
-			message := ""
-			switch {
-			case err != nil:
-				code = diag.ReportInspectionFailed
-				message = err.Error()
-			case collision:
-				code = diag.ReportIsInput
-				message = "Destination aliases an input: " + input
-			case unproved:
-				code = diag.ReportIdentityUnverified
-				message = "Cannot establish report separation from input: " + input + ". Use a different existing report directory."
-			}
-			if code != (diag.Code{}) {
-				d := diag.New(code, message)
-				d.File = f.Report
-				ds = append(ds, d)
-				break
-			}
-		}
-	}
+
 	return ds
 }
 func hasNonregularReport(ds []diag.Diagnostic) bool {
@@ -83,9 +57,8 @@ func hasNonregularReport(ds []diag.Diagnostic) bool {
 	}
 	return false
 }
-func roleErrors(ds []diag.Diagnostic) bool { status, _ := diag.Outcome(ds); return status != "ok" }
 
-func (f Files) checkTarget(path, role string, overwrite bool, query identityQuery) []diag.Diagnostic {
+func (f Roles) checkTarget(path, role string, overwrite bool) []diag.Diagnostic {
 	if path == "" {
 		return nil
 	}
@@ -111,7 +84,7 @@ func (f Files) checkTarget(path, role string, overwrite bool, query identityQuer
 		return ds
 	}
 	for _, input := range f.Inputs {
-		same, identityErr := samePathOrFile(path, input, query)
+		same, identityErr := samePathOrFile(path, input)
 		if identityErr != nil {
 			add(inspection, identityErr.Error())
 			break
@@ -122,4 +95,26 @@ func (f Files) checkTarget(path, role string, overwrite bool, query identityQuer
 		}
 	}
 	return ds
+}
+
+// samePathOrFile protects existing bytes by identity and missing inputs by spelling.
+func samePathOrFile(a, b string) (bool, error) {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true, nil
+	}
+	first, err := os.Stat(a)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	second, err := os.Stat(b)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return os.SameFile(first, second), nil
 }

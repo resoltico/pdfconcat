@@ -22,7 +22,7 @@ func TestFileRoleFIFORefusals(t *testing.T) {
 			if err := syscall.Mkfifo(path, 0600); err != nil {
 				t.Skipf("native FIFO unavailable: %v", err)
 			}
-			roles := files.Files{InputsKnown: true, Overwrite: true}
+			roles := files.Roles{InputsKnown: true, Overwrite: true}
 			if role == "output" {
 				roles.Output = path
 			} else {

@@ -142,7 +142,7 @@ func TestPlanByteLimitAndCanceledPhysicalInputs(t *testing.T) {
 	cancel()
 	for n, input := range []core.Input{core.PlanFile{Path: "missing.json"}, core.Items{core.SourceItem{Path: "missing.pdf", Ref: "row"}}} {
 		r = core.Execute(ctx, core.Request{Operation: core.Check, Input: input, WorkingDir: dir, Report: filepath.Join(dir, fmt.Sprintf("cancel-%d.json", n))})
-		if !code(r, "interrupted") || !code(r, "report_identity_unverified") || r.Report.Written {
+		if !code(r, "interrupted") || !r.Report.Written {
 			t.Fatal(r)
 		}
 	}
@@ -223,7 +223,7 @@ func TestEffectiveFontReservationsAndDirectBudgets(t *testing.T) {
 		want  string
 	}{
 		{`[{"source":"source.pdf"}]`, ""},
-		{`[{"page":{}}]`, "report_identity_unverified"},
+		{`[{"page":{}}]`, "font_unreadable"},
 	} {
 		data := []byte(`{"version":4,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
 		report := filepath.Join(dir, "report.json")
@@ -232,7 +232,7 @@ func TestEffectiveFontReservationsAndDirectBudgets(t *testing.T) {
 			if r.Status != "ok" || !r.Report.Written {
 				t.Fatal(r)
 			}
-		} else if !code(r, tc.want) || !code(r, "font_unreadable") || r.Report.Written {
+		} else if !code(r, tc.want) || !r.Report.Written {
 			t.Fatal(r)
 		}
 	}
@@ -245,41 +245,6 @@ func TestEffectiveFontReservationsAndDirectBudgets(t *testing.T) {
 		t.Fatal(r.Diagnostics)
 	}
 
-}
-
-func TestReportCannotCreateAMissingInputDirectoryPrefix(t *testing.T) {
-	for _, separate := range []bool{false, true} {
-		t.Run(fmt.Sprintf("separate-report-directory=%t", separate), func(t *testing.T) {
-			parent := t.TempDir()
-			prefix := filepath.Join(parent, "not-yet-dir")
-			input := filepath.Join(prefix, "source.pdf")
-			report := prefix
-			if separate {
-				report = filepath.Join(t.TempDir(), "report.json")
-			}
-			r := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.Items{core.SourceItem{Path: input, Ref: "row"}}, WorkingDir: parent, Report: report})
-			if !code(r, "source_unreadable") || r.Report == nil || r.Report.Written != separate {
-				t.Fatal(r)
-			}
-			if !separate && !code(r, "report_identity_unverified") {
-				t.Fatal("missing-prefix obstruction was authorized", r)
-			}
-			if _, err := os.Stat(prefix); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("report obstructed the future input directory: %v", err)
-			}
-			if separate {
-				data, err := os.ReadFile(report)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var full core.Result
-				if err = json.Unmarshal(data, &full); err != nil || !full.Report.Written || full.Status != "failed" {
-					t.Fatalf("safe separate report: %s %v", data, err)
-				}
-				schemaValid(t, full)
-			}
-		})
-	}
 }
 
 func TestInvocationFailureOmitsEmptyConsumersAndKeepsMetadataStrict(t *testing.T) {

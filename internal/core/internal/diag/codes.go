@@ -109,7 +109,6 @@ func Registry() map[Code]Definition {
 // Registered diagnostic identifiers. Definitions follow declaration order.
 var (
 	RequestInvalid                      = define("request_invalid", Error, Invalid, "invalid application request envelope")
-	ReportIdentityUnverified            = define("report_identity_unverified", Error, Invalid, "report separation from a known missing input cannot be established; use a different existing directory")
 	SourceSelectionOutOfRange           = define("source_selection_out_of_range", Error, Invalid, "selected page range exceeds the original source page count")
 	SourceSelectionFormUnsupported      = define("source_selection_form_unsupported", Error, Invalid, "partial page selection of a source with form fields or widgets is unsupported")
 	SourceNavigationRemoved             = define("source_navigation_removed", Warning, NoClass, "navigation to omitted source pages was removed for affected occurrences")

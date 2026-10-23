@@ -161,6 +161,6 @@ func TestRepeatedPageLimitAndCancellation(t *testing.T) {
 	}
 	page := textPage(t, defaultFont(t), "font")
 	if _, err := pdf.WriteRepeated(t.Context(), io.Discard, page, 1, fontResources(nil)); !errors.Is(err, pdf.ErrInvalidPage) {
-		t.Fatalf("missing job-wide font accepted: %v", err)
+		t.Fatalf("missing packet-wide font accepted: %v", err)
 	}
 }

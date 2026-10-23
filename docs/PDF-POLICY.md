@@ -1,77 +1,10 @@
-# Design and PDF policy
+# PDF policy
 
-PDFConcat is a sequential, in-memory packet assembler built on unmodified pdfcpu. It owns plan and result contracts, generated text, source-policy checks, per-occurrence destinations and file publication.
+PDFConcat composes trusted local PDFs in memory using pdfcpu. Source policy is
+checked before layout and again where it depends on the final packet. The trust
+and filesystem boundary is in [SECURITY](../SECURITY.md).
 
-## Packages and boundaries
-
-| Package | Responsibility |
-| --- | --- |
-| cmd/pdfconcat | Signals, streams, cwd capability, linker override and exit |
-| cli | Grammar/help, process stdin adapter and copied stdout/terminal views |
-| plan | Strict plan decoding, located errors and editor schema |
-| job | Styles, paths, sizes, layering and page ranges |
-| typeset | Font validation, shaping, placement and stable-GID pruning |
-| pdf | PDF inspection, generation, fitting, merging and verification |
-| inputfile | Regular-file reads and bounded stream reads |
-| publication | Native object identity, role reservations, staging and durability |
-| result | Complete result/report v4, normalization, schemas and JSON encoding |
-| core | Closed application facade; admission, preparation, composition, build and report |
-
-Only `internal/pdf` imports pdfcpu; only `internal/typeset` imports go-text;
-only `internal/publication` imports x/sys. Exact strict owner rules in
-`.golangci.yml` cover the entire current package graph without grandfathering.
-Owner directories are canonical and module-relative; root `.` selectors are
-refused because their layer glob would not match canonical source filenames.
-The tools-module architecture command invokes pinned depguard directly, fully
-syntax-parsing all physical Go files including inactive OS/custom tags, hidden,
-ignored, generated and testdata files. It rejects unclassified/overlapping/stale
-owners, source links, unexpected module/workspace roots and discovery/config/syntax
-errors. Root and tools are the supported modules. Tests have explicit allowances;
-fixture/oracle production has no local imports. The core parity executable in
-`internal/core/testdata/client` has an explicit owner permitting only core/std.
-Import/ownership enforcement does not prove inactive-code type correctness or
-behavior. Review semantic cohesion separately.
-See [application contracts and ownership](CORE.md) and [contributor checks](../CONTRIBUTING.md).
-
-## Strict decoding
-
-Plan decoding uses jsontext grammar and duplicate-member checks, json/v2 scalar conversion, and immediate domain/null checks to preserve first-fault order. A leading UTF-8 BOM is included in original byte locations. Required members, lexical integer counts and aggregate limits are checked by the decoder; standard JSON Schema cannot enforce every one of these constraints. See [PLAN](PLAN.md) for syntax, paths, layering and error precedence.
-
-## Declared tree and physical layout
-
-Plan v3 keeps containers through resolution. Source objects hold normalized,
-ascending disjoint original-page ranges. A single resolved layout supplies
-compact mappings, authored section targets/ranges and all source, page, divider,
-contents and padding spans. The result/report v4 leaf parts partition physical
-pages 1..N; section ranges can overlap and can begin before their non-padding
-target. Titles are stored once on sections and derived into divider text.
-
-Contents titles wrap once against a fixed measured digit column sized by the
-conservative selected-source/authored-page/divider/section/odd-boundary bound.
-The exact contents count is known before final parity resolution; actual target
-digits do not reflow titles. Whole-row logical and ink bounds fit beneath a
-repeated heading and above the configured footer envelope in final fitted
-geometry. Without contents its page count is zero.
-
-Physical Arabic footers count every page but skip painting automatic parity
-blanks. They are overlays, not page parts. Fresh page-local resource dictionaries
-and q/Q wrapper streams isolate original conforming graphics state; original
-stream objects and page/annotation geometry remain intact. Fitted preservation
-is measured against the immediate post-fit baseline. Footer placement does not
-inspect source content for overlaps. The output uses physical page numbers
-without a PageLabels override.
-
-## Execution and input identity
-
-`check` and `build` load the plan or operands, check file roles, load selected fonts and validate text policy before reading PDFs, inspect each distinct source, resolve sizes/ranges and form/destination policy, then lay out generated text. `check` stops after layout and may write a report. It does not prove that merging or serialization will succeed.
-
-`build` rereads every source occurrence and compares its SHA-256 with the inspected bytes. Each occurrence is imported separately so its links and widgets belong to that copy. Named inputs are checked with `Stat` before opening and on the opened descriptor; symlinks to regular input files are supported. Stdin is the stream exception. Cancellation is passed to pdfcpu and checked between parts. A pending stdin read or close does not block the interrupted CLI outcome; a second signal uses the process's default termination behavior.
-
-Each part is validated before merging. Finalization rebuilds destinations, prunes catalog/name caches, synchronizes the effective PDF version, optimizes, validates and writes a sibling temporary file. Verification reopens that file and checks validation, exact page count and serialized catalog policy before publication.
-
-Stages collect diagnostics and stop on errors. `interrupted` takes precedence over `failed`, then `invalid`. Safe reports are attempted after failures too, but never after argument parsing fails. Readable refused sources retain known byte hashes and lengths; unknown page counts stay null. See [CLI](CLI.md) for result caps, report rules and publication facts.
-
-## PDF policy
+## Source policy
 
 | Source feature | Behavior |
 | --- | --- |
@@ -158,9 +91,9 @@ style fallbacks. Missing, short or unknown metadata is `font_invalid`; embedding
 rights are enforced separately. Original traits feed shared native font
 descriptors for full/pruned programs and body/contents/footer resources.
 
-Glyph pruning keeps IDs, metrics, glyph count, used outlines and composite components; rebuilds glyf/loca and checksums; reduces post to format 3; and drops layout/cmap tables after shaping. Stable IDs allow Identity CID-to-GID mapping without a renumbering layer. The job-wide glyph union produces identical font programs, widths and ToUnicode in generated items so upstream can deduplicate them. Counted pages within one item share content/resources and use a balanced page tree.
+Glyph pruning keeps IDs, metrics, glyph count, used outlines and composite components; rebuilds glyf/loca and checksums; reduces post to format 3; and drops layout/cmap tables after shaping. Stable IDs allow Identity CID-to-GID mapping without a renumbering layer. The packet-wide glyph union produces identical font programs, widths and ToUnicode in generated items so upstream can deduplicate them. Counted pages within one item share content/resources and use a balanced page tree.
 
-Prepared fonts explicitly record whether they contain a subset. Before writing any generated item, the PDF adapter reserves six-uppercase-letter subset prefixes found in imported BaseFont and descriptor FontName entries and tag-like names of generated full fonts, then allocates unused prefixes deterministically in sorted font-byte identity order. Each pruned font uses one `AAAAAA+PostScriptName`-style name throughout the job; its Type0 wrapper, CIDFont and descriptor agree. Full programs receive no added prefix and retain their original sanitized PostScript name and exact bytes, including names that already resemble subset names. TrueType name tables remain unchanged. PDF name syntax is escaped when writing, so ordinary literal hashes remain literal. The canonical-name safety policy also applies to generated fonts: a PostScript name containing a literal hash followed by two hexadecimal digits is refused as `font_invalid` by both check and build, before publication. Select a font with a different PostScript name. Generated allocation avoids adding imported-tag collisions; it does not repair naming defects between sources.
+Prepared fonts explicitly record whether they contain a subset. Before writing any generated item, the PDF adapter reserves six-uppercase-letter subset prefixes found in imported BaseFont and descriptor FontName entries and tag-like names of generated full fonts, then allocates unused prefixes deterministically in sorted font-byte identity order. Each pruned font uses one `AAAAAA+PostScriptName`-style name throughout the packet; its Type0 wrapper, CIDFont and descriptor agree. Full programs receive no added prefix and retain their original sanitized PostScript name and exact bytes, including names that already resemble subset names. TrueType name tables remain unchanged. PDF name syntax is escaped when writing, so ordinary literal hashes remain literal. The canonical-name safety policy also applies to generated fonts: a PostScript name containing a literal hash followed by two hexadecimal digits is refused as `font_invalid` by both check and build, before publication. Select a font with a different PostScript name. Generated allocation avoids adding imported-tag collisions; it does not repair naming defects between sources.
 
 ## Parser and resource limits
 
@@ -168,12 +101,5 @@ Upstream relaxed parsing can accept malformed object suffixes, duplicate decoded
 
 Finite PDF real numbers are serialized by upstream to at most twelve fractional digits; bitwise numeric round trips are not promised. Upstream owns content-stream parsing and fitting may rewrite those streams. Source metadata is replaced/removed as specified in the policy table.
 
-Assembly is in memory. Imported object graphs, decoded streams, repeated source occurrences and generated pages can require much more memory than compressed input sizes. There is no universal time or memory bound, hostile decoder-work budget, or guarantee to interrupt every inner decoding loop. Ordinary panic recovery does not cover memory exhaustion or fatal stack overflow. Use operating-system resource limits for unusually large or untrusted inputs. [SECURITY](../SECURITY.md) defines the trusted-input boundary; [CONTRIBUTING](../CONTRIBUTING.md#comparison-and-scale) describes optional measurements.
+Assembly is in memory. Imported object graphs, decoded streams, repeated source occurrences and generated pages can require much more memory than compressed input sizes. There is no universal time or memory bound, hostile decoder-work budget, or guarantee to interrupt every inner decoding loop. Ordinary panic recovery does not cover memory exhaustion or fatal stack overflow. Use operating-system resource limits for unusually large or untrusted inputs. [SECURITY](../SECURITY.md) defines the trusted-input boundary; [CONTRIBUTING](../CONTRIBUTING.md#scale) describes optional measurements.
 
-## Files, tools and delivery
-
-Output and report files follow umask; replacements retain their mode. Publication records visibility immediately after rename/link, before cleanup/directory sync. Abort removes only its temporary name. Report roles are rechecked after PDF publication; unsafe targets are invalid refusals and attempted I/O failures are failed outcomes. An undecoded plan forces report no-replace even with overwrite. There is no private-ACL, recovery-copy, cross-file transaction, adversarial namespace-race or universal network-filesystem guarantee.
-
-Tool versions are declared in `tools/go.mod`. The linter is built for the host before running it under each target GOOS. Actionlint runs with stock `@version` isolation because its YAML API is incompatible with the combined linter-tool dependency graph; the selected version is derived from that same module. Contributor commands, verification scope and isolated snapshot precautions are in [CONTRIBUTING](../CONTRIBUTING.md).
-
-CI runs lint, native tests on Linux/macOS/Windows, a six-target cross-build and the `Required CI` aggregate. The release workflow requires these checks before publishing tagged binaries and provenance.

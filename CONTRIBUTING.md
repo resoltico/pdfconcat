@@ -6,7 +6,7 @@ Use Go at the version declared in `go.mod`. From a clean checkout:
 go build -o bin/pdfconcat ./cmd/pdfconcat
 go vet ./...
 go test -count=1 ./...
-(cd tools && go test -count=1 ./... && go run ./cmd/architecture ..)
+(cd tools && go mod tidy -diff)
 ```
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
@@ -46,15 +46,14 @@ go mod tidy -diff
 ```
 
 Use a writable scratch executable path on Windows. Actionlint uses isolated
-`@version` execution with its version derived from the tool module; see
-[DESIGN](docs/DESIGN.md#files-tools-and-delivery) for the isolation reason.
+`@version` execution with its version derived from the tool module: its YAML API
+is incompatible with the combined linter-tool dependency graph.
 Actionlint uses shellcheck when it is available.
 
-The architecture command checks every physical Go file, including inactive tags
-and hidden or ignored source, against `.golangci.yml`. New package directories
-require deliberate ownership classification. See
-[package boundaries](docs/DESIGN.md#packages-and-boundaries) for its scope and
-limits. Run it and its rejecting controls as shown above.
+The compiler confines adapters and domain packages beneath
+`internal/core/internal/`. Depguard confines third-party adapters and keeps file,
+process and network I/O out of production CLI code. See
+[architecture](docs/ARCHITECTURE.md) for the package graph.
 
 Lint is standard plus a curated list. No inline lint suppressions are allowed.
 Every exception belongs in `.golangci.yml` with its reason. Do not run an all-

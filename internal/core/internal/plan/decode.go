@@ -303,7 +303,7 @@ func (p *decoder) item(depth int) (node, error) {
 		err := p.expect('{')
 		var typeFault *fault
 		if errors.As(err, &typeFault) && typeFault.code == diag.PlanType {
-			typeFault.message = `An item must be a source object, generated page object, contents object, or container object; for example {"source":"source.pdf"}.`
+			typeFault.message = `An item must be a source object, page object, contents object, or group object; for example {"source":"source.pdf"}.`
 		}
 		return n, err
 	}
@@ -357,12 +357,12 @@ func (p *decoder) item(depth int) (node, error) {
 	source := seen["source"] && len(seen) == 1 || seen["source"] && seen["pages"] && len(seen) == 2
 	page := seen["page"] && (len(seen) == 1 || seen["count"] && len(seen) == 2)
 	contents := seen["contents"] && len(seen) == 1
-	container := seen["items"] && (seen["dir"] || seen["title"] || seen["start_on"]) && (!seen["divider"] || seen["title"])
+	group := seen["items"] && (seen["dir"] || seen["title"] || seen["start_on"]) && (!seen["divider"] || seen["title"])
 	for _, key := range []string{"source", "pages", "page", "count", "contents"} {
-		container = container && !seen[key]
+		group = group && !seen[key]
 	}
-	if !source && !page && !contents && !container {
-		return n, p.fail(diag.PlanItemShape, "An item must be a source, generated page, contents item, or useful container; divider requires a title.")
+	if !source && !page && !contents && !group {
+		return n, p.fail(diag.PlanItemShape, "An item must be a source item, page item, contents item, or useful group; divider requires a title.")
 	}
 	generated := 0
 	if n.Page != nil {

@@ -14,7 +14,7 @@ import (
 )
 
 func TestInvalidItemTypeExplainsShapesAtExactLocation(t *testing.T) {
-	for _, container := range []struct {
+	for _, scope := range []struct {
 		name, prefix, suffix, pointer string
 		column                        int
 	}{
@@ -23,17 +23,17 @@ func TestInvalidItemTypeExplainsShapesAtExactLocation(t *testing.T) {
 	} {
 		for _, value := range []string{`"source.pdf"`, `7`, `true`, `false`, `[]`} {
 			for _, bom := range []string{"", "\ufeff"} {
-				t.Run(container.name+value+bom, func(t *testing.T) {
-					prefix := bom + container.prefix
-					_, ds := plan.Decode([]byte(prefix+value+container.suffix), "packet.json", t.TempDir())
+				t.Run(scope.name+value+bom, func(t *testing.T) {
+					prefix := bom + scope.prefix
+					_, ds := plan.Decode([]byte(prefix+value+scope.suffix), "packet.json", t.TempDir())
 					if len(ds) != 1 || ds[0].Code != diag.PlanType {
 						t.Fatalf("wrong item type: %+v", ds)
 					}
 					d := ds[0]
-					if d.Location == nil || d.Location.Ref != container.pointer || d.Location.Offset != int64(len(prefix)) || d.Location.Line != 2 || d.Location.Column != container.column || d.File != "packet.json" || len(d.Items) != 1 || d.Items[0] != container.pointer {
+					if d.Location == nil || d.Location.Ref != scope.pointer || d.Location.Offset != int64(len(prefix)) || d.Location.Line != 2 || d.Location.Column != scope.column || d.File != "packet.json" || len(d.Items) != 1 || d.Items[0] != scope.pointer {
 						t.Fatalf("item location changed: %+v", d)
 					}
-					for _, want := range []string{"source object", "generated page object", "contents object", "container object", `{"source":"source.pdf"}`} {
+					for _, want := range []string{"source object", "page object", "contents object", "group object", `{"source":"source.pdf"}`} {
 						if !strings.Contains(d.Message, want) {
 							t.Fatalf("missing %q in item guidance: %q", want, d.Message)
 						}

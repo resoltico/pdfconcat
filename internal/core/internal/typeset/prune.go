@@ -10,7 +10,7 @@ import (
 	"slices"
 )
 
-// EmbeddedFont holds job-wide glyph resources. PDF writers must use the same
+// EmbeddedFont holds packet-wide glyph resources. PDF writers must use the same
 // Glyphs for widths and ToUnicode as well as the same Program for every item.
 type EmbeddedFont struct {
 	Font    *Font

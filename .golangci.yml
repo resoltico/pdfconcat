@@ -110,7 +110,7 @@ linters:
       # No background fill is a successful nil color, rather than an exceptional condition.
       - path: internal/core/internal/packet/units.go
         linters: [nilnil]
-      # Conventional permissions are D4; exclusive random sibling creation in the chosen directory is intentional.
+      # Conventional permissions and exclusive random sibling creation in the chosen directory are intentional.
       - path: internal/core/internal/files/file.go
         text: "G(302|304):"
         linters: [gosec]

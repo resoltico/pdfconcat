@@ -95,7 +95,7 @@ func TestLayeringSettingRefsAndPaths(t *testing.T) {
 		t.Fatal(ds)
 	}
 	if len(j.Items) != 2 || j.Output != filepath.Join(base, "packet.pdf") || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, j.Items[0]).Items[0]).Path != filepath.Join(base, "sources/chapters/a.pdf") {
-		t.Fatalf("job %+v", j)
+		t.Fatalf("plan %+v", j)
 	}
 	a, b := itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, j.Items[0]).Items[1]).Style, itemAs[*packet.PageItem](t, j.Items[1]).Style
 	if a.Background.Value != nil || a.Text.Value.Value != "" || a.Text.Font.Value.Path != filepath.Join(base, "sources/chapters/local.ttf") || b.Text.Font.Value != (packet.Font{}) || b.Text.Value.Value != "default" || b.Background.Value == nil {
@@ -355,7 +355,7 @@ func TestAggregateContainerAndSelectionBudgets(t *testing.T) {
 		input := `{"version":4,"items":[{"title":"A","items":[` + strings.Repeat(`{"source":"x"},`, count-1) + `{"source":"x"}]}]}`
 		_, ds := plan.Decode([]byte(input), "p", ".")
 		if count == 99999 && len(ds) > 0 || count == 100000 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
-			t.Fatalf("container item budget %d: %+v", count, ds)
+			t.Fatalf("group item budget %d: %+v", count, ds)
 		}
 	}
 	for _, count := range []int{100000, 100001} {

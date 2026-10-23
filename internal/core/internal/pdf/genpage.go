@@ -122,7 +122,7 @@ func Write(c context.Context, w io.Writer, pages []compose.Page) (int64, error) 
 	return serializeGenerated(c, s, w)
 }
 
-// WriteRepeated serializes a repeated native generated item with its job union.
+// WriteRepeated serializes a repeated native generated item with its packet font union.
 func WriteRepeated(c context.Context, w io.Writer, page compose.Page, count int, resources []typeset.EmbeddedFont) (int64, error) {
 	prepared := map[typeset.Digest]typeset.EmbeddedFont{}
 	for _, font := range resources {

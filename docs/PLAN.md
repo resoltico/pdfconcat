@@ -1,9 +1,9 @@
-# Plan v3
+# Plan v4
 
-A plan is one UTF-8 JSON object with `version: 3`. Use source objects to select
-input pages, generated items for extra pages, and containers for sections or
+A plan is one UTF-8 JSON object with `version: 4`. Use source objects to select
+input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
-operands and `--blank`. See the [installation guidance](../README.md#use-a-published-release)
+operands and `--blank`. See the [installation guidance](../README.md#install)
 for documentation matching a source build or published binary.
 
 ```json
@@ -35,11 +35,11 @@ for documentation matching a source build or published binary.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `3` |
+| `version` | Required integer token `4` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
-| `page` | Default generated-page style |
+| `page_defaults` | Default style for page items and dividers |
 | `fit_to` | Fit every output page onto a paper name or explicit sheet size |
 | `page_numbers` | Optional physical footer numbering configuration |
 | `$schema` | Optional editor schema URL; ignored string |
@@ -49,7 +49,7 @@ Each item is exactly one of:
 - A source object with required `source` and optional `pages` selection.
 - A generated item with `page` and optional `count` (default 1).
 - A contents item with `contents`.
-- A container with nonempty `items` and at least one declared `dir`, `title` or
+- A group with nonempty `items` and at least one declared `dir`, `title` or
   `start_on`; `divider` is allowed only with `title`.
 
 Unknown members are errors. Wrong combinations of known members are
@@ -58,10 +58,10 @@ Each source needs its own object; a bare path string is not an item.
 
 The base directory is the named plan file's supplied directory. For stdin it is
 `--base-dir`, or the working directory. Source paths and item font files resolve
-against their enclosing items directory, changed by top-level/container `dir`.
-Output and fonts declared in top-level `page` resolve against the base directory.
-A container's `dir` applies to its children; a font declared in that container's
-`divider` resolves in the enclosing item scope, before the container's `dir`.
+against their enclosing items directory, changed by top-level/group `dir`.
+Output and fonts declared in root `page_defaults` resolve against the base directory.
+A group's `dir` applies to its children; a font declared in that group's
+`divider` resolves in the enclosing item scope, before the group's `dir`.
 CLI output/report paths resolve against the working directory.
 
 Paths are joined lexically: `a/link/../b.pdf` becomes `a/b.pdf`. Absolute paths
@@ -88,7 +88,7 @@ A genuinely partial selection of a source with nonempty form fields or any
 widgets is `source_selection_form_unsupported`. Full-range forms keep the
 existing form rules. Fitting and effective-PDF-2.0 appearance compatibility use
 the retained selected view, so omitted annotations and targets do not create
-those compatibility refusals. See [PDF policy and limitations](DESIGN.md).
+those compatibility refusals. See [PDF policy and limitations](PDF-POLICY.md).
 
 Local links and destinations to omitted pages are removed within their own
 occurrence; they never jump into a different occurrence of the same source.
@@ -100,8 +100,8 @@ page selection. This is neither a sanitizer nor a universal PDF-fidelity claim.
 
 ## Sections, title dividers and odd starts
 
-A container with `title` is an authored section. Its JSON pointer is its identity;
-repeated titles remain separate sections. Containers without a title only group
+A group with `title` is an authored section. Its JSON pointer is its identity;
+repeated titles remain separate sections. Groups without a title only group
 or align material and create no navigation entry. Sections nest in authored
 order; source bookmarks appear beneath their nearest titled section. Ordinary
 generated pages create no section of their own.
@@ -113,13 +113,13 @@ font rules below apply when a title is painted in a divider or contents. A
 bookmark-only title does not require a font it never uses.
 
 `divider: {}` adds exactly one generated title page before the children. Its
-settings layer over root `page` defaults, but its text is always the section
+settings layer over root `page_defaults`, but its text is always the section
 title. Declaring `divider.text.value` is forbidden, including an empty value.
 A section without `divider` adds no title page.
 
 `start_on` is `any` by default or `odd`. An odd boundary inserts at most one blank
-immediately before the container when its next physical page would otherwise be
-even. Nested starts naturally share the same odd page. The automatic blank uses
+immediately before the group when its next physical page would otherwise be
+even. Nested starts naturally share the same odd page. The padding uses
 the preceding physical sheet's displayed size, or the global fit target. It has
 no background, text or footer. If that size cannot form a supported generated
 canvas, fit the packet or omit odd alignment. This describes physical PDF page
@@ -177,7 +177,7 @@ fitted pages preserve their immediate post-fit state outside the overlay.
 
 ## Generated pages and layering
 
-Each setting comes from item `page`, then top-level `page`, then built-ins. Text
+Each setting comes from item `page`, then root `page_defaults`, then built-ins. Text
 members merge individually. `font` is atomic: a file object replaces the whole
 choice; `default` explicitly selects the embedded font. `background: none` clears
 a fill; `value: ""` clears text. Empty text still validates its selected font.
@@ -277,7 +277,7 @@ A font's PostScript name must meet the PDF name-safety policy: a literal hash
 followed by two hexadecimal digits is refused by `check` and `build` as
 `font_invalid`. Use a font with a different PostScript name. Ordinary hashes and
 names resembling subset names remain supported. See the [font metadata
-requirements](DESIGN.md#text-and-pruning) and [notices](../THIRD_PARTY_NOTICES.md).
+requirements](PDF-POLICY.md#text-and-pruning) and [notices](../THIRD_PARTY_NOTICES.md).
 
 ## Strictness and limits
 
@@ -285,10 +285,10 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 3 is supported; version checks follow the same first-fault order.
+version 4 is supported; version checks follow the same first-fault order.
 
-Limits: 64 MiB original JSON, 64 container levels, 100,000 authored item nodes
-(including containers), and 100,000 explicit selection pairs across the plan.
+Limits: 64 MiB original JSON, 64 group levels, 100,000 authored item nodes
+(including groups), and 100,000 explicit selection pairs across the plan.
 `count` is 1–100,000. The actual generated-page total is at most 100,000,
 including dividers, contents and automatic padding. Source selections and
 repeated generated runs stay compact; selected source pages have no arbitrary

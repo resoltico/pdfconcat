@@ -290,7 +290,7 @@
                     "file": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "Static TrueType font; resolves against the directory of the items array this style is written in (base directory for the top-level page)."
+                      "description": "Static TrueType font; resolves against the directory of the items array this style is written in (base directory for page_defaults)."
                     }
                   }
                 }

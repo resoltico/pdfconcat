@@ -15,7 +15,7 @@ Encrypted sources, signature values/certification/timestamps, dynamic forms,
 optional content and known content-dropping page-tree shapes are refused. Empty
 unsigned signature fields remain supported. Signatures are not authenticated.
 Upstream relaxed parsing may accept other repairs/malformed syntax; see the
-[feature policy and limitations](docs/DESIGN.md).
+[feature policy and limitations](docs/PDF-POLICY.md).
 
 Page selection is visible-page composition, not redaction. It does not promise
 removal of every private object or byte associated with omitted pages. Every
@@ -26,9 +26,9 @@ Named input plans, fonts and PDFs must be regular files; input symlinks to regul
 files are supported. Filesystem checks assume trusted local namespaces and do not
 claim protection against concurrent adversarial path substitution.
 
-Output/report targets cannot alias inputs or each other, cannot be symlinks or
+Output/report targets cannot alias existing inputs or each other, cannot be symlinks or
 other nonregular files, and require `--overwrite` for existing regular targets.
-Reports are rechecked after PDF publication. With undecoded plans, a report can
+Missing inputs are protected only by cleaned path spelling; alternative spellings of missing paths are not reserved. Reports are rechecked after PDF publication. With undecoded plans, a report can
 only create a new path even if overwrite was requested. Publication preserves
 visibility facts through trailing errors; do not blindly retry a result with
 `output.published: true`.

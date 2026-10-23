@@ -68,7 +68,7 @@ func TestAssemblyReportsActualWriterFailures(t *testing.T) {
 		{"short write", shortOutputWriter{}, io.ErrShortWrite},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, tc.writer)
+			_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, nil, tc.writer)
 			if !errors.Is(err, tc.err) || pdf.Diagnostic(err).Code != diag.OutputWriteFailed {
 				t.Fatalf("writer failure misclassified: %v", err)
 			}

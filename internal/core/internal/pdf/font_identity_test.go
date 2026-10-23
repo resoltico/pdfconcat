@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
@@ -103,8 +104,8 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pages := []pdf.Page{textPage(t, font, "Ā ļ ķ"), textPage(t, alias, "Ελληνικά"), textPage(t, other, "Кириллица")}
-	prepared, err := typeset.PrepareFonts([]*typeset.Placed{pages[0].Text, pages[1].Text, pages[2].Text})
+	pages := []compose.Page{textPage(t, font, "Ā ļ ķ"), textPage(t, alias, "Ελληνικά"), textPage(t, other, "Кириллица")}
+	prepared, err := typeset.PrepareFonts([]*typeset.Placed{pages[0].Blocks[0].Text, pages[1].Blocks[0].Text, pages[2].Blocks[0].Text})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,11 +138,11 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 			t.Fatalf("prefixes: %v", facts.SubsetPrefixes)
 		}
 		recipe := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: "source"}})
-		generated := map[int][]pdf.Page{}
+		generated := map[int][]compose.Page{}
 		for i, page := range append(pages, pages[0]) {
 			style := packet.Defaults()
 			recipe.Items = append(recipe.Items, &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})
-			generated[i+1] = []pdf.Page{page}
+			generated[i+1] = []compose.Page{page}
 		}
 		layout, ds := packet.Resolve(packet.NewPlan(recipe.Output, recipe.FitTo, recipe.PageNumbers, recipe.PageDefaults, recipe.Items), map[string]packet.SourceFacts{"source": facts.SourceFacts}, 0)
 		if len(ds) > 0 {
@@ -150,7 +151,7 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 		var previous map[string]int
 		for repeat := range 2 {
 			var out bytes.Buffer
-			if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), generated, nil, prepared, &out); err != nil {
+			if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), generated, nil, prepared, nil, &out); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, fmt.Sprintf("packet%d.pdf", repeat))
@@ -265,14 +266,14 @@ func noSubsetFont(t *testing.T, tagged bool) *typeset.Font {
 func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset.Digest]typeset.EmbeddedFont) {
 	t.Helper()
 	recipe := packet.NewPlan("", nil, nil, packet.PageStyle{}, nil)
-	pages := map[int][]pdf.Page{}
+	pages := map[int][]compose.Page{}
 	var placements []*typeset.Placed
 	for i, font := range fonts {
 		style := packet.Defaults()
 		style.Size.Value = packet.Size{Width: 300, Height: 200}
 		recipe.Items = append(recipe.Items, &packet.PageItem{Style: style, Count: 1})
-		pages[i] = []pdf.Page{textPage(t, font, "Ā Ελληνικά Кириллица")}
-		placements = append(placements, pages[i][0].Text)
+		pages[i] = []compose.Page{textPage(t, font, "Ā Ελληνικά Кириллица")}
+		placements = append(placements, pages[i][0].Blocks[0].Text)
 	}
 	prepared, err := typeset.PrepareFonts(placements)
 	if err != nil {
@@ -283,7 +284,7 @@ func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset
 		t.Fatal(ds)
 	}
 	var out bytes.Buffer
-	if _, err = pdf.Assemble(t.Context(), layout, nil, nil, pages, nil, prepared, &out); err != nil {
+	if _, err = pdf.Assemble(t.Context(), layout, nil, nil, pages, nil, prepared, nil, &out); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "packet.pdf")
@@ -335,7 +336,7 @@ func TestOrdinaryHashFontNameSurvivesWritingAndMerge(t *testing.T) {
 			if names[expected] != 3 || len(names) != 1 || len(programs) != 1 || !bytes.Equal(programs[expected], prepared[font.Identity()].Program) {
 				t.Fatalf("literal hash font name/program changed: %v", names)
 			}
-			original, _ := writePDF(t, []pdf.Page{textPage(t, font, "Ā Ελληνικά")})
+			original, _ := writePDF(t, []compose.Page{textPage(t, font, "Ā Ελληνικά")})
 			names, programs = finalFontFacts(t, original)
 			if names[name] != 3 || !bytes.Equal(programs[name], font.Bytes()) {
 				t.Fatalf("original literal hash font changed: %v", names)
@@ -353,7 +354,7 @@ func TestFullEmbeddingPreservesOriginalNameAndProgram(t *testing.T) {
 	} {
 		font, tagged := tc.font, tc.tagged
 		page := textPage(t, font, "Ā Ελληνικά Кириллица")
-		prepared, err := typeset.PrepareFonts([]*typeset.Placed{page.Text})
+		prepared, err := typeset.PrepareFonts([]*typeset.Placed{page.Blocks[0].Text})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -366,7 +367,7 @@ func TestFullEmbeddingPreservesOriginalNameAndProgram(t *testing.T) {
 			}
 			var out bytes.Buffer
 			if original {
-				_, err = pdf.Write(t.Context(), &out, []pdf.Page{page})
+				_, err = pdf.Write(t.Context(), &out, []compose.Page{page})
 			} else {
 				_, err = pdf.WriteRepeated(t.Context(), &out, page, 1, prepared)
 			}
@@ -413,7 +414,7 @@ func TestHashEscapeFontNamesAreRefusedBeforePublication(t *testing.T) {
 			t.Fatalf("unsafe canonical name accepted: %s", name)
 		}
 		var raw bytes.Buffer
-		if _, err := pdf.Write(t.Context(), &raw, []pdf.Page{textPage(t, font, "Ā Ελληνικά")}); err == nil || raw.Len() != 0 {
+		if _, err := pdf.Write(t.Context(), &raw, []compose.Page{textPage(t, font, "Ā Ελληνικά")}); err == nil || raw.Len() != 0 {
 			t.Fatalf("direct writer did not refuse before writing: %v", err)
 		}
 		dir := t.TempDir()

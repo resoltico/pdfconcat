@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 	"github.com/resoltico/pdfconcat/internal/oracle"
@@ -239,7 +241,7 @@ func TestContentStreamOperators(t *testing.T) {
 	for _, row := range append(offsetRows(font, hand), spanRows(font, hand)...) {
 		block := &typeset.Placed{Font: font, Size: 10, Lines: row.lines}
 
-		path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
+		path, _ := writePDF(t, []compose.Page{{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}}})
 		qpdfCheck(t, path)
 
 		const contents = "/Contents"
@@ -256,12 +258,12 @@ func TestContentStreamPaintsBackgroundAndTextColor(t *testing.T) {
 	block := &typeset.Placed{Font: font, Size: 10, Lines: []typeset.Line{{X: 1, Baseline: 2, Clusters: []typeset.Cluster{
 		cluster(font, handGlyphs(t).a, 0, 0),
 	}}}}
-	page := pdf.Page{
-		Width: 100.5, Height: 50, Text: block,
-		Background: &pdf.Color{R: 255, G: 51, B: 0}, TextColor: pdf.Color{R: 51, G: 102, B: 153},
+	page := compose.Page{
+		Width: 100.5, Height: 50,
+		Background: &packet.Color{R: 255, G: 51, B: 0}, Blocks: []compose.TextBlock{{Text: block, Color: packet.Color{R: 51, G: 102, B: 153}}},
 	}
 
-	path, _ := writePDF(t, []pdf.Page{page})
+	path, _ := writePDF(t, []compose.Page{page})
 
 	want := "1 0.2 0 rg\n0 0 100.5 50 re\nf\n0.2 0.4 0.6 rg\nBT\n/F1 10 Tf\n1 0 0 1 1 2 Tm\n[" + hex4(handGlyphs(t).a.id) + "] TJ\nET\n"
 	if got := objectStream(t, path, "/Contents"); got != want {
@@ -279,7 +281,7 @@ func TestFontDescriptorAndWidthsAreScaledToThousandthsOfAnEm(t *testing.T) {
 		cluster(font, hand.b, 0, 0), cluster(font, hand.a, 0, 0),
 	}}}}
 
-	path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
+	path, _ := writePDF(t, []compose.Page{{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}}})
 	foundWidths, foundDescriptor := false, false
 	for _, dict := range qpdfDictionaries(t, path) {
 		if actual, ok := dict["/W"]; ok && dict["/Subtype"] == "/CIDFontType2" {
@@ -312,7 +314,7 @@ func TestToUnicodeMapsExactlyTheUsedGlyphs(t *testing.T) {
 		cluster(font, hand.b, 0, 0), cluster(font, hand.a, 0, 0),
 	}}}}
 
-	path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
+	path, _ := writePDF(t, []compose.Page{{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}}})
 
 	want := toUnicodeHeader + "2 beginbfchar\n<0024> <0041>\n<0025> <0042>\nendbfchar\n" + toUnicodeFooter
 	if got := objectStream(t, path, "/ToUnicode"); got != want {
@@ -358,7 +360,7 @@ func TestToUnicodeChunksEveryHundredEntries(t *testing.T) {
 		}
 
 		block := &typeset.Placed{Font: font, Size: 10, Lines: []typeset.Line{{Clusters: clusters}}}
-		got := toUnicodeCounts(t, pdf.Page{Width: 300, Height: 200, Text: block})
+		got := toUnicodeCounts(t, compose.Page{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}})
 
 		if !equalStrings(got, row.want) {
 			t.Errorf("%s: chunk sizes %v, want %v", row.name, got, row.want)
@@ -368,7 +370,7 @@ func TestToUnicodeChunksEveryHundredEntries(t *testing.T) {
 
 // toUnicodeCounts writes the page, guarding against a writer that never finishes, and returns the entry count
 // of each beginbfchar section of the font's ToUnicode map.
-func toUnicodeCounts(tb testing.TB, page pdf.Page) []string {
+func toUnicodeCounts(tb testing.TB, page compose.Page) []string {
 	tb.Helper()
 
 	var buffer bytes.Buffer
@@ -376,7 +378,7 @@ func toUnicodeCounts(tb testing.TB, page pdf.Page) []string {
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := pdf.Write(context.Background(), &buffer, []pdf.Page{page})
+		_, err := pdf.Write(context.Background(), &buffer, []compose.Page{page})
 		done <- err
 	}()
 
@@ -389,7 +391,7 @@ func toUnicodeCounts(tb testing.TB, page pdf.Page) []string {
 		tb.Fatal("Write did not finish")
 	}
 
-	path, _ := writePDF(tb, []pdf.Page{page})
+	path, _ := writePDF(tb, []compose.Page{page})
 
 	matches := beginBfChar.FindAllStringSubmatch(objectStream(tb, path, "/ToUnicode"), -1)
 	counts := make([]string, 0, len(matches))
@@ -435,7 +437,7 @@ func TestFontSizeBoundaries(t *testing.T) {
 	for _, row := range rows {
 		block := &typeset.Placed{Font: font, Size: row.size, Lines: []typeset.Line{line}}
 
-		_, err := pdf.Write(context.Background(), io.Discard, []pdf.Page{{Width: 300, Height: 200, Text: block}})
+		_, err := pdf.Write(context.Background(), io.Discard, []compose.Page{{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}}})
 		if (err != nil) != row.wantErr {
 			t.Errorf("%s: %v", row.name, err)
 		}
@@ -447,9 +449,9 @@ func TestFontsAreCollectedFromEveryPage(t *testing.T) {
 
 	font := defaultFont(t)
 
-	pages := []pdf.Page{
+	pages := []compose.Page{
 		{Width: 100, Height: 50},
-		{Width: 100, Height: 50, Text: &typeset.Placed{Font: font, Size: 10}},
+		{Width: 100, Height: 50, Blocks: []compose.TextBlock{{Text: &typeset.Placed{Font: font, Size: 10}}}},
 		textPage(t, font, "late text"),
 	}
 
@@ -469,9 +471,9 @@ func TestPageLimitIsInclusive(t *testing.T) {
 
 	// A canceled context stops the write right after the header and page tree, so reaching that point
 	// shows the page count was accepted without writing a million pages.
-	pages := make([]pdf.Page, pdf.MaxPages)
+	pages := make([]compose.Page, pdf.MaxPages)
 	for index := range pages {
-		pages[index] = pdf.Page{Width: 10, Height: 10}
+		pages[index] = compose.Page{Width: 10, Height: 10}
 	}
 
 	_, err := pdf.Write(ctx, io.Discard, pages)
@@ -491,9 +493,9 @@ func TestGeneratedBlocksShareFontAndLinkFinalPhysicalPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := textPage(t, font, "Heading")
-	first.Blocks = []pdf.TextBlock{{Text: numeric}}
-	first.Links = []pdf.PageLink{{Rect: typeset.Rect{X: 10, Y: 90, Width: 270, Height: 100}, TargetPage: 2}}
-	path, _ := writePDF(t, []pdf.Page{first, textPage(t, font, "TARGET")})
+	first.Blocks = append(first.Blocks, compose.TextBlock{Text: numeric})
+	first.Links = []compose.Link{{Rect: typeset.Rect{X: 10, Y: 90, Width: 270, Height: 100}, TargetPage: 2}}
+	path, _ := writePDF(t, []compose.Page{first, textPage(t, font, "TARGET")})
 	qpdfCheck(t, path)
 	texts := extractRaw(t, path)
 	if len(texts) != 2 || strings.Join(strings.Fields(texts[0]), " ") != "Heading 123" || strings.TrimSpace(texts[1]) != "TARGET" {

@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"io"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -26,21 +28,18 @@ type buildOutcome struct {
 
 func build(c context.Context, j packet.Plan, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
 	out := buildOutcome{output: result.Output{Path: j.Output}}
-	layout, pages, facts, occurrences, fonts := composition.layout, composition.pages, prepared.facts, prepared.occurrences, prepared.fonts
-	placements := placedTexts(pages)
-	if j.PageNumbers != nil {
-		digits, e := typeset.NewDigits(fonts[packet.Font{}], j.PageNumbers.Size)
+	layout, pages, facts, occurrences := composition.layout, composition.pages, prepared.facts, prepared.occurrences
+	placements := compose.PlacedTexts(pages)
+
+	if composition.footer != nil {
+		union, e := composition.footer.Union()
 		if e != nil {
-			out.diagnostics = append(out.diagnostics, textDiagnostic(e, "/page_numbers"))
-			return out
-		}
-		union, e := digits.Place("0123456789", 10*digits.CellWidth, 0)
-		if e != nil {
-			out.diagnostics = append(out.diagnostics, textDiagnostic(e, "/page_numbers"))
+			out.diagnostics = append(out.diagnostics, compose.Diagnostic(e, "/page_numbers"))
 			return out
 		}
 		placements = append(placements, union)
 	}
+
 	embedded, err := typeset.PrepareFonts(placements)
 	if err != nil {
 		out.diagnostics = append(out.diagnostics, diag.New(diag.FontInvalid, err.Error()))
@@ -58,7 +57,7 @@ func build(c context.Context, j packet.Plan, prepared preparationOutcome, compos
 	defer staged.Abort()
 	hash := sha256.New()
 	counter := &countWriter{Writer: staged}
-	assembled, err := pdf.Assemble(c, layout, facts, occurrences, pages, j.FitTo, embedded, io.MultiWriter(counter, hash))
+	assembled, err := pdf.Assemble(c, layout, facts, occurrences, pages, j.FitTo, embedded, composition.footer, io.MultiWriter(counter, hash))
 	out.diagnostics = append(out.diagnostics, assembled.Diagnostics...)
 	out.renames = assembled.FieldsRenamed
 	if err != nil {

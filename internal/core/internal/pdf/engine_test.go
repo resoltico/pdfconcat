@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
@@ -164,7 +165,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := pdf.Assemble(t.Context(), layout, facts, wholeOccurrences(layout, facts), nil, fit, nil, f)
+	a, err := pdf.Assemble(t.Context(), layout, facts, wholeOccurrences(layout, facts), nil, fit, nil, nil, f)
 	closeErr := f.Close()
 	if err != nil {
 		return path, a, []diag.Diagnostic{pdf.Diagnostic(err)}
@@ -274,7 +275,7 @@ func TestSerializedCatalogAndVersions(t *testing.T) {
 func TestGeneratedItemSharesContentAndFontUnion(t *testing.T) {
 	font := defaultFont(t)
 	page := textPage(t, font, "Ā ļ ķ Ελληνικά\nКириллица ā ļ")
-	fonts, err := typeset.PrepareFonts([]*typeset.Placed{page.Text})
+	fonts, err := typeset.PrepareFonts([]*typeset.Placed{page.Blocks[0].Text})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,13 +332,13 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, &bytes.Buffer{})
+	_, err := pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, nil, &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != diag.SourceChanged {
 		t.Fatalf("change detection %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = pdf.Assemble(ctx, layout, nil, nil, nil, nil, nil, &bytes.Buffer{})
+	_, err = pdf.Assemble(ctx, layout, nil, nil, nil, nil, nil, nil, &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != diag.Interrupted {
 		t.Fatalf("cancel %v", err)
 	}
@@ -400,7 +401,7 @@ func TestGlyphPruningPreservesPixels(t *testing.T) {
 	for _, font := range []*typeset.Font{defaultFont(t), noSubsetFont(t, false), noSubsetFont(t, true)} {
 		for _, text := range []string{"Latvija Ā ļ ķ", "Ελληνικά", "Кириллица ā ļ Áé"} {
 			page := textPage(t, font, text)
-			prepared, err := typeset.PrepareFonts([]*typeset.Placed{page.Text})
+			prepared, err := typeset.PrepareFonts([]*typeset.Placed{page.Blocks[0].Text})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -408,7 +409,7 @@ func TestGlyphPruningPreservesPixels(t *testing.T) {
 			original := filepath.Join(dir, "original.pdf")
 			pruned := filepath.Join(dir, "pruned.pdf")
 			var a, b bytes.Buffer
-			if _, err = pdf.Write(t.Context(), &a, []pdf.Page{page}); err != nil {
+			if _, err = pdf.Write(t.Context(), &a, []compose.Page{page}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = pdf.WriteRepeated(t.Context(), &b, page, 1, prepared); err != nil {
@@ -471,12 +472,12 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	}
 	font := defaultFont(t)
 	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: source, Ref: "source"}})
-	pages := map[int][]pdf.Page{}
+	pages := map[int][]compose.Page{}
 	var placements []*typeset.Placed
 	for i, text := range []string{"Ā ļ ķ", "Ελληνικά", "Кириллица ā"} {
 		page := textPage(t, font, text)
-		pages[i+1] = []pdf.Page{page}
-		placements = append(placements, page.Text)
+		pages[i+1] = []compose.Page{page}
+		placements = append(placements, page.Blocks[0].Text)
 		style := packet.Defaults()
 		style.Size.Value = packet.Size{Width: 300, Height: 200}
 		j.Items = append(j.Items, &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})
@@ -490,7 +491,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		t.Fatal(ds)
 	}
 	var b bytes.Buffer
-	if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), pages, nil, fonts, &b); err != nil {
+	if _, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), pages, nil, fonts, nil, &b); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "output.pdf")

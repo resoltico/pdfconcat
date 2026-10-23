@@ -7,19 +7,19 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
-	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
-	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 type compositionOutcome struct {
 	layout packet.Layout
-	pages  map[int][]pdf.Page
+	pages  map[int][]compose.Page
 	result result.Result
+	footer *compose.Footer
 }
 
-func compose(c context.Context, j packet.Plan, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
+func composePacket(c context.Context, j packet.Plan, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
 	fonts, facts, occurrences, domain := prepared.fonts, prepared.facts, prepared.occurrences, prepared.domain
 	leaves, _ := j.Leaves(), j.Sections()
 	for i, leaf := range leaves {
@@ -34,14 +34,23 @@ func compose(c context.Context, j packet.Plan, prepared preparationOutcome, r re
 	if hasErrors(r.Diagnostics) {
 		return compositionOutcome{result: r}
 	}
-	contents, ds := prepareContents(c, j, domain, fonts)
+	var footer *compose.Footer
+	if j.PageNumbers != nil {
+		var err error
+		footer, err = compose.NewFooter(fonts[packet.Font{}], *j.PageNumbers)
+		if err != nil {
+			r.Diagnostics = append(r.Diagnostics, compose.Diagnostic(err, "/page_numbers"))
+			return compositionOutcome{result: r}
+		}
+	}
+	contents, ds := compose.PrepareContents(c, j, domain, fonts, footer)
 	r.Diagnostics = append(r.Diagnostics, ds...)
 	if hasErrors(r.Diagnostics) {
 		return compositionOutcome{result: r}
 	}
 	contentsCount := 0
 	if contents != nil {
-		contentsCount = len(contents.pages)
+		contentsCount = contents.Pages()
 	}
 	layout, ds := packet.Resolve(j, domain, contentsCount)
 	r.Diagnostics = append(r.Diagnostics, ds...)
@@ -50,11 +59,6 @@ func compose(c context.Context, j packet.Plan, prepared preparationOutcome, r re
 		return compositionOutcome{result: r}
 	}
 	if j.PageNumbers != nil {
-		digits, e := typeset.NewDigits(fonts[packet.Font{}], j.PageNumbers.Size)
-		if e != nil {
-			r.Diagnostics = append(r.Diagnostics, textDiagnostic(e, "/page_numbers"))
-			return compositionOutcome{result: r}
-		}
 		for _, part := range layout.Parts {
 			if part.Kind == packet.PartPadding {
 				continue
@@ -77,12 +81,12 @@ func compose(c context.Context, j packet.Plan, prepared preparationOutcome, r re
 					original := span.SourceFirst + int(number-span.OutputFirst)
 					size = facts[part.Source].PageSizes[original]
 				}
-				if err = pdf.CheckNumberPlacement(digits, size, part.FirstPage+int64(offset), j.PageNumbers.Margin); err != nil {
+				if err = footer.Check(size, part.FirstPage+int64(offset)); err != nil {
 					break
 				}
 			}
 			if err != nil {
-				d := pdf.Diagnostic(err)
+				d := compose.Diagnostic(err, "")
 				d.Items = []string{part.Ref, "/page_numbers"}
 				if part.Kind == packet.PartSource {
 					d.File = part.Source
@@ -125,12 +129,22 @@ func compose(c context.Context, j packet.Plan, prepared preparationOutcome, r re
 		}
 		r.Parts = append(r.Parts, entry)
 	}
-	pages := layOut(c, layout, fonts, &r)
+	pages, texts, findings := compose.LayOut(c, layout, fonts)
+	r.Diagnostics = append(r.Diagnostics, findings...)
+	for i, text := range texts {
+		r.Parts[i].Text = &result.Text{Font: text.Font, FontSize: text.FontSize, Bounds: text.Bounds, InkBounds: text.InkBounds, Overflow: text.Overflow}
+	}
 	if contents != nil {
-		r.Diagnostics = append(r.Diagnostics, contents.finish(layout, pages)...)
+		generated, findings := contents.Finish(layout)
+		r.Diagnostics = append(r.Diagnostics, findings...)
+		for i, part := range layout.Parts {
+			if part.Kind == packet.PartContents {
+				pages[i] = generated
+			}
+		}
 	}
 	if hasErrors(r.Diagnostics) {
 		return compositionOutcome{result: r}
 	}
-	return compositionOutcome{layout: layout, pages: pages, result: r}
+	return compositionOutcome{layout: layout, pages: pages, result: r, footer: footer}
 }

@@ -8,123 +8,14 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 
-	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
-
-func footerDigits(config packet.PageNumbers) (*typeset.Digits, error) {
-	font, err := typeset.LoadDefaultFont()
-	if err != nil {
-		return nil, err
-	}
-	return typeset.NewDigits(font, config.Size)
-}
-
-func footerPlacement(digits *typeset.Digits, size packet.Size, number int64, margin float64) (*typeset.Placed, error) {
-	if number < 1 || math.IsNaN(margin) || math.IsInf(margin, 0) || margin < 0 {
-		return nil, refuse(diag.TextOverflow, "Invalid physical footer placement.")
-	}
-	text := strconv.FormatInt(number, 10)
-	width := float64(len(text)) * digits.CellWidth
-	placed, err := digits.Place(text, (size.Width+width)/2, 0)
-	if err != nil {
-		return nil, err
-	}
-	if placed.InkBounds == nil {
-		return nil, refuse(diag.TextOverflow, "The physical page number has no painted glyphs.")
-	}
-	unshifted := placed
-	placed, err = digits.Place(text, (size.Width+width)/2, margin-placed.InkBounds.Y)
-	if err != nil {
-		return nil, err
-	}
-	if !footerFits(placed, size) {
-		return nil, footerOverflow(digits, size, number, margin, unshifted, placed)
-	}
-	return placed, nil
-}
-
-func footerFits(placed *typeset.Placed, size packet.Size) bool {
-	for _, bounds := range []*typeset.Rect{&placed.Bounds, placed.InkBounds} {
-		if bounds == nil {
-			continue
-		}
-		if !(bounds.X >= 0 && bounds.Y >= 0 && bounds.X+bounds.Width <= size.Width && bounds.Y+bounds.Height <= size.Height) {
-			return false
-		}
-	}
-	return true
-}
-
-// footerOverflow describes all failed axes after the original logical/ink guard
-// refuses placement. Unshifted measurements estimate margin limits; actual
-// placement validates each numerical hint.
-func footerOverflow(digits *typeset.Digits, size packet.Size, number int64, margin float64, unshifted, placed *typeset.Placed) error {
-	ink := placed.InkBounds
-	left := math.Min(placed.Bounds.X, ink.X)
-	right := math.Max(placed.Bounds.X+placed.Bounds.Width, ink.X+ink.Width)
-	bottom := math.Min(placed.Bounds.Y, ink.Y)
-	top := math.Max(placed.Bounds.Y+placed.Bounds.Height, ink.Y+ink.Height)
-	below, above := bottom < 0, top > size.Height
-	var advice []string
-	if left < 0 || right > size.Width {
-		advice = append(advice, "The page number exceeds the physical page width; reduce page_numbers.size or increase sheet width.")
-	}
-	if below || above {
-		side := "below"
-		if above {
-			side = "above"
-		}
-		if below && above {
-			side = "below and above"
-		}
-		advice = append(advice, fmt.Sprintf("The page number extends %s the physical page.", side))
-		unshiftedBottom := math.Min(unshifted.Bounds.Y, unshifted.InkBounds.Y)
-		unshiftedTop := math.Max(unshifted.Bounds.Y+unshifted.Bounds.Height, unshifted.InkBounds.Y+unshifted.InkBounds.Height)
-		if height := unshiftedTop - unshiftedBottom; height > size.Height {
-			advice = append(advice, fmt.Sprintf("Its complete logical and ink envelope is %g pt high, exceeding the %g pt sheet height; reduce page_numbers.size or increase sheet height. A margin change alone cannot fit it.", height, size.Height))
-		} else {
-			minimum := unshifted.InkBounds.Y - unshiftedBottom
-			maximum := size.Height - (unshiftedTop - unshifted.InkBounds.Y)
-			// Prefer readable point values, retaining precision for tight sheets.
-			direction, limit, proposed := "Increase", "at least", minimum
-			if below {
-				if rounded := math.Ceil(minimum*1000) / 1000; rounded <= maximum {
-					proposed = rounded
-				}
-			} else {
-				direction, limit, proposed = "Decrease", "at most", maximum
-				if rounded := math.Floor(maximum*1000) / 1000; rounded >= minimum {
-					proposed = rounded
-				}
-			}
-			text := strconv.FormatInt(number, 10)
-			candidate, err := digits.Place(text, (size.Width+unshifted.Bounds.Width)/2, proposed-unshifted.InkBounds.Y)
-			if err == nil && footerFits(candidate, size) {
-				advice = append(advice, fmt.Sprintf("%s page_numbers.margin to %s %g pt.", direction, limit, proposed))
-			} else {
-				advice = append(advice, direction+" page_numbers.margin. If it still does not fit vertically, reduce page_numbers.size or increase sheet height.")
-			}
-		}
-	}
-	if len(advice) == 0 {
-		advice = append(advice, "The measured footer bounds or physical viewport are invalid.")
-	}
-	return refuse(diag.TextOverflow, fmt.Sprintf("Physical page %d cannot contain its page number at size %g pt and margin %g pt. %s", number, placed.Size, margin, strings.Join(advice, " ")))
-}
-
-// CheckNumberPlacement predicts one footer using the packet's already measured
-// digit cells, without imposing generated-canvas limits on source viewports.
-func CheckNumberPlacement(digits *typeset.Digits, size packet.Size, number int64, margin float64) error {
-	_, err := footerPlacement(digits, size, number, margin)
-	return err
-}
 
 type physicalViewport struct {
 	size   packet.Size
@@ -181,19 +72,17 @@ func copiedDict(original types.Dict) types.Dict {
 
 // applyPageNumbers adds fresh page-local wrappers and font dictionaries after
 // fitting. Original streams, annotation coordinates and page geometry stay intact.
-func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) error {
-	if layout.PageNumbers == nil {
+func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string, footer *compose.Footer) error {
+
+	if footer == nil {
 		return nil
 	}
-	digits, err := footerDigits(*layout.PageNumbers)
-	if err != nil {
-		return err
-	}
-	font, ok := prepared[digits.Font.Identity()]
+	face := footer.Font()
+	font, ok := prepared[face.Identity()]
 	if !ok {
 		return ErrInvalidPage
 	}
-	name := names[digits.Font.Identity()]
+	name := names[face.Identity()]
 	if name == "" {
 		return ErrInvalidPage
 	}
@@ -220,9 +109,9 @@ func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout,
 		if e != nil {
 			return e
 		}
-		placed, e := footerPlacement(digits, viewport.size, int64(page), layout.PageNumbers.Margin)
+		placed, e := footer.Place(viewport.size, int64(page))
 		if e != nil {
-			diagnostic := Diagnostic(e)
+			diagnostic := compose.Diagnostic(e, "")
 			return &policyError{code: diagnostic.Code, err: e, file: part.Source, items: []string{part.Ref, "/page_numbers"}}
 		}
 		_, _, attrs, e := s.PageDict(c, page, false)
@@ -262,10 +151,10 @@ func applyPageNumbers(c context.Context, s *model.Context, layout packet.Layout,
 				contents = append(contents, original)
 			}
 		}
-		doc := &document{fonts: &fontSet{index: map[typeset.Digest]int{digits.Font.Identity(): 0}, list: []*typeset.Font{digits.Font}, used: make([][glyphSetWords]uint64, 1)}, fontKeys: []string{key}, content: []byte("Q\nq\n")}
+		doc := &document{fonts: &fontSet{index: map[typeset.Digest]int{face.Identity(): 0}, list: []*typeset.Font{face}, used: make([][glyphSetWords]uint64, 1)}, fontKeys: []string{key}, content: []byte("Q\nq\n")}
 		m := viewport.matrix
 		doc.content = fmt.Appendf(doc.content, "%s %s %s %s %s %s cm\n", number(m[0]), number(m[1]), number(m[2]), number(m[3]), number(m[4]), number(m[5]))
-		doc.appendColor(Color{})
+		doc.appendColor(packet.Color{})
 		doc.appendText(placed, 0)
 		doc.content = append(doc.content, "Q\n"...)
 		overlay, e := addStream(s, doc.content, nil)

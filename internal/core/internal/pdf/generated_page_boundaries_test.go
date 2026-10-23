@@ -16,26 +16,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 	"github.com/resoltico/pdfconcat/internal/oracle"
 )
 
-func boundaryPageBytes(t *testing.T, mode string, page pdf.Page) ([]byte, error) {
+func boundaryPageBytes(t *testing.T, mode string, page compose.Page) ([]byte, error) {
 	t.Helper()
 	var data bytes.Buffer
 	if mode == "slice" {
-		_, err := pdf.Write(t.Context(), &data, []pdf.Page{page})
+		_, err := pdf.Write(t.Context(), &data, []compose.Page{page})
 		return data.Bytes(), err
 	}
 	prepared := map[typeset.Digest]typeset.EmbeddedFont{}
-	if page.Text != nil && page.Text.Font != nil {
+
+	var placements []*typeset.Placed
+	for _, block := range page.Blocks {
+		if block.Text != nil && block.Text.Font != nil {
+			placements = append(placements, block.Text)
+		}
+	}
+	if len(placements) > 0 {
 		var err error
-		prepared, err = typeset.PrepareFonts([]*typeset.Placed{page.Text})
+		prepared, err = typeset.PrepareFonts(placements)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	_, err := pdf.WriteRepeated(t.Context(), &data, page, 1, prepared)
 	return data.Bytes(), err
 }
@@ -66,7 +75,7 @@ func TestPageWriterAcceptsInclusiveGeometryAndFontBoundaries(t *testing.T) {
 	for _, mode := range []string{"slice", "repeated"} {
 		for _, dimensions := range [][2]float64{{1, 200}, {14400, 200}, {300, 1}, {300, 14400}} {
 			t.Run(fmt.Sprintf("%s/page-%gx%g", mode, dimensions[0], dimensions[1]), func(t *testing.T) {
-				page := pdf.Page{Width: dimensions[0], Height: dimensions[1]}
+				page := compose.Page{Width: dimensions[0], Height: dimensions[1]}
 				data, err := boundaryPageBytes(t, mode, page)
 				if err != nil {
 					t.Fatalf("inclusive page boundary refused: %v", err)
@@ -80,7 +89,7 @@ func TestPageWriterAcceptsInclusiveGeometryAndFontBoundaries(t *testing.T) {
 					Text: "A", Size: size, PageWidth: 14400, PageHeight: 14400,
 					Anchor: typeset.AnchorCenter, LineSpacing: 1, Overflow: typeset.OverflowAllow,
 				})
-				page := pdf.Page{Width: 14400, Height: 14400, Text: block}
+				page := compose.Page{Width: 14400, Height: 14400, Blocks: []compose.TextBlock{{Text: block}}}
 				data, err := boundaryPageBytes(t, mode, page)
 				if err != nil {
 					t.Fatalf("inclusive font boundary refused: %v", err)
@@ -98,7 +107,7 @@ func TestPageWriterRejectsImmediateOutOfRangeNeighbors(t *testing.T) {
 	for _, mode := range []string{"slice", "repeated"} {
 		for _, dimension := range []string{"width", "height"} {
 			for _, value := range []float64{math.Nextafter(1, 0), math.Nextafter(14400, math.Inf(1))} {
-				page := pdf.Page{Width: 300, Height: 200}
+				page := compose.Page{Width: 300, Height: 200}
 				if dimension == "width" {
 					page.Width = value
 				} else {
@@ -110,10 +119,11 @@ func TestPageWriterRejectsImmediateOutOfRangeNeighbors(t *testing.T) {
 			}
 		}
 		for _, size := range []float64{math.Nextafter(0.01, 0), math.Nextafter(14400, math.Inf(1))} {
-			block := *valid.Text
+			block := *valid.Blocks[0].Text
 			block.Size = size
 			page := valid
-			page.Text = &block
+			page.Blocks = append([]compose.TextBlock(nil), valid.Blocks...)
+			page.Blocks[0].Text = &block
 			if _, err := boundaryPageBytes(t, mode, page); !errors.Is(err, pdf.ErrInvalidPage) {
 				t.Fatalf("%s font neighbor %g was not a font-size refusal: %v", mode, size, err)
 			}
@@ -125,7 +135,7 @@ func TestPageWriterEmptyTextDoesNotRequireUnusedFont(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"slice", "repeated"} {
 		for _, block := range []*typeset.Placed{nil, {}} {
-			page := pdf.Page{Width: 300, Height: 200, Text: block}
+			page := compose.Page{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}}
 			data, err := boundaryPageBytes(t, mode, page)
 			if err != nil {
 				t.Fatalf("%s empty text required unused font: %v", mode, err)
@@ -141,7 +151,7 @@ func TestRepeatedPageLimitAndCancellation(t *testing.T) {
 	canceled, stop := context.WithCancel(ctx)
 	stop()
 	for _, count := range []int{100000, 100001} {
-		_, err := pdf.WriteRepeated(canceled, io.Discard, pdf.Page{Width: 100, Height: 100}, count, nil)
+		_, err := pdf.WriteRepeated(canceled, io.Discard, compose.Page{Width: 100, Height: 100}, count, nil)
 		if count == 100000 && !errors.Is(err, context.Canceled) {
 			t.Fatalf("accepted count lost cancellation: %v", err)
 		}

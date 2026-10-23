@@ -1,17 +1,26 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-package core
+package compose
 
 import (
+	"context"
 	"errors"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-func textDiagnostic(err error, item string) diag.Diagnostic {
+// Diagnostic maps text and placement failures to product diagnostics.
+func Diagnostic(err error, item string) diag.Diagnostic {
 	code := diag.FontInvalid
+	var placement placementError
+	if errors.As(err, &placement) {
+		return diag.New(diag.TextOverflow, err.Error(), item)
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return diag.New(diag.Interrupted, err.Error(), item)
+	}
 	var text *typeset.TextError
 	var overflow *typeset.OverflowError
 	switch {

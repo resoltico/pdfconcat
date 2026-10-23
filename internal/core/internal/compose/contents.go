@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-package core
+package compose
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
-	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
@@ -20,16 +19,18 @@ type contentsRow struct {
 	baseline, right float64
 	bounds          typeset.Rect
 }
-type contentsLayout struct {
+
+// Contents retains paginated rows until their physical targets are resolved.
+type Contents struct {
 	pointer string
-	pages   []pdf.Page
+	pages   []Page
 	rows    []contentsRow
 	digits  *typeset.Digits
 }
 
-// prepareContents wraps titles with a conservative fixed digit column, before
+// PrepareContents wraps titles with a conservative fixed digit column, before
 // any parity or section target is known. There is no pagination fixed point.
-func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.SourceFacts, fonts map[packet.Font]*typeset.Font) (*contentsLayout, []diag.Diagnostic) {
+func PrepareContents(c context.Context, j packet.Plan, facts map[string]packet.SourceFacts, fonts map[packet.Font]*typeset.Font, footer *Footer) (*Contents, []diag.Diagnostic) {
 	leaves, sections := j.Leaves(), j.Sections()
 	var contents *packet.ContentsItem
 	pointer := ""
@@ -57,7 +58,7 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 	}
 	addBound(int64(len(sections)))
 	addBound(int64(j.OddStarts()))
-	fail := func(message string, item string) (*contentsLayout, []diag.Diagnostic) {
+	fail := func(message string, item string) (*Contents, []diag.Diagnostic) {
 		return nil, []diag.Diagnostic{diag.New(diag.TextOverflow, message, pointer, item)}
 	}
 	if len(sections) == 0 {
@@ -73,16 +74,13 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 	font := fonts[packet.Font{}]
 	digits, err := typeset.NewDigits(font, 12)
 	if err != nil {
-		return nil, []diag.Diagnostic{textDiagnostic(err, pointer)}
+		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
 	}
 	numberWidth := float64(len(strconv.FormatInt(max(bound, 1), 10))) * digits.CellWidth
 	bottom := 36.0
-	if j.PageNumbers != nil {
-		footer, e := typeset.NewDigits(font, j.PageNumbers.Size)
-		if e != nil {
-			return nil, []diag.Diagnostic{textDiagnostic(e, "/page_numbers")}
-		}
-		protectedTop := j.PageNumbers.Margin - footer.InkBottom + footer.Top + 6
+
+	if footer != nil {
+		protectedTop := footer.ExclusionTop() + 6
 		scale, offset := 1.0, 0.0
 		if j.FitTo != nil {
 			scale = math.Min(j.FitTo.Width/size.Width, j.FitTo.Height/size.Height)
@@ -90,7 +88,8 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 		}
 		bottom = math.Max(bottom, (protectedTop-offset)/scale)
 	}
-	layout := &contentsLayout{pointer: pointer, digits: digits}
+
+	layout := &Contents{pointer: pointer, digits: digits}
 	var shaper typeset.Shaper
 	shape := func(text string, fontSize, width float64) (*typeset.Placed, error) {
 		return shaper.Place(font, typeset.Params{Text: text, Size: fontSize, PageWidth: size.Width, PageHeight: size.Height, WrapWidth: width, LineSpacing: 1.2, Anchor: typeset.AnchorTopLeft, Align: typeset.AlignLeft, Overflow: typeset.OverflowAllow})
@@ -100,7 +99,7 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 	}
 	heading, err := shape(contents.Title, 18, size.Width-72)
 	if err != nil {
-		return nil, []diag.Diagnostic{textDiagnostic(err, pointer)}
+		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
 	}
 	headingHeight := paintedBounds(heading).Height
 	for _, finding := range heading.Findings {
@@ -122,7 +121,7 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 	addPage := func() {
 		h := clonePlaced(heading)
 		movePlaced(h, 36, headingTop)
-		layout.pages = append(layout.pages, pdf.Page{Width: size.Width, Height: size.Height, Blocks: []pdf.TextBlock{{Text: h}}})
+		layout.pages = append(layout.pages, Page{Width: size.Width, Height: size.Height, Blocks: []TextBlock{{Text: h}}})
 	}
 	addPage()
 	cursor := firstRowTop
@@ -139,7 +138,7 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 		}
 		title, e := shape(section.Title, 12, width)
 		if e != nil {
-			d := textDiagnostic(e, section.Item)
+			d := Diagnostic(e, section.Item)
 			d.Items = append(d.Items, pointer)
 			return nil, []diag.Diagnostic{d}
 		}
@@ -165,7 +164,7 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 		}
 		title.Findings = nil
 		page := len(layout.pages) - 1
-		layout.pages[page].Blocks = append(layout.pages[page].Blocks, pdf.TextBlock{Text: title})
+		layout.pages[page].Blocks = append(layout.pages[page].Blocks, TextBlock{Text: title})
 		baseline := title.Lines[0].Baseline
 		rowBottom := math.Min(cursor-height, baseline+digits.Bottom)
 		rowTop := math.Max(cursor, baseline+digits.Top)
@@ -178,7 +177,8 @@ func prepareContents(c context.Context, j packet.Plan, facts map[string]packet.S
 	return layout, nil
 }
 
-func (contents *contentsLayout) finish(layout packet.Layout, pages map[int][]pdf.Page) []diag.Diagnostic {
+// Finish fills in target numbers and links without changing pagination.
+func (contents *Contents) Finish(layout packet.Layout) ([]Page, []diag.Diagnostic) {
 	targets := map[string]int64{}
 	for _, section := range layout.Sections {
 		targets[section.Item] = section.Target
@@ -187,19 +187,21 @@ func (contents *contentsLayout) finish(layout packet.Layout, pages map[int][]pdf
 		target := targets[row.section]
 		number, err := contents.digits.Place(strconv.FormatInt(target, 10), row.right, row.baseline)
 		if err != nil {
-			return []diag.Diagnostic{textDiagnostic(err, contents.pointer)}
+			return nil, []diag.Diagnostic{Diagnostic(err, contents.pointer)}
 		}
-		contents.pages[row.page].Blocks = append(contents.pages[row.page].Blocks, pdf.TextBlock{Text: number})
-		contents.pages[row.page].Links = append(contents.pages[row.page].Links, pdf.PageLink{Rect: row.bounds, TargetPage: target})
+		contents.pages[row.page].Blocks = append(contents.pages[row.page].Blocks, TextBlock{Text: number})
+		contents.pages[row.page].Links = append(contents.pages[row.page].Links, Link{Rect: row.bounds, TargetPage: target})
 	}
-	for i, part := range layout.Parts {
+	for _, part := range layout.Parts {
 		if part.Kind == packet.PartContents && part.Ref == contents.pointer {
-			pages[i] = contents.pages
-			return nil
+			return contents.pages, nil
 		}
 	}
-	return []diag.Diagnostic{diag.New(diag.AssemblyFailed, "Resolved contents item is missing.", contents.pointer)}
+	return nil, []diag.Diagnostic{diag.New(diag.AssemblyFailed, "Resolved contents item is missing.", contents.pointer)}
 }
+
+// Pages returns the prepared page count.
+func (contents *Contents) Pages() int { return len(contents.pages) }
 
 func paintedBounds(p *typeset.Placed) typeset.Rect {
 	b := p.Bounds

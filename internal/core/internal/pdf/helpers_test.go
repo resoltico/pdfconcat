@@ -14,6 +14,7 @@ import (
 
 	"os/exec"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
@@ -96,14 +97,16 @@ func placed(tb testing.TB, font *typeset.Font, spec typeset.Params) *typeset.Pla
 	return result
 }
 
-func textPage(tb testing.TB, font *typeset.Font, text string) pdf.Page {
+func textPage(tb testing.TB, font *typeset.Font, text string) compose.Page {
 	tb.Helper()
 
-	return pdf.Page{Width: 300, Height: 200, Text: placed(tb, font, params(text))}
+	return compose.Page{Width: 300, Height: 200, Blocks: []compose.TextBlock{{
+
+		// writePDF writes the pages to a file of a private directory and returns the file's path and bytes.
+		Text: placed(tb, font, params(text))}}}
 }
 
-// writePDF writes the pages to a file of a private directory and returns the file's path and bytes.
-func writePDF(tb testing.TB, pages []pdf.Page) (string, []byte) {
+func writePDF(tb testing.TB, pages []compose.Page) (string, []byte) {
 	tb.Helper()
 
 	var buffer bytes.Buffer

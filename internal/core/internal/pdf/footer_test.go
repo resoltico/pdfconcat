@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -173,7 +174,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 						}
 					}
 					prepared, names := preparedFooter(t)
-					if err = applyPageNumbers(t.Context(), s, footerLayout(1), prepared, names); err != nil {
+					if err = applyPageNumbers(t.Context(), s, footerLayout(1), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
 						t.Fatal(err)
 					}
 					if !reflect.DeepEqual(annotationBefore, annotationSnapshot) {
@@ -303,7 +304,7 @@ func TestFooterCopiesInheritedResourcesAndPreservesSharedContent(t *testing.T) {
 	second["Contents"] = first["Contents"]
 	originalContent := first["Contents"]
 	prepared, names := preparedFooter(t)
-	if err = applyPageNumbers(t.Context(), s, footerLayout(2), prepared, names); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerLayout(2), prepared, names, footerForLayout(t, footerLayout(2))); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(parent["Resources"], originalResources) {
@@ -333,49 +334,10 @@ func TestFooterCopiesInheritedResourcesAndPreservesSharedContent(t *testing.T) {
 	}
 }
 
-func TestFooterInkBottomMatchesMarginForEveryDigit(t *testing.T) {
-	digits, err := footerDigits(packet.PageNumbers{Size: 9})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for number := int64(1); number <= 20; number++ {
-		placed, err := footerPlacement(digits, packet.Size{Width: 300, Height: 200}, number, 24)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if placed.InkBounds == nil || math.Abs(placed.InkBounds.Y-24) > 1e-9 {
-			t.Fatalf("number %d ink bottom: %+v", number, placed.InkBounds)
-		}
-	}
-}
-
-func TestFooterPlacementRejectsOverflowAndAcceptsLargeSourceCanvas(t *testing.T) {
-	for _, test := range []struct {
-		size   packet.Size
-		number int64
-		config packet.PageNumbers
-		bad    bool
-	}{
-		{packet.Size{Width: 50000, Height: 50000}, 123, packet.PageNumbers{Size: 9, Margin: 24}, false},
-		{packet.Size{Width: 5, Height: 200}, 1234567890, packet.PageNumbers{Size: 9, Margin: 24}, true},
-		{packet.Size{Width: 200, Height: 20}, 1, packet.PageNumbers{Size: 9, Margin: 24}, true},
-		{packet.Size{Width: 200, Height: 200}, 1, packet.PageNumbers{Size: 100, Margin: 180}, true},
-	} {
-		digits, err := footerDigits(test.config)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = CheckNumberPlacement(digits, test.size, test.number, test.config.Margin)
-		if (err != nil) != test.bad {
-			t.Fatalf("placement %+v: %v", test, err)
-		}
-	}
-}
-
 func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 	tools := oracle.RequireTools(t)
 	prepared, names := preparedFooter(t)
-	s, _, err := generatedContext(t.Context(), []Page{{Width: 300, Height: 200}}, 3, prepared, names)
+	s, _, err := generatedContext(t.Context(), []compose.Page{{Width: 300, Height: 200}}, 3, prepared, names)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +352,7 @@ func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 		{Leaf: packet.Leaf{Kind: "padding"}, FirstPage: 2, LastPage: 2},
 		{Leaf: packet.Leaf{Kind: "page"}, FirstPage: 3, LastPage: 3},
 	}
-	if err = applyPageNumbers(t.Context(), s, layout, prepared, names); err != nil {
+	if err = applyPageNumbers(t.Context(), s, layout, prepared, names, footerForLayout(t, layout)); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(padding, untouched) {
@@ -435,85 +397,12 @@ func TestFooterOnLargeSourceDoesNotImposeGeneratedCanvasLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared, names := preparedFooter(t)
-	if err = applyPageNumbers(t.Context(), s, footerLayout(1), prepared, names); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerLayout(1), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
 		t.Fatal(err)
 	}
 	path := writeFooterContext(t, s, "large")
 	if err = oracle.RequireTools(t).Check(path); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
-	digits, err := footerDigits(packet.PageNumbers{Size: 9})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name         string
-		size         packet.Size
-		number       int64
-		margin       float64
-		want, absent []string
-	}{
-		{"lower", packet.Size{Width: 300, Height: 200}, 1, 0, []string{"below the physical page", "Increase page_numbers.margin to at least 2.637 pt"}, []string{"Decrease page_numbers.margin"}},
-		{"upper", packet.Size{Width: 300, Height: 20}, 1, 24, []string{"above the physical page", "Decrease page_numbers.margin to at most 10.379 pt"}, []string{"Increase page_numbers.margin"}},
-		{"width", packet.Size{Width: 5, Height: 200}, 1234567890, 24, []string{"width", "reduce page_numbers.size", "increase sheet width"}, []string{"Increase page_numbers.margin", "Decrease page_numbers.margin"}},
-		{"width and lower", packet.Size{Width: 5, Height: 200}, 1234567890, 0, []string{"width", "below the physical page", "Increase page_numbers.margin"}, nil},
-		{"short envelope with lower only", packet.Size{Width: 300, Height: 11}, 1, 0, []string{"below the physical page", "complete logical and ink envelope", "reduce page_numbers.size", "increase sheet height"}, []string{"Increase page_numbers.margin"}},
-		{"short envelope crossing both edges", packet.Size{Width: 300, Height: 5}, 1, 0, []string{"below and above the physical page", "complete logical and ink envelope", "reduce page_numbers.size", "increase sheet height"}, []string{"Increase page_numbers.margin"}},
-		{"width and both vertical edges", packet.Size{Width: 5, Height: 5}, 1234567890, 0, []string{"width", "below and above the physical page", "increase sheet width", "increase sheet height"}, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := CheckNumberPlacement(digits, tc.size, tc.number, tc.margin)
-			if err == nil {
-				t.Fatal("overflow was accepted")
-			}
-			diagnostic := Diagnostic(err)
-			if diagnostic.Code != diag.TextOverflow {
-				t.Fatalf("overflow classification: %+v", diagnostic)
-			}
-			assertFooterMarginHintFits(t, digits, tc.size, tc.number, diagnostic.Message)
-			for _, text := range tc.want {
-				if !strings.Contains(diagnostic.Message, text) {
-					t.Errorf("missing %q in %q", text, diagnostic.Message)
-				}
-			}
-			for _, text := range tc.absent {
-				if strings.Contains(diagnostic.Message, text) {
-					t.Errorf("misleading %q in %q", text, diagnostic.Message)
-				}
-			}
-		})
-	}
-	// The stated measured thresholds must give the user working remedies.
-	for _, tc := range []struct {
-		size   packet.Size
-		margin float64
-	}{{packet.Size{Width: 300, Height: 200}, 2.637}, {packet.Size{Width: 300, Height: 20}, 10.379}} {
-		if err = CheckNumberPlacement(digits, tc.size, 1, tc.margin); err != nil {
-			t.Fatalf("recommended margin %g did not fit: %v", tc.margin, err)
-		}
-	}
-	tight, err := footerDigits(packet.PageNumbers{Size: 9.1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tightSize := packet.Size{Width: 300, Height: tight.Top - tight.Bottom}
-	message := Diagnostic(CheckNumberPlacement(tight, tightSize, 1, 0)).Message
-	_, tail, found := strings.Cut(message, "Increase page_numbers.margin to at least ")
-	if !found {
-		t.Fatalf("missing tight-interval advice: %s", message)
-	}
-	var minimum float64
-	if _, err = fmt.Sscanf(tail, "%f", &minimum); err != nil {
-		t.Fatal(err)
-	}
-	if err = CheckNumberPlacement(tight, tightSize, 1, minimum); err != nil {
-		t.Fatalf("rounded advice left the narrow usable interval: %g: %v", minimum, err)
-	}
-	if err = CheckNumberPlacement(digits, packet.Size{Width: 300, Height: math.NaN()}, 1, 24); err == nil || Diagnostic(err).Code != diag.TextOverflow {
-		t.Fatalf("nonfinite physical height escaped the guard: %v", err)
 	}
 }
 
@@ -543,7 +432,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 					}
 				}
 			} else {
-				s, _, err = generatedContext(t.Context(), []Page{{Width: 300, Height: 200}}, 1, prepared, names)
+				s, _, err = generatedContext(t.Context(), []compose.Page{{Width: 300, Height: 200}}, 1, prepared, names)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -555,7 +444,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 			if tc.kind == "source" {
 				layout.Parts[0].Source = "selected.pdf"
 			}
-			err = applyPageNumbers(t.Context(), s, layout, prepared, names)
+			err = applyPageNumbers(t.Context(), s, layout, prepared, names, footerForLayout(t, layout))
 			if err == nil {
 				t.Fatal("lower logical overflow was accepted")
 			}
@@ -567,54 +456,18 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 	}
 }
 
-func assertFooterMarginHintFits(t *testing.T, digits *typeset.Digits, size packet.Size, number int64, message string) {
+func footerForLayout(t *testing.T, layout packet.Layout) *compose.Footer {
 	t.Helper()
-	for _, phrase := range []string{"Increase page_numbers.margin to at least ", "Decrease page_numbers.margin to at most "} {
-		_, tail, found := strings.Cut(message, phrase)
-		if !found {
-			continue
-		}
-		var margin float64
-		if _, err := fmt.Sscanf(tail, "%f", &margin); err != nil {
-			t.Fatalf("invalid margin hint in %q: %v", message, err)
-		}
-		if err := CheckNumberPlacement(digits, size, number, margin); err != nil {
-			t.Fatalf("unusable margin hint %g in %q: %v", margin, message, err)
-		}
+	if layout.PageNumbers == nil {
+		return nil
 	}
-}
-
-func TestFooterAdviceOmitsNumericalBoundsThatFailExactContainment(t *testing.T) {
-	for _, tc := range []struct {
-		name                                         string
-		fontSize, width, height, margin, validMargin float64
-		direction                                    string
-	}{
-		{"tight upper 9.1pt", 9.1, 1000000, 12.3942, 13.3942, 2.6663, "Decrease"},
-		{"tight upper 1pt", 1, 1000000, 1.3619999999999999, 2.362, 0.293, "Decrease"},
-		{"lower roundoff", 1.3890784982935154, 300, 200, 0, 0.408, "Increase"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			digits, err := footerDigits(packet.PageNumbers{Size: tc.fontSize})
-			if err != nil {
-				t.Fatal(err)
-			}
-			size := packet.Size{Width: tc.width, Height: tc.height}
-			err = CheckNumberPlacement(digits, size, 1, tc.margin)
-			if err == nil {
-				t.Fatal("expected the initial margin to overflow")
-			}
-			message := Diagnostic(err).Message
-			assertFooterMarginHintFits(t, digits, size, 1, message)
-			if !strings.Contains(message, tc.direction+" page_numbers.margin.") || !strings.Contains(message, "reduce page_numbers.size or increase sheet height") {
-				t.Fatalf("missing directional fallback: %s", message)
-			}
-			if strings.Contains(message, "to at least") || strings.Contains(message, "to at most") {
-				t.Fatalf("unverified numerical bound was advertised: %s", message)
-			}
-			if err = CheckNumberPlacement(digits, size, 1, tc.validMargin); err != nil {
-				t.Fatalf("known usable margin %g refused: %v", tc.validMargin, err)
-			}
-		})
+	font, err := typeset.LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
 	}
+	footer, err := compose.NewFooter(font, *layout.PageNumbers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return footer
 }

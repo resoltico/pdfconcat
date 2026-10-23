@@ -19,7 +19,7 @@ func Execute(c context.Context, request Request) Result {
 	if !hasErrors(r.Diagnostics) {
 		prepared := prepare(c, admission.plan)
 		r.Diagnostics = append(r.Diagnostics, prepared.diagnostics...)
-		composition := compose(c, admission.plan, prepared, r, request.operation)
+		composition := composePacket(c, admission.plan, prepared, r, request.operation)
 		r = composition.result
 		if !hasErrors(r.Diagnostics) && request.operation == Build {
 			built := build(c, admission.plan, prepared, composition, request.options.Overwrite)

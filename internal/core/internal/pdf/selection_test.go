@@ -64,7 +64,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 		t.Fatal(ds)
 	}
 	var output bytes.Buffer
-	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, fit, nil, &output)
+	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, fit, nil, nil, &output)
 	if err != nil {
 		return "", []diag.Diagnostic{Diagnostic(err)}
 	}
@@ -402,7 +402,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, nil, nil, &output)
+	_, err := Assemble(t.Context(), layout, map[string]SourceFacts{path: facts}, occurrences, nil, nil, nil, nil, &output)
 	if err == nil || Diagnostic(err).Code != diag.SourceChanged || output.Len() != 0 {
 		t.Fatalf("changed omitted bytes were not refused before writing: err=%v bytes=%d", err, output.Len())
 	}

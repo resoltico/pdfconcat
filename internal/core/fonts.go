@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -115,7 +117,7 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 		}
 		if font := fonts[key.font]; font != nil {
 			if err := shaper.ValidateText(font, key.value); err != nil {
-				d := textDiagnostic(err, "")
+				d := compose.Diagnostic(err, "")
 				d.Items = textItems[key]
 				if key.font != (packet.Font{}) {
 					d.File = key.font.Path

@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/image/font/gofont/goitalic"
 
-	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
@@ -45,11 +45,11 @@ func TestInkBearingRejectsClippingAndReportsSameRejectedGeometry(t *testing.T) {
 		t.Fatal("overflow policy changed computed geometry")
 	}
 
-	clipped, _ := writePDF(t, []pdf.Page{{Width: 400, Height: 400, Text: allowed}})
+	clipped, _ := writePDF(t, []compose.Page{{Width: 400, Height: 400, Blocks: []compose.TextBlock{{Text: allowed}}}})
 	spec.OffsetX = 20
 	spec.Overflow = typeset.OverflowReject
 	inside := placed(t, font, spec)
-	whole, _ := writePDF(t, []pdf.Page{{Width: 400, Height: 400, Text: inside}})
+	whole, _ := writePDF(t, []compose.Page{{Width: 400, Height: 400, Blocks: []compose.TextBlock{{Text: inside}}}})
 	a, b := renderGray(t, clipped), renderGray(t, whole)
 
 	if darkPixels(b)-darkPixels(a) < 400 {
@@ -114,12 +114,12 @@ func assertInkClippingDetected(t *testing.T, font *typeset.Font, text string, an
 		t.Fatal("ink clipping not reported")
 	}
 
-	cut, _ := writePDF(t, []pdf.Page{{Width: 400, Height: 400, Text: clipped}})
+	cut, _ := writePDF(t, []compose.Page{{Width: 400, Height: 400, Blocks: []compose.TextBlock{{Text: clipped}}}})
 	params.OffsetX, params.OffsetY = moveX, moveY
 	params.Overflow = typeset.OverflowReject
 	inside := placed(t, font, params)
 
-	whole, _ := writePDF(t, []pdf.Page{{Width: 400, Height: 400, Text: inside}})
+	whole, _ := writePDF(t, []compose.Page{{Width: 400, Height: 400, Blocks: []compose.TextBlock{{Text: inside}}}})
 	if darkPixels(renderGray(t, whole)) <= darkPixels(renderGray(t, cut)) {
 		t.Fatalf("independent raster did not detect clipping of %q", text)
 	}

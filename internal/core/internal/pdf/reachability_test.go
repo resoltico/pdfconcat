@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -24,7 +25,7 @@ import (
 func TestNativeCompositionFreesUnwrittenTrailingObjects(t *testing.T) {
 	tools := oracle.RequireTools(t)
 	for _, cleanup := range []bool{false, true} {
-		s, _, err := generatedContext(t.Context(), []Page{{Width: 300, Height: 200}}, 1, nil, nil)
+		s, _, err := generatedContext(t.Context(), []compose.Page{{Width: 300, Height: 200}}, 1, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +69,7 @@ func TestNativeCompositionFreesUnwrittenTrailingObjects(t *testing.T) {
 }
 
 func TestReachabilityPreservesStructuralReferencesAndCancellation(t *testing.T) {
-	s, _, err := generatedContext(t.Context(), []Page{{Width: 300, Height: 200}}, 1, nil, nil)
+	s, _, err := generatedContext(t.Context(), []compose.Page{{Width: 300, Height: 200}}, 1, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 )
 
 type pageTreeWriteFunc func([]byte) (int, error)
@@ -18,9 +19,9 @@ func (w pageTreeWriteFunc) Write(data []byte) (int, error) { return w(data) }
 
 func TestNativePageTreeHasBoundedKidsAndPreservesWriteFailures(t *testing.T) {
 	t.Parallel()
-	pages := make([]Page, 8193)
+	pages := make([]compose.Page, 8193)
 	for index := range pages {
-		pages[index] = Page{Width: 100, Height: 100}
+		pages[index] = compose.Page{Width: 100, Height: 100}
 	}
 	var output bytes.Buffer
 	written, err := Write(t.Context(), &output, pages)

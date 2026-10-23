@@ -16,6 +16,7 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -29,7 +30,7 @@ type Assembly struct {
 }
 
 // Assemble imports each occurrence independently and writes only after final validation.
-func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFacts, occurrences map[string]OccurrenceFacts, pages map[int][]Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, w io.Writer) (result Assembly, err error) {
+func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFacts, occurrences map[string]OccurrenceFacts, pages map[int][]compose.Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont, footer *compose.Footer, w io.Writer) (result Assembly, err error) {
 	var current *packet.Part
 	defer func() {
 		if value := recover(); value != nil {
@@ -159,7 +160,7 @@ func Assemble(c context.Context, layout packet.Layout, facts map[string]SourceFa
 	if err = finalizeGeneratedLinks(c, dest, generatedLinks); err != nil {
 		return result, err
 	}
-	if err = applyPageNumbers(c, dest, layout, fonts, names); err != nil {
+	if err = applyPageNumbers(c, dest, layout, fonts, names, footer); err != nil {
 		return result, err
 	}
 	if err = cleanCatalog(dest, compatibility.version, needAppearances); err != nil {

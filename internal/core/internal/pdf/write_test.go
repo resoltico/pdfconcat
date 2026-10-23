@@ -14,6 +14,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
@@ -23,7 +25,7 @@ type (
 	// text color among the ink, and the ink inside the reported text bounds and roughly filling them
 	// horizontally.
 	rasterOracle struct {
-		page pdf.Page
+		page compose.Page
 		dpi  int
 	}
 
@@ -54,11 +56,11 @@ func TestWriteHasExpectedPageAndFontStructure(t *testing.T) {
 	t.Parallel()
 
 	f := defaultFont(t)
-	pages := []pdf.Page{
+	pages := []compose.Page{
 		textPage(t, f, "Rīgas ļoti"),
-		{Width: 100, Height: 50, Background: &pdf.Color{R: 255, G: 128, B: 0}},
+		{Width: 100, Height: 50, Background: &packet.Color{R: 255, G: 128, B: 0}},
 		{Width: 100, Height: 50},
-		{Width: 100, Height: 50, Text: &typeset.Placed{Font: f, Size: 10}},
+		{Width: 100, Height: 50, Blocks: []compose.TextBlock{{Text: &typeset.Placed{Font: f, Size: 10}}}},
 	}
 
 	path, first := writePDF(t, pages)
@@ -107,7 +109,7 @@ func TestIndependentValidationAndExtraction(t *testing.T) {
 		"no break", "wrapped paragraph\nsecond paragraph",
 	}
 
-	pages := make([]pdf.Page, 0, len(texts))
+	pages := make([]compose.Page, 0, len(texts))
 	for _, text := range texts {
 		pages = append(pages, textPage(t, f, text))
 	}
@@ -141,7 +143,7 @@ func TestJustifiedAndWrappedTextExtractsExactly(t *testing.T) {
 	p.WrapWidth, p.Align = 90, typeset.AlignJustify
 	block := placed(t, f, p)
 
-	path, _ := writePDF(t, []pdf.Page{{Width: 300, Height: 200, Text: block}})
+	path, _ := writePDF(t, []compose.Page{{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block}}}})
 
 	want := lineTexts(block)
 
@@ -159,7 +161,7 @@ func TestRasterMarkPositioning(t *testing.T) {
 	f := defaultFont(t)
 
 	render := func(block *typeset.Placed) bitmap {
-		path, _ := writePDF(t, []pdf.Page{{Width: 120, Height: 80, Text: block}})
+		path, _ := writePDF(t, []compose.Page{{Width: 120, Height: 80, Blocks: []compose.TextBlock{{Text: block}}}})
 
 		return renderGray(t, path)
 	}
@@ -241,11 +243,10 @@ func TestRasterColorAndPlacement(t *testing.T) {
 	p := params("HHHH")
 	p.Size, p.PageWidth, p.PageHeight, p.OffsetX, p.OffsetY = 60, 300, 200, 40, -30
 	block := placed(t, f, p)
-	page := pdf.Page{
-		Width: 300, Height: 200, Background: &pdf.Color{R: 250, G: 240, B: 200},
-		TextColor: pdf.Color{R: 200, G: 0, B: 40}, Text: block,
+	page := compose.Page{
+		Width: 300, Height: 200, Background: &packet.Color{R: 250, G: 240, B: 200}, Blocks: []compose.TextBlock{{Text: block, Color: packet.Color{R: 200, G: 0, B: 40}}},
 	}
-	path, _ := writePDF(t, []pdf.Page{page})
+	path, _ := writePDF(t, []compose.Page{page})
 
 	const dpi = 144
 
@@ -256,23 +257,25 @@ func TestRasterColorAndPlacement(t *testing.T) {
 
 	// Negative controls: the oracle must reject wrong color and wrong placement.
 	wrongColor := page
-	wrongColor.TextColor = pdf.Color{R: 0, G: 0, B: 200}
+	wrongColor.Blocks = append([]compose.TextBlock(nil), page.Blocks...)
+	wrongColor.Blocks[0].Color = packet.Color{R: 0, G: 0, B: 200}
 
 	if err := (rasterOracle{dpi: dpi, page: wrongColor}).check(t, path); err == nil {
 		t.Error("oracle accepted the wrong text color")
 	}
 
 	wrongBackground := page
-	wrongBackground.Background = &pdf.Color{R: 10, G: 10, B: 10}
+	wrongBackground.Background = &packet.Color{R: 10, G: 10, B: 10}
 
 	if err := (rasterOracle{dpi: dpi, page: wrongBackground}).check(t, path); err == nil {
 		t.Error("oracle accepted the wrong background")
 	}
 
 	moved := page
+	moved.Blocks = append([]compose.TextBlock(nil), page.Blocks...)
 	movedBlock := *block
 	movedBlock.Bounds.X += 60
-	moved.Text = &movedBlock
+	moved.Blocks[0].Text = &movedBlock
 
 	if err := (rasterOracle{dpi: dpi, page: moved}).check(t, path); err == nil {
 		t.Error("oracle accepted the wrong placement")
@@ -306,19 +309,19 @@ func (o rasterOracle) check(t *testing.T, path string) error {
 	// A fully covered pixel of the text color exists.
 	for y := box.top; y <= box.bottom; y++ {
 		for x := box.left; x <= box.right; x++ {
-			if closeTo(img.rgb(x, y), o.page.TextColor) {
+			if closeTo(img.rgb(x, y), o.page.Blocks[0].Color) {
 				return nil
 			}
 		}
 	}
 
-	return fmt.Errorf("%w: no pixel of text color %v", errRaster, o.page.TextColor)
+	return fmt.Errorf("%w: no pixel of text color %v", errRaster, o.page.Blocks[0].Color)
 }
 
 // checkInkPlacement checks that the ink lies inside the text bounds of the page specification and starts
 // near their left edge.
 func (o rasterOracle) checkInkPlacement(ink extent, scale float64) error {
-	bounds := o.page.Text.Bounds
+	bounds := o.page.Blocks[0].Text.Bounds
 	left, right := int(bounds.X*scale)-2, int((bounds.X+bounds.Width)*scale)+2
 	top, bottom := int((o.page.Height-bounds.Y-bounds.Height)*scale)-2, int((o.page.Height-bounds.Y)*scale)+2
 
@@ -326,7 +329,7 @@ func (o rasterOracle) checkInkPlacement(ink extent, scale float64) error {
 		return fmt.Errorf("%w: ink %+v outside expected bounds [%d,%d]-[%d,%d]", errRaster, ink, left, top, right, bottom)
 	}
 
-	if ink.left > left+int(0.15*scale*o.page.Text.Size) {
+	if ink.left > left+int(0.15*scale*o.page.Blocks[0].Text.Size) {
 		return fmt.Errorf("%w: ink starts at %d, expected near %d", errRaster, ink.left, left)
 	}
 
@@ -341,7 +344,7 @@ func (b bitmap) rgb(x, y int) [3]int {
 }
 
 // closeTo reports whether a pixel is within rounding of a color.
-func closeTo(pixel [3]int, color pdf.Color) bool {
+func closeTo(pixel [3]int, color packet.Color) bool {
 	return abs(pixel[0]-int(color.R)) <= 3 && abs(pixel[1]-int(color.G)) <= 3 && abs(pixel[2]-int(color.B)) <= 3
 }
 
@@ -365,7 +368,7 @@ func lineTexts(block *typeset.Placed) []string {
 }
 
 // inkAgainst returns the box of pixels of an RGB bitmap that differ from the background.
-func inkAgainst(img bitmap, background *pdf.Color) (extent, bool) {
+func inkAgainst(img bitmap, background *packet.Color) (extent, bool) {
 	base := [3]int{255, 255, 255}
 
 	if background != nil {
@@ -388,12 +391,12 @@ func inkAgainst(img bitmap, background *pdf.Color) (extent, bool) {
 	return box, found
 }
 
-func distinctPages(tb testing.TB, font *typeset.Font, count int) []pdf.Page {
+func distinctPages(tb testing.TB, font *typeset.Font, count int) []compose.Page {
 	tb.Helper()
 
 	var shaper typeset.Shaper
 
-	pages := make([]pdf.Page, count)
+	pages := make([]compose.Page, count)
 	for index := range pages {
 		text := fmt.Sprintf("Lappuse %d no %d\nĀčēģī ļoti Ελληνικά Привет %d\nx́ q̄ z̧", index+1, count, index*7919)
 		spec := params(text)
@@ -404,7 +407,7 @@ func distinctPages(tb testing.TB, font *typeset.Font, count int) []pdf.Page {
 			tb.Fatal(err)
 		}
 
-		pages[index] = pdf.Page{Width: 300, Height: 200, Text: block, TextColor: pdf.Color{R: 1, G: 2, B: 3}}
+		pages[index] = compose.Page{Width: 300, Height: 200, Blocks: []compose.TextBlock{{Text: block, Color: packet.Color{R: 1, G: 2, B: 3}}}}
 	}
 
 	return pages
@@ -437,7 +440,7 @@ func TestThousandPagesShareOneFont(t *testing.T) {
 	extracted := extractRaw(t, path)
 
 	for _, i := range []int{0, 1, 499, 998, 999} {
-		want := lineTexts(pages[i].Text)
+		want := lineTexts(pages[i].Blocks[0].Text)
 
 		if got := strings.TrimRight(extracted[i], "\n"); got != strings.Join(want, "\n") {
 			t.Errorf("page %d: %q vs %q", i+1, got, want)
@@ -456,7 +459,7 @@ func TestDistinctFontsAreEmbeddedOnceEach(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pages := []pdf.Page{
+	pages := []compose.Page{
 		textPage(t, first, firstPageText),
 		textPage(t, other, secondPageText),
 		textPage(t, sameBytes, "three"),
@@ -492,11 +495,11 @@ func TestWriteRejectsInvalidInput(t *testing.T) {
 	f := defaultFont(t)
 	good := textPage(t, f, "x")
 
-	badSize := func(w, h float64) []pdf.Page { return []pdf.Page{good, {Width: w, Height: h}} }
-	noFont := pdf.Page{Width: 10, Height: 10, Text: &typeset.Placed{Size: 12, Lines: good.Text.Lines}}
-	noSize := pdf.Page{Width: 10, Height: 10, Text: &typeset.Placed{Font: f, Lines: good.Text.Lines}}
+	badSize := func(w, h float64) []compose.Page { return []compose.Page{good, {Width: w, Height: h}} }
+	noFont := compose.Page{Width: 10, Height: 10, Blocks: []compose.TextBlock{{Text: &typeset.Placed{Size: 12, Lines: good.Blocks[0].Text.Lines}}}}
+	noSize := compose.Page{Width: 10, Height: 10, Blocks: []compose.TextBlock{{Text: &typeset.Placed{Font: f, Lines: good.Blocks[0].Text.Lines}}}}
 
-	cases := map[string][]pdf.Page{
+	cases := map[string][]compose.Page{
 		"no pages":      nil,
 		"NaN width":     badSize(math.NaN(), 10),
 		"infinite":      badSize(10, math.Inf(1)),
@@ -504,7 +507,7 @@ func TestWriteRejectsInvalidInput(t *testing.T) {
 		"too large":     badSize(10, 14401),
 		"text no font":  {noFont},
 		"text no size":  {noSize},
-		"negative size": {{Width: 10, Height: 10, Text: &typeset.Placed{Font: f, Size: -1, Lines: good.Text.Lines}}},
+		"negative size": {{Width: 10, Height: 10, Blocks: []compose.TextBlock{{Text: &typeset.Placed{Font: f, Size: -1, Lines: good.Blocks[0].Text.Lines}}}}},
 	}
 
 	for name, pages := range cases {
@@ -514,7 +517,7 @@ func TestWriteRejectsInvalidInput(t *testing.T) {
 		}
 	}
 
-	tooMany := make([]pdf.Page, pdf.MaxPages+1)
+	tooMany := make([]compose.Page, pdf.MaxPages+1)
 	if _, err := pdf.Write(context.Background(), io.Discard, tooMany); !errors.Is(err, pdf.ErrTooManyPages) {
 		t.Errorf("too many pages: %v", err)
 	}
@@ -523,7 +526,7 @@ func TestWriteRejectsInvalidInput(t *testing.T) {
 func TestPageSizeBoundariesAreAccepted(t *testing.T) {
 	t.Parallel()
 	for _, side := range []float64{typeset.MinPageSide, 595.276, typeset.MaxPageSide} {
-		path, _ := writePDF(t, []pdf.Page{{Width: side, Height: side}})
+		path, _ := writePDF(t, []compose.Page{{Width: side, Height: side}})
 		assertPageDimensions(t, path, side, side)
 		qpdfCheck(t, path)
 	}
@@ -647,7 +650,7 @@ func TestWriterFailureMarkerSpansTransportWrites(t *testing.T) {
 	for _, marker := range []string{"\nstartxref\n", "\n%%EOF\n"} {
 		// Exercise the real serializer through one-byte transport writes, ensuring
 		// marker detection spans calls instead of assuming a particular buffer size.
-		pages := []pdf.Page{{Width: 10, Height: 10}}
+		pages := []compose.Page{{Width: 10, Height: 10}}
 		writer := &phaseFailureWriter{marker: []byte(marker)}
 		split := singleByteWriter{writer: writer}
 		written, err := pdf.Write(t.Context(), split, pages)
@@ -677,7 +680,7 @@ func (w singleByteWriter) Write(p []byte) (int, error) {
 func TestPageDimensionsRetainFractionalPoints(t *testing.T) {
 	t.Parallel()
 	for _, width := range []float64{1, 100.5, 595.276, 841.8894, 14400, 1.0004, 1.0006, 12.3000001} {
-		path, _ := writePDF(t, []pdf.Page{{Width: width, Height: 10}})
+		path, _ := writePDF(t, []compose.Page{{Width: width, Height: 10}})
 		assertPageDimensions(t, path, width, 10)
 	}
 }
@@ -685,7 +688,7 @@ func TestPageDimensionsRetainFractionalPoints(t *testing.T) {
 func TestBlankLinesProduceNoOperators(t *testing.T) {
 	t.Parallel()
 
-	path, _ := writePDF(t, []pdf.Page{textPage(t, defaultFont(t), "a\n\nb\n\n\nc")})
+	path, _ := writePDF(t, []compose.Page{textPage(t, defaultFont(t), "a\n\nb\n\n\nc")})
 	qpdfCheck(t, path)
 
 	got := strings.Join(strings.Fields(extractRaw(t, path)[0]), " ")

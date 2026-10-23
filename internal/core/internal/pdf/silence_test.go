@@ -59,6 +59,6 @@ func silentLibraryBuild(t *testing.T) error {
 		return fmt.Errorf("layout: %+v", ds)
 	}
 	var output bytes.Buffer
-	_, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, &output)
+	_, err = pdf.Assemble(t.Context(), layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil, nil, &output)
 	return err
 }

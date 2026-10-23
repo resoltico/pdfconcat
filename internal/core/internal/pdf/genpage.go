@@ -17,33 +17,11 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-// Color is an sRGB text or background color.
-type Color struct{ R, G, B uint8 }
-
-// TextBlock is one measured, independently colored block on a generated page.
-type TextBlock struct {
-	Text  *typeset.Placed
-	Color Color
-}
-
-// PageLink is a measured contents row linked to a final physical output page.
-type PageLink struct {
-	Rect       typeset.Rect
-	TargetPage int64
-}
-
-// Page is a generated canvas with optional background, text and contents links.
-type Page struct {
-	Background    *Color
-	Text          *typeset.Placed
-	Blocks        []TextBlock
-	Links         []PageLink
-	Width, Height float64
-	TextColor     Color
-}
 type fontSet struct {
 	index map[typeset.Digest]int
 	list  []*typeset.Font
@@ -91,16 +69,7 @@ var (
 	ErrInvalidPage = errors.New("pdf: generated page: invalid page")
 )
 
-func pageBlocks(page Page) []TextBlock {
-	if page.Text == nil {
-		return page.Blocks
-	}
-	result := make([]TextBlock, 0, 1+len(page.Blocks))
-	result = append(result, TextBlock{Text: page.Text, Color: page.TextColor})
-	return append(result, page.Blocks...)
-}
-
-func collectFonts(c context.Context, pages []Page) (*fontSet, error) {
+func collectFonts(c context.Context, pages []compose.Page) (*fontSet, error) {
 	set := &fontSet{index: map[typeset.Digest]int{}}
 	for number, page := range pages {
 		if err := c.Err(); err != nil {
@@ -109,7 +78,7 @@ func collectFonts(c context.Context, pages []Page) (*fontSet, error) {
 		if !(page.Width >= minPageSide && page.Width <= maxPageSide && page.Height >= minPageSide && page.Height <= maxPageSide) {
 			return nil, fmt.Errorf("%w %d: size %v x %v pt outside %v to %v", ErrInvalidPage, number, page.Width, page.Height, minPageSide, maxPageSide)
 		}
-		for _, block := range pageBlocks(page) {
+		for _, block := range page.Blocks {
 			text := block.Text
 			if text == nil || len(text.Lines) == 0 {
 				continue
@@ -142,7 +111,7 @@ func collectFonts(c context.Context, pages []Page) (*fontSet, error) {
 
 // Write serializes the same native builder used by assembly, retaining full fonts
 // for the independent original-program comparison path.
-func Write(c context.Context, w io.Writer, pages []Page) (int64, error) {
+func Write(c context.Context, w io.Writer, pages []compose.Page) (int64, error) {
 	s, links, err := generatedContext(c, pages, len(pages), nil, nil)
 	if err != nil {
 		return 0, err
@@ -154,18 +123,18 @@ func Write(c context.Context, w io.Writer, pages []Page) (int64, error) {
 }
 
 // WriteRepeated serializes a repeated native generated item with its job union.
-func WriteRepeated(c context.Context, w io.Writer, page Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont) (int64, error) {
+func WriteRepeated(c context.Context, w io.Writer, page compose.Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont) (int64, error) {
 	names, err := generatedFontNames(prepared, nil)
 	if err != nil {
 		return 0, err
 	}
 	return writeRepeatedNamed(c, w, page, count, prepared, names)
 }
-func writeRepeatedNamed(c context.Context, w io.Writer, page Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) (int64, error) {
+func writeRepeatedNamed(c context.Context, w io.Writer, page compose.Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) (int64, error) {
 	if prepared == nil {
 		prepared = map[typeset.Digest]typeset.EmbeddedFont{}
 	}
-	s, links, err := generatedContext(c, []Page{page}, count, prepared, names)
+	s, links, err := generatedContext(c, []compose.Page{page}, count, prepared, names)
 	if err != nil {
 		return 0, err
 	}
@@ -246,7 +215,7 @@ func newGeneratedContext() (*model.Context, error) {
 
 // generatedContext builds one native resource document. A one-page slice repeats
 // to count; otherwise each supplied page contributes exactly one physical page.
-func generatedContext(c context.Context, pages []Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) (*model.Context, []generatedLink, error) {
+func generatedContext(c context.Context, pages []compose.Page, count int, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string) (*model.Context, []generatedLink, error) {
 	if count < 1 || len(pages) == 0 {
 		return nil, nil, ErrNoPages
 	}
@@ -520,12 +489,12 @@ func buildFontResource(c context.Context, s *model.Context, font typeset.Embedde
 	return &refs[0], nil
 }
 
-func (d *document) appendContent(page Page) {
+func (d *document) appendContent(page compose.Page) {
 	if page.Background != nil {
 		d.appendColor(*page.Background)
 		d.content = fmt.Appendf(d.content, "0 0 %s %s re\nf\n", number(page.Width), number(page.Height))
 	}
-	for _, block := range pageBlocks(page) {
+	for _, block := range page.Blocks {
 		if block.Text == nil || len(block.Text.Lines) == 0 {
 			continue
 		}
@@ -535,7 +504,7 @@ func (d *document) appendContent(page Page) {
 	}
 }
 
-func (d *document) appendColor(color Color) {
+func (d *document) appendColor(color packet.Color) {
 	for _, component := range []uint8{color.R, color.G, color.B} {
 		d.content = append(d.content, number(float64(component)/math.MaxUint8)...)
 		d.content = append(d.content, ' ')

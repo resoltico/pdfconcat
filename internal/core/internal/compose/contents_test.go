@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-package core
+package compose
 
 import (
 	"fmt"
@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
-	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
@@ -35,7 +34,7 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 		var heights []float64
 		for delta := range 2 {
 			j, fonts := contentsRecipe(t, leading+delta, 12, packet.Size{Width: 595, Height: 842})
-			c, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts)
+			c, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -43,8 +42,8 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			pages := map[int][]pdf.Page{}
-			if ds = c.finish(layout, pages); len(ds) > 0 {
+			_, ds = c.Finish(layout)
+			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
 			if len(c.pages) != 1 {
@@ -86,7 +85,7 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 80, authored)
 	j.FitTo = &fit
 	j.PageNumbers = &packet.PageNumbers{Size: 9, Margin: 50 * 72 / 25.4}
-	c, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts)
+	c, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j))
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -106,7 +105,7 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 		}
 	}
 	j.PageNumbers.Margin = fit.Height
-	if _, ds = prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds = PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("impossible footer space accepted: %+v", ds)
 	}
 }
@@ -114,12 +113,12 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 1, packet.Size{Width: 109.152, Height: 200})
 	itemAs[*packet.ContentsItem](t, j.Items[1]).Title = "ffffff"
-	if _, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("heading ink margin was ignored: %+v", ds)
 	}
 	j, fonts = contentsRecipe(t, 1, 1, packet.Size{Width: 200, Height: 150})
 	itemAs[*packet.GroupItem](t, j.Items[2]).Title = strings.Repeat("Long wrapped title ", 20)
-	if _, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("oversized whole row accepted: %+v", ds)
 	}
 	nested := j.Items[2]
@@ -127,11 +126,11 @@ func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
 		nested = &packet.GroupItem{Ref: fmt.Sprintf("ancestor%d", i), Title: "Ancestor", Items: []packet.Item{nested}}
 	}
 	j.Items[2] = nested
-	if _, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); len(ds) == 0 {
+	if _, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j)); len(ds) == 0 {
 		t.Fatal("unusable indented column accepted")
 	}
 	j.Items = j.Items[:1]
-	if c, ds := prepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts); c != nil || len(ds) > 0 {
+	if c, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items), nil, fonts, testFooter(t, j)); c != nil || len(ds) > 0 {
 		t.Fatalf("absent contents must mean C=0: %+v %+v", c, ds)
 	}
 }
@@ -143,4 +142,20 @@ func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
 		t.Fatalf("item has type %T, expected %T", item, value)
 	}
 	return value
+}
+
+func testFooter(t *testing.T, p packet.Plan) *Footer {
+	t.Helper()
+	if p.PageNumbers == nil {
+		return nil
+	}
+	font, err := typeset.LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
+	}
+	footer, err := NewFooter(font, *p.PageNumbers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return footer
 }

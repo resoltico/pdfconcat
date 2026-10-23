@@ -89,7 +89,7 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 		t.Fatalf("fit %+v %+v", layout, ds)
 	}
 	_, ds = resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.PageItem{Style: inherited, Count: 1}}), nil, 0)
-	if len(ds) != 1 || ds[0].Code != diag.PageSizeRequired {
+	if len(ds) != 1 || ds[0].Code != diag.PageSizeRequired || !strings.Contains(ds[0].Message, "explicit plan page size") || !strings.Contains(ds[0].Message, "--fit-to SIZE") {
 		t.Fatal(ds)
 	}
 	facts["source"] = packet.SourceFacts{Pages: 1, FirstSize: packet.Size{Width: 14401, Height: 300}, LastSize: b}

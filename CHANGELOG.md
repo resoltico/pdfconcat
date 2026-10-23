@@ -14,6 +14,8 @@ Notable changes to this project are documented in this file. The format is based
 
 - Updated the PDF engine to pdfcpu v0.16.3 and its selected dependency versions.
 
+- Source and tool builds require Go 1.27.3.
+
 ### Added
 
 - Distinct source PDFs are inspected concurrently with a bounded worker count and deterministic diagnostic order. Assembly remains sequential.
@@ -21,6 +23,11 @@ Notable changes to this project are documented in this file. The format is based
 ### Removed
 
 - The optional pdfcpu comparison script and its contributor instructions.
+
+### Fixed
+
+- Page and annotation JavaScript actions are retained as documented instead of being falsely refused as `source_damaged`.
+- `--blank` help and `page_size_required` explain source inheritance, explicit plan page sizes and the `--fit-to SIZE` remedy.
 
 ### Internal
 

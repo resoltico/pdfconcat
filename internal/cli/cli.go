@@ -28,7 +28,7 @@ type Command struct {
 type option struct{ name, alias, value, description string }
 
 var options = []option{
-	{"--blank", "", "", "Insert one generated page with default style."},
+	{"--blank", "", "", "Insert one generated page with default style; size comes from a source or --fit-to SIZE."},
 	{"--plan", "", "FILE|-", "Read a plan v4 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},

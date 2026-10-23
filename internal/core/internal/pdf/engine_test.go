@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -1080,5 +1081,71 @@ func TestDestinationByteEncodingsStayDistinct(t *testing.T) {
 	}
 	if err := oracle.RequireTools(t).CheckLinks(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPageAndAnnotationScriptsSurviveDocumentActionCleanup(t *testing.T) {
+	const retained = `// retain this action (exactly)
+`
+	const removed = `// remove document action
+`
+	for _, attachment := range []string{"page", "annotation"} {
+		t.Run(attachment, func(t *testing.T) {
+			doc := pdffixture.Plain("script")
+			doc.Objs = append(doc.Objs,
+				[]byte(fmt.Sprintf("<< /S /JavaScript /JS <%x> >>", []byte(retained))),
+				[]byte(fmt.Sprintf("<< /S /JavaScript /JS <%x> >>", []byte(removed))))
+			if attachment == "page" {
+				insertEntry(doc, 3, "/AA << /O 6 0 R >>")
+			} else {
+				doc.Objs = append(doc.Objs, []byte("<< /Type /Annot /Subtype /Link /Rect [10 10 30 30] /A 6 0 R /P 3 0 R >>"))
+				insertEntry(doc, 3, "/Annots [8 0 R]")
+			}
+			insertEntry(doc, 1, "/OpenAction 7 0 R /AA << /WC 7 0 R >> /Names << /JavaScript << /Names [(launch) 7 0 R] >> >>")
+			dir := t.TempDir()
+			source, output := filepath.Join(dir, "source.pdf"), filepath.Join(dir, "packet.pdf")
+			if err := doc.WriteFile(source); err != nil {
+				t.Fatal(err)
+			}
+			for _, operation := range []core.Operation{core.Check, core.Build} {
+				result := core.Execute(t.Context(), core.Request{Operation: operation, WorkingDir: dir, Output: output, Input: core.Items{core.SourceItem{Ref: "first", Path: source}, core.SourceItem{Ref: "repeat", Path: source}}})
+				if result.Status != "ok" || !codePresent(result.Diagnostics, diag.SourceDocumentActionsRemoved) {
+					t.Fatalf("%s: %+v", operation, result)
+				}
+				if operation == core.Build && !result.Output.Published {
+					t.Fatal("build did not publish", result)
+				}
+			}
+			if pages := qpdfCheck(t, output); pages != 2 {
+				t.Fatal(pages)
+			}
+			scripts := map[string]int{}
+			owners := 0
+			for _, dict := range qpdfDictionaries(t, output) {
+				if script, ok := dict["/JS"].(string); ok {
+					scripts[script]++
+				}
+				if attachment == "page" && dict["/Type"] == "/Page" && dict["/AA"] != nil {
+					owners++
+				}
+				if attachment == "annotation" && dict["/Subtype"] == "/Link" && dict["/A"] != nil {
+					owners++
+				}
+				if dict["/Type"] == "/Catalog" {
+					if _, ok := dict["/AA"]; ok {
+						t.Fatal("document additional actions retained")
+					}
+					if _, ok := dict["/OpenAction"]; ok {
+						t.Fatal("document open action retained")
+					}
+				}
+				if _, ok := dict["/JavaScript"]; ok {
+					t.Fatal("document JavaScript name tree retained")
+				}
+			}
+			if owners != 2 || len(scripts) != 1 || scripts["u:"+retained] != 2 {
+				t.Fatalf("script bytes or occurrence retention changed: %#v", scripts)
+			}
+		})
 	}
 }

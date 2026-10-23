@@ -186,11 +186,32 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 		return s, err
 	}
 	for _, n := range report.Notices() {
-		if (n.Disposition == model.NoticeRepaired || n.Disposition == model.NoticeSkipped) && (n.PageNumber > 0 || strings.Contains(strings.ToLower(n.Path), "page") || strings.Contains(strings.ToLower(n.Message), "page")) {
+		if pageDamageNotice(n) {
 			return s, refuse(diag.SourceDamaged, n.Message)
 		}
 	}
 	return s, nil
+}
+
+// pageDamageNotice keeps the repair guard separate from pdfcpu's informational
+// active-content notices. In v0.16.3 their producer records retained content as
+// causeless validation skips with an empty path and this location/kind format.
+func pageDamageNotice(n model.ValidationNotice) bool {
+	if n.Disposition != model.NoticeRepaired && n.Disposition != model.NoticeSkipped {
+		return false
+	}
+	if n.Phase == model.NoticePhaseValidate && n.Disposition == model.NoticeSkipped && n.Cause == nil && n.Path == "" && n.PageNumber >= 0 {
+		location := "document"
+		if n.PageNumber > 0 {
+			location = fmt.Sprintf("page %d", n.PageNumber)
+		}
+		for _, kind := range []string{"JavaScript", "Sound", "Movie", "Rendition"} {
+			if strings.HasPrefix(n.Message, location+": active content: "+kind+" in ") {
+				return false
+			}
+		}
+	}
+	return n.PageNumber > 0 || strings.Contains(strings.ToLower(n.Path), "page") || strings.Contains(strings.ToLower(n.Message), "page")
 }
 
 type pageRef struct {

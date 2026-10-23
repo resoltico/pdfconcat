@@ -1,6 +1,6 @@
 module github.com/resoltico/pdfconcat
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/go-text/typesetting v0.3.5

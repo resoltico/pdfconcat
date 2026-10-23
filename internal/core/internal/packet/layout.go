@@ -30,7 +30,7 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 		ds = append(ds, diag.New(code, message, pointer))
 	}
 	canvas := func(size Size, pointer string, padding bool) bool {
-		message := "Give an explicit page size when no source is available."
+		message := "Page size must come from a source, an explicit plan page size, or --fit-to SIZE."
 		code := diag.PageSizeRequired
 		switch {
 		case size == (Size{}):

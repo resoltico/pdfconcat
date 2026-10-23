@@ -68,6 +68,14 @@ func TestHelpAndVersionForms(t *testing.T) {
 			t.Fatalf("version %v: %+v %+v", args, c, failure)
 		}
 	}
+	for _, command := range []string{"build", "check"} {
+		help := cli.Help(command)
+		for _, remedy := range []string{"size comes from a source", "--fit-to SIZE"} {
+			if !strings.Contains(help, remedy) {
+				t.Fatalf("%s help omits %q: %s", command, remedy, help)
+			}
+		}
+	}
 	help := cli.Help("build")
 	for _, option := range []string{"--plan", "--output", "--base-dir", "--fit-to", "--report", "--overwrite", "--json", "--help"} {
 		if !strings.Contains(help, option) {

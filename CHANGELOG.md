@@ -4,13 +4,38 @@ Notable changes to this project are documented in this file. The format is based
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** plans require `"version": 4`, and the plan-wide default page style moves from root `page` to `page_defaults`. Item `page`, `count` and source `pages` are unchanged. Update saved plans; see [PLAN](docs/PLAN.md).
+- **Breaking:** results, reports and JSON version objects use `format_version: 5`. The diagnostic code `report_identity_unverified` is removed; `working_directory_unavailable`, `output_inspection_failed` and `report_inspection_failed` are added. A missing working directory no longer reports `plan_unreadable`, and destination inspection failures no longer report `output_write_failed`/`report_write_failed`. Update JSON and diagnostic-code consumers; see [CLI](docs/CLI.md#diagnostic-codes).
+- **Breaking:** the CLI prints human-readable text by default, with diagnostics on stderr. `--json` prints one JSON result on stdout and replaces `--format json|text`, which is removed. Scripts that parsed default stdout must add `--json`; text-mode usage errors leave stdout empty and include a help hint on stderr.
+- **Breaking:** failure or cancellation while acquiring a plan from standard input returns `plan_unreadable` or `interrupted` without writing a requested report. Plan decoding failures after successful acquisition still support reports.
+- Report destinations are checked against existing inputs and the output by file identity, and against missing inputs by cleaned path spelling only. Alternative spellings of missing paths are not reserved. Reports can no longer be refused because separation from a missing input could not be proven; reports are rechecked after PDF publication. See [publication limits](docs/CLI.md#reports-and-committed-state).
+- Distinct source paths are inspected concurrently with at most `GOMAXPROCS` workers and findings merged in first-use order. Font preparation and PDF assembly remain sequential; parsing and assembly still have no universal time or memory bound.
+- Updated the PDF engine to pdfcpu v0.16.3 and its selected dependency versions.
+- Source and development-tool builds require Go 1.27.3. Upgrade the Go toolchain before building.
+- Editor-schema source paths are `internal/core/internal/plan/plan.schema.json` and `internal/core/internal/result/result.schema.json`. Update source-tree schema URLs, or obtain matching schemas with `pdfconcat schema plan|result`; binary archives still contain them under `schemas/`.
+
+### Removed
+
+- The optional pdfcpu comparison script.
+
+### Fixed
+
+- Valid page and annotation JavaScript actions are retained instead of being falsely refused as `source_damaged`. Document-level actions are still removed; output is not sanitized. See [PDF policy](docs/PDF-POLICY.md#source-policy).
+
+### Internal
+
+- Packet adapters are confined to the core tree by Go's nested `internal/` rules. Stock depguard checks enforce third-party adapter and CLI I/O boundaries, replacing the custom architecture command. Diagnostic codes use one ordered typed registry.
+- Opt-in scale and staged-build signal workloads use `TestScale`; ordinary tests and CI exclude these workloads. Use the commands in [CONTRIBUTING](CONTRIBUTING.md#scale).
+
 ## [0.4.0] - 2026-10-16
 
 ### Changed
 
-- **Breaking:** plans require `version: 3` and source objects such as `{"source":"chapter.pdf"}` instead of source strings. Results and full reports use `format_version: 4`, adding original-page counts, selection spans, sections, divider/contents/padding parts and packet numbering settings. Update saved plans and JSON consumers using the current [plan](docs/PLAN.md) and [result](docs/CLI.md#output) contracts.
+- **Breaking:** plans require `version: 3` and source objects such as `{"source":"chapter.pdf"}` instead of source strings. Results and full reports use `format_version: 4`, adding original-page counts, selection spans, sections, divider/contents/padding parts and packet numbering settings. Update saved plans and JSON consumers using the current [plan](https://github.com/resoltico/pdfconcat/blob/v0.4.0/docs/PLAN.md) and [result](https://github.com/resoltico/pdfconcat/blob/v0.4.0/docs/CLI.md#output) contracts.
 - **Breaking:** failure reports can be refused as `report_identity_unverified` when separation from a known missing plan, source or consumed external font cannot be established; choose a different existing report directory. Only effective consumed fonts reserve input paths, including fonts selected for empty text; unused defaults do not. Native identity failures retain the queried operation/path and never authorize replacement.
-- **Breaking:** generated fonts require complete consumed `post` and `OS/2` headers with supported versions; missing, short or unsupported metadata is `font_invalid`. Choose a compatible static TrueType font; see [font requirements](docs/DESIGN.md#text-and-pruning).
+- **Breaking:** generated fonts require complete consumed `post` and `OS/2` headers with supported versions; missing, short or unsupported metadata is `font_invalid`. Choose a compatible static TrueType font; see [font requirements](https://github.com/resoltico/pdfconcat/blob/v0.4.0/docs/DESIGN.md#text-and-pruning).
 - **Breaking:** generated text refuses a font whose sanitized PostScript name contains a literal `#` followed by two hexadecimal digits (`font_invalid`), because the backend cannot preserve that name. Choose a font with an unambiguous PostScript name; other literal hashes remain supported.
 - **Breaking:** fitting refuses retained internal page destinations with numeric position coordinates as `fit_destination_unsupported`. Use original page sizes for those sources; whole-page and valid null-position or zoom-only destinations remain supported.
 - **Breaking:** when individually valid sources combine into PDF 2.0 output with a missing required retained annotation appearance, `check` and `build` refuse the known conflict before assembly as `source_output_incompatible`. Supply complete appearances or assemble the affected source separately; other merge/write failures can still occur.
@@ -20,8 +45,8 @@ Notable changes to this project are documented in this file. The format is based
 ### Added
 
 - Packet plans select ascending disjoint source-page ranges and use separate occurrences to repeat or reorder excerpts. Local navigation to omitted pages is pruned within its own occurrence with `source_navigation_removed`. Whole-source validation, version and hash checks still apply, and genuinely partial sources with fields/widgets are refused as `source_selection_form_unsupported`. Selection composes visible pages; it is not redaction.
-- Nested titled sections create authored bookmarks, optional title dividers and odd physical starts with automatic blank padding. Imported source bookmarks remain beneath the nearest authored section. See [sections and page positions](docs/PLAN.md#sections-title-dividers-and-odd-starts).
-- Linked contents pages and optional physical Arabic footer numbers use final packet page positions. Automatic padding counts but stays unpainted and unnumbered. Footers can cover existing source content; no overlap detector or content shifting is provided. See [contents](docs/PLAN.md#linked-contents) and [numbering](docs/PLAN.md#physical-footer-numbers).
+- Nested titled sections create authored bookmarks, optional title dividers and odd physical starts with automatic blank padding. Imported source bookmarks remain beneath the nearest authored section. See [sections and page positions](https://github.com/resoltico/pdfconcat/blob/v0.4.0/docs/PLAN.md#sections-title-dividers-and-odd-starts).
+- Linked contents pages and optional physical Arabic footer numbers use final packet page positions. Automatic padding counts but stays unpainted and unnumbered. Footers can cover existing source content; no overlap detector or content shifting is provided. See [contents](https://github.com/resoltico/pdfconcat/blob/v0.4.0/docs/PLAN.md#linked-contents) and [numbering](https://github.com/resoltico/pdfconcat/blob/v0.4.0/docs/PLAN.md#physical-footer-numbers).
 
 ### Fixed
 

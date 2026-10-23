@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "output": "Pielikums.pdf",
-  "page": {
+  "page_defaults": {
     "background": "#F4EFE6",
     "text": {
       "size": 20,

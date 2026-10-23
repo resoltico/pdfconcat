@@ -28,15 +28,15 @@ func corpusSection(title string, items ...any) map[string]any {
 }
 func corpusRecipe(t *testing.T, dir string, plan map[string]any) (core.Result, core.Result) {
 	t.Helper()
-	plan["version"] = 3
+	plan["version"] = 4
 	plan["output"] = "packet.pdf"
 	path := filepath.Join(dir, "plan.json")
 	corpusJSON(t, path, plan)
-	check := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "check.json")}))
+	check := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: filepath.Join(dir, "check.json")})
 	if check.Status != "ok" || check.Output.Published {
 		t.Fatal(check)
 	}
-	build := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, "build.json")}))
+	build := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: filepath.Join(dir, "build.json")})
 	if build.Status != "ok" {
 		t.Fatal(build)
 	}
@@ -80,12 +80,12 @@ func corpusWorkflows(t *testing.T, cli string) {
 	physicalBody["start_on"] = "odd"
 	cases := []corpusWorkflow{
 		{"coalesced-odd-boundaries", map[string]any{"items": []any{corpusSource("plain.pdf"), map[string]any{"start_on": "odd", "items": []any{parentOdd}}, corpusGenerated(1, "105x148mm", "")}}, 4, nil, []int64{3, 3}},
-		{"padding-clears-style", map[string]any{"page": map[string]any{"size": "A4", "background": "#FF0000", "text": map[string]any{"value": "DEFAULT"}}, "page_numbers": map[string]any{}, "items": []any{corpusSource("plain.pdf"), redBody, map[string]any{"page": map[string]any{}}}}, 6, nil, []int64{3}},
+		{"padding-clears-style", map[string]any{"page_defaults": map[string]any{"size": "A4", "background": "#FF0000", "text": map[string]any{"value": "DEFAULT"}}, "page_numbers": map[string]any{}, "items": []any{corpusSource("plain.pdf"), redBody, map[string]any{"page": map[string]any{}}}}, 6, nil, []int64{3}},
 		{"padding-physical-versus-source", map[string]any{"items": []any{corpusSource("book.pdf", [2]int{1, 1}), corpusGenerated(1, "210x100pt", ""), corpusGenerated(1, "150x250pt", ""), physicalBody, map[string]any{"page": map[string]any{}}}}, 6, nil, []int64{5}},
 		{"selected-disjoint", map[string]any{"items": []any{corpusSource("book.pdf", [2]int{2, 4}, [2]int{7, 7}, [2]int{12, 12})}}, 5, []string{"BOOK p2", "BOOK p3", "BOOK p4", "BOOK p7", "BOOK p12"}, nil},
 		{"selected-reordered-occurrences", map[string]any{"items": []any{corpusSource("book.pdf", [2]int{10, 12}), corpusSource("book.pdf", [2]int{1, 1}), corpusSource("book.pdf", [2]int{5, 6})}}, 6, []string{"BOOK p10", "BOOK p11", "BOOK p12", "BOOK p1", "BOOK p5", "BOOK p6"}, nil},
 		{"selected-adjacency", map[string]any{"items": []any{corpusSource("book.pdf", [2]int{1, 2}, [2]int{3, 3}, [2]int{4, 5})}}, 5, nil, nil},
-		{"nested-native-outlines", map[string]any{"page": map[string]any{"size": "A4"}, "items": []any{corpusSource("plain.pdf"), nested, map[string]any{"contents": map[string]any{}}}}, 6, []string{"PLAIN", "Parent", "OUTLINED p1", "OUTLINED p2", "BOOK p12", "Contents"}, []int64{2, 3, 5}},
+		{"nested-native-outlines", map[string]any{"page_defaults": map[string]any{"size": "A4"}, "items": []any{corpusSource("plain.pdf"), nested, map[string]any{"contents": map[string]any{}}}}, 6, []string{"PLAIN", "Parent", "OUTLINED p1", "OUTLINED p2", "BOOK p12", "Contents"}, []int64{2, 3, 5}},
 		{"duplicate-section-titles", map[string]any{"items": []any{map[string]any{"contents": map[string]any{}}, duplicateA, duplicateB}}, 3, nil, []int64{2, 3}},
 		{"parent-range-before-target", map[string]any{"page_numbers": map[string]any{}, "items": []any{corpusSource("plain.pdf"), corpusSection("Parent", odd), map[string]any{"contents": map[string]any{}}}}, 4, nil, []int64{3, 3}},
 		{"contents-inside-own-section", map[string]any{"items": []any{corpusSection("Volume", map[string]any{"contents": map[string]any{}}, corpusSource("book.pdf", [2]int{5, 5}), corpusSection("Child", corpusSource("book.pdf", [2]int{6, 6})))}}, 3, nil, []int64{1, 3}},
@@ -95,8 +95,8 @@ func corpusWorkflows(t *testing.T, cli string) {
 		{"contents-digits9", map[string]any{"page_numbers": map[string]any{}, "items": []any{corpusSource("book.pdf", [2]int{1, 8}), map[string]any{"contents": map[string]any{}}, corpusSection("First double-digit target", corpusSource("book.pdf", [2]int{9, 9})), corpusSection("Next target", corpusSource("book.pdf", [2]int{10, 10}))}}, 11, nil, []int64{10, 11}},
 		{"contents-digits99", map[string]any{"page_numbers": map[string]any{}, "items": []any{corpusGenerated(98, "A4", ""), map[string]any{"contents": map[string]any{}}, corpusSection("One hundred", corpusSource("book.pdf", [2]int{1, 1})), corpusSection("One hundred one", corpusSource("book.pdf", [2]int{12, 12}))}}, 101, nil, []int64{100, 101}},
 		{"title-unpainted-script", map[string]any{"items": []any{corpusSection("資料 📎", corpusSource("book.pdf", [2]int{4, 4}))}}, 1, []string{"BOOK p4"}, []int64{1}},
-		{"title-painted-decomposed", map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"size": 18}}, "page_numbers": map[string]any{}, "items": []any{map[string]any{"contents": map[string]any{}}, painted}}, 3, nil, []int64{2}},
-		{"generated-only", map[string]any{"page": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": []any{corpusGenerated(1, "200x300pt", "COVER"), map[string]any{"contents": map[string]any{}}, map[string]any{"title": "Cards", "start_on": "odd", "divider": map[string]any{}, "items": []any{corpusGenerated(2, "150x250pt", ""), map[string]any{"title": "End", "start_on": "odd", "items": []any{corpusGenerated(1, "300x200pt", "END")}}}}}}, 7, []string{"COVER", "Contents", "Cards", "", "", "", "END"}, []int64{3, 7}},
+		{"title-painted-decomposed", map[string]any{"page_defaults": map[string]any{"size": "A4", "text": map[string]any{"size": 18}}, "page_numbers": map[string]any{}, "items": []any{map[string]any{"contents": map[string]any{}}, painted}}, 3, nil, []int64{2}},
+		{"generated-only", map[string]any{"page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": []any{corpusGenerated(1, "200x300pt", "COVER"), map[string]any{"contents": map[string]any{}}, map[string]any{"title": "Cards", "start_on": "odd", "divider": map[string]any{}, "items": []any{corpusGenerated(2, "150x250pt", ""), map[string]any{"title": "End", "start_on": "odd", "items": []any{corpusGenerated(1, "300x200pt", "END")}}}}}}, 7, []string{"COVER", "Contents", "Cards", "", "", "", "END"}, []int64{3, 7}},
 		{"native-selected-outlines", map[string]any{"items": []any{corpusSection("One", corpusSource("outlined.pdf", [2]int{1, 1})), corpusSection("Two", corpusSource("outlined.pdf", [2]int{2, 2})), map[string]any{"contents": map[string]any{}}}}, 3, nil, []int64{1, 2}},
 		{"named-repeated", map[string]any{"items": []any{corpusSource("named.pdf"), corpusSource("named.pdf")}}, 4, nil, nil},
 		{"legacy-selected", map[string]any{"items": []any{corpusSource("legacy.pdf", [2]int{1, 1}), corpusSource("legacy.pdf", [2]int{2, 2})}}, 2, nil, nil},
@@ -259,8 +259,8 @@ func corpusWorkflows(t *testing.T, cli string) {
 			t.Fatal(err)
 		}
 		corpusCopy(t, "testdata/corpus/business-report.pdf", filepath.Join(old, "inputs/leaf/report.pdf"))
-		corpusCopy(t, "../typeset/fontdata/NotoSans-Regular.ttf", filepath.Join(old, "inputs/fonts/title.ttf"))
-		plan := map[string]any{"version": 3, "dir": "inputs", "output": "packet.pdf", "items": []any{map[string]any{"title": "Scoped Ā Ελληνικά", "dir": "leaf", "divider": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": "fonts/title.ttf"}}}, "items": []any{corpusSource("report.pdf", [2]int{2, 3})}}}}
+		corpusCopy(t, "internal/typeset/fontdata/NotoSans-Regular.ttf", filepath.Join(old, "inputs/fonts/title.ttf"))
+		plan := map[string]any{"version": 4, "dir": "inputs", "output": "packet.pdf", "items": []any{map[string]any{"title": "Scoped Ā Ελληνικά", "dir": "leaf", "divider": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": "fonts/title.ttf"}}}, "items": []any{corpusSource("report.pdf", [2]int{2, 3})}}}}
 		corpusJSON(t, filepath.Join(old, "plan.json"), plan)
 		moved := filepath.Join(root, "Packet space Ā Ελληνικά")
 		if err := os.Rename(old, moved); err != nil {
@@ -269,7 +269,7 @@ func corpusWorkflows(t *testing.T, cli string) {
 		if _, err := os.Stat(old); !os.IsNotExist(err) {
 			t.Fatal("old project still exists")
 		}
-		cmd := exec.CommandContext(t.Context(), cli, "build", "--plan", filepath.Join(moved, "plan.json"), "--output", filepath.Join(moved, "override.pdf"), "--report", filepath.Join(moved, "report.json"))
+		cmd := exec.CommandContext(t.Context(), cli, "build", "--plan", filepath.Join(moved, "plan.json"), "--output", filepath.Join(moved, "override.pdf"), "--report", filepath.Join(moved, "report.json"), "--json")
 		cmd.Dir = root
 		if data, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("relocated CLI: %s %v", data, err)
@@ -405,7 +405,7 @@ func TestCorpusContentsSpecimens(t *testing.T) {
 func corpusBlankNeighbors(t *testing.T, cli string) {
 	dir := corpusStage(t, "business-report.pdf")
 	report := filepath.Join(dir, "report.json")
-	cmd := exec.CommandContext(t.Context(), cli, "build", "--blank", filepath.Join(dir, "business-report.pdf"), "--blank", "-o", filepath.Join(dir, "packet.pdf"), "--report", report)
+	cmd := exec.CommandContext(t.Context(), cli, "build", "--blank", filepath.Join(dir, "business-report.pdf"), "--blank", "-o", filepath.Join(dir, "packet.pdf"), "--report", report, "--json")
 	cmd.Dir = dir
 	if raw, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("direct blank neighbors %s %v", raw, err)
@@ -449,11 +449,8 @@ func TestCorpusSourceRefresh(t *testing.T) {
 	closing := corpusSection("Closing", corpusSource("book.pdf", [2]int{12, 12}))
 	closing["start_on"] = "odd"
 	path := filepath.Join(dir, "plan.json")
-	corpusJSON(t, path, map[string]any{"version": 3, "output": "ignored.pdf", "items": []any{map[string]any{"contents": map[string]any{}}, corpusSection("Opening", corpusSource("evolving.pdf")), closing}})
-	document, ds := core.ReadPlan(t.Context(), core.FilePlan(path), dir)
-	if len(ds) > 0 {
-		t.Fatal(ds)
-	}
+	corpusJSON(t, path, map[string]any{"version": 4, "output": "ignored.pdf", "items": []any{map[string]any{"contents": map[string]any{}}, corpusSection("Opening", corpusSource("evolving.pdf")), closing}})
+
 	hashes := map[string]bool{}
 	for _, tc := range []struct{ Pages, Total, Padding, Closing int }{{2, 5, 4, 5}, {3, 5, 0, 5}, {4, 7, 6, 7}} {
 		t.Run(strconv.Itoa(tc.Pages), func(t *testing.T) {
@@ -461,7 +458,7 @@ func TestCorpusSourceRefresh(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, fmt.Sprintf("version-%d.pdf", tc.Pages))
-			r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromDocument(document), core.Options{WorkingDir: dir, Output: output, Report: filepath.Join(dir, fmt.Sprintf("version-%d.json", tc.Pages))}))
+			r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Output: output, Report: filepath.Join(dir, fmt.Sprintf("version-%d.json", tc.Pages))})
 			if r.Status != "ok" || *r.Pages.Total != int64(tc.Total) || *r.Sections[0].TargetPage != 2 || *r.Sections[1].TargetPage != int64(tc.Closing) {
 				t.Fatal(r)
 			}

@@ -14,9 +14,9 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
-	"github.com/resoltico/pdfconcat/internal/result"
 )
 
 func packetPlan(t *testing.T, dir string, value map[string]any) string {
@@ -37,7 +37,7 @@ func TestCompositionReportPartitionsPhysicalPacket(t *testing.T) {
 	if err := pdffixture.Pages("SOURCE", 4).WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 		t.Fatal(err)
 	}
-	recipe := map[string]any{"version": 3, "output": "packet.pdf", "page": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": []any{
+	recipe := map[string]any{"version": 4, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": []any{
 		map[string]any{"page": map[string]any{"text": map[string]any{"value": "Cover"}}},
 		map[string]any{"contents": map[string]any{}},
 		map[string]any{"title": "Pielikums Ā Ελληνικά", "start_on": "odd", "divider": map[string]any{}, "items": []any{
@@ -47,11 +47,11 @@ func TestCompositionReportPartitionsPhysicalPacket(t *testing.T) {
 		map[string]any{"page": map[string]any{}, "count": 2},
 	}}
 	path := packetPlan(t, dir, recipe)
-	checked := core.Execute(t.Context(), core.NewRequest(core.Check, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+	checked := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 	if checked.Status != "ok" || checked.Output.Published {
 		t.Fatalf("check: %+v", checked.Diagnostics)
 	}
-	built := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+	built := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 	if built.Status != "ok" || !built.Output.Published {
 		t.Fatalf("build: %+v", built.Diagnostics)
 	}
@@ -170,13 +170,13 @@ func TestRefusedCompositionRetainsOnlyEstablishedFacts(t *testing.T) {
 			if kind == "layout" {
 				count = 100000
 			}
-			recipe := map[string]any{"version": 3, "output": "packet.pdf", "items": []any{source, map[string]any{"title": "Section", "start_on": "odd", "items": []any{map[string]any{"page": page, "count": count}}}}}
+			recipe := map[string]any{"version": 4, "output": "packet.pdf", "items": []any{source, map[string]any{"title": "Section", "start_on": "odd", "items": []any{map[string]any{"page": page, "count": count}}}}}
 			path := packetPlan(t, dir, recipe)
 			report := filepath.Join(dir, "report.json")
 			if kind == "font" {
 				report = filepath.Join(t.TempDir(), "report.json")
 			}
-			r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: report}))
+			r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: report})
 			if r.Status == "ok" || r.Output.Published || !r.Report.Written {
 				t.Fatalf("refusal/report: %+v", r)
 			}

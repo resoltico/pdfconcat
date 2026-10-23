@@ -1,0 +1,2 @@
+error usage_unknown_command: Unknown command: unknown [items "argv:0"]
+Run "pdfconcat help" for usage.

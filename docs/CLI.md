@@ -1,10 +1,10 @@
-# Command line and result v4
+# Command line and result v5
 
 ```text
 pdfconcat build [options] (--plan FILE|- | PDF... [--blank]...)
 pdfconcat check [options] (--plan FILE|- | PDF... [--blank]...)
 pdfconcat schema plan|result
-pdfconcat version [--format json|text]
+pdfconcat version [--json]
 pdfconcat help [COMMAND]
 ```
 
@@ -16,12 +16,13 @@ including the command but excluding the executable.
 | Option | Meaning |
 | --- | --- |
 | `--plan FILE`, `--plan -` | Named plan or stdin; excludes source/blank operands |
+| `--blank` | Insert one generated page; size comes from a source or `--fit-to SIZE` |
 | `-o FILE`, `--output FILE` | Output PDF; overrides plan output, relative to cwd |
 | `--base-dir DIR` | Base for stdin plans only |
 | `--fit-to SIZE` | Overrides plan fitting; paper name or dimensions |
 | `--report FILE` | Full JSON report, relative to cwd |
 | `--overwrite` | Permit replacement of existing regular output/report files |
-| `--format json\|text` | Stdout format, default JSON |
+| `--json` | Print one JSON result on stdout; text is the default |
 | `--help`, `-h` | Help |
 
 Values accept `--option=value` or separate arguments. Each ordinary option is
@@ -30,7 +31,7 @@ worker-count option, report-query command or inline-plan JSON option.
 
 A separate required value cannot be a recognized option token (including
 `--blank`); an omitted value is refused before input or report I/O. To name a
-file like an option, use `--report=--format` or `--report ./--format`. A literal
+file like an option, use `--report=--json` or `--report ./--json`. A literal
 `--` can be an option value; it ends options only when encountered between
 options or operands.
 
@@ -42,57 +43,42 @@ fonts, inspect every distinct source, resolve sizes/ranges and lay out text.
 `check` writes no PDF but may write its requested report. Passing check predicts
 assembly; merge, pruning, fitting, I/O or publication can still fail later.
 
-Fitting scales proportionally onto the declared sheet, preserving displayed
-orientation without an extra best-fit rotation. Source widget forms are refused.
-Explicit generated canvases retain their authored layout/overflow checks, then
-resize; inherited canvases use the fit target. Link rectangles scale. Internal
-destinations with numeric position coordinates are refused (`fit_destination_unsupported`); use original page sizes for those sources.
-Whole-page targets and valid null-only position coordinates remain supported.
-Both commands also detect the known retained-appearance conflict when otherwise
-valid sources are combined into PDF 2.0 output (`source_output_incompatible`). See the complete
-[PDF policy and limits](DESIGN.md).
+A direct blank inherits the last selected page size of the nearest preceding
+source, or the first selected page size of the first following source. With no
+source, supply a fit target:
 
-## Packet composition
+```sh
+pdfconcat check --blank --fit-to A4
+pdfconcat build --blank --fit-to A4 -o blank.pdf
+```
 
-Plan v3 uses source objects, with optional ascending disjoint inclusive page
-ranges. Every source is validated and hashed in full; selection cannot hide a
-signature, encryption or damaged structure. A partial source with form fields
-or widgets is refused. Selection composes visible pages and is **not redaction**.
+`--fit-to` accepts the sheet grammar in [PLAN](PLAN.md#generated-pages-and-layering).
+See [PDF policy](PDF-POLICY.md#forms-fitting-and-catalog) for fitting refusals,
+forms, destination handling and the effective output version.
 
-Authored containers retain their title as a bookmark and optional contents row.
-A `divider` derives its text from that title; it cannot declare `text.value`.
-Source bookmarks retain their native styles/actions beneath the nearest section.
-Navigation to omitted pages is removed in that occurrence, with a warning.
+Sections, dividers, contents, odd starts and page numbers are declared in
+[PLAN](PLAN.md). The [composition example](../examples/plans/packet-composition.json)
+combines them in one packet.
 
-`start_on: "odd"` inserts one blank when needed before its container, counting
-all physical sheets from page 1. Padding uses the preceding physical sheet size
-(or fit target), remains unpainted, and is included in page totals. A section's
-range can include a child's leading blank before the section's separate target.
-
-One optional `contents` item lists authored sections in preorder with linked
-physical numbers. Its fixed layout uses the bundled font; it refuses titles or
-rows that cannot fit. Optional `page_numbers` paints physical Arabic numbers on
-every non-padding page, including authored blanks. It may cover existing source
-content; there is no overlap detector or source-content shift. The configured
-footer envelope is excluded from contents layout even with fitting.
-
-See [plan syntax](PLAN.md) and the [composition example](../examples/plans/packet-composition.json).
+`--plan -` reads standard input with the plan byte limit. A read failure or
+cancellation during acquisition returns `plan_unreadable` or `interrupted`
+without writing a requested report.
 
 ## Output
 
-Stdout contains one result JSON object, text result, version object, help text or
-schema. Stderr is quiet in normal operation. `schema result` covers result,
-report and version. JSON member order is stable in the implementation but is not
-a consumer contract.
+Text is the default: stdout holds the result summary, and stderr holds one line
+per diagnostic. With `--json`, stdout holds exactly one capped JSON result and
+stderr is empty unless writing stdout fails. `schema result` covers results,
+reports and JSON version objects. JSON member order is not a consumer contract.
 
-For commands accepting `--format`, a single valid explicit format also controls
-usage errors, regardless of option order. The first parsing error and its
-location are retained. Invalid or repeated format requests use JSON. Format-like
-text inside option values or after the `--` delimiter is not a format request.
+Usage errors print diagnostics and a help hint on stderr, with empty stdout.
+For build, check and version, an exact `--json` before the first `--` delimiter
+selects JSON even when argument parsing fails. The first error and its location
+are retained.
 
 ```json
 {
-  "format_version": 4,
+  "format_version": 5,
   "command": "build",
   "status": "ok",
   "output": {
@@ -128,7 +114,7 @@ pages. Warnings do not make an outcome invalid.
 | `interrupted` | 130 | Cancelled |
 
 Interrupted takes precedence over failed, then invalid. Errors precede warnings
-in stdout, in stage order. Stdout shows at most 20 diagnostics, with
+in their output stream, in stage order. The summary shows at most 20 diagnostics, with
 `diagnostics_omitted` for the rest. Each diagnostic shows at most 20 consumer
 pointers, with `items_omitted`. A full report has no such caps.
 
@@ -159,32 +145,24 @@ input hidden in a malformed plan. Existing-target and known-collision refusals
 use `report_exists`, `report_not_regular`, `report_is_input` or
 `report_is_output`.
 
-Reports beside known missing plans, sources or consumed fonts can be refused as
-`report_identity_unverified` when separation cannot be established. Use a
-different existing report directory. A font selected for a generated page is an
-input even when its text is empty; an unused default declaration reserves no
-file. Identity inspection errors are `report_write_failed`. Report-parent
-feasibility is checked at report publication, so an output PDF may already be
-published when reporting fails.
-A `check` report does not prove separation from an absent future output under
-alternative path spellings.
+Existing inputs and the output are protected by file identity. Missing inputs are protected only by cleaned path spelling; reports are rechecked after PDF publication.
 
 Output/report files use ordinary umask permissions; replacements keep the old
 mode. Publication uses a sibling temp, sync, no-replace rename (link fallback
 when needed), and Unix directory sync. A trailing sync or temp-cleanup failure
 can coexist with `output.published: true` or `report.written: true`. A report
 failure never rolls back the PDF. The saved report cannot predict its own late
-failure; stdout is authoritative for that final outcome. There are no recovery
+failure; the final CLI result is authoritative for that outcome. There are no recovery
 copies or cross-file transaction guarantees.
 
 A full report adds preorder `sections` with `item`, `title`, nullable `parent`,
 `target_page` and `output_pages`. It records `page_numbers` once at packet level.
-It includes one compact part per source occurrence, generated run, divider,
-contents item or automatic padding span:
+It includes one compact part per source occurrence, page item run, divider,
+contents item or padding span:
 
 ```json
 {
-  "format_version": 4,
+  "format_version": 5,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -257,35 +235,16 @@ jq '.parts[] | select(.kind == "source") | {path,sha256,bytes}' packet.report.js
 Declare the sort order and preserve filenames as array elements. Do not split
 filenames on newlines. Plans require valid UTF-8 paths.
 
-### Python
-
-Run next to a `chapters` directory. This writes UTF-8 and returns PDFConcat's exit
-code. Replace `glob` with `rglob` for recursive input.
-
-```python
-import json
-import pathlib
-import subprocess
-
-files = sorted(path.as_posix() for path in pathlib.Path("chapters").glob("*.pdf"))
-if not files:
-    raise SystemExit("no PDF files in chapters/")
-plan = {"version": 3, "items": [{"source": path} for path in files]}
-pathlib.Path("job.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-raise SystemExit(subprocess.run(["pdfconcat", "build", "--plan", "job.json", "-o", "book.pdf"]).returncode)
-```
-
 ### bash and zsh
 
 Globs plus `jq --args` preserve quotes/newlines as arguments. `LC_ALL=C` fixes byte
 order; bash `nullglob` avoids treating an unmatched pattern as a filename. In
-zsh omit `shopt` (or use its `NULL_GLOB` option). Use Python for lists beyond OS
-argument limits.
+zsh omit `shopt` (or use its `NULL_GLOB` option). For lists beyond OS argument limits, generate the plan in batches or with a program that preserves filenames.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 3, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > job.json )
-pdfconcat build --plan job.json -o book.pdf
+  jq -n '{version: 4, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+pdfconcat build --plan plan.json -o book.pdf
 ```
 
 ### PowerShell
@@ -298,13 +257,14 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 3; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content job.json -Encoding utf8
-pdfconcat build --plan job.json -o book.pdf
+@{ version = 4; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+pdfconcat build --plan plan.json -o book.pdf
 ```
 
-## Diagnostic registry
 
-The registry in `internal/diag/codes.go` is authoritative. Warning class is empty
+## Diagnostic codes
+
+The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning class is empty
 (shown as —); warnings never select an error outcome.
 
 <!-- codes -->
@@ -329,7 +289,7 @@ The registry in `internal/diag/codes.go` is authoritative. Warning class is empt
 | `output_not_regular` | error | invalid | output exists and is not a regular file (directory, symlink, device) |
 | `output_page_count_mismatch` | error | failed | written page count ≠ expected |
 | `output_publish_failed` | error | failed | the final rename failed (incl. no-replace unsupported and link fallback failed) |
-| `output_write_failed` | error | failed | writing the temporary output failed (disk full, permissions) |
+| `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |
 | `page_size_required` | error | invalid | `inherit` with no source page to inherit from |
 | `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
 | `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
@@ -344,13 +304,15 @@ The registry in `internal/diag/codes.go` is authoritative. Warning class is empt
 | `plan_unreadable` | error | failed | plan file or stdin could not be read |
 | `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
 | `plan_version_unsupported` | error | invalid | required plan version is missing or unsupported |
-| `report_exists` | error | invalid | report exists and `--overwrite` not given (or inputs unknown, see CLI.md) |
-| `report_identity_unverified` | error | invalid | report separation from a known missing input cannot be established; use a different existing directory |
+| `report_exists` | error | invalid | report exists and `--overwrite` was not given, or plan inputs are unknown |
 | `report_is_input` | error | invalid | report is (or aliases) an input |
 | `report_is_output` | error | invalid | report and output are the same file |
 | `report_not_regular` | error | invalid | same for the report |
-| `report_write_failed` | error | failed | the report could not be written |
+| `report_write_failed` | error | failed | writing or publishing the report failed |
 | `request_invalid` | error | invalid | invalid application request envelope |
+| `report_inspection_failed` | error | failed | The report destination could not be inspected |
+| `output_inspection_failed` | error | failed | The output destination could not be inspected |
+| `working_directory_unavailable` | error | failed | The process working directory could not be determined |
 | `source_changed` | error | failed | source bytes at merge time differ from the inspected bytes |
 | `source_damaged` | error | invalid | broken page tree (missing/empty kid, wrong count) or content-replacing repair |
 | `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
@@ -364,7 +326,7 @@ The registry in `internal/diag/codes.go` is authoritative. Warning class is empt
 | `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
 | `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
 | `usage_conflict` | error | invalid | `--plan` with PDF operands; `--base-dir` without `--plan -`; repeated single-use option |
-| `usage_invalid_value` | error | invalid | option value not allowed (`--format`, `--fit-to`, `schema` name, …) |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
 | `usage_missing_input` | error | invalid | neither `--plan` nor PDF operands |
 | `usage_missing_output` | error | invalid | `build` without `-o` and without plan `output` |
 | `usage_missing_value` | error | invalid | option needs a value |

@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "output": "Annex.pdf",
-  "page": {
+  "page_defaults": {
     "text": {
       "value": "This page intentionally left blank",
       "anchor": "bottom",

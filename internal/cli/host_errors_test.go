@@ -5,6 +5,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"os"
@@ -22,8 +23,12 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 			t.Run(tc.name+"/"+format, func(t *testing.T) {
 				report := filepath.Join(t.TempDir(), "must-not-exist.json")
 				var stdout, stderr bytes.Buffer
-				exit := cli.Run(t.Context(), []string{"check", "source.pdf", "--report", report, "--format", format}, nil, &stdout, &stderr, cli.Host{WorkingDir: func() (string, error) { return "", errors.New(tc.message) }})
-				if exit != 1 || stderr.Len() != 0 {
+				args := []string{"check", "source.pdf", "--report", report}
+				if format == "json" {
+					args = append(args, "--json")
+				}
+				exit := cli.Run(t.Context(), args, nil, &stdout, &stderr, cli.Host{WorkingDir: func() (string, error) { return "", errors.New(tc.message) }})
+				if exit != 1 || format == "json" && stderr.Len() != 0 || format == "text" && stderr.Len() == 0 {
 					t.Fatalf("host failure classification: %d %q %q", exit, stdout.String(), stderr.String())
 				}
 				if format == "json" {
@@ -31,10 +36,10 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 					if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
 						t.Fatal(err)
 					}
-					if r.Status != "failed" || r.Command != "check" || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "plan_unreadable" || len(r.Diagnostics[0].Items) != 0 || r.Diagnostics[0].Message != "Cannot determine working directory: "+tc.want {
+					if r.Status != "failed" || r.Command != "check" || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code.String() != "working_directory_unavailable" || len(r.Diagnostics[0].Items) != 0 || r.Diagnostics[0].Message != "Cannot determine working directory: "+tc.want {
 						t.Fatal(r)
 					}
-				} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stdout.String(), "plan_unreadable") || strings.Contains(stdout.String(), "[items") {
+				} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stderr.String(), "working_directory_unavailable") || strings.Contains(stderr.String(), "[items") {
 					t.Fatalf("host text failure: %q", stdout.String())
 				}
 				if _, err := os.Stat(report); !errors.Is(err, os.ErrNotExist) {
@@ -45,8 +50,40 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 	}
 }
 func TestParserRetainsCompleteNormalizedFailure(t *testing.T) {
-	command, failure := cli.Parse([]string{"check", "--bad", "--format=text"})
-	if command.Format != "text" || failure == nil || failure.FormatVersion != 4 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
+	command, failure := cli.Parse([]string{"check", "--bad", "--json"})
+	if !command.JSON || failure == nil || failure.FormatVersion != 5 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
 		t.Fatalf("complete parse outcome: %+v %+v", command, failure)
+	}
+}
+
+type failingPlanReader struct{}
+
+func (failingPlanReader) Read([]byte) (int, error) { return 0, errors.New("stdin read failed") }
+
+func TestStdinAcquisitionFailureDoesNotWriteReport(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		dir := t.TempDir()
+		report := filepath.Join(dir, "must-not-exist.json")
+		ctx, cancel := context.WithCancel(t.Context())
+		if cancelled {
+			cancel()
+		}
+		var stdout, stderr bytes.Buffer
+		exit := cli.Run(ctx, []string{"check", "--plan", "-", "--report", report, "--json"}, failingPlanReader{}, &stdout, &stderr, cli.Host{WorkingDir: func() (string, error) { return dir, nil }})
+		cancel()
+		var outcome core.Result
+		if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
+			t.Fatal(err)
+		}
+		want, wantExit := "plan_unreadable", 1
+		if cancelled {
+			want, wantExit = "interrupted", 130
+		}
+		if exit != wantExit || stderr.Len() != 0 || outcome.Report != nil || len(outcome.Diagnostics) != 1 || outcome.Diagnostics[0].Code.String() != want {
+			t.Fatalf("%d %q %+v", exit, stderr.String(), outcome)
+		}
+		if _, err := os.Stat(report); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("acquisition failure wrote report: %v", err)
+		}
 	}
 }

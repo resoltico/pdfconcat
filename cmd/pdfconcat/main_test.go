@@ -17,19 +17,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
-	"github.com/resoltico/pdfconcat/internal/result"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-func invoke(t *testing.T, args []string, stdin string) (result.Result, int, string) {
+func invokeJSON(t *testing.T, args []string, stdin string) (core.Result, int, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	exit := run(args, strings.NewReader(stdin), &stdout, &stderr)
+	exit := run(jsonArguments(args), strings.NewReader(stdin), &stdout, &stderr)
 	if stderr.Len() > 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
-	var r result.Result
+	var r core.Result
 	if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
 		t.Fatalf("stdout is not exactly one result: %v %q", err, stdout.String())
 	}
@@ -40,7 +40,7 @@ func invoke(t *testing.T, args []string, stdin string) (result.Result, int, stri
 func validateResult(t *testing.T, data []byte) {
 	t.Helper()
 	var document, value any
-	if err := json.Unmarshal(result.Schema, &document); err != nil {
+	if err := json.Unmarshal(resultSchemaBytes(t), &document); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(data, &value); err != nil {
@@ -68,7 +68,7 @@ func TestBuildCheckJSONTextAndReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"check", "-o", out, source, "--blank", "--report", report}
-	r, exit, _ := invoke(t, args, "")
+	r, exit, _ := invokeJSON(t, args, "")
 	if exit != 0 || r.Status != "ok" || r.Output.Published || r.Pages == nil || *r.Pages.Total != 2 || !r.Report.Written {
 		t.Fatalf("check %+v exit %d", r, exit)
 	}
@@ -80,7 +80,7 @@ func TestBuildCheckJSONTextAndReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, data)
-	var full result.Result
+	var full core.Result
 	if err = json.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestBuildCheckJSONTextAndReport(t *testing.T) {
 	}
 	args[0] = "build"
 	args = append(args, "--overwrite")
-	r, exit, _ = invoke(t, args, "")
+	r, exit, _ = invokeJSON(t, args, "")
 	if exit != 0 || !r.Output.Published || !r.Report.Written || r.Output.Bytes == nil {
 		t.Fatalf("build %+v exit %d", r, exit)
 	}
@@ -102,7 +102,7 @@ func TestBuildCheckJSONTextAndReport(t *testing.T) {
 		t.Fatal("published digest/size mismatch")
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"check", "--format=text", source}, strings.NewReader(""), &stdout, &stderr); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "check ok") {
+	if code := run([]string{"check", source}, strings.NewReader(""), &stdout, &stderr); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "check ok") {
 		t.Fatalf("text result %d %q %q", code, stdout.String(), stderr.String())
 	}
 }
@@ -110,20 +110,20 @@ func TestBuildCheckJSONTextAndReport(t *testing.T) {
 func TestEveryUsageClassAndNoReportAfterArgvFailure(t *testing.T) {
 	dir := t.TempDir()
 	report := filepath.Join(dir, "report.json")
-	for _, args := range [][]string{{"unknown"}, {"build", "--unknown"}, {"build", "--plan"}, {"build", "--format=xml"}, {"build", "--plan=x", "a"}, {"build"}, {"build", "missing.pdf"}, {"schema", "wrong"}, {"version", "--unknown"}} {
-		r, exit, _ := invoke(t, args, "")
+	for _, args := range [][]string{{"build", "--unknown"}, {"build", "--plan"}, {"build", "--json=true"}, {"build", "--plan=x", "a"}, {"build"}, {"build", "missing.pdf"}, {"version", "--unknown"}} {
+		r, exit, _ := invokeJSON(t, args, "")
 		if exit != 2 || r.Status != "invalid" {
 			t.Fatalf("usage %v: %+v %d", args, r, exit)
 		}
 	}
-	invoke(t, []string{"build", "--report", report, "--unknown"}, "")
+	invokeJSON(t, []string{"build", "--report", report, "--unknown"}, "")
 	if _, err := os.Stat(report); !os.IsNotExist(err) {
 		t.Fatalf("argv failure wrote report: %v", err)
 	}
 }
 
 func TestVersionAndSchemas(t *testing.T) {
-	for _, args := range [][]string{{"version"}, {"--version"}, {"schema", "plan"}, {"schema", "result"}} {
+	for _, args := range [][]string{{"version", "--json"}, {"--version", "--json"}, {"schema", "plan"}, {"schema", "result"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, strings.NewReader(""), &stdout, &stderr); code != 0 || stderr.Len() > 0 {
 			t.Fatalf("%v: %d %s", args, code, stderr.String())
@@ -153,7 +153,7 @@ func buildBinary(t *testing.T) string {
 }
 func TestVersionBinarySmoke(t *testing.T) {
 	path := buildBinary(t)
-	output, err := exec.CommandContext(t.Context(), path, "version").Output()
+	output, err := exec.CommandContext(t.Context(), path, "version", "--json").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestBuildBinarySmoke(t *testing.T) {
 	if err := pdffixture.Plain("smoke").WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	output, err := exec.CommandContext(t.Context(), binary, "build", "-o", out, source).Output()
+	output, err := exec.CommandContext(t.Context(), binary, "build", "--json", "-o", out, source).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,9 +178,9 @@ func TestBuildBinarySmoke(t *testing.T) {
 	}
 }
 
-func hasDiagnostic(r result.Result, code string) bool {
+func hasDiagnostic(r core.Result, code string) bool {
 	for _, d := range r.Diagnostics {
-		if string(d.Code) == code {
+		if d.Code.String() == code {
 			return true
 		}
 	}
@@ -198,7 +198,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 					report = filepath.Join(t.TempDir(), "report.json")
 				}
 				if !unreadable {
-					if err := os.WriteFile(planPath, []byte(`{"version":3,"items":[`), 0600); err != nil {
+					if err := os.WriteFile(planPath, []byte(`{"version":4,"items":[`), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -211,7 +211,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 				if overwrite {
 					args = append(args, "--overwrite")
 				}
-				r, exit, _ := invoke(t, args, "")
+				r, exit, _ := invokeJSON(t, args, "")
 				expectedExit := 2
 				if unreadable {
 					expectedExit = 1
@@ -244,7 +244,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 	}
 	report := filepath.Join(dir, "safe-report.json")
 	badOutput := filepath.Join(dir, "missing-parent", "output.pdf")
-	r, exit, _ := invoke(t, []string{"build", "-o", badOutput, source, "--report", report}, "")
+	r, exit, _ := invokeJSON(t, []string{"build", "-o", badOutput, source, "--report", report}, "")
 	if exit != 1 || r.Output.Published || !r.Report.Written || !hasDiagnostic(r, "output_write_failed") {
 		t.Fatalf("failed build report: %+v %d", r, exit)
 	}
@@ -255,7 +255,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 	validateResult(t, data)
 	out := filepath.Join(dir, "output.pdf")
 	badReport := filepath.Join(dir, "missing-parent", "report.json")
-	r, exit, _ = invoke(t, []string{"build", "-o", out, source, "--report", badReport}, "")
+	r, exit, _ = invokeJSON(t, []string{"build", "-o", out, source, "--report", badReport}, "")
 	if exit != 1 || !r.Output.Published || r.Report.Written || !hasDiagnostic(r, "report_write_failed") {
 		t.Fatalf("late report failure: %+v %d", r, exit)
 	}
@@ -281,7 +281,7 @@ func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
 	}
 	out := filepath.Join(realDir, "packet.pdf")
 	report := filepath.Join(alias, "packet.pdf")
-	r, exit, _ := invoke(t, []string{"build", "-o", out, source, "--report", report, "--overwrite"}, "")
+	r, exit, _ := invokeJSON(t, []string{"build", "-o", out, source, "--report", report, "--overwrite"}, "")
 	if exit != 2 || !r.Output.Published || r.Report.Written || !hasDiagnostic(r, "report_is_output") || hasDiagnostic(r, "report_write_failed") {
 		t.Fatalf("late alias outcome: %+v %d", r, exit)
 	}
@@ -294,16 +294,16 @@ func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
 func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ text, code string }{{"漢", "text_unsupported_character"}, {"😀", "text_glyph_missing"}} {
-		plan := `{"version":3,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
-		r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
+		plan := `{"version":4,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
+		r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 		if exit != 2 || !hasDiagnostic(r, tc.code) || hasDiagnostic(r, "source_unreadable") {
 			t.Fatalf("font/text ordering: %+v %d", r, exit)
 		}
 	}
 	for _, text := range []string{"", "A"} {
 		out := filepath.Join(dir, "tiny-"+text+".pdf")
-		plan := `{"version":3,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
-		r, exit, _ := invoke(t, []string{"build", "--plan", "-", "-o", out}, plan)
+		plan := `{"version":4,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
+		r, exit, _ := invokeJSON(t, []string{"build", "--plan", "-", "-o", out}, plan)
 		if text == "" {
 			if exit != 0 || !r.Output.Published {
 				t.Fatalf("plain tiny page: %+v %d", r, exit)
@@ -318,26 +318,26 @@ func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 
 func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 	dir := t.TempDir()
-	r, exit, _ := invoke(t, []string{"check", "--plan", dir}, "")
+	r, exit, _ := invokeJSON(t, []string{"check", "--plan", dir}, "")
 	if exit != 1 || !hasDiagnostic(r, "plan_unreadable") {
 		t.Fatalf("directory plan: %+v %d", r, exit)
 	}
-	r, exit, _ = invoke(t, []string{"check", dir}, "")
+	r, exit, _ = invokeJSON(t, []string{"check", dir}, "")
 	if exit != 1 || !hasDiagnostic(r, "source_unreadable") {
 		t.Fatalf("directory source: %+v %d", r, exit)
 	}
 	fontPlan := func(path string) string {
-		data, err := json.Marshal(map[string]any{"version": 3, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
+		data, err := json.Marshal(map[string]any{"version": 4, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return string(data)
 	}
-	r, exit, _ = invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, fontPlan(dir))
+	r, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, fontPlan(dir))
 	if exit != 1 || !hasDiagnostic(r, "font_unreadable") || hasDiagnostic(r, "source_unreadable") {
 		t.Fatalf("directory font stage: %+v %d", r, exit)
 	}
-	data, err := os.ReadFile("../../internal/typeset/fontdata/NotoSans-Regular.ttf")
+	data, err := os.ReadFile("../../internal/core/internal/typeset/fontdata/NotoSans-Regular.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 	if err = os.WriteFile(fontPath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	r, exit, _ = invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, fontPlan(fontPath))
+	r, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, fontPlan(fontPath))
 	if exit != 2 || !hasDiagnostic(r, "font_not_embeddable") || hasDiagnostic(r, "source_unreadable") {
 		t.Fatalf("bitmap-only font: %+v %d", r, exit)
 	}
@@ -371,7 +371,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 	if err = os.Symlink(source, link); err != nil {
 		t.Logf("input symlink unavailable: %v", err)
 	} else {
-		r, exit, _ = invoke(t, []string{"check", link}, "")
+		r, exit, _ = invokeJSON(t, []string{"check", link}, "")
 		if exit != 0 || r.Pages == nil || *r.Pages.Total != 1 {
 			t.Fatalf("regular source symlink: %+v %d", r, exit)
 		}
@@ -386,7 +386,7 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	r, exit, _ := invoke(t, []string{"check", source, "--report", report}, "")
+	r, exit, _ := invokeJSON(t, []string{"check", source, "--report", report}, "")
 	if exit != 2 || !r.Report.Written {
 		t.Fatalf("refused source outcome %+v %d", r, exit)
 	}
@@ -395,7 +395,7 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, saved)
-	var full result.Result
+	var full core.Result
 	if err = json.Unmarshal(saved, &full); err != nil {
 		t.Fatal(err)
 	}
@@ -407,8 +407,8 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 
 func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 	dir := t.TempDir()
-	plan := `{"version":3,"page":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
-	r, exit, _ := invoke(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
+	plan := `{"version":4,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
+	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 	if exit != 1 || !hasDiagnostic(r, "font_unreadable") {
 		t.Fatalf("empty text bypassed selected-font validation: %+v %d", r, exit)
 	}
@@ -417,24 +417,24 @@ func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 func TestTextPlanLocationsAndInputContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Rīga-Ελλάδα-Київ.json")
-	input := "{\n  \"version\":3,\n  \"items\":[null]\n}\n"
+	input := "{\n  \"version\":4,\n  \"items\":[null]\n}\n"
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	exit := run([]string{"check", "--format", "text", "--plan", path}, strings.NewReader(""), &stdout, &stderr)
-	if exit != 2 || stderr.Len() != 0 || !strings.Contains(stdout.String(), strconv.Quote(path)+":3:12") || !strings.Contains(stdout.String(), `[pointer "/items/0"]`) {
+	exit := run([]string{"check", "--plan", path}, strings.NewReader(""), &stdout, &stderr)
+	if exit != 2 || stderr.Len() == 0 || !strings.Contains(stderr.String(), strconv.Quote(path)+":3:12") || !strings.Contains(stderr.String(), `[pointer "/items/0"]`) {
 		t.Fatalf("located plan error: %d %q %q", exit, stdout.String(), stderr.String())
 	}
 	for _, tc := range []struct{ input, code, file, item string }{
-		{`{"version":3,"items":[{"source":"missing.pdf"}]}`, "source_unreadable", filepath.Join(dir, "missing.pdf"), "/items/0"},
-		{`{"version":3,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_unreadable", filepath.Join(dir, "missing.ttf"), "/items/0"},
-		{`{"version":3,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
+		{`{"version":4,"items":[{"source":"missing.pdf"}]}`, "source_unreadable", filepath.Join(dir, "missing.pdf"), "/items/0"},
+		{`{"version":4,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_unreadable", filepath.Join(dir, "missing.ttf"), "/items/0"},
+		{`{"version":4,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
 	} {
 		stdout.Reset()
 		stderr.Reset()
-		exit = run([]string{"check", "--format", "text", "--plan", "-", "--base-dir", dir}, strings.NewReader(tc.input), &stdout, &stderr)
-		if exit == 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), tc.code) || !strings.Contains(stdout.String(), tc.item) || tc.file != "" && !strings.Contains(stdout.String(), strconv.Quote(tc.file)) {
+		exit = run([]string{"check", "--plan", "-", "--base-dir", dir}, strings.NewReader(tc.input), &stdout, &stderr)
+		if exit == 0 || stderr.Len() == 0 || !strings.Contains(stderr.String(), tc.code) || !strings.Contains(stderr.String(), tc.item) || tc.file != "" && !strings.Contains(stderr.String(), strconv.Quote(tc.file)) {
 			t.Fatalf("%s context: %d %q %q", tc.code, exit, stdout.String(), stderr.String())
 		}
 	}
@@ -449,7 +449,7 @@ func TestTextLegalControlCharacterSourcePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if exit := run([]string{"check", "--format", "text", source}, strings.NewReader(""), &stdout, &stderr); exit != 0 || stderr.Len() != 0 {
+	if exit := run([]string{"check", source}, strings.NewReader(""), &stdout, &stderr); exit != 0 || stderr.Len() != 0 {
 		t.Fatalf("legal filename rejected: %d %q %q", exit, stdout.String(), stderr.String())
 	}
 	// A refusal must identify the same legal path without printing its controls.
@@ -457,12 +457,46 @@ func TestTextLegalControlCharacterSourcePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout.Reset()
-	exit := run([]string{"check", "--format", "text", source}, strings.NewReader(""), &stdout, &stderr)
-	if exit != 2 || !strings.Contains(stdout.String(), strconv.Quote(source)) || strings.ContainsAny(stdout.String(), "\r\t\x1b") || strings.Count(stdout.String(), "\n") != 3 {
+	exit := run([]string{"check", source}, strings.NewReader(""), &stdout, &stderr)
+	if exit != 2 || !strings.Contains(stdout.String(), strconv.Quote(source)) || strings.ContainsAny(stdout.String(), "\r\t\x1b") || strings.Count(stdout.String(), "\n") != 2 || strings.Count(stderr.String(), "\n") != 1 || !strings.Contains(stderr.String(), strconv.Quote(source)) || strings.ContainsAny(stderr.String(), "\r\t\x1b") {
 		t.Fatalf("unsafe filename diagnostic: %d %q %q", exit, stdout.String(), stderr.String())
 	}
-	r, code, _ := invoke(t, []string{"check", source}, "")
+	r, code, _ := invokeJSON(t, []string{"check", source}, "")
 	if code != 2 || len(r.Diagnostics) != 1 || r.Diagnostics[0].File != source {
 		t.Fatalf("JSON path changed: %d %+v", code, r)
 	}
+}
+
+func resultSchemaBytes(t *testing.T) []byte {
+	t.Helper()
+	data, err := core.Schema(core.ResultSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func jsonArguments(args []string) []string {
+	result := append([]string(nil), args...)
+	if len(result) == 0 {
+		return result
+	}
+	switch result[0] {
+	case "build", "check", "version", "--version":
+	default:
+		return result
+	}
+	for i, arg := range result[1:] {
+		if arg == "--json" {
+			return result
+		}
+		if arg == "--" {
+			index := i + 1
+			result = append(result, "")
+			copy(result[index+1:], result[index:])
+			result[index] = "--json"
+			return result
+		}
+	}
+	return append(result, "--json")
 }

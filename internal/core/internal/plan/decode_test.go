@@ -1,0 +1,449 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Ervins Strauhmanis
+
+package plan_test
+
+import (
+	"encoding/json/v2"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/plan"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+)
+
+func TestLocatedFirstFaults(t *testing.T) {
+	cases := []struct {
+		input   string
+		code    diag.Code
+		pointer string
+	}{
+		{`{"version":4,"unknown":1,"items":[null]}`, diag.PlanUnknownMember, "/unknown"},
+		{`{"version":4,"a~/b":1}`, diag.PlanUnknownMember, "/a~0~1b"},
+		{`{"version":4,"items":[{"page":{},"count":3.0},null]}`, diag.PlanValue, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":3e0}]}`, diag.PlanValue, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":0}]}`, diag.PlanValue, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":100001}]}`, diag.PlanLimit, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":9223372036854775808}]}`, diag.PlanLimit, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":"3"}]}`, diag.PlanType, "/items/0/count"},
+		{`{"version":4,"items":[{"page":{},"count":null}]}`, diag.PlanNull, "/items/0/count"},
+		{`{"version":4,"items":[null],"items":[]}`, diag.PlanNull, "/items/0"},
+		{`{"version":4,"version":4,"items":[null]}`, diag.PlanDuplicateMember, "/version"},
+		{`{"version":4,"items":[{"page":{"text":{"size":null}}}]}`, diag.PlanNull, "/items/0/page/text/size"},
+		{`{"version":4,"items":[{"page":{"text":{"width":0}}}]}`, diag.PlanValue, "/items/0/page/text/width"},
+		{`{"version":4,"items":[{"page":{"text":{"font":{}}}}]}`, diag.PlanType, "/items/0/page/text/font"},
+		{`{"version":4,"items":[{"page":{},"dir":"x"}]}`, diag.PlanItemShape, "/items/0"},
+		{`{"version":4,"items":[{"items":[{"source":"a.pdf"}]}]}`, diag.PlanItemShape, "/items/0"},
+		{`{"version":4,"items":[{"dir":"x","items":[]}]}`, diag.PlanValue, "/items/0/items"},
+		{`{"version":4,"items":[]}`, diag.PlanValue, "/items"},
+		{`{"version":4,"items":"x"}`, diag.PlanType, "/items"},
+		{`{"version":4,"items":[{"source":"\u0000"}]}`, diag.PathInvalid, "/items/0/source"},
+		{`{"version":4,"items":[{"page":{"size":"0x10"}}]}`, diag.PlanValue, "/items/0/page/size"},
+		{`{"version":4,"items":[{"source":"\ud800"}]}`, diag.PlanSyntax, "/items/0/source"},
+		{`{"version":4,"items":[{"source":"a.pdf"}]} null`, diag.PlanSyntax, ""},
+		{`{"version":4`, diag.PlanSyntax, ""},
+		{`{}`, diag.PlanVersionUnsupported, ""},
+		{`{"version":4}`, diag.PlanType, ""},
+		{`{"version":5}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":1,"blank":{},"items":[]}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"blank":{},"items":[],"version":1}`, diag.PlanUnknownMember, "/blank"},
+		{`{"items":[null],"version":1}`, diag.PlanNull, "/items/0"},
+		{`{"Version":3}`, diag.PlanUnknownMember, "/Version"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.code.String()+tc.pointer+tc.input, func(t *testing.T) {
+			_, ds := plan.Decode([]byte(tc.input), "plan.json", t.TempDir())
+			if len(ds) != 1 {
+				t.Fatalf("expected one error, got %+v", ds)
+			}
+			d := ds[0]
+			if d.Code != tc.code || d.Location == nil || d.Location.Ref != tc.pointer {
+				t.Fatalf("got %+v location %+v; want %s %s", d, d.Location, tc.code, tc.pointer)
+			}
+			l := d.Location
+			before := tc.input[:l.Offset]
+			wantLine := strings.Count(before, "\n") + 1
+			wantColumn := len(before) - strings.LastIndex(before, "\n")
+			if l.Line != wantLine || l.Column != wantColumn || l.File != "plan.json" {
+				t.Fatalf("location %+v", l)
+			}
+		})
+	}
+}
+
+func TestBOMOffsets(t *testing.T) {
+	plain := "{\n  \"version\":4,\n  \"items\":[null]}"
+	_, a := plan.Decode([]byte(plain), "p", ".")
+	_, b := plan.Decode([]byte("\ufeff"+plain), "p", ".")
+	if a[0].Location.Offset+3 != b[0].Location.Offset || a[0].Location.Line != b[0].Location.Line || a[0].Location.Column != b[0].Location.Column {
+		t.Fatalf("BOM offsets: %+v %+v", a, b)
+	}
+}
+
+func TestLayeringSettingRefsAndPaths(t *testing.T) {
+	base := t.TempDir()
+	input := `{"version":4,"output":"packet.pdf","dir":"sources","page_defaults":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm"},"background":"#abc"},"items":[{"dir":"chapters","items":[{"source":"a.pdf"},{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":""}}}]},{"page":{"text":{"font":"default"}}}]}`
+	j, ds := plan.Decode([]byte(input), "p", base)
+	if len(ds) > 0 {
+		t.Fatal(ds)
+	}
+	if len(j.Items) != 2 || j.Output != filepath.Join(base, "packet.pdf") || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, j.Items[0]).Items[0]).Path != filepath.Join(base, "sources/chapters/a.pdf") {
+		t.Fatalf("plan %+v", j)
+	}
+	a, b := itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, j.Items[0]).Items[1]).Style, itemAs[*packet.PageItem](t, j.Items[1]).Style
+	if a.Background.Value != nil || a.Text.Value.Value != "" || a.Text.Font.Value.Path != filepath.Join(base, "sources/chapters/local.ttf") || b.Text.Font.Value != (packet.Font{}) || b.Text.Value.Value != "default" || b.Background.Value == nil {
+		t.Fatalf("layered: %+v %+v", a, b)
+	}
+	if a.Text.Font.From != "/items/0/items/1/page/text/font" || a.Text.Width.From != "/page_defaults/text/width" || b.Background.From != "/page_defaults/background" {
+		t.Fatalf("origins %+v %+v", a, b)
+	}
+	top, ds := plan.Decode([]byte(`{"version":4,"page_defaults":{"text":{"font":{"file":"top.ttf"}}},"items":[{"dir":"elsewhere","items":[{"page":{}}]}]}`), "p", base)
+	if len(ds) > 0 || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, top.Items[0]).Items[0]).Style.Text.Font.Value.Path != filepath.Join(base, "top.ttf") {
+		t.Fatalf("top font scope %+v %+v", top, ds)
+	}
+}
+
+func TestLimits(t *testing.T) {
+	for _, n := range []int{100000, 100001} {
+		input := `{"version":4,"items":[` + strings.Repeat(`{"source":"a"},`, n-1) + `{"source":"a"}]}`
+		j, ds := plan.Decode([]byte(input), "p", ".")
+		if n == 100000 && (len(ds) > 0 || len(j.Items) != n) || n == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+			t.Fatalf("entry boundary %d: %d %+v", n, len(j.Items), ds)
+		}
+	}
+	for _, count := range []string{"100000", "100001"} {
+		_, ds := plan.Decode([]byte(`{"version":4,"items":[{"page":{},"count":`+count+`}]}`), "p", ".")
+		if count == "100000" && len(ds) > 0 || count == "100001" && len(ds) == 0 {
+			t.Fatalf("count %s: %+v", count, ds)
+		}
+	}
+	_, ds := plan.Decode([]byte(`{"version":4,"items":[{"page":{},"count":100000},{"page":{}}]}`), "p", ".")
+	if len(ds) != 1 || ds[0].Code != diag.PlanLimit {
+		t.Fatal(ds)
+	}
+	for _, n := range []int{64, 65} {
+		input := `{"source":"a"}`
+		for range n {
+			input = `{"dir":"x","items":[` + input + `]}`
+		}
+		_, ds := plan.Decode([]byte(`{"version":4,"items":[`+input+`]}`), "p", ".")
+		if n == 64 && len(ds) > 0 || n == 65 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+			t.Fatalf("depth %d: %+v", n, ds)
+		}
+	}
+	for _, n := range []int{10000, 10001} {
+		_, ds := plan.Decode([]byte(`{"version":4,"items":[{"page":{"text":{"value":"`+strings.Repeat("a", n)+`"}}}]}`), "p", ".")
+		if n == 10000 && len(ds) > 0 || n == 10001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+			t.Fatalf("text %d: %+v", n, ds)
+		}
+	}
+	input := append([]byte(`{"version":4,"items":[{"source":"a"}]}`), []byte(strings.Repeat(" ", plan.MaxBytes))...)
+	_, ds = plan.Decode(input, "p", ".")
+	if len(ds) != 1 || ds[0].Code != diag.PlanTooLarge {
+		t.Fatal(ds)
+	}
+}
+
+func compileSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	var instance any
+	if err := json.Unmarshal(plan.Schema, &instance); err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("plan.json", instance); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("plan.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+func TestSchemaAndExamples(t *testing.T) {
+	schema := compileSchema(t)
+	paths, err := filepath.Glob("../../../../examples/plans/*.json")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("examples not found: %v", err)
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, ds := plan.Decode(data, path, filepath.Dir(path))
+		if len(ds) > 0 {
+			t.Fatalf("%s: %+v", path, ds)
+		}
+		var instance any
+		if err = json.Unmarshal(data, &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err = schema.Validate(instance); err != nil {
+			t.Fatalf("%s schema: %v", path, err)
+		}
+	}
+	for _, input := range []string{
+		`{"version":4,"items":[]}`, `{"version":4,"items":[{"page":{},"count":0}]}`,
+		`{"version":4,"items":[{"page":{"text":{"size":-1}}}]}`, `{"version":4,"items":[{"page":{"text":{"width":0}}}]}`,
+		`{"version":4,"items":[{"items":[{"source":"a"}]}]}`, `{"version":4,"items":[null]}`,
+	} {
+		var instance any
+		if err := json.Unmarshal([]byte(input), &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(instance); err == nil {
+			t.Fatalf("schema accepted %s", input)
+		}
+	}
+	// Standard schema integer semantics cannot enforce lexical integer tokens.
+	for _, count := range []string{"3.0", "3e0"} {
+		input := []byte(`{"version":4,"items":[{"page":{},"count":` + count + `}]}`)
+		var instance any
+		if err := json.Unmarshal(input, &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(instance); err != nil {
+			t.Fatal(err)
+		}
+		if _, ds := plan.Decode(input, "p", "."); len(ds) != 1 || ds[0].Code != diag.PlanValue {
+			t.Fatalf("lexical rejection: %+v", ds)
+		}
+	}
+}
+
+func FuzzPlanDecode(f *testing.F) {
+	for _, seed := range []string{`{"version":4,"items":[{"source":"a.pdf"}]}`, `{"version":4,"items":[{"page":{}}]}`, `{"version":4,"items":[null]}`, `{"version":1,"blank":{}}`, `{`, "\ufeff{}"} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, input []byte) {
+		_, ds := plan.Decode(input, "p", ".")
+		if len(ds) > 1 {
+			t.Fatal("decoder returned multiple faults")
+		}
+	})
+}
+
+func TestNumericVersionAndLengthFaultClasses(t *testing.T) {
+	for _, tc := range []struct {
+		input   string
+		code    diag.Code
+		pointer string
+	}{
+		{`{"version":4.0,"items":[{"source":"a"}]}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":999999999999999999999999,"items":[{"source":"a"}]}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":4,"items":[{"page":{"text":{"size":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/size"},
+		{`{"version":4,"items":[{"page":{"text":{"leading":1e999}}}]}`, diag.PlanValue, "/items/0/page/text/leading"},
+	} {
+		_, ds := plan.Decode([]byte(tc.input), "p", ".")
+		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.pointer {
+			t.Fatalf("numeric fault %s: %+v", tc.input, ds)
+		}
+	}
+	input := `{"version":1,"items":[]}`
+	_, ds := plan.Decode([]byte(input), "p", ".")
+	if ds[0].Location.Offset != int64(strings.LastIndex(input, "1")) {
+		t.Fatalf("version location points away from its value: %+v", ds[0].Location)
+	}
+}
+
+func TestPacketShapesScopesAndDefaults(t *testing.T) {
+	base := t.TempDir()
+	input := `{"version":4,"dir":"inputs","page_defaults":{"text":{"value":"inherited","font":{"file":"top.ttf"}},"background":"#abc"},"page_numbers":{},"items":[{"contents":{}},{"title":"  Rīga Ελληνικά Кириллица  ","dir":"chapter","start_on":"odd","divider":{"text":{"font":{"file":"title.ttf"}}},"items":[{"source":"source.pdf","pages":[[2,3],[4,4],[8,8]]},{"page":{"background":"none","text":{"value":""}},"count":2}]},{"title":"漢字","items":[{"source":"last.pdf"}]}]}`
+	j, ds := plan.Decode([]byte(input), "packet.json", base)
+	if len(ds) != 0 {
+		t.Fatal(ds)
+	}
+	leaves, sections := j.Leaves(), j.Sections()
+	if len(j.Items) != 3 || len(leaves) != 5 || len(sections) != 2 || sections[0].Title != "  Rīga Ελληνικά Кириллица  " || sections[1].Title != "漢字" {
+		t.Fatalf("lost declared structure: %+v %+v", j, sections)
+	}
+	section := j.Items[1]
+	if itemAs[*packet.GroupItem](t, section).Divider.Text.Font.Value.Path != filepath.Join(base, "inputs/title.ttf") || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Path != filepath.Join(base, "inputs/chapter/source.pdf") || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Text.Font.Value.Path != filepath.Join(base, "top.ttf") {
+		t.Fatalf("declaration path scope: %+v", section)
+	}
+	if len(itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection) != 2 || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection[0] != (packet.PageRange{First: 2, Last: 4}) || itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection[1] != (packet.PageRange{First: 8, Last: 8}) {
+		t.Fatalf("normalized ranges: %+v", itemAs[*packet.SourceItem](t, itemAs[*packet.GroupItem](t, section).Items[0]).Selection)
+	}
+	if leaves[1].Kind != "divider" || leaves[1].Owner != "/items/1" || leaves[1].Page.Text.Value.Value != itemAs[*packet.GroupItem](t, section).Title || itemAs[*packet.GroupItem](t, section).Divider.Text.Value.Value != "inherited" || leaves[1].Ref != "/items/1/divider" {
+		t.Fatalf("divider title derivation: %+v", leaves[1])
+	}
+	if j.PageNumbers == nil || j.PageNumbers.Size != 9 || j.PageNumbers.Margin != 8*72/25.4 || itemAs[*packet.ContentsItem](t, j.Items[0]).Title != "Contents" || itemAs[*packet.ContentsItem](t, j.Items[0]).Size != (packet.Size{}) {
+		t.Fatalf("packet defaults: %+v", j)
+	}
+	if itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Background.Value != nil || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Text.Value.Value != "" || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style.Text.Value.From != "/items/1/items/1/page/text/value" {
+		t.Fatalf("style presence lost: %+v", itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, section).Items[1]).Style)
+	}
+	var instance any
+	if err := json.Unmarshal([]byte(input), &instance); err != nil {
+		t.Fatal(err)
+	}
+	if err := compileSchema(t).Validate(instance); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPacketRejectingContracts(t *testing.T) {
+	cases := []struct {
+		input, pointer string
+		code           diag.Code
+	}{
+		{`{"version":2,"items":[{"source":"x.pdf"}]}`, "/version", diag.PlanVersionUnsupported},
+		{`{"version":4,"items":["x.pdf"]}`, "/items/0", diag.PlanType},
+		{`{"version":4,"items":[{"source":"x","page":{}}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"source":"x","count":2}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"items":[{"source":"x"}]}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"divider":{},"start_on":"odd","items":[{"source":"x"}]}]}`, "/items/0", diag.PlanItemShape},
+		{`{"version":4,"items":[{"title":"A","divider":{"text":{"value":"B"}},"items":[{"source":"x"}]}]}`, "/items/0/divider/text/value", diag.PlanValue},
+		{`{"version":4,"items":[{"title":"A","divider":{"text":{"value":"B","unknown":0}},"items":[{"source":"x"}]}]}`, "/items/0/divider/text/value", diag.PlanValue},
+		{`{"version":4,"items":[{"contents":{}}]}`, "/items/0/contents", diag.PlanValue},
+		{`{"version":4,"items":[{"title":"A","items":[{"contents":{}},{"contents":{}}]}]}`, "/items/0/items/1/contents", diag.PlanValue},
+		{`{"version":4,"items":[{"title":"A","items":[{"contents":{"size":"inherit"}}]}]}`, "/items/0/items/0/contents/size", diag.PlanValue},
+		{`{"version":4,"page_numbers":{"margin":-1},"items":[{"source":"x"}]}`, "/page_numbers/margin", diag.PlanValue},
+		{`{"version":4,"page_numbers":{"size":0},"items":[{"source":"x"}]}`, "/page_numbers/size", diag.PlanValue},
+		{`{"version":4,"page_numbers":null,"items":[{"source":"x"}]}`, "/page_numbers", diag.PlanNull},
+		{`{"version":4,"page_numbers":{"margin":1,"margin":2},"items":[{"source":"x"}]}`, "/page_numbers/margin", diag.PlanDuplicateMember},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,2],[2,3]]}]}`, "/items/0/pages/1", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[4,4],[1,2]]}]}`, "/items/0/pages/1", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[2,1]]}]}`, "/items/0/pages/0", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[]}]}`, "/items/0/pages", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[0,2]]}]}`, "/items/0/pages/0/0", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[1.0,2]]}]}`, "/items/0/pages/0/0", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,2e0]]}]}`, "/items/0/pages/0/1", diag.PlanValue},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,null]]}]}`, "/items/0/pages/0/1", diag.PlanNull},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,2,3]]}]}`, "/items/0/pages/0/2", diag.PlanType},
+		{`{"version":4,"items":[{"source":"x","pages":[[1,9223372036854775808]]}]}`, "/items/0/pages/0/1", diag.PlanValue},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			_, ds := plan.Decode([]byte(tc.input), "packet.json", t.TempDir())
+			if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.pointer {
+				t.Fatalf("want %s %s: %+v", tc.code, tc.pointer, ds)
+			}
+		})
+	}
+	for _, title := range []string{"", " ", "\u00a0", "first\nsecond", "bad\x1b", "bad\u200b", "bad\u2028", "bad\u2029"} {
+		encoded, err := json.Marshal(title)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := `{"version":4,"items":[{"title":` + string(encoded) + `,"items":[{"source":"x"}]}]}`
+		_, ds := plan.Decode([]byte(input), "packet.json", t.TempDir())
+		if len(ds) != 1 || ds[0].Code != diag.PlanValue || ds[0].Location.Ref != "/items/0/title" {
+			t.Fatalf("invalid title %q accepted: %+v", title, ds)
+		}
+		var instance any
+		if err = json.Unmarshal([]byte(input), &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err = compileSchema(t).Validate(instance); err == nil {
+			t.Fatalf("schema accepted invalid title %q", title)
+		}
+	}
+}
+
+func TestAggregateContainerAndSelectionBudgets(t *testing.T) {
+	for _, count := range []int{99999, 100000} {
+		input := `{"version":4,"items":[{"title":"A","items":[` + strings.Repeat(`{"source":"x"},`, count-1) + `{"source":"x"}]}]}`
+		_, ds := plan.Decode([]byte(input), "p", ".")
+		if count == 99999 && len(ds) > 0 || count == 100000 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+			t.Fatalf("group item budget %d: %+v", count, ds)
+		}
+	}
+	for _, count := range []int{100000, 100001} {
+		var pairs strings.Builder
+		for i := range count {
+			if i > 0 {
+				pairs.WriteByte(',')
+			}
+			fmt.Fprintf(&pairs, "[%d,%d]", i+1, i+1)
+		}
+		input := `{"version":4,"items":[{"source":"x","pages":[` + pairs.String() + `]}]}`
+		j, ds := plan.Decode([]byte(input), "p", ".")
+		if count == 100000 && (len(ds) > 0 || len(itemAs[*packet.SourceItem](t, j.Items[0]).Selection) != 1 || itemAs[*packet.SourceItem](t, j.Items[0]).Selection[0].Last != count) || count == 100001 && (len(ds) != 1 || ds[0].Code != diag.PlanLimit) {
+			t.Fatalf("selection pair budget %d: %+v", count, ds)
+		}
+	}
+}
+
+func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
+	t.Helper()
+	value, ok := item.(T)
+	if !ok {
+		t.Fatalf("item has type %T, expected %T", item, value)
+	}
+	return value
+}
+
+// Schema vocabulary must describe exactly the values accepted by the domain.
+
+func TestSchemaEnumsEqualPacketVocabulary(t *testing.T) {
+	var schema any
+	if err := json.Unmarshal(plan.Schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path   string
+		values []string
+	}{
+		{"/$defs/page/properties/text/properties/anchor/enum", packet.Anchor("").Values()},
+		{"/$defs/page/properties/text/properties/align/enum", packet.Align("").Values()},
+		{"/$defs/page/properties/text/properties/overflow/enum", packet.Overflow("").Values()},
+		{"/$defs/items/items/oneOf/3/properties/start_on/enum", packet.StartOn("").Values()},
+	} {
+		value := schema
+		for _, key := range strings.Split(strings.TrimPrefix(tc.path, "/"), "/") {
+			switch node := value.(type) {
+			case map[string]any:
+				value = node[key]
+			case []any:
+				index, err := strconv.Atoi(key)
+				if err != nil || index < 0 || index >= len(node) {
+					t.Fatalf("invalid schema path %s", tc.path)
+				}
+				value = node[index]
+			default:
+				t.Fatalf("missing schema path %s", tc.path)
+			}
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual []string
+		if err = json.Unmarshal(data, &actual); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(actual, tc.values) {
+			t.Fatalf("%s: schema %v domain %v", tc.path, actual, tc.values)
+		}
+	}
+}
+
+func TestPlanVersionAndDefaultsContract(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		code  diag.Code
+		ref   string
+	}{
+		{`{"version":3,"items":[{"page":{}}]}`, diag.PlanVersionUnsupported, "/version"},
+		{`{"version":4,"page":{},"items":[{"page":{}}]}`, diag.PlanUnknownMember, "/page"},
+	} {
+		_, ds := plan.Decode([]byte(tc.input), "plan.json", t.TempDir())
+		if len(ds) != 1 || ds[0].Code != tc.code || ds[0].Location.Ref != tc.ref {
+			t.Fatalf("contract refusal: %+v", ds)
+		}
+		if tc.code == diag.PlanVersionUnsupported && ds[0].Message != "Supported plan version is 4." {
+			t.Fatal(ds[0].Message)
+		}
+
+	}
+}

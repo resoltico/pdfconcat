@@ -32,8 +32,8 @@ archives:
       - THIRD_PARTY_NOTICES.md
       - CONTRIBUTING.md
       - SECURITY.md
-      - docs/DESIGN.md
-      - docs/CORE.md
+      - docs/PDF-POLICY.md
+      - docs/ARCHITECTURE.md
       - docs/PLAN.md
       - docs/CLI.md
       - src: examples/plans/*.json
@@ -42,10 +42,10 @@ archives:
       - src: third_party/licenses/*.txt
         dst: third_party/licenses
         strip_parent: true
-      - src: internal/plan/plan.schema.json
+      - src: internal/core/internal/plan/plan.schema.json
         dst: schemas
         strip_parent: true
-      - src: internal/result/result.schema.json
+      - src: internal/core/internal/result/result.schema.json
         dst: schemas
         strip_parent: true
 

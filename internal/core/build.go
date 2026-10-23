@@ -9,58 +9,65 @@ import (
 	"encoding/hex"
 	"io"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/publication"
-	"github.com/resoltico/pdfconcat/internal/result"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
+
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 // build owns the complete staging lifecycle, including abort on every failure.
 type buildOutcome struct {
 	output      result.Output
-	renames     map[int][]job.FieldRename
+	renames     [][]packet.FieldRename
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j job.Job, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
+func build(c context.Context, j packet.Plan, composition *composition, overwrite bool) buildOutcome {
 	out := buildOutcome{output: result.Output{Path: j.Output}}
-	layout, pages, facts, occurrences, fonts := composition.layout, composition.pages, prepared.facts, prepared.occurrences, prepared.fonts
-	placements := placedTexts(pages)
-	if j.PageNumbers != nil {
-		digits, e := typeset.NewDigits(fonts["default"], j.PageNumbers.Size)
-		if e != nil {
-			out.diagnostics = append(out.diagnostics, textDiagnostic(e, "/page_numbers"))
-			return out
+	layout, assembly := composition.layout, composition.assembly
+	var placements []*typeset.Placed
+	for _, part := range assembly.Parts {
+		for _, page := range part.Generated {
+			for _, block := range page.Blocks {
+				placements = append(placements, block.Text)
+			}
 		}
-		union, e := digits.Place("0123456789", 10*digits.CellWidth, 0)
+	}
+
+	if assembly.Footer != nil {
+		union, e := assembly.Footer.Union()
 		if e != nil {
-			out.diagnostics = append(out.diagnostics, textDiagnostic(e, "/page_numbers"))
+			out.diagnostics = append(out.diagnostics, compose.Diagnostic(e, "/page_numbers"))
 			return out
 		}
 		placements = append(placements, union)
 	}
+
 	embedded, err := typeset.PrepareFonts(placements)
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New("font_invalid", err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.New(diag.FontInvalid, err.Error()))
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New("interrupted", err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.New(diag.Interrupted, err.Error()))
 		return out
 	}
-	staged, err := publication.Create(j.Output)
+	staged, err := files.Create(j.Output)
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic("output_write_failed", err, j.Output))
+		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputWriteFailed, err, j.Output))
 		return out
 	}
 	defer staged.Abort()
 	hash := sha256.New()
 	counter := &countWriter{Writer: staged}
-	assembled, err := pdf.Assemble(c, layout, facts, occurrences, pages, j.FitTo, embedded, io.MultiWriter(counter, hash))
+	assembly.Fonts = embedded
+	assembled, err := pdf.Assemble(c, assembly, io.MultiWriter(counter, hash))
 	out.diagnostics = append(out.diagnostics, assembled.Diagnostics...)
-	out.renames = assembled.FieldsRenamed
+	out.renames = assembled.Renames
 	if err != nil {
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
@@ -70,7 +77,7 @@ func build(c context.Context, j job.Job, prepared preparationOutcome, compositio
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New("interrupted", err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.New(diag.Interrupted, err.Error()))
 		return out
 	}
 	published, err := staged.Commit(overwrite)
@@ -80,7 +87,7 @@ func build(c context.Context, j job.Job, prepared preparationOutcome, compositio
 		out.output.Bytes = knownCount(counter.n)
 	}
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic("output_publish_failed", err, j.Output))
+		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputPublishFailed, err, j.Output))
 	}
 	return out
 }

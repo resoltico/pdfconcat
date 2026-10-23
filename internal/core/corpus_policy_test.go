@@ -62,7 +62,7 @@ func corpusPolicies(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			plan := map[string]any{"version": 3, "output": "packet.pdf", "items": tc.Items}
+			plan := map[string]any{"version": 4, "output": "packet.pdf", "items": tc.Items}
 			if tc.Fit != "" {
 				plan["fit_to"] = tc.Fit
 			}
@@ -72,7 +72,7 @@ func corpusPolicies(t *testing.T) {
 			path := filepath.Join(dir, "plan.json")
 			corpusJSON(t, path, plan)
 			for _, operation := range []core.Operation{core.Check, core.Build} {
-				r := core.Execute(t.Context(), core.NewRequest(operation, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir, Report: filepath.Join(dir, string(operation)+".json")}))
+				r := core.Execute(t.Context(), core.Request{Operation: operation, Input: core.PlanFile{Path: path}, WorkingDir: dir, Report: filepath.Join(dir, string(operation)+".json")})
 				schemaValid(t, r)
 				corpusJSON(t, filepath.Join(dir, string(operation)+"-complete.json"), r)
 				if tc.Code != "" {
@@ -127,7 +127,7 @@ func corpusPolicies(t *testing.T) {
 	}
 	t.Run("cff-full-and-pruned", func(t *testing.T) {
 		dir := corpusStage(t, "technical-note.pdf")
-		data, err := os.ReadFile("../typeset/fontdata/NotoSans-Regular.ttf")
+		data, err := os.ReadFile("internal/typeset/fontdata/NotoSans-Regular.ttf")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,10 +144,10 @@ func corpusPolicies(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		plan := map[string]any{"version": 3, "output": "packet.pdf", "page": map[string]any{"size": "A4"}, "items": []any{corpusSource("technical-note.pdf"), corpusPage("Pruned Ā Ελληνικά", "pruned.ttf"), corpusPage("Full Ā Ελληνικά", "full.ttf")}}
+		plan := map[string]any{"version": 4, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": []any{corpusSource("technical-note.pdf"), corpusPage("Pruned Ā Ελληνικά", "pruned.ttf"), corpusPage("Full Ā Ελληνικά", "full.ttf")}}
 		path := filepath.Join(dir, "plan.json")
 		corpusJSON(t, path, plan)
-		r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+		r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 		if r.Status != "ok" || *r.Pages.Total != 3 {
 			t.Fatal(r)
 		}
@@ -166,7 +166,7 @@ func corpusPolicies(t *testing.T) {
 	})
 	t.Run("late-report-after-pdf", func(t *testing.T) {
 		dir := corpusStage(t, "approval-form.pdf")
-		r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromItems(core.Source("approval-form.pdf", "form")), core.Options{WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf"), Report: filepath.Join(dir, "absent/report.json")}))
+		r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.Items{core.SourceItem{Path: "approval-form.pdf", Ref: "form"}}, WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf"), Report: filepath.Join(dir, "absent/report.json")})
 		if r.Status != "failed" || !r.Output.Published || r.Report.Written || !code(r, "report_write_failed") {
 			t.Fatal(r)
 		}

@@ -4,57 +4,14 @@
 package core
 
 import (
-	"context"
 	"encoding/json/v2"
-	"errors"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/publication"
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
-func knownCount(n int64) *int64           { return &n }
-func hasErrors(ds []diag.Diagnostic) bool { status, _ := diag.Outcome(ds); return status != "ok" }
-func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		code = "interrupted"
-	}
-	d := diag.New(code, err.Error())
-	if file != "<stdin>" {
-		d.File = file
-	}
-	return d
-}
-
-func declaredReportPart(leaf job.Leaf) result.Part {
-	p := result.Part{Item: leaf.Pointer, Kind: leaf.Kind, Path: leaf.Source, Section: leaf.Owner}
-	switch leaf.Kind {
-	case "source":
-		p.FieldsRenamed = []job.FieldRename{}
-	case "page", "divider":
-		p.Count = leaf.Count
-	}
-	return p
-}
-func reportSections(sections []job.Section, resolved bool) []result.Section {
-	resultSections := make([]result.Section, 0, len(sections))
-	for _, section := range sections {
-		s := result.Section{Item: section.Item, Title: section.Title}
-		if section.Parent != "" {
-			parent := section.Parent
-			s.Parent = &parent
-		}
-		if resolved {
-			s.TargetPage = knownCount(section.Target)
-			s.OutputPages = &[2]int64{section.FirstPage, section.LastPage}
-		}
-		resultSections = append(resultSections, s)
-	}
-	return resultSections
-}
-
-func writeReport(r *result.Result, roles publication.Files) {
+func writeReport(r *result.Result, roles files.Roles) {
 	if r.Report == nil {
 		return
 	}
@@ -69,8 +26,8 @@ func writeReport(r *result.Result, roles publication.Files) {
 	full.Report = &report
 	data, err := json.Marshal(full)
 	if err == nil {
-		var staged *publication.File
-		staged, err = publication.Create(roles.Report)
+		var staged *files.Staged
+		staged, err = files.Create(roles.Report)
 		if err == nil {
 			defer staged.Abort()
 			_, err = staged.Write(append(data, '\n'))
@@ -80,19 +37,8 @@ func writeReport(r *result.Result, roles publication.Files) {
 		}
 	}
 	if err != nil {
-		d := diag.New("report_write_failed", err.Error())
+		d := diag.New(diag.ReportWriteFailed, err.Error())
 		d.File = roles.Report
 		r.Diagnostics = append(r.Diagnostics, d)
-	}
-}
-
-func noteCancellation(c context.Context, r *result.Result) {
-	if err := c.Err(); err != nil {
-		for _, d := range r.Diagnostics {
-			if d.Code == "interrupted" {
-				return
-			}
-		}
-		r.Diagnostics = append(r.Diagnostics, diag.New("interrupted", err.Error()))
 	}
 }

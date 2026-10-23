@@ -1,0 +1,424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/core/internal/plan/plan.schema.json",
+  "title": "PDFConcat plan",
+  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 4). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
+  "type": "object",
+  "required": [
+    "version",
+    "items"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Ignored by PDFConcat; for editors."
+    },
+    "version": {
+      "const": 4,
+      "description": "Plan format version."
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Output PDF, relative to the base directory. -o overrides it."
+    },
+    "dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory for relative paths in the top-level items, relative to the base directory."
+    },
+    "fit_to": {
+      "$ref": "#/$defs/sheetSize",
+      "description": "Scale every output page proportionally, centred, onto this sheet. Refuses form widgets and internal destinations with numeric position coordinates. Paper names are portrait. --fit-to overrides it."
+    },
+    "page_defaults": {
+      "$ref": "#/$defs/page",
+      "description": "Default style of every generated page. Font files here resolve against the base directory."
+    },
+    "items": {
+      "$ref": "#/$defs/items"
+    },
+    "page_numbers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "$ref": "#/$defs/positiveLength",
+          "default": 9
+        },
+        "margin": {
+          "$ref": "#/$defs/nonnegativeLength",
+          "default": "8mm"
+        }
+      },
+      "description": "Presence paints physical Arabic page numbers on all non-padding pages. The overlay may cover source content."
+    }
+  },
+  "$defs": {
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "source"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pages": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100000,
+                "items": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  ],
+                  "items": false
+                },
+                "description": "Ascending disjoint inclusive original page ranges; adjacency is normalized. Decoder checks ordering, aggregate pair count and source bounds."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "page"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "page": {
+                "$ref": "#/$defs/page"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000,
+                "default": 1,
+                "description": "Number of consecutive identical generated pages."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "contents"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "contents": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "$ref": "#/$defs/title",
+                    "default": "Contents"
+                  },
+                  "size": {
+                    "$ref": "#/$defs/sheetSize",
+                    "description": "Defaults to fit_to, otherwise A4; explicit size is authored before fitting."
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "items"
+            ],
+            "anyOf": [
+              {
+                "required": [
+                  "dir"
+                ]
+              },
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "start_on"
+                ]
+              }
+            ],
+            "dependentRequired": {
+              "divider": [
+                "title"
+              ]
+            },
+            "additionalProperties": false,
+            "properties": {
+              "dir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Scope for child item paths; divider font declarations resolve in the enclosing scope."
+              },
+              "title": {
+                "$ref": "#/$defs/title"
+              },
+              "start_on": {
+                "enum": [
+                  "any",
+                  "odd"
+                ],
+                "default": "any"
+              },
+              "divider": {
+                "$ref": "#/$defs/divider"
+              },
+              "items": {
+                "$ref": "#/$defs/items"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "length": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": -14400,
+          "maximum": 14400,
+          "description": "Points (1/72 inch)."
+        },
+        {
+          "type": "string",
+          "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$",
+          "description": "Decimal number with optional unit pt, mm, cm, in; no spaces, no exponent."
+        }
+      ]
+    },
+    "color": {
+      "type": "string",
+      "pattern": "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$"
+    },
+    "paperName": {
+      "enum": [
+        "A3",
+        "A4",
+        "A5",
+        "B4",
+        "B5",
+        "Letter",
+        "Legal",
+        "Tabloid"
+      ]
+    },
+    "dimensions": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?|\\.[0-9]+)x([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$",
+      "description": "WIDTHxHEIGHT with one optional shared unit, e.g. 297x210mm. Each side 1 to 14400 points."
+    },
+    "sheetSize": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/paperName"
+        },
+        {
+          "$ref": "#/$defs/dimensions"
+        }
+      ]
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "oneOf": [
+            {
+              "const": "inherit"
+            },
+            {
+              "$ref": "#/$defs/sheetSize"
+            }
+          ],
+          "description": "inherit (default): the displayed size of the neighbouring source page; or a paper name (portrait); or WIDTHxHEIGHT[unit]."
+        },
+        "background": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/color"
+            },
+            {
+              "const": "none"
+            }
+          ],
+          "description": "Page fill, or none (default; also clears an inherited fill)."
+        },
+        "text": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string",
+              "maxLength": 10000,
+              "description": "The text; \\n starts a new line; empty means no text."
+            },
+            "font": {
+              "oneOf": [
+                {
+                  "const": "default",
+                  "description": "Embedded Noto Sans Regular."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Static TrueType font; resolves against the directory of the items array this style is written in (base directory for page_defaults)."
+                    }
+                  }
+                }
+              ]
+            },
+            "size": {
+              "$ref": "#/$defs/positiveLength",
+              "description": "Font size, 1 to 14400 points. Default 12."
+            },
+            "color": {
+              "$ref": "#/$defs/color",
+              "description": "Default #000000."
+            },
+            "anchor": {
+              "enum": [
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "center",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right"
+              ],
+              "description": "Default center."
+            },
+            "x": {
+              "$ref": "#/$defs/length",
+              "description": "Offset from the anchor, +x right. Default 0."
+            },
+            "y": {
+              "$ref": "#/$defs/length",
+              "description": "Offset from the anchor, +y up. Default 0."
+            },
+            "width": {
+              "$ref": "#/$defs/positiveLength",
+              "description": "Text block width, 1 to 14400 points. Default page width - 72pt."
+            },
+            "align": {
+              "enum": [
+                "left",
+                "center",
+                "right",
+                "justify"
+              ],
+              "description": "Line alignment inside the block. Default center."
+            },
+            "leading": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Baseline distance as a multiple of the font size. Default 1.2."
+            },
+            "overflow": {
+              "enum": [
+                "error",
+                "allow"
+              ],
+              "description": "Default error."
+            }
+          }
+        }
+      }
+    },
+    "positiveLength": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 14400
+        },
+        {
+          "type": "string",
+          "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$"
+        }
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000,
+      "allOf": [
+        {
+          "pattern": "[^\\p{Z}\\s]"
+        },
+        {
+          "not": {
+            "pattern": "[\\p{Cc}\\p{Cf}  ]"
+          }
+        }
+      ],
+      "description": "Single-line title without control or format characters; preserve authored Unicode without trimming."
+    },
+    "divider": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/page"
+        },
+        {
+          "not": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "required": [
+                  "value"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "description": "One generated section title page. text.value is supplied by the section title and must not be declared."
+    },
+    "nonnegativeLength": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 14400
+        },
+        {
+          "type": "string",
+          "pattern": "^-?([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in)?$"
+        }
+      ]
+    }
+  }
+}

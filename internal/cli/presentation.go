@@ -42,9 +42,9 @@ func JSON(w io.Writer, value any) error {
 	return err
 }
 
-// Render writes the capped JSON or text stdout view.
-func Render(w io.Writer, r core.Result, format string) error {
-	if format != "text" {
+// Render writes a capped JSON document or a text summary with separate diagnostics.
+func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
+	if asJSON {
 		return JSON(w, Summary(r))
 	}
 	rows, omitted := previewRows(r)
@@ -73,12 +73,12 @@ func Render(w io.Writer, r core.Result, format string) error {
 		}
 	}
 	for _, d := range r.Diagnostics {
-		if _, err := fmt.Fprintln(w, diagnosticText(d)); err != nil {
+		if _, err := fmt.Fprintln(stderr, diagnosticText(d)); err != nil {
 			return err
 		}
 	}
 	if r.DiagnosticsOmitted > 0 {
-		if _, err := fmt.Fprintf(w, "%d more diagnostics; use --report for full details.\n", r.DiagnosticsOmitted); err != nil {
+		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; use --report for full details.\n", r.DiagnosticsOmitted); err != nil {
 			return err
 		}
 	}
@@ -106,8 +106,8 @@ func diagnosticText(d core.Diagnostic) string {
 		b.WriteByte(']')
 	}
 	pointer := ""
-	if d.Location != nil && d.Location.Pointer != "" {
-		pointer = d.Location.Pointer
+	if d.Location != nil && d.Location.Ref != "" {
+		pointer = d.Location.Ref
 		fmt.Fprintf(&b, " [pointer %s]", strconv.Quote(pointer))
 	}
 	var items []string
@@ -166,7 +166,7 @@ func previewRows(r core.Result) ([]string, int) {
 			break
 		}
 		switch part.Kind {
-		case "source":
+		case core.PartSource:
 			source := "unknown"
 			if part.Spans != nil {
 				mapping := *part.Spans
@@ -180,9 +180,9 @@ func previewRows(r core.Result) ([]string, int) {
 				}
 			}
 			rows = append(rows, fmt.Sprintf("Source %s: selected %s → pages %s", strconv.Quote(part.Path), source, pages(part.OutputPages)))
-		case "padding":
+		case core.PartPadding:
 			rows = append(rows, fmt.Sprintf("Padding before %s: pages %s (odd_start)", strconv.Quote(part.BeforeItem), pages(part.OutputPages)))
-		default:
+		case core.PartPage, core.PartDivider, core.PartContents:
 			rows = append(rows, fmt.Sprintf("%s %s: pages %s", part.Kind, strconv.Quote(part.Item), pages(part.OutputPages)))
 		}
 	}

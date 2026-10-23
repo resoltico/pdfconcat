@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -32,14 +33,29 @@ func operationHint(name string) core.Operation {
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, host Host) int {
 	command, failure := Parse(args)
 	render := func(r core.Result) int {
-		if err := Render(stdout, r, command.Format); err != nil {
+		if err := Render(stdout, stderr, r, command.JSON); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
 		return core.ExitCode(r)
 	}
 	if failure != nil {
-		return render(*failure)
+		if command.JSON {
+			return render(*failure)
+		}
+		for _, d := range Summary(*failure).Diagnostics {
+			if _, err := fmt.Fprintln(stderr, diagnosticText(d)); err != nil {
+				return 1
+			}
+		}
+		help := "pdfconcat help"
+		if knownCommand(command.Name) {
+			help += " " + command.Name
+		}
+		if _, err := fmt.Fprintf(stderr, "Run %q for usage.\n", help); err != nil {
+			return 1
+		}
+		return core.ExitCode(*failure)
 	}
 	query := func(err error) int {
 		if err != nil {
@@ -62,7 +78,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if command.Name == "version" {
 		v, err := core.Version(host.ReleaseOverride)
 		if err == nil {
-			if command.Format == "text" {
+			if !command.JSON {
 				_, err = fmt.Fprintf(stdout, "pdfconcat %s (%s, %s, %s)\n", v.Version, v.Commit, v.Go, v.Platform)
 			} else {
 				err = JSON(stdout, v)
@@ -79,29 +95,39 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		message = strings.ReplaceAll(message, "\x00", `\x00`)
 		return render(core.InvocationFailure(operationHint(command.Name), core.WorkingDirectoryUnavailable, "Cannot determine working directory: "+message, ""))
 	}
+
 	var input core.Input
 	if command.Plan != "" {
-		source := core.FilePlan(command.Plan)
 		if command.Plan == "-" {
-			source = core.LoadPlan("<stdin>", command.BaseDir, func(c context.Context, limit int64) ([]byte, error) { return readStdin(c, stdin, limit) })
+			data, err := readStdin(ctx, stdin, core.MaxPlanBytes)
+			if err != nil {
+				kind := core.PlanUnreadable
+				if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					kind = core.Interrupted
+				}
+				return render(core.InvocationFailure(operationHint(command.Name), kind, strings.ReplaceAll(strings.ToValidUTF8(err.Error(), "�"), "\x00", `\x00`), ""))
+			}
+			input = core.PlanBytes{Data: data, Label: "<stdin>", BaseDir: command.BaseDir}
+		} else {
+			input = core.PlanFile{Path: command.Plan}
 		}
-		input = core.FromPlan(source)
 	} else {
-		items := make([]core.Item, 0, len(command.Operands))
+		items := make(core.Items, 0, len(command.Operands))
 		for _, operand := range command.Operands {
 			ref := fmt.Sprintf("argv:%d", operand.Index)
-			item := core.Source(operand.Path, ref)
 			if operand.Blank {
-				item = core.Blank(ref)
+				items = append(items, core.BlankItem{Ref: ref})
+			} else {
+				items = append(items, core.SourceItem{Ref: ref, Path: operand.Path})
 			}
-			items = append(items, item)
 		}
-		input = core.FromItems(items...)
+		input = items
 	}
-	options := core.Options{WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
+
+	request := core.Request{Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
 	if command.FitTo != "" {
 		size, _ := core.ParseSheet(command.FitTo)
-		options.FitTo = &size
+		request.FitTo = &size
 	}
-	return render(core.Execute(ctx, core.NewRequest(operationHint(command.Name), input, options)))
+	return render(core.Execute(ctx, request))
 }

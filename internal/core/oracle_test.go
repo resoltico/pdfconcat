@@ -25,7 +25,7 @@ func TestUnicodeSeparatorExtractionEmbeddingAndSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := "Pielikums Ā ļ ķ\nΕλληνικά\nКириллица ā ļ"
-	plan, err := json.Marshal(map[string]any{"version": 3, "output": "packet.pdf", "items": []any{map[string]any{"source": "source.pdf"}, map[string]any{"page": map[string]any{"text": map[string]any{"value": text}}}}})
+	plan, err := json.Marshal(map[string]any{"version": 4, "output": "packet.pdf", "items": []any{map[string]any{"source": "source.pdf"}, map[string]any{"page": map[string]any{"text": map[string]any{"value": text}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestUnicodeSeparatorExtractionEmbeddingAndSize(t *testing.T) {
 	if err = os.WriteFile(path, plan, 0600); err != nil {
 		t.Fatal(err)
 	}
-	r := core.Execute(t.Context(), core.NewRequest(core.Build, core.FromPlan(core.FilePlan(path)), core.Options{WorkingDir: dir}))
+	r := core.Execute(t.Context(), core.Request{Operation: core.Build, Input: core.PlanFile{Path: path}, WorkingDir: dir})
 	if r.Status != "ok" || !r.Output.Published {
 		t.Fatalf("packet failed: %+v", r.Diagnostics)
 	}

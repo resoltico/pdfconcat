@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/resoltico/pdfconcat/internal/plan"
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/plan"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 // SchemaKind selects a supported wire contract.

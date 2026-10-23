@@ -127,7 +127,7 @@ func corpusPolicies(t *testing.T) {
 	}
 	t.Run("cff-full-and-pruned", func(t *testing.T) {
 		dir := corpusStage(t, "technical-note.pdf")
-		data, err := os.ReadFile("../typeset/fontdata/NotoSans-Regular.ttf")
+		data, err := os.ReadFile("internal/typeset/fontdata/NotoSans-Regular.ttf")
 		if err != nil {
 			t.Fatal(err)
 		}

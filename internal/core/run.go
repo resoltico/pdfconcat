@@ -6,7 +6,7 @@ package core
 import (
 	"context"
 
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 // Execute is the sole application use-case flow. Request rejection performs no I/O.

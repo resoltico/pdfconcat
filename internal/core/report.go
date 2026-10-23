@@ -8,10 +8,10 @@ import (
 	"encoding/json/v2"
 	"errors"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/publication"
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 func knownCount(n int64) *int64           { return &n }
@@ -27,17 +27,17 @@ func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
 	return d
 }
 
-func declaredReportPart(leaf job.Leaf) result.Part {
+func declaredReportPart(leaf packet.Leaf) result.Part {
 	p := result.Part{Item: leaf.Pointer, Kind: leaf.Kind, Path: leaf.Source, Section: leaf.Owner}
 	switch leaf.Kind {
 	case "source":
-		p.FieldsRenamed = []job.FieldRename{}
+		p.FieldsRenamed = []packet.FieldRename{}
 	case "page", "divider":
 		p.Count = leaf.Count
 	}
 	return p
 }
-func reportSections(sections []job.Section, resolved bool) []result.Section {
+func reportSections(sections []packet.Section, resolved bool) []result.Section {
 	resultSections := make([]result.Section, 0, len(sections))
 	for _, section := range sections {
 		s := result.Section{Item: section.Item, Title: section.Title}
@@ -54,7 +54,7 @@ func reportSections(sections []job.Section, resolved bool) []result.Section {
 	return resultSections
 }
 
-func writeReport(r *result.Result, roles publication.Files) {
+func writeReport(r *result.Result, roles files.Files) {
 	if r.Report == nil {
 		return
 	}
@@ -69,8 +69,8 @@ func writeReport(r *result.Result, roles publication.Files) {
 	full.Report = &report
 	data, err := json.Marshal(full)
 	if err == nil {
-		var staged *publication.File
-		staged, err = publication.Create(roles.Report)
+		var staged *files.File
+		staged, err = files.Create(roles.Report)
 		if err == nil {
 			defer staged.Abort()
 			_, err = staged.Write(append(data, '\n'))

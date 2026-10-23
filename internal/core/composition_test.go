@@ -14,9 +14,9 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
-	"github.com/resoltico/pdfconcat/internal/result"
 )
 
 func packetPlan(t *testing.T, dir string, value map[string]any) string {

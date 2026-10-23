@@ -259,7 +259,7 @@ func corpusWorkflows(t *testing.T, cli string) {
 			t.Fatal(err)
 		}
 		corpusCopy(t, "testdata/corpus/business-report.pdf", filepath.Join(old, "inputs/leaf/report.pdf"))
-		corpusCopy(t, "../typeset/fontdata/NotoSans-Regular.ttf", filepath.Join(old, "inputs/fonts/title.ttf"))
+		corpusCopy(t, "internal/typeset/fontdata/NotoSans-Regular.ttf", filepath.Join(old, "inputs/fonts/title.ttf"))
 		plan := map[string]any{"version": 3, "dir": "inputs", "output": "packet.pdf", "items": []any{map[string]any{"title": "Scoped Ā Ελληνικά", "dir": "leaf", "divider": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": "fonts/title.ttf"}}}, "items": []any{corpusSource("report.pdf", [2]int{2, 3})}}}}
 		corpusJSON(t, filepath.Join(old, "plan.json"), plan)
 		moved := filepath.Join(root, "Packet space Ā Ελληνικά")

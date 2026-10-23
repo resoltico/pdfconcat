@@ -10,22 +10,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-func contentsRecipe(t *testing.T, leading, count int, size job.Size) (job.Job, map[string]*typeset.Font) {
+func contentsRecipe(t *testing.T, leading, count int, size packet.Size) (packet.Job, map[string]*typeset.Font) {
 	t.Helper()
 	font, err := typeset.LoadDefaultFont()
 	if err != nil {
 		t.Fatal(err)
 	}
-	style := job.Defaults()
-	style.Size = job.Size{Width: 595, Height: 842}
-	j := job.Job{Parts: []job.Part{{Pointer: "cover", Page: &style, Count: leading}, {Pointer: "toc", Contents: &job.ContentsStyle{Title: "Contents", Size: size}}}}
+	style := packet.Defaults()
+	style.Size = packet.Size{Width: 595, Height: 842}
+	j := packet.Job{Parts: []packet.Part{{Pointer: "cover", Page: &style, Count: leading}, {Pointer: "toc", Contents: &packet.ContentsStyle{Title: "Contents", Size: size}}}}
 	for i := range count {
-		j.Parts = append(j.Parts, job.Part{Pointer: fmt.Sprintf("section%d", i), Title: fmt.Sprintf("Pielikums Ā ļ ķ Ελληνικά Кириллица %d", i), Items: []job.Part{{Pointer: fmt.Sprintf("page%d", i), Page: &style, Count: 1}}})
+		j.Parts = append(j.Parts, packet.Part{Pointer: fmt.Sprintf("section%d", i), Title: fmt.Sprintf("Pielikums Ā ļ ķ Ελληνικά Кириллица %d", i), Items: []packet.Part{{Pointer: fmt.Sprintf("page%d", i), Page: &style, Count: 1}}})
 	}
 	return j, map[string]*typeset.Font{"default": font}
 }
@@ -34,12 +34,12 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 	for _, leading := range []int{7, 97} {
 		var heights []float64
 		for delta := range 2 {
-			j, fonts := contentsRecipe(t, leading+delta, 12, job.Size{Width: 595, Height: 842})
+			j, fonts := contentsRecipe(t, leading+delta, 12, packet.Size{Width: 595, Height: 842})
 			c, ds := prepareContents(t.Context(), j, nil, fonts)
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			layout, ds := job.Resolve(j, nil, len(c.pages))
+			layout, ds := packet.Resolve(j, nil, len(c.pages))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -81,11 +81,11 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 }
 
 func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
-	authored, _ := job.ParseSize("A3", false)
-	fit, _ := job.ParseSize("A5", false)
+	authored, _ := packet.ParseSize("A3", false)
+	fit, _ := packet.ParseSize("A5", false)
 	j, fonts := contentsRecipe(t, 1, 80, authored)
 	j.FitTo = &fit
-	j.PageNumbers = &job.PageNumbers{Size: 9, Margin: 50 * 72 / 25.4}
+	j.PageNumbers = &packet.PageNumbers{Size: 9, Margin: 50 * 72 / 25.4}
 	c, ds := prepareContents(t.Context(), j, nil, fonts)
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -112,19 +112,19 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 }
 
 func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
-	j, fonts := contentsRecipe(t, 1, 1, job.Size{Width: 109.152, Height: 200})
+	j, fonts := contentsRecipe(t, 1, 1, packet.Size{Width: 109.152, Height: 200})
 	j.Parts[1].Contents.Title = "ffffff"
 	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code != "text_overflow" {
 		t.Fatalf("heading ink margin was ignored: %+v", ds)
 	}
-	j, fonts = contentsRecipe(t, 1, 1, job.Size{Width: 200, Height: 150})
+	j, fonts = contentsRecipe(t, 1, 1, packet.Size{Width: 200, Height: 150})
 	j.Parts[2].Title = strings.Repeat("Long wrapped title ", 20)
 	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 || ds[0].Code != "text_overflow" {
 		t.Fatalf("oversized whole row accepted: %+v", ds)
 	}
 	nested := j.Parts[2]
 	for i := range 20 {
-		nested = job.Part{Pointer: fmt.Sprintf("ancestor%d", i), Title: "Ancestor", Items: []job.Part{nested}}
+		nested = packet.Part{Pointer: fmt.Sprintf("ancestor%d", i), Title: "Ancestor", Items: []packet.Part{nested}}
 	}
 	j.Parts[2] = nested
 	if _, ds := prepareContents(t.Context(), j, nil, fonts); len(ds) == 0 {

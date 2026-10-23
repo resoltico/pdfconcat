@@ -6,21 +6,21 @@ package core
 import (
 	"context"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/result"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 type pageKey struct {
-	size       job.Size
-	text       job.TextStyle
-	background job.Color
+	size       packet.Size
+	text       packet.TextStyle
+	background packet.Color
 	filled     bool
 }
 
-func layOut(c context.Context, layout job.Layout, fonts map[string]*typeset.Font, r *result.Result) map[int][]pdf.Page {
+func layOut(c context.Context, layout packet.Layout, fonts map[string]*typeset.Font, r *result.Result) map[int][]pdf.Page {
 	pages := map[int][]pdf.Page{}
 	type cached struct {
 		page pdf.Page
@@ -144,7 +144,7 @@ func alignment(value string) typeset.Align {
 	}
 }
 
-func resolvePolicies(layout job.Layout, facts map[string]pdf.SourceFacts, occurrences map[string]pdf.OccurrenceFacts, fit *job.Size, predict bool) []diag.Diagnostic {
+func resolvePolicies(layout packet.Layout, facts map[string]pdf.SourceFacts, occurrences map[string]pdf.OccurrenceFacts, fit *packet.Size, predict bool) []diag.Diagnostic {
 	ds := pdf.CheckCompatibility(layout, facts, occurrences, fit).Diagnostics
 	names := map[string]bool{}
 	for i, p := range layout.Parts {

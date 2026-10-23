@@ -7,15 +7,15 @@ import (
 	"context"
 	"errors"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/inputfile"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/result"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
-func loadFonts(c context.Context, j job.Job) (map[string]*typeset.Font, []diag.Diagnostic) {
+func loadFonts(c context.Context, j packet.Job) (map[string]*typeset.Font, []diag.Diagnostic) {
 	r := result.New("")
 	fonts := map[string]*typeset.Font{}
 	var fontOrder []string
@@ -51,7 +51,7 @@ func loadFonts(c context.Context, j job.Job) (map[string]*typeset.Font, []diag.D
 			}
 		}
 	}
-	leaves, sections := job.Declarations(j)
+	leaves, sections := packet.Declarations(j)
 	for _, p := range leaves {
 		if p.Page != nil {
 			register(p.Page.Text.Font, p.Page.Text.Value, p.Page.Origins["value"], p.Page.Origins["font"], p.Pointer)
@@ -77,7 +77,7 @@ func loadFonts(c context.Context, j job.Job) (map[string]*typeset.Font, []diag.D
 			font, err = typeset.LoadDefaultFont()
 		} else {
 			var data []byte
-			data, err = inputfile.Read(c, name, 0)
+			data, err = files.Read(c, name, 0)
 			if err != nil {
 				d := ioDiagnostic("font_unreadable", err, name)
 				d.Items = fontItems[name]

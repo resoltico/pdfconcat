@@ -4,9 +4,9 @@
 package core
 
 import (
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 type (
@@ -37,11 +37,11 @@ type (
 	// Part is the complete factual contract exposed by core.
 	Part = result.Part
 	// Size is the complete factual contract exposed by core.
-	Size = job.Size
+	Size = packet.Size
 	// PageNumbers is the complete factual contract exposed by core.
-	PageNumbers = job.PageNumbers
+	PageNumbers = packet.PageNumbers
 	// FieldRename is the complete factual contract exposed by core.
-	FieldRename = job.FieldRename
+	FieldRename = packet.FieldRename
 	// VersionInfo is the complete factual contract exposed by core.
 	VersionInfo = result.Version
 )

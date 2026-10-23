@@ -7,21 +7,21 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/result"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 type compositionOutcome struct {
-	layout job.Layout
+	layout packet.Layout
 	pages  map[int][]pdf.Page
 	result result.Result
 }
 
-func compose(c context.Context, j job.Job, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
+func compose(c context.Context, j packet.Job, prepared preparationOutcome, r result.Result, operation Operation) compositionOutcome {
 	fonts, facts, occurrences, domain := prepared.fonts, prepared.facts, prepared.occurrences, prepared.domain
-	leaves, _ := job.Declarations(j)
+	leaves, _ := packet.Declarations(j)
 	for i, leaf := range leaves {
 		if f, ok := facts[leaf.Source]; leaf.Kind == "source" && ok {
 			r.Parts[i].SHA256 = fmt.Sprintf("%x", f.SHA256)
@@ -43,7 +43,7 @@ func compose(c context.Context, j job.Job, prepared preparationOutcome, r result
 	if contents != nil {
 		contentsCount = len(contents.pages)
 	}
-	layout, ds := job.Resolve(j, domain, contentsCount)
+	layout, ds := packet.Resolve(j, domain, contentsCount)
 	r.Diagnostics = append(r.Diagnostics, ds...)
 	r.Diagnostics = append(r.Diagnostics, resolvePolicies(layout, facts, occurrences, j.FitTo, operation == Check)...)
 	if hasErrors(r.Diagnostics) {

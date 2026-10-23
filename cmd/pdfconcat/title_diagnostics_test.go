@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core"
 )
 
 func titlePlan(t *testing.T, sections int, contents, dividers bool, font string) string {
@@ -72,7 +72,7 @@ func TestPaintedTitleDiagnosticsRetainDeclarationAndConsumers(t *testing.T) {
 				t.Fatal(err)
 			}
 			validateResult(t, data)
-			var full result.Result
+			var full core.Result
 			if err = json.Unmarshal(data, &full); err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +96,7 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, data)
-	var full result.Result
+	var full core.Result
 	if err = json.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestBookmarkOnlyTitleDoesNotRequireGlyphValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, data)
-	var full result.Result
+	var full core.Result
 	if err = json.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
 	}

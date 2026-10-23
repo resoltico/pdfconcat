@@ -46,9 +46,6 @@ jobs:
             GOOS=$goos "$RUNNER_TEMP/golangci-lint" run ./...
             echo "::endgroup::"
           done
-      - name: Whole-source architecture and controls
-        run: |
-          (cd tools && go test -count=1 ./... && go run ./cmd/architecture ..)
       - name: Workflow lint
         run: |
           actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)

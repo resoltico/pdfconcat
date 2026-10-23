@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/cli"
-	"github.com/resoltico/pdfconcat/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core"
 )
 
 func TestInterleavedOperandsAndDelimiter(t *testing.T) {
@@ -35,7 +35,7 @@ func TestInterleavedOperandsAndDelimiter(t *testing.T) {
 func TestUsageDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
-		code diag.Code
+		code core.Code
 	}{
 		{[]string{"other"}, "usage_unknown_command"}, {[]string{"report"}, "usage_unknown_command"},
 		{[]string{"build", "--jobs", "2"}, "usage_unknown_option"}, {[]string{"build", "--progress"}, "usage_unknown_option"},
@@ -86,7 +86,7 @@ func TestUsageErrorFormatAndFirstFailure(t *testing.T) {
 	for _, tc := range []struct {
 		args   []string
 		format string
-		code   diag.Code
+		code   core.Code
 		item   string
 	}{
 		{[]string{"check", "--bad", "--format", "text"}, "text", "usage_unknown_option", "argv:1"},

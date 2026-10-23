@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/inputfile"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/plan"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/plan"
 )
 
 // PlanDocument retains original declaration bytes and physical input reservations.
@@ -41,7 +41,7 @@ func (d PlanDocument) ReplaceJSON(data []byte) (PlanDocument, []Diagnostic) {
 
 // DecodePlan validates declarations without reading physical fonts or sources.
 func DecodePlan(data []byte, label, absoluteBaseDir string) (PlanDocument, []Diagnostic) {
-	if !metadata(label) || !metadata(absoluteBaseDir) || !filepath.IsAbs(absoluteBaseDir) || job.ValidatePath(absoluteBaseDir) != nil {
+	if !metadata(label) || !metadata(absoluteBaseDir) || !filepath.IsAbs(absoluteBaseDir) || packet.ValidatePath(absoluteBaseDir) != nil {
 		return PlanDocument{}, invalidRequest("").Diagnostics
 	}
 	j, ds := plan.Decode(data, label, absoluteBaseDir)
@@ -53,7 +53,7 @@ func DecodePlan(data []byte, label, absoluteBaseDir string) (PlanDocument, []Dia
 
 // ReadPlan acquires and statically validates a declaration, retaining physical origin.
 func ReadPlan(c context.Context, source PlanSource, workingDir string) (PlanDocument, []Diagnostic) {
-	if !validSource(source) || !metadata(workingDir) || !filepath.IsAbs(workingDir) || job.ValidatePath(workingDir) != nil {
+	if !validSource(source) || !metadata(workingDir) || !filepath.IsAbs(workingDir) || packet.ValidatePath(workingDir) != nil {
 		return PlanDocument{}, invalidRequest("").Diagnostics
 	}
 	data, label, base, origin, ds := acquirePlan(c, source, workingDir)
@@ -71,11 +71,11 @@ func acquirePlan(c context.Context, s PlanSource, cwd string) (data []byte, labe
 	label = s.label
 	var err error
 	if s.kind == 1 {
-		origin, err = job.Path(cwd, s.path)
+		origin, err = packet.Path(cwd, s.path)
 		label = origin
 		base = filepath.Dir(origin)
 	} else if s.base != "" {
-		base, err = job.Path(cwd, s.base)
+		base, err = packet.Path(cwd, s.base)
 	}
 	if err != nil {
 		return nil, label, base, origin, []Diagnostic{diag.New("path_invalid", err.Error())}
@@ -83,7 +83,7 @@ func acquirePlan(c context.Context, s PlanSource, cwd string) (data []byte, labe
 	if err = c.Err(); err == nil {
 		switch s.kind {
 		case 1:
-			data, err = inputfile.Read(c, origin, plan.MaxBytes)
+			data, err = files.Read(c, origin, plan.MaxBytes)
 		case 2:
 			data = slices.Clone(s.data)
 		case 3:
@@ -96,17 +96,17 @@ func acquirePlan(c context.Context, s PlanSource, cwd string) (data []byte, labe
 	case c.Err() != nil:
 		err = c.Err()
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
-	case len(data) > plan.MaxBytes || errors.Is(err, inputfile.ErrTooLarge):
+	case len(data) > plan.MaxBytes || errors.Is(err, files.ErrTooLarge):
 		code = "plan_too_large"
-		err = inputfile.ErrTooLarge
+		err = files.ErrTooLarge
 	}
 	if err != nil {
 		return nil, label, base, origin, []Diagnostic{ioDiagnostic(code, err, label)}
 	}
 	return data, label, base, origin, nil
 }
-func inputPaths(j job.Job) []string {
-	leaves, _ := job.Declarations(j)
+func inputPaths(j packet.Job) []string {
+	leaves, _ := packet.Declarations(j)
 	var paths []string
 	for _, leaf := range leaves {
 		if leaf.Kind == "source" {

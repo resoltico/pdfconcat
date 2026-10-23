@@ -9,22 +9,22 @@ import (
 	"encoding/hex"
 	"io"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/publication"
-	"github.com/resoltico/pdfconcat/internal/result"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 // build owns the complete staging lifecycle, including abort on every failure.
 type buildOutcome struct {
 	output      result.Output
-	renames     map[int][]job.FieldRename
+	renames     map[int][]packet.FieldRename
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j job.Job, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
+func build(c context.Context, j packet.Job, prepared preparationOutcome, composition compositionOutcome, overwrite bool) buildOutcome {
 	out := buildOutcome{output: result.Output{Path: j.Output}}
 	layout, pages, facts, occurrences, fonts := composition.layout, composition.pages, prepared.facts, prepared.occurrences, prepared.fonts
 	placements := placedTexts(pages)
@@ -50,7 +50,7 @@ func build(c context.Context, j job.Job, prepared preparationOutcome, compositio
 		out.diagnostics = append(out.diagnostics, diag.New("interrupted", err.Error()))
 		return out
 	}
-	staged, err := publication.Create(j.Output)
+	staged, err := files.Create(j.Output)
 	if err != nil {
 		out.diagnostics = append(out.diagnostics, ioDiagnostic("output_write_failed", err, j.Output))
 		return out

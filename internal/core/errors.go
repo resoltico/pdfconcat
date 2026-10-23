@@ -6,8 +6,8 @@ package core
 import (
 	"errors"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 func textDiagnostic(err error, item string) diag.Diagnostic {

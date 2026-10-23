@@ -265,7 +265,7 @@ func TestSeparateCoreClientRichParity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	font, err := os.ReadFile("../typeset/fontdata/NotoSans-Regular.ttf")
+	font, err := os.ReadFile("internal/typeset/fontdata/NotoSans-Regular.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}

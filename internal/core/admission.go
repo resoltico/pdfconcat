@@ -7,17 +7,17 @@ import (
 	"context"
 	"strings"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/plan"
-	"github.com/resoltico/pdfconcat/internal/publication"
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/plan"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 // admissionOutcome retains known physical roles even if declaration acquisition fails.
 type admissionOutcome struct {
-	job           job.Job
-	roles         publication.Files
+	job           packet.Job
+	roles         files.Files
 	result        result.Result
 	reportRefused bool
 }
@@ -25,12 +25,12 @@ type admissionOutcome struct {
 func admit(c context.Context, request Request) admissionOutcome {
 	o := request.options
 	input := request.input
-	a := admissionOutcome{roles: publication.Files{Overwrite: o.Overwrite}, result: result.New(string(request.operation))}
+	a := admissionOutcome{roles: files.Files{Overwrite: o.Overwrite}, result: result.New(string(request.operation))}
 	// Reservations must precede cancellation and acquisition failures.
 	switch input.kind {
 	case 1:
 		if input.source.kind == 1 {
-			if path, err := job.Path(o.WorkingDir, input.source.path); err == nil {
+			if path, err := packet.Path(o.WorkingDir, input.source.path); err == nil {
 				a.roles.Inputs = append(a.roles.Inputs, path)
 			}
 		}
@@ -42,14 +42,14 @@ func admit(c context.Context, request Request) admissionOutcome {
 	case 3:
 		for _, item := range input.items {
 			if item.kind == 1 {
-				if path, err := job.Path(o.WorkingDir, item.path); err == nil {
+				if path, err := packet.Path(o.WorkingDir, item.path); err == nil {
 					a.roles.Inputs = append(a.roles.Inputs, path)
 				}
 			}
 		}
 	}
 	if o.Report != "" {
-		path, err := job.Path(o.WorkingDir, o.Report)
+		path, err := packet.Path(o.WorkingDir, o.Report)
 		if err != nil {
 			a.result.Diagnostics = append(a.result.Diagnostics, diag.New("path_invalid", err.Error()))
 			return a
@@ -58,7 +58,7 @@ func admit(c context.Context, request Request) admissionOutcome {
 		a.result.Report = &result.Report{Path: path}
 	}
 	if o.Output != "" {
-		path, err := job.Path(o.WorkingDir, o.Output)
+		path, err := packet.Path(o.WorkingDir, o.Output)
 		if err != nil {
 			a.result.Diagnostics = append(a.result.Diagnostics, diag.New("path_invalid", err.Error()))
 			return a
@@ -108,7 +108,7 @@ func admit(c context.Context, request Request) admissionOutcome {
 	}
 	a.result.FitTo = a.job.FitTo
 	a.result.PageNumbers = a.job.PageNumbers
-	leaves, sections := job.Declarations(a.job)
+	leaves, sections := packet.Declarations(a.job)
 	a.result.Pages = &result.Pages{}
 	a.result.Sections = reportSections(sections, false)
 	for _, leaf := range leaves {

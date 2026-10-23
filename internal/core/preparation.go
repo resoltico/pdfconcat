@@ -6,31 +6,31 @@ package core
 import (
 	"context"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/inputfile"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 type preparationOutcome struct {
 	fonts       map[string]*typeset.Font
 	facts       map[string]pdf.SourceFacts
 	occurrences map[string]pdf.OccurrenceFacts
-	domain      map[string]job.SourceFacts
+	domain      map[string]packet.SourceFacts
 	diagnostics []diag.Diagnostic
 }
 
-func prepare(c context.Context, j job.Job) preparationOutcome {
+func prepare(c context.Context, j packet.Job) preparationOutcome {
 	fonts, ds := loadFonts(c, j)
 	if hasErrors(ds) {
 		return preparationOutcome{fonts: fonts, diagnostics: ds}
 	}
 	facts := map[string]pdf.SourceFacts{}
 	occurrences := map[string]pdf.OccurrenceFacts{}
-	domain := map[string]job.SourceFacts{}
+	domain := map[string]packet.SourceFacts{}
 	for _, use := range sourceUses(j) {
-		data, err := inputfile.Read(c, use.path, 0)
+		data, err := files.Read(c, use.path, 0)
 		if err != nil {
 			d := ioDiagnostic("source_unreadable", err, use.path)
 			d.Items = use.items
@@ -63,10 +63,10 @@ type sourceUse struct {
 	requests []pdf.SelectionRequest
 }
 
-func sourceUses(j job.Job) []sourceUse {
+func sourceUses(j packet.Job) []sourceUse {
 	var uses []sourceUse
 	index := map[string]int{}
-	leaves, _ := job.Declarations(j)
+	leaves, _ := packet.Declarations(j)
 	for _, p := range leaves {
 		if p.Kind != "source" {
 			continue

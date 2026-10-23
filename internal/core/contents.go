@@ -8,10 +8,10 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/typeset"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
+	"github.com/resoltico/pdfconcat/internal/core/internal/typeset"
 )
 
 type contentsRow struct {
@@ -29,14 +29,14 @@ type contentsLayout struct {
 
 // prepareContents wraps titles with a conservative fixed digit column, before
 // any parity or section target is known. There is no pagination fixed point.
-func prepareContents(c context.Context, j job.Job, facts map[string]job.SourceFacts, fonts map[string]*typeset.Font) (*contentsLayout, []diag.Diagnostic) {
-	leaves, sections := job.Declarations(j)
-	var contents *job.ContentsStyle
+func prepareContents(c context.Context, j packet.Job, facts map[string]packet.SourceFacts, fonts map[string]*typeset.Font) (*contentsLayout, []diag.Diagnostic) {
+	leaves, sections := packet.Declarations(j)
+	var contents *packet.ContentsStyle
 	pointer := ""
 	bound := int64(0)
 	addBound := func(n int64) {
-		if n > job.MaxPageIndex-bound {
-			bound = job.MaxPageIndex
+		if n > packet.MaxPageIndex-bound {
+			bound = packet.MaxPageIndex
 		} else {
 			bound += n
 		}
@@ -56,8 +56,8 @@ func prepareContents(c context.Context, j job.Job, facts map[string]job.SourceFa
 		return nil, nil
 	}
 	addBound(int64(len(sections)))
-	var boundaries func([]job.Part)
-	boundaries = func(parts []job.Part) {
+	var boundaries func([]packet.Part)
+	boundaries = func(parts []packet.Part) {
 		for _, p := range parts {
 			if p.StartOn == "odd" {
 				addBound(1)
@@ -73,8 +73,8 @@ func prepareContents(c context.Context, j job.Job, facts map[string]job.SourceFa
 		return fail("Contents requires at least one authored section.", pointer)
 	}
 	size := contents.Size
-	if size == (job.Size{}) {
-		size, _ = job.ParseSize("A4", false)
+	if size == (packet.Size{}) {
+		size, _ = packet.ParseSize("A4", false)
 		if j.FitTo != nil {
 			size = *j.FitTo
 		}
@@ -187,7 +187,7 @@ func prepareContents(c context.Context, j job.Job, facts map[string]job.SourceFa
 	return layout, nil
 }
 
-func (contents *contentsLayout) finish(layout job.Layout, pages map[int][]pdf.Page) []diag.Diagnostic {
+func (contents *contentsLayout) finish(layout packet.Layout, pages map[int][]pdf.Page) []diag.Diagnostic {
 	targets := map[string]int64{}
 	for _, section := range layout.Sections {
 		targets[section.Item] = section.Target

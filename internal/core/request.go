@@ -14,9 +14,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/resoltico/pdfconcat/internal/diag"
-	"github.com/resoltico/pdfconcat/internal/job"
-	"github.com/resoltico/pdfconcat/internal/result"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
+	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
 
 // Operation is a supported packet use case.
@@ -61,7 +61,7 @@ type Item struct {
 }
 
 // Sheet is a validated physical sheet size.
-type Sheet struct{ size job.Size }
+type Sheet struct{ size packet.Size }
 
 // Options supplies host-relative paths and optional overrides.
 type Options struct {
@@ -114,25 +114,25 @@ func Blank(reference string) Item { return Item{kind: 2, reference: reference} }
 
 // ParseSheet uses the shared physical paper and dimension grammar.
 func ParseSheet(text string) (Sheet, error) {
-	size, err := job.ParseSize(text, false)
+	size, err := packet.ParseSize(text, false)
 	return Sheet{size: size}, err
 }
 
 // SheetPoints validates explicit physical dimensions.
 func SheetPoints(width, height float64) (Sheet, error) {
-	s := Sheet{size: job.Size{Width: width, Height: height}}
+	s := Sheet{size: packet.Size{Width: width, Height: height}}
 	if !s.valid() {
 		return Sheet{}, errors.New("each page side must be 1–14400 points")
 	}
 	return s, nil
 }
 func (s Sheet) valid() bool {
-	return !math.IsNaN(s.size.Width) && !math.IsNaN(s.size.Height) && s.size.Width >= 1 && s.size.Width <= job.MaxSide && s.size.Height >= 1 && s.size.Height <= job.MaxSide
+	return !math.IsNaN(s.size.Width) && !math.IsNaN(s.size.Height) && s.size.Width >= 1 && s.size.Width <= packet.MaxSide && s.size.Height >= 1 && s.size.Height <= packet.MaxSide
 }
 func metadata(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 func (r Request) valid() bool {
 	o := r.options
-	if r.operation != Check && r.operation != Build || !filepath.IsAbs(o.WorkingDir) || !metadata(o.WorkingDir) || job.ValidatePath(o.WorkingDir) != nil || !metadata(o.Output) || !metadata(o.Report) || o.FitTo != nil && !o.FitTo.valid() {
+	if r.operation != Check && r.operation != Build || !filepath.IsAbs(o.WorkingDir) || !metadata(o.WorkingDir) || packet.ValidatePath(o.WorkingDir) != nil || !metadata(o.Output) || !metadata(o.Report) || o.FitTo != nil && !o.FitTo.valid() {
 		return false
 	}
 	switch r.input.kind {

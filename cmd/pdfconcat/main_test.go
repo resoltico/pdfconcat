@@ -17,19 +17,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
-	"github.com/resoltico/pdfconcat/internal/result"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-func invoke(t *testing.T, args []string, stdin string) (result.Result, int, string) {
+func invoke(t *testing.T, args []string, stdin string) (core.Result, int, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	exit := run(args, strings.NewReader(stdin), &stdout, &stderr)
 	if stderr.Len() > 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
-	var r result.Result
+	var r core.Result
 	if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
 		t.Fatalf("stdout is not exactly one result: %v %q", err, stdout.String())
 	}
@@ -40,7 +40,7 @@ func invoke(t *testing.T, args []string, stdin string) (result.Result, int, stri
 func validateResult(t *testing.T, data []byte) {
 	t.Helper()
 	var document, value any
-	if err := json.Unmarshal(result.Schema, &document); err != nil {
+	if err := json.Unmarshal(resultSchemaBytes(t), &document); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(data, &value); err != nil {
@@ -80,7 +80,7 @@ func TestBuildCheckJSONTextAndReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, data)
-	var full result.Result
+	var full core.Result
 	if err = json.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestBuildBinarySmoke(t *testing.T) {
 	}
 }
 
-func hasDiagnostic(r result.Result, code string) bool {
+func hasDiagnostic(r core.Result, code string) bool {
 	for _, d := range r.Diagnostics {
 		if string(d.Code) == code {
 			return true
@@ -337,7 +337,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 	if exit != 1 || !hasDiagnostic(r, "font_unreadable") || hasDiagnostic(r, "source_unreadable") {
 		t.Fatalf("directory font stage: %+v %d", r, exit)
 	}
-	data, err := os.ReadFile("../../internal/typeset/fontdata/NotoSans-Regular.ttf")
+	data, err := os.ReadFile("../../internal/core/internal/typeset/fontdata/NotoSans-Regular.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, saved)
-	var full result.Result
+	var full core.Result
 	if err = json.Unmarshal(saved, &full); err != nil {
 		t.Fatal(err)
 	}
@@ -465,4 +465,13 @@ func TestTextLegalControlCharacterSourcePath(t *testing.T) {
 	if code != 2 || len(r.Diagnostics) != 1 || r.Diagnostics[0].File != source {
 		t.Fatalf("JSON path changed: %d %+v", code, r)
 	}
+}
+
+func resultSchemaBytes(t *testing.T) []byte {
+	t.Helper()
+	data, err := core.Schema(core.ResultSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

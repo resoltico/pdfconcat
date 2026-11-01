@@ -22,6 +22,9 @@ type (
 	// OverflowPolicy decides what a finding means.
 	OverflowPolicy int
 
+	// WrapPolicy selects ordinary word wrapping or emergency splitting of oversized tokens.
+	WrapPolicy int
+
 	// Params describes one text block on one page. Lengths are points; +x is right and +y is up.
 	Params struct {
 		Text string
@@ -40,6 +43,7 @@ type (
 		Anchor      Anchor
 		Align       Align
 		Overflow    OverflowPolicy
+		Wrap        WrapPolicy
 	}
 
 	// InvalidParamError names a Params field outside its domain.
@@ -161,6 +165,11 @@ const (
 	// OverflowAllow reports findings and succeeds.
 	OverflowAllow OverflowPolicy = 1
 
+	// WrapWord wraps only at ordinary spaces.
+	WrapWord WrapPolicy = 0
+	// WrapEmergency additionally splits oversized tokens at grapheme and shaping-safe boundaries.
+	WrapEmergency WrapPolicy = 1
+
 	// FindingWordTooWide means a line, necessarily a single unbreakable word, is wider than the wrap width.
 	FindingWordTooWide FindingKind = "word-wider-than-box"
 	// FindingOutsidePageHorizontal means the block leaves the page on the left or right.
@@ -246,7 +255,7 @@ func (s *Shaper) Place(font *Font, params Params) (*Placed, error) {
 		lang = language.NewLanguage(params.Language)
 	}
 
-	lines, err := s.wrapParagraphs(font, text, lang, params.WrapWidth*float64(font.upem)/params.Size)
+	lines, err := s.wrapParagraphs(font, text, lang, params.WrapWidth*float64(font.upem)/params.Size, params.Wrap)
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +302,7 @@ func validate(params Params) error {
 			params.LineSpacing > 0 && params.LineSpacing <= MaxLineSpacing,
 		},
 		{"overflow", "error or allow", params.Overflow == OverflowReject || params.Overflow == OverflowAllow},
+		{"wrap", "word or emergency", params.Wrap == WrapWord || params.Wrap == WrapEmergency},
 		{"language", "empty or a BCP-47 tag of letters, digits and hyphens", validLanguage(params.Language)},
 		{"text", fmt.Sprintf("at most %d characters", MaxTextRunes), utf8.RuneCountInString(params.Text) <= MaxTextRunes},
 	}
@@ -323,7 +333,7 @@ func validLanguage(tag string) bool {
 }
 
 // wrapParagraphs splits text at LF (a final LF adds no paragraph), shapes each paragraph and wraps it.
-func (s *Shaper) wrapParagraphs(font *Font, text string, lang language.Language, limit float64) ([]wrappedLine, error) {
+func (s *Shaper) wrapParagraphs(font *Font, text string, lang language.Language, limit float64, policy WrapPolicy) ([]wrappedLine, error) {
 	if text == "" {
 		return nil, nil
 	}
@@ -342,7 +352,11 @@ func (s *Shaper) wrapParagraphs(font *Font, text string, lang language.Language,
 
 		offset += utf8.RuneCountInString(paragraph) + 1
 
-		for _, line := range breakLines(clusters, limit) {
+		broken := breakLines(clusters, limit)
+		if policy == WrapEmergency && limit > 0 {
+			broken = emergencyLines(broken, limit)
+		}
+		for _, line := range broken {
 			lines = append(lines, wrappedLine{clusters: line})
 		}
 

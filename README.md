@@ -41,7 +41,7 @@ checks a source-free blank. Options may interleave with operands; `--` makes
 following arguments literal paths. Text summaries go
 to stdout and diagnostics to stderr. Add `--json` for one machine-readable result.
 
-For a generated divider, save `packet.json` beside the source PDFs:
+For a generated text page, save `packet.json` beside the source PDFs:
 
 ```json
 {
@@ -74,13 +74,46 @@ results, exit codes, reports and overwrite behavior.
 
 ## PDFConcat or the pdfcpu CLI?
 
-| Task | pdfcpu CLI | PDFConcat |
-| --- | --- | --- |
-| Join existing PDFs | `pdfcpu merge packet.pdf first.pdf second.pdf` | `pdfconcat build -o packet.pdf first.pdf second.pdf` |
-| Combine excerpts, sections, dividers, contents and numbering | Coordinate PDF operations in a script | Keep packet choices in one plan |
-| Generate Latvian, Greek or Cyrillic text | Install a suitable font | Use the included Noto Sans |
-| Check layout and track included pages | Validate PDFs and track the script's choices | Check the plan and retain its full report |
-| Split, watermark, encrypt or fill forms | Use the corresponding pdfcpu tools | Use pdfcpu for those editing tasks |
+Both concatenate existing PDFs. Use **pdfcpu** for a straightforward merge when
+you already use its PDF tools, or when you need appending, interleaving, PDF
+streams or general editing. Use **PDFConcat** to assemble a structured packet:
+keep excerpts, sections, title pages, odd starts, linked contents and numbering
+together in one reviewable plan, check its layout, and retain a source-to-output
+report.
+
+● means built-in support; an empty cell means the CLI does not provide that
+capability. The table covers each tool's commands as a whole; pdfcpu can require
+separate commands for selection, generation, merging and numbering.
+
+| Capability | pdfcpu CLI | PDFConcat |
+| --- | :---: | :---: |
+| Concatenate PDFs in the supplied order | ● | ● |
+| Append PDFs directly to an existing output file | ● | |
+| Automatically interleave two PDFs: A1, B1, A2, B2, … | ● | |
+| Read PDF input from stdin and write PDF output to stdout | ● | |
+| Select, repeat or reorder source pages | ● | ● |
+| Keep source pages at their original sizes | ● | ● |
+| Insert blank pages | ● | ● |
+| Preserve imported source bookmarks | ● | ● |
+| Add custom PDF bookmarks | ● | ● |
+| Fit pages to a chosen paper size | ● | ● |
+| Generate text pages from JSON | ● | ● |
+| Add physical page numbers | ● | ● |
+| Describe the complete packet in one JSON assembly plan | | ● |
+| Define nested sections and their title dividers in that plan | | ● |
+| Automatically pad sections to start on odd pages | | ● |
+| Automatically generate linked contents from sections and final page numbers | | ● |
+| Check planned generated-text layout and overflow before writing a PDF | | ● |
+| Report source SHA-256 identities and source-to-output page ranges | | ● |
+| Generate Latin, Greek and Cyrillic text with a bundled font | | ● |
+| Split a PDF into multiple output files in one command | ● | |
+| Apply general text, image or PDF stamps and watermarks | ● | |
+| Encrypt, decrypt and manage PDF passwords | ● | |
+| Fill interactive forms | ● | |
+
+See the [pdfcpu command reference](https://pdfcpu.io/) and
+[PDFConcat plan reference](docs/PLAN.md) for options and limits. PDFConcat's
+`check` predicts assembly; a later build or publication can still fail.
 
 ## Limits
 

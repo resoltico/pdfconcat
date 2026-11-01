@@ -3,7 +3,7 @@ Copyright (c) 2026 Ervins Strauhmanis. Mozilla Public License 2.0;
 see the repository LICENSE. No customer documents or downloaded imagery.
 
 Embedded/generated Noto Sans: Copyright 2022 The Noto Project Authors.
-See internal/typeset/fontdata/OFL.txt and its original Monotype credits.
+See internal/core/internal/typeset/fontdata/OFL.txt and its original Monotype credits.
 The office authoring recipe gives a transient naming-only derivative the family
 Corpus Noto Sans to avoid fallback fonts. Original copyright/OFL remain.
 

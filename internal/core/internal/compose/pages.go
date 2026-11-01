@@ -65,6 +65,9 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 				if style.Text.Overflow.Value == packet.OverflowAllow {
 					params.Overflow = typeset.OverflowAllow
 				}
+				if style.Text.Wrap.Value == packet.WrapEmergency {
+					params.Wrap = typeset.WrapEmergency
+				}
 				value.page.Blocks[0].Text, value.err = shaper.Place(fonts[style.Text.Font.Value], params)
 			}
 			cache[key] = value

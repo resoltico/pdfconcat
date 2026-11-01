@@ -75,6 +75,35 @@ func (v *Align) UnmarshalText(b []byte) error {
 // Values returns the supported wire values.
 func (Align) Values() []string { return slices.Clone(alignValues) }
 
+// Wrap is the generated-text wrapping policy.
+type Wrap string
+
+// Supported Wrap values.
+const (
+	WrapWord      Wrap = "word"
+	WrapEmergency Wrap = "emergency"
+)
+
+var wrapValues = []string{string(WrapWord), string(WrapEmergency)}
+
+// String returns the wire value.
+func (v Wrap) String() string { return string(v) }
+
+// MarshalText encodes a domain value.
+func (v Wrap) MarshalText() ([]byte, error) { return []byte(v), nil }
+
+// UnmarshalText rejects unknown values.
+func (v *Wrap) UnmarshalText(b []byte) error {
+	if !slices.Contains(wrapValues, string(b)) {
+		return fmt.Errorf("unknown Wrap: %q", b)
+	}
+	*v = Wrap(b)
+	return nil
+}
+
+// Values returns the supported wire values.
+func (Wrap) Values() []string { return slices.Clone(wrapValues) }
+
 // Overflow is a closed domain vocabulary.
 type Overflow string
 

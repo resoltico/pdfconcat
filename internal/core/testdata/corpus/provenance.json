@@ -51,7 +51,7 @@
       "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
-        "internal/typeset/fontdata/OFL.txt"
+        "internal/core/internal/typeset/fontdata/OFL.txt"
       ],
       "Admission": {
         "qpdf_check": true,
@@ -104,7 +104,7 @@
       "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
-        "internal/typeset/fontdata/OFL.txt"
+        "internal/core/internal/typeset/fontdata/OFL.txt"
       ],
       "Admission": {
         "qpdf_check": true,
@@ -162,7 +162,7 @@
       "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
-        "internal/typeset/fontdata/OFL.txt"
+        "internal/core/internal/typeset/fontdata/OFL.txt"
       ],
       "Admission": {
         "qpdf_check": true,
@@ -260,7 +260,7 @@
       "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
-        "internal/typeset/fontdata/OFL.txt"
+        "internal/core/internal/typeset/fontdata/OFL.txt"
       ],
       "Admission": {
         "qpdf_check": true,
@@ -335,7 +335,7 @@
       "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
-        "internal/typeset/fontdata/OFL.txt"
+        "internal/core/internal/typeset/fontdata/OFL.txt"
       ],
       "Admission": {
         "qpdf_check": true,
@@ -384,6 +384,6 @@
   "OriginalContentAuthor": "PDFConcat fixture authors",
   "OriginalContentLicense": "MPL-2.0",
   "PrivacyScope": "All final PDF/source metadata and both form revisions reviewed; benign example.invalid links are never followed.",
-  "NotoReuse": "internal/typeset/fontdata/NotoSans-Regular.ttf",
+  "NotoReuse": "internal/core/internal/typeset/fontdata/NotoSans-Regular.ttf",
   "Regeneration": "Explicit reviewed authoring only; no producer/network dependencies in Go tests."
 }

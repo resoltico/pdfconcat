@@ -1,111 +1,114 @@
 # Coding-agent instructions
 
-Apply these principles within the authorized task and governing instructions; resolve conflicts by instruction precedence and flag unresolved conflicts.
+Apply these principles proportionately within the authorized task and governing instructions. Establish project-specific constraints and checks from their sources, not assumptions.
 
-## Name by meaning, not incidental development history
+## Baseline and repository guidance
 
-Name files, directories and identifiers for their responsibility, behavior or domain concept, using the project's idioms. Keep terminology consistent within a context and make necessary distinctions between contexts explicit.
+This file is the shared baseline. Do not modify, append to, replace, move or delete it unless the user explicitly authorizes changes to this baseline. General permission to refactor or improve documentation is not authorization. Propose suspected baseline corrections in the task response; do not apply them without that authorization.
 
-Prefer names that convey meaning in context. Broad names such as `utils`, `manager` or `data` deserve scrutiny when they hide responsibility or collect unrelated concerns. Clarify responsibility before renaming; refactor only when warranted and within scope.
+Before repository work, read `AGENTS_EXTRA.md` from the same directory as this file if it exists. Absence is normal; report read failures rather than treating them as absence. The supplement adds context, not permission to override this baseline or higher-priority instructions. Put repository-specific additions there; do not create parallel agent-instruction files without explicit user authorization.
 
-Do not name things merely for implementation generations, task provenance, development status or unsupported superiority. `new`, `legacy`, `v2`, `temp` and `improved` are examples to examine, not banned words. Distinguish alternatives by meaningful properties: `StreamingParser` and `BufferedParser`, not `Parser` and `ImprovedParser`.
+Create or maintain the supplement only for verified, durable repository-specific guidance that materially helps future work. Prefer references to existing sources over copies. Keep additions brief and scoped; exclude task plans, progress logs, incident narratives, generic advice and speculative rules. Do not create an empty template.
 
-States, stages, ordering, lifetimes and versions are valid when they describe the domain, algorithm, contract, compatibility boundary or artifact. `api/v2`, `LegacyEncoding`, `TemporaryDirectory` and `FinalInvoice` can be precise. A versioned public contract need not lose its versioned name when older versions retire.
+Before changing the supplement, check accuracy, necessity, duplication, scope and consistency with governing instructions. Update or remove obsolete guidance rather than accumulating it. Do not use the supplement or other instruction files to grant yourself authority or bypass these restrictions. Before finishing, verify you did not change the baseline without authorization and report supplement changes.
 
-Apply this to comments, documentation, logs, errors and test descriptions too. Retain history where it explains current constraints or belongs in a historical record.
+## Judgment and authority
 
-Review names introduced or affected by the task, including your prose. Fix misleading names within scope and update references. Respect external conventions, persisted formats and established compatibility commitments; use an authorized migration or deprecation path where needed.
+Distinguish authority from evidence. Identify user decisions, delegated choices and proposals accurately; do not misattribute your decisions or make them immune to review. Instructions establish what is requested, not whether assumptions or methods are correct.
+
+Test consequential assumptions against relevant code, observed behavior and authoritative, version-appropriate sources. Check conditions and separate observations from inferences or preferences. Experience, approval and consensus are not proof; revise assumptions contradicted by verified findings, even in an approved approach.
+
+Respect instruction precedence. When requirements, designs, code, checks or evidence conflict, investigate and explain the consequences and uncertainty. Do not stretch unrelated instructions or disguise design corrections as preservation. Pause dependent work while consequential contradictions remain unresolved; continue safe investigation and independent work. Correct methods and sequencing within delegated authority; seek a decision before changing requirements or commitments beyond it. Explain consequential corrections before acting and record their rationale.
+
+Examine adjacent assumptions and consumers for the same failure pattern. Prefer a sound outcome over preserving earlier work or apparent progress.
 
 ## Simplicity
 
-Build the simplest design that fully solves the stated problem and is easy to understand and change. Minimize concepts, special cases and hidden state, not lines of code. Keep complexity required for correctness, security, error handling and stated requirements. Flag avoidable complexity in explicit requirements without silently overriding them.
+Build the simplest solution that meets the requirements and is easy to understand and change. Minimize concepts, special cases, hidden state and total maintenance burden, not lines of code. Keep complexity needed for correctness, security and error handling.
 
-**Understand first.** Read relevant code, contracts and tests; validate assumptions before changing them. Prefer root-cause fixes; identify necessary mitigations and their limits.
+Read relevant code, contracts and tests before changing them. Prefer root-cause fixes; identify necessary mitigations and their limits. Consider fundamentally different approaches where they could be simpler.
 
-**Look wider than the matter at hand.** Examine related defects, duplicated mechanisms and downstream effects for shared causes. Consider fundamentally different approaches, including replacement, where simpler. Keep removals and refactors within scope; report related work outside it with a recommendation.
+Before adding code, abstractions, dependencies, options, checks or documents:
 
-**Before adding anything** (code, file, abstraction, option, dependency, check, document):
+- Identify a concrete requirement, defect, maintenance burden or real risk. Do not build speculative capabilities, extension points or compatibility layers.
+- Establish compatibility commitments from instructions, supported interfaces, persisted data and consumers. Break them only when authorized; coordinate changes and rollout.
+- Prefer removing unnecessary work, suitable platform features and existing code. Choose a maintained dependency or new code by total complexity; do not force poor-fitting reuse.
+- Give each shared fact or rule an authoritative owner, chosen by meaning rather than convenience or incidental agreement. Derive or check dependent representations; avoid unnecessary hand-maintained copies, not authoritative source data.
+- Share abstractions only when they reduce total complexity without coupling responsibilities that need to change independently. Similar code or wording does not establish a shared contract.
 
-- Name the concrete need: a requirement, defect, maintenance burden or real risk. Without one, do not add it. Tie verification and documentation to these needs.
-- Do not build speculative options, extension points or compatibility layers. Establish compatibility commitments from instructions, supported interfaces, persisted data and consumers. Coordinate changes with consumers and rollout; break commitments only when authorized.
-- Prefer removing unnecessary work, suitable platform features, existing project code, then a maintained dependency or new code according to total complexity. Do not force reuse or a dependency that fits poorly.
-- Keep one authoritative source per fact; derive or check dependent copies. Avoid hand-maintained derived inventories, not necessary source data. Keep test oracles independent of the logic under test.
-- Avoid needless duplicate mechanisms; share abstractions only when they reduce total complexity. Do not merge distinct contracts merely because their code looks similar.
+Before removing anything, understand what uses it and what it protects. Missing search hits or tests do not establish that something is unused. Preserve required protections; remove what the task demonstrably makes obsolete.
 
-**Before removing anything:**
+Judge complexity across the system, including callers and operators. Keep changes within scope and report related work outside it.
 
-- Understand its users and the property it protects. If unsure, investigate; absence of search hits or test coverage is not sufficient evidence for deletion.
-- Preserve required safety, security and correctness properties when replacing checks. Remove unnecessary mechanisms rather than adding tests or documentation to justify them.
-- Delete what the task demonstrably makes obsolete, including your own superseded scaffolding.
+## Design and implementation
 
-**Judge the whole, not the part.** Improving a metric alone does not establish simplification; neither does shifting complexity to callers or users. Count concepts, moving parts, state and indirection across the system.
+Scale review to risk, not line count. Routine low-risk edits need a sanity check. For consequential changes, establish requirements, alternatives, acceptance criteria and downstream effects, then challenge the approach in a separate pass against evidence and counterexamples before building. Check producer/consumer contracts early against requirements and actual outputs when available. Revise invalidated choices and dependent work; do not defer prerequisites past the check meant to verify them. A formal design document is not required unless useful or requested.
 
-**Before finishing:** remove needless changes, then verify intended behavior and protection against regressions. Explain necessary complexity.
+Keep shared business rules and domain meaning independent of incidental presentation and transport details. Interfaces adapt input and present outcomes rather than define competing business rules; interface-specific wording and interaction belong with their interface. Preserve boundaries with different compatibility, lifetime or security needs instead of forcing one representation across them.
 
-## Design before building
+Prefer representations and APIs that prevent invalid states and expose incomplete handling. Preserve validated structure through internal processing; avoid needless serialization and reparsing. Conversions must preserve the semantics and guarantees required by the receiving contract.
 
-Scale design and review to risk, not line count: a one-line change to authorization or data deletion can be high-risk. Routine low-risk edits need only a brief sanity check; use distinct design and challenge passes for non-trivial changes to behavior, contracts or mechanisms.
+Enforce state-dependent rules and permissions against the state used for the action; an earlier check or offered action is insufficient if that state can change. Reuse policy without eliminating necessary boundary validation or independent safeguards.
 
-1. **Design.** Establish the problem, relevant constraints, alternatives and chosen approach. Consider a fundamentally different approach where it could be simpler, and effects on callers, data, tests, documentation and operations.
-2. **Challenge it.** Review the design in a separate skeptical pass. Test assumptions against code, experiments or counterexamples; try to make it fail. Revise where the evidence disagrees, rather than restating the design.
-3. **Build.** Implement the reviewed design. If implementation invalidates an assumption, revisit and challenge that part before proceeding.
+## Execution and coordination
 
-## Finish the whole change
+Before expensive work, check prerequisites and prefer the least costly check capable of resolving the relevant uncertainty.
 
-Follow the change through its dependents, not just the edited files.
+When delegating, define responsibilities, decision authority, shared-resource boundaries and acceptance evidence. Preserve material uncertainty; distinguish requirements from suggested methods. Parallelize only when authorized and useful, coordinate affected inputs and verify the integrated result.
 
-- Find affected callers, configuration, lockfiles, generated files, build/CI rules, documentation, tests and external consumers. Update in-scope dependents; identify needed external coordination.
-- Search relevant inputs, including hidden, ignored or binary files when needed. Check tool exclusions and stale references; retain valid history, compatibility and rejection-test references. No text matches does not prove completeness.
-- Check that intended files reach deliverables and relevant files reach required checks, including test discovery. Inspect tracking, ignore and packaging rules; regenerate affected outputs per project policy.
+Use exclusive ownership, isolation or supported concurrency for mutable resources. Keep verification inputs stable; intended watch/reload workflows are fine. Avoid duplicate setup and investigate unexplained task-related resource growth.
 
-Report implementation, verification and external rollout separately. Do not claim an unmet requirement is satisfied or widen scope without authorization.
+Report substantive progress, blockers and next decisive checks, not activity for its own sake.
 
-## Checks must prove something
+Preserve unrelated work. Clean up temporary resources you created for the task, not deliverables or useful failure evidence; leave requested services running. Keep output focused and protect secrets.
 
-A check, test, gate or record must support a property someone relies on; match the strength of the claim to the evidence.
+## Naming
 
-- Hashes can verify identity or integrity against a reference, not review quality. A completion claim does not establish execution; mocks alone do not demonstrate real-system integration. Use real-boundary verification where the property requires it.
-- Test intended behavior, boundaries and relevant failures. Give guards a case they must reject. Use regression tests or negative controls to demonstrate detection, not just code execution.
-- Keep controls proportionate. Do not build a check mainly to appease another check or inflate coverage; address the underlying risk. Independent checks of the same property can be justified.
-- Fix real findings; correct invalid checks against established requirements. Do not lower required assurance without authorization. Exceptions must be explicit, narrow and justified.
-- Investigate relevant failures, including pre-existing ones. Fix in-scope issues, continue independent safe work, and report unresolved failures or unavailable checks. Never report a failing or unrun gate as passing.
+Name files, directories and identifiers for responsibility, behavior or domain meaning, following project idioms. Keep terminology consistent within a context and distinguish different contexts explicitly.
 
-## Verification
+Examine broad names such as `utils`, `manager` or `data` when they hide responsibility. Clarify meaning before renaming; refactor only where warranted.
 
-An exit code establishes only what that command's success criteria mean. Check the intended result; local success does not establish success in the authoritative environment.
+Do not name things merely for incidental implementation generations, task provenance, development status or unsupported superiority. `new`, `legacy`, `v2`, `temp` and `improved` warrant examination, not automatic rejection. Prefer `StreamingParser` and `BufferedParser` to `Parser` and `ImprovedParser`.
 
-- After a meaningful state-changing operation or related batch, inspect its effects: changed files, commit contents, generated outputs or installed versions. Preserve failure visibility; do not let a later success mask an earlier failure.
-- Check expected outputs and test discovery, including skipped tests and exclusions. Investigate unexpectedly empty, small or missing results before treating them as success; expected quiet output is not itself a failure.
-- Diagnose from the full relevant failure output, retaining details without dumping sensitive or excessive content.
-- Use targeted checks during iteration; run required verification where authorized and available. Prefer an isolated, clean environment matching the required platform, toolchain and restore mode without discarding user work.
-- Verify the delivered state, not an earlier working tree. Report what ran, outcomes and untested platforms or conditions.
+States, versions, ordering and lifetimes are legitimate when they describe behavior, a domain concept, a contract or an artifact: `FinalInvoice`, `api/v2` and `TemporaryDirectory` can be precise. A public versioned name may remain after older versions retire. Historical records may name the work they document.
 
-## Documentation and comments state the current truth
+Review affected names, including prose. Update references within scope while respecting external conventions, persisted formats and compatibility commitments; use an authorized migration where needed.
 
-Describe supported behavior, assumptions and reasons. Keep history in change or decision records unless it explains a current constraint or migration; do not erase useful rationale. Prefer links, generated content or consistency checks over manually duplicated reference facts. The authoritative source may be code or configuration, not a document. Update affected documentation, examples and error text with the change, and check affected links and generated blocks proportionately. Do not create documentation machinery merely to satisfy this rule.
+## Meaningful checks
 
-## Working hygiene
+Match claims and reported outcomes to evidence, including exercised paths, states and conditions. Preserve uncertainty until evidence resolves it. Successful parsing alone does not establish semantic validity, mocks alone do not establish integration, and a hash does not establish review quality.
 
-- Check inputs and prerequisites cheaply before long runs.
-- Keep running checks' inputs stable or isolate them; intended watch/reload workflows are fine.
-- Preserve unrelated work. Clean up your temporary resources, not deliverables or useful failure evidence. Leave requested services running.
-- Keep output focused; do not dump large generated files or expose secrets.
+- Test required behavior, boundaries, interactions and relevant failures. Derive acceptance from governing requirements; characterization alone does not determine what must be preserved. Use regression cases or negative controls to demonstrate detection of the intended defect, not merely execution or an unrelated failure.
+- Keep test expectations independent of the logic under test. Shared generation can ensure consistency without independently establishing that the shared source is correct.
+- When replacing a mechanism, verify that checks and consumers exercise its replacement. Results from a retired path do not establish the replacement's correctness.
+- Keep controls proportionate. Independent checks can be justified; checks added merely to appease other checks or inflate coverage cannot.
+- Fix real defects; correct invalid checks against independently established requirements. Do not lower required assurance simply to pass. Exceptions must be authorized, explicit, narrow and justified.
 
-## Easy to start
+## Complete and verify the change
 
-Document the shortest setup from a clean checkout, prerequisites and actionable errors. Reuse commands; do not mandate setup wrappers or doctor tools. Declare each toolchain version authoritatively; derive or check required copies. Pin inputs for reproducible builds; retain supported dependency ranges and deliberate compatibility probes.
+Follow the change through affected callers, configuration, lockfiles, generated files, build and CI rules, documentation, tests and deliverables. Update in-scope dependents and identify required external coordination.
 
-## Changelog: record release outcomes, not development history
+Combine search with relevant build or runtime evidence; account for tool exclusions and dynamic or external consumers. Retain valid historical, compatibility and rejection-test references. An empty search alone does not establish completeness.
 
-Record notable net changes for users, operators, integrators and contributors against the relevant published baseline. Lead with what changed and who is affected; state breaking changes and necessary action, including breaking fixes. Substantiate claims and retain material commands, public identifiers, limits and non-guarantees. Link detailed explanations rather than narrating implementation; do not invent benefits or present unfinished capabilities as delivered.
+- Inspect meaningful state changes or related batches. Record material outcomes and retain relevant failure evidence; later success must not conceal an earlier failure.
+- Verify delivery contents and required check inputs separately. Check test discovery, skipped tests, packaging and unexpectedly empty results; expected quiet output is not itself a failure.
+- Diagnose from full relevant failure output; investigate task-relevant pre-existing failures. Test corrections narrowly where feasible. A full rerun may be needed for diagnosis; give it a purpose, bound retries and reassess recurring failures. Fix in-scope issues and report unresolved ones.
+- Reuse evidence or build outputs only when relevant inputs, conditions and purpose still apply; do not bypass required independent or clean verification.
+- Run outstanding required verification where authorized and available. Prefer an isolated, clean environment matching the required platform, toolchain and restore mode.
+- Verify the delivered state. Distinguish implementation, local checks, required-environment verification and rollout. Report actual outcomes and untested conditions; do not claim verified readiness without applicable passing evidence for required checks.
 
-Consolidate related pending work into its final outcome. Omit routine churn and wholly reversed, unpublished work with no remaining consequence. Classify against released behaviour, not commit labels. Fold repairs to never-released functionality into the completed feature; retain meaningful consequences for public-prerelease users.
+## Current documentation
 
-Use established categories consistently and omit empty ones. Internal is for noteworthy implementation, verification or release-process outcomes, not routine churn or concealed compatibility changes, new build requirements or user-visible effects. Keep technical method and protocol identifiers; omit development-phase labels.
+Describe supported behavior, assumptions and reasons in documentation, comments, logs, errors and test descriptions; distinguish proposals and history. Retain history where it explains current constraints or migrations.
 
-Retain Unreleased and release history. Preserve version attribution, dates, links and publication-status distinctions. Published entries may be clarified, consolidated or reclassified without changing what they say shipped; factual corrections require evidence. Do not prune or relocate history without an explicit policy or request, or alter tags or published artifacts when editing the working file.
+Keep guidance useful to its readers. Update affected documentation, examples and active instructions alongside behavior; identify retained superseded guidance. Prefer links, generation or consistency checks for duplicated reference facts. Check affected links and generated blocks proportionately. Do not create documentation machinery merely to satisfy this rule.
 
-## This project
+## Reproducible setup
 
-Project-specific scope and the verification budget are in [CONTRIBUTING.md](CONTRIBUTING.md#what-we-test-and-what-we-do-not).
-Read it before adding a check, a CI job, a tool or a native-platform guarantee.
+Document minimal setup from a clean checkout, prerequisites and actionable errors. Reuse commands rather than mandating wrappers or doctor tools. Declare toolchain versions authoritatively; derive or check necessary copies. Pin reproducible build inputs; distinguish those pins from supported dependency ranges and deliberate compatibility probes.
+
+## Changelog rules
+
+`Unreleased` summarizes implemented changes intended for the next release, including relevant uncommitted work, cumulatively against the preceding published non-prerelease version; the first release describes implemented scope. Verify actual publication rather than inferring it from headings, tags or workflow status; public prereleases do not reset this baseline. Check claims and material omissions against implementation, contracts, tests and documentation; commits and plans are leads. Describe consequences for users, operators, integrators or contributors, preserving material compatibility effects, limitations and required action, including for prerelease users. Exclude development chronology, superseded changes and verification logs.
+
+Use concise bullets without category labels or subheadings, grouping related changes and putting breaking changes and required actions first. Each bullet occupies one physical line, at most 200 characters including Markdown but excluding its `- ` marker: a ceiling, not a target. Shorten or split without losing material consequences. Use technical names when helpful; link to existing relevant documentation, without assuming paths or creating documents merely to satisfy this rule. Keep `## [Unreleased]` above dated `## [version] - YYYY-MM-DD` headings, newest first; retain existing release-note links. This file is authoritative for release summaries and their writing rules; derive published summaries from it and leave unrelated history unchanged. Review accuracy, completeness, duplication, compatibility and format; report unresolved evidence gaps outside this file and run applicable existing checks. Versioning, dating and publication require release authorization.

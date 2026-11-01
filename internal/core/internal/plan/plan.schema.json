@@ -345,6 +345,13 @@
               "maximum": 10,
               "description": "Baseline distance as a multiple of the font size. Default 1.2."
             },
+            "wrap": {
+              "enum": [
+                "word",
+                "emergency"
+              ],
+              "description": "Default word. Emergency additionally splits oversized tokens at safe grapheme and shaping boundaries."
+            },
             "overflow": {
               "enum": [
                 "error",

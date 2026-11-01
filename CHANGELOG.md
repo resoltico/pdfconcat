@@ -1,13 +1,13 @@
 # Changelog
 
-Notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [Unreleased]
+
+## [0.6.0] - 2026-11-01
 
 - Consumers using `text.wrap` need a binary whose plan v4 schema includes it; 0.5.0 rejects the field. PDF extraction may include visual line breaks; canonical metadata stays caller-owned.
 - Generated pages and title dividers support opt-in `text.wrap: "emergency"` for long tokens; safe grapheme/shaping boundaries preserve text, and genuine overflow still fails by default.
 - Updated pdfcpu to 0.16.4 with security fixes, including cumulative stream decoding limits; oversized or pathological PDFs may now be refused.
-- Updated compatible development dependencies and GoReleaser to 2.19.0; the Go requirement remains 1.27.3.
+- Updated compatible development dependencies and GoReleaser to 2.19.0.
 
 ## [0.5.0] - 2026-10-23
 

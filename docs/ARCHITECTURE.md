@@ -37,7 +37,7 @@ packet  -> diag
 compose -> packet, typeset, diag
 pdf     -> packet, compose, typeset, files, diag
 files   -> diag
-typeset -> external font libraries
+typeset -> external font and Unicode libraries
 diag    -> standard library
 ```
 
@@ -105,5 +105,9 @@ assembly remain sequential.
 
 The compose package owns measured geometry. One Footer digit measurement serves
 contents exclusion, pre-assembly checks, font preparation and PDF painting.
+The typesetter owns wrapping policy. Emergency wrapping intersects Unicode
+grapheme boundaries with the shaper's safe cluster boundaries, retaining shaped
+glyphs rather than reshaping or inserting source characters. It preserves the
+ordinary wrapping pass and leaves indivisible runs to the same overflow checks.
 The PDF adapter owns source graphs, per-occurrence navigation and final PDF
 validation. See [PDF policy](PDF-POLICY.md) for its fidelity and resource limits.

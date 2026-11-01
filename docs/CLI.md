@@ -26,8 +26,7 @@ including the command but excluding the executable.
 | `--help`, `-h` | Help |
 
 Values accept `--option=value` or separate arguments. Each ordinary option is
-single-use; repeated `--blank` operands are allowed. There is no progress output,
-worker-count option, report-query command or inline-plan JSON option.
+single-use; repeated `--blank` operands are allowed.
 
 A separate required value cannot be a recognized option token (including
 `--blank`); an omitted value is refused before input or report I/O. To name a

@@ -195,6 +195,7 @@ a fill; `value: ""` clears text. Empty text still validates its selected font.
 | `text.width` | Page width minus 72 pt | Length, 1–14,400 pt |
 | `text.align` | `center` | `left`, `center`, `right`, `justify` |
 | `text.leading` | 1.2 | Baseline distance / font size, 1–10 |
+| `text.wrap` | `word` | `word`, `emergency` |
 | `text.overflow` | `error` | `error`, `allow` |
 
 `inherit` uses the last page of the nearest preceding selected source. Leading
@@ -241,11 +242,44 @@ can overflow even when its text looks short; give an appropriate width.
 }
 ```
 
-Wrapping is greedy at U+0020. Leading paragraph spaces and internal space runs
-are retained; spaces consumed by a wrap disappear at that break. Trailing spaces
-have no measured line width and are not justified. NBSP and other accepted spaces
-are glyphs, not break opportunities. Justification stretches interior ordinary
-spaces on wrapped lines, except the last line of a paragraph.
+Default `wrap: "word"` wrapping is greedy at U+0020. Leading paragraph spaces and
+internal space runs are retained; spaces consumed by a wrap disappear at that
+break. Trailing spaces have no measured line width and are not justified. NBSP
+and other accepted spaces are glyphs, not break opportunities. Justification
+stretches interior ordinary spaces on wrapped lines, except the last line of a
+paragraph.
+
+For long paths and identifiers, set `text.wrap` to `emergency`. Ordinary wrapping
+runs first; oversized tokens are then split into fitting fragments, without
+repacking following words into the last fragment. Breaks preserve extended
+graphemes, ligatures and shaping dependencies such as kerning. An indivisible
+shaping run can still be too wide. Leading indentation stays on the first
+fragment and trailing spaces on the last; indentation can still cause overflow.
+In this opt-in mode even tokens containing NBSP can split at safe boundaries.
+No hyphens or other characters are inserted, and letters/marks are not normalized.
+PDF extraction can introduce visual line breaks; uninterrupted copy-and-paste
+across wraps is not guaranteed. Keep canonical identifiers and paths in the
+caller's authoritative metadata.
+
+Generated pages and title dividers inherit the policy from `page_defaults`; an
+explicit `wrap: "word"` overrides it with ordinary wrapping. It does not change
+contents or footer layout. For example, a generated page can declare:
+
+```json
+{
+  "version": 4,
+  "items": [{ "page": {
+    "size": "A4",
+    "text": {
+      "value": "originals/data/Supporting/A11111111111111111111111111111111111111111111111/original/résumé.txt",
+      "size": 11, "wrap": "emergency"
+    }
+  }}]
+}
+```
+
+Consumers remain responsible for metadata wording, cover organization and
+handling genuine layout refusals.
 
 CRLF, CR and LF are line breaks. One final line break adds nothing; adjacent
 breaks create an empty line. Letters/marks are not normalized. TAB, other controls,
@@ -254,11 +288,12 @@ refused. Supported scripts are left-to-right Latin, Greek, Cyrillic and suitable
 Common/Inherited characters. RTL/complex scripts are refused even if a font has
 their glyphs. Missing glyph sequences are errors.
 
-Default overflow refuses a word wider than the block or logical/ink bounds past
-a page edge. `allow` places measured overflow and warns; it does not shrink,
-truncate or normalize text. Empty text has no text geometry; whitespace can have
-logical bounds without ink. A nonempty value on a page whose default margins
-leave width below 1 pt is refused even with `allow`; specify a valid explicit
+Default overflow refuses an unsplittable word or fragment wider than the block,
+or logical/ink bounds past a page edge. `allow` places measured overflow and
+warns; it does not shrink, truncate or normalize text. Empty text has no text
+geometry; whitespace can have logical bounds without ink. A nonempty value on a
+page whose default margins leave width below 1 pt is refused even with `allow`;
+specify a valid explicit
 width or a wider page. Explicit authored sizes are laid out before fitting.
 
 ## Fonts

@@ -1,12 +1,16 @@
 # Command line and result v5
 
 ```text
-pdfconcat build [options] (--plan FILE|- | PDF... [--blank]...)
-pdfconcat check [options] (--plan FILE|- | PDF... [--blank]...)
+pdfconcat build [options] (--plan FILE|- | ITEM...)
+pdfconcat check [options] (--plan FILE|- | ITEM...)
 pdfconcat schema plan|result
 pdfconcat version [--json]
 pdfconcat help [COMMAND]
 ```
+
+Each `ITEM` is a PDF path or `--blank`. Items retain their supplied order and may
+contain only blanks when `--fit-to` supplies their size. A plan cannot be combined
+with these direct items.
 
 `COMMAND --help`, `-h`, root `--help` and `--version` are also accepted. Help is
 plain text. Options interleave with operands; `--` ends option parsing. A path
@@ -56,8 +60,8 @@ See [PDF policy](PDF-POLICY.md#forms-fitting-and-catalog) for fitting refusals,
 forms, destination handling and the effective output version.
 
 Sections, dividers, contents, odd starts and page numbers are declared in
-[PLAN](PLAN.md). The [composition example](../examples/plans/packet-composition.json)
-combines them in one packet.
+[PLAN](PLAN.md). Its [examples index](PLAN.md#examples) lists ready-to-adapt plans
+and their required inputs, including a plan that needs no source PDFs.
 
 `--plan -` reads standard input with the plan byte limit. A read failure or
 cancellation during acquisition returns `plan_unreadable` or `interrupted`
@@ -147,8 +151,11 @@ use `report_exists`, `report_not_regular`, `report_is_input` or
 Existing inputs and the output are protected by file identity. Missing inputs are protected only by cleaned path spelling; reports are rechecked after PDF publication.
 
 Output/report files use ordinary umask permissions; replacements keep the old
-mode. Publication uses a sibling temp, sync, no-replace rename (link fallback
-when needed), and Unix directory sync. A trailing sync or temp-cleanup failure
+mode. Publication writes and syncs a sibling temporary file first. Without
+`--overwrite`, it uses a no-replace rename, with a link fallback when necessary.
+With `--overwrite`, it uses a replacing rename, except that a report whose plan
+inputs are unknown still uses no-replace. On Unix it then syncs the containing
+directory. A trailing sync or temp-cleanup failure
 can coexist with `output.published: true` or `report.written: true`. A report
 failure never rolls back the PDF. The saved report cannot predict its own late
 failure; the final CLI result is authoritative for that outcome. There are no recovery
@@ -205,15 +212,32 @@ Source parts include full-input `input_pages`, hash/byte count, emitted `pages`
 and compact `spans` such as `{"source":[2,4],"output":[10,12]}`. Unknown source mappings and non-source parts use `spans: null`; known source mappings are nonempty arrays. Divider parts
 reference their section; padding records `reason: odd_start` and `before_item`.
 Complete leaf ranges partition physical pages 1..N once. Nested section ranges
-may overlap. Before resolution, emitted counts/spans/ranges and section targets
-stay null; no padding is predicted in a failed layout. A nonnull total means the
-physical sequence is complete.
+may overlap. Until the physical page sequence has been resolved, emitted
+counts/spans/ranges and section targets stay null, and no padding is predicted.
+A later text-layout or build failure can retain a complete predicted sequence.
+A nonnull total means the physical sequence is known; it does not establish
+successful PDF publication.
 
 Source parts include path, known byte hash/length and actual
 `fields_renamed` records. Readable refused sources retain byte facts; unestablished
-page counts/ranges remain null. Generated parts include authored size, count,
-text block/ink bounds and overflow when known. Under fitting, the sheet is top-
-level `fit_to`; generated size/text describe the authored layout.
+page counts/ranges remain null. Page items and dividers include `count` and, when
+known, authored `size` and measured `text`. Contents and padding parts include
+their generated size but no text-layout object. Under fitting, the final sheet
+is top-level `fit_to`; generated size/text describe the authored layout.
+
+Text `bounds` and `ink_bounds` are `[left, bottom, right, top]` in points
+(1/72 inch), measured from the lower-left corner of the authored page before
+fitting. `bounds` encloses the logical text block; `ink_bounds` encloses its
+painted glyphs. For example, `bounds: [10, 20, 70, 50]` describes a block 60 pt
+wide and 30 pt high, starting 10 pt from the left edge and 20 pt from the bottom.
+It does not describe a width of 70 pt or a height of 50 pt, and fitting to a
+different sheet does not convert these reported coordinates.
+
+`text` is null when no generated-text layout is available, including empty text,
+an unresolved layout, and source, contents or padding parts. A measured
+whitespace-only block can have logical bounds and `ink_bounds: null` because it
+paints no glyphs. `font_size` is in points; `font` is `default` for bundled Noto
+Sans or the resolved path of the selected font file.
 
 Ranges are inclusive and 1-based. Check ranges and rename warnings are predictions.
 Only build records actual field-name mappings. The backend may namespace a later
@@ -324,9 +348,9 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 | `text_glyph_missing` | error | invalid | the font cannot render a character sequence |
 | `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
 | `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
-| `usage_conflict` | error | invalid | `--plan` with PDF operands; `--base-dir` without `--plan -`; repeated single-use option |
+| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
 | `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
-| `usage_missing_input` | error | invalid | neither `--plan` nor PDF operands |
+| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 | `usage_missing_output` | error | invalid | `build` without `-o` and without plan `output` |
 | `usage_missing_value` | error | invalid | option needs a value |
 | `usage_unknown_command` | error | invalid | first argument is not a command |

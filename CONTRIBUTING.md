@@ -1,6 +1,21 @@
 # Contributing
 
-Use Go at the version declared in `go.mod`. From a clean checkout:
+For commands and packet plans, start with the [README](README.md). This guide
+covers development from a source checkout; binary release archives do not contain
+the test sources or corpus.
+
+- [Build and ordinary tests](#build-and-ordinary-tests)
+- [Stock tools](#stock-tools)
+- [Test scope](#what-we-test-and-what-we-do-not)
+- [Corpus investigations and regeneration](#permanent-corpus)
+- [Optional scale measurements](#scale)
+- [Release procedure](#release)
+
+## Build and ordinary tests
+
+Use Go at the version declared in [go.mod](go.mod). Shell snippets use bash/zsh;
+adapt environment assignments and paths when using another shell. From a clean
+checkout:
 
 ```sh
 go build -o bin/pdfconcat ./cmd/pdfconcat
@@ -88,7 +103,11 @@ Frozen, fictional producer exports, authored sources and font notices live in
 case tables are in `internal/core/corpus*_test.go`; no producer or network access
 is needed by tests. This is finite pairwise/higher-order capability coverage,
 not exhaustive arbitrary PDF permutations. Binary archives do not include the
-source-only corpus; these commands and paths refer to a source checkout.
+source-only corpus; these commands and paths refer to a source checkout. See the
+[corpus guide](https://github.com/resoltico/pdfconcat/blob/main/internal/core/testdata/corpus/README.md)
+for asset provenance and producer recipes.
+
+### Retain investigation output
 
 Use an unused absolute output directory outside the checkout for retention:
 
@@ -100,6 +119,8 @@ PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -r
 
 The large scale and staged-build workloads are opt-in; ordinary tests and CI
 exclude them.
+
+### Read retained output and signal checks
 
 `t.ArtifactDir` provides actual unique case paths; child directories are siblings,
 not children of the suite directory. Derived matrices record those paths. Each
@@ -113,9 +134,14 @@ opt-in staging test observes an owned stage before signaling and verifies cleanu
 Scale profiles have no timing threshold. Existing unit/context tests remain
 supporting checks, not substitutes for real signal boundaries.
 
-Regeneration is reviewed authoring, not CI setup. Inspect every source page,
+### Regenerate source assets
+
+Follow the corpus guide's recipes in fresh paths outside the checkout. Regeneration
+is reviewed authoring, not CI setup. Inspect every source page,
 metadata/action/attachment content and prior form revision, retain complete font
 notices, and refresh independent facts/hashes only after visual/structural review.
+If an authoring script changes without changing the frozen assets, refresh its
+`AuthoredSourcesSHA256` entry without replacing the reviewed PDF bytes.
 
 ## Scale
 

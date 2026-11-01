@@ -177,7 +177,7 @@ func Parse(args []string) (Command, *core.Result) {
 		return failure("usage_conflict", "--base-dir requires --plan -.", 0)
 	}
 	if c.Plan == "" && len(c.Operands) == 0 {
-		return failure("usage_missing_input", "Give --plan FILE|- or PDF operands.", 0)
+		return failure("usage_missing_input", "Give --plan FILE|- or at least one PDF path or --blank.", 0)
 	}
 	return c, nil
 }
@@ -245,7 +245,8 @@ func Help(command string) string {
 	case "version":
 		b.WriteString("Usage: pdfconcat version [--json]\n")
 	default:
-		fmt.Fprintf(&b, "Usage: pdfconcat %s [options] (--plan FILE|- | PDF... [--blank]...)\n", command)
+		fmt.Fprintf(&b, "Usage: pdfconcat %s [options] (--plan FILE|- | ITEM...)\n", command)
+		b.WriteString("Each ITEM is a PDF path or --blank, in supplied order. Blank-only input needs --fit-to SIZE.\n")
 		b.WriteString("Options may interleave with operands; -- ends options.\n")
 	}
 	for _, o := range options {

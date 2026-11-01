@@ -10,7 +10,7 @@ import argparse
 p=argparse.ArgumentParser();p.add_argument("--output-dir",type=Path,required=True);a=p.parse_args()
 root=a.output_dir;root.mkdir(parents=True,exist_ok=True)
 corpus=Path(__file__).resolve().parents[1]
-pdfmetrics.registerFont(TTFont('FieldNoto',str(corpus.parents[2]/'typeset/fontdata/NotoSans-Regular.ttf')))
+pdfmetrics.registerFont(TTFont('FieldNoto',str(corpus.parents[1]/'internal/typeset/fontdata/NotoSans-Regular.ttf')))
 c=canvas.Canvas(str(root/'business-report.pdf'),pagesize=A4,pageCompression=1,invariant=1)
 c.setAuthor('PDFConcat fixture authors');c.setSubject('Fictional corpus material; original content MPL-2.0');c.setCreator('PDFConcat corpus sources / ReportLab 4.4.9')
 c.setTitle('Field packet: project evidence report')

@@ -319,6 +319,7 @@
     },
     "size": {
       "type": "object",
+      "description": "Width and height in points (1/72 inch). A generated part's size is its authored canvas before fitting; fit_to is the final sheet size.",
       "additionalProperties": false,
       "required": [
         "width",
@@ -475,6 +476,7 @@
           "$ref": "#/$defs/size"
         },
         "text": {
+          "description": "Measured text layout for a page item or divider. Null for empty text, unavailable layout, and source, contents or padding parts.",
           "anyOf": [
             {
               "type": "null"
@@ -593,15 +595,18 @@
       ],
       "properties": {
         "font": {
-          "type": "string"
+          "type": "string",
+          "description": "default for bundled Noto Sans, otherwise the resolved path of the selected font file."
         },
         "font_size": {
           "type": "number",
+          "description": "Authored font size in points, before fitting.",
           "minimum": 1,
           "maximum": 14400
         },
         "bounds": {
           "type": "array",
+          "description": "Logical text block as [left, bottom, right, top] in points from the lower-left corner of the authored page, before fitting. These are corner coordinates, not width and height.",
           "minItems": 4,
           "maxItems": 4,
           "items": {
@@ -609,6 +614,7 @@
           }
         },
         "ink_bounds": {
+          "description": "Painted glyph bounds as [left, bottom, right, top] in points from the lower-left corner of the authored page, before fitting. Null when the measured text paints no glyphs, such as a whitespace-only block.",
           "anyOf": [
             {
               "type": "null"

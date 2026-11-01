@@ -38,6 +38,9 @@ func TestLocatedFirstFaults(t *testing.T) {
 		{`{"version":4,"version":4,"items":[null]}`, diag.PlanDuplicateMember, "/version"},
 		{`{"version":4,"items":[{"page":{"text":{"size":null}}}]}`, diag.PlanNull, "/items/0/page/text/size"},
 		{`{"version":4,"items":[{"page":{"text":{"width":0}}}]}`, diag.PlanValue, "/items/0/page/text/width"},
+		{`{"version":4,"items":[{"page":{"text":{"wrap":"anywhere"}}}]}`, diag.PlanValue, "/items/0/page/text/wrap"},
+		{`{"version":4,"items":[{"page":{"text":{"wrap":null}}}]}`, diag.PlanNull, "/items/0/page/text/wrap"},
+		{`{"version":4,"items":[{"page":{"text":{"wrap":true}}}]}`, diag.PlanType, "/items/0/page/text/wrap"},
 		{`{"version":4,"items":[{"page":{"text":{"font":{}}}}]}`, diag.PlanType, "/items/0/page/text/font"},
 		{`{"version":4,"items":[{"page":{},"dir":"x"}]}`, diag.PlanItemShape, "/items/0"},
 		{`{"version":4,"items":[{"items":[{"source":"a.pdf"}]}]}`, diag.PlanItemShape, "/items/0"},
@@ -89,7 +92,7 @@ func TestBOMOffsets(t *testing.T) {
 
 func TestLayeringSettingRefsAndPaths(t *testing.T) {
 	base := t.TempDir()
-	input := `{"version":4,"output":"packet.pdf","dir":"sources","page_defaults":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm"},"background":"#abc"},"items":[{"dir":"chapters","items":[{"source":"a.pdf"},{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":""}}}]},{"page":{"text":{"font":"default"}}}]}`
+	input := `{"version":4,"output":"packet.pdf","dir":"sources","page_defaults":{"text":{"value":"default","font":{"file":"fonts/top.ttf"},"width":"50mm","wrap":"emergency"},"background":"#abc"},"items":[{"dir":"chapters","items":[{"source":"a.pdf"},{"page":{"background":"none","text":{"font":{"file":"local.ttf"},"value":"","wrap":"word"}}}]},{"page":{"text":{"font":"default"}}}]}`
 	j, ds := plan.Decode([]byte(input), "p", base)
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -103,6 +106,9 @@ func TestLayeringSettingRefsAndPaths(t *testing.T) {
 	}
 	if a.Text.Font.From != "/items/0/items/1/page/text/font" || a.Text.Width.From != "/page_defaults/text/width" || b.Background.From != "/page_defaults/background" {
 		t.Fatalf("origins %+v %+v", a, b)
+	}
+	if a.Text.Wrap.Value != packet.WrapWord || a.Text.Wrap.From != "/items/0/items/1/page/text/wrap" || b.Text.Wrap.Value != packet.WrapEmergency || b.Text.Wrap.From != "/page_defaults/text/wrap" {
+		t.Fatalf("wrapping inheritance and explicit reset: %+v %+v", a.Text.Wrap, b.Text.Wrap)
 	}
 	top, ds := plan.Decode([]byte(`{"version":4,"page_defaults":{"text":{"font":{"file":"top.ttf"}}},"items":[{"dir":"elsewhere","items":[{"page":{}}]}]}`), "p", base)
 	if len(ds) > 0 || itemAs[*packet.PageItem](t, itemAs[*packet.GroupItem](t, top.Items[0]).Items[0]).Style.Text.Font.Value.Path != filepath.Join(base, "top.ttf") {
@@ -195,6 +201,7 @@ func TestSchemaAndExamples(t *testing.T) {
 		`{"version":4,"items":[]}`, `{"version":4,"items":[{"page":{},"count":0}]}`,
 		`{"version":4,"items":[{"page":{"text":{"size":-1}}}]}`, `{"version":4,"items":[{"page":{"text":{"width":0}}}]}`,
 		`{"version":4,"items":[{"items":[{"source":"a"}]}]}`, `{"version":4,"items":[null]}`,
+		`{"version":4,"items":[{"page":{"text":{"wrap":"anywhere"}}}]}`,
 	} {
 		var instance any
 		if err := json.Unmarshal([]byte(input), &instance); err != nil {
@@ -397,6 +404,7 @@ func TestSchemaEnumsEqualPacketVocabulary(t *testing.T) {
 		{"/$defs/page/properties/text/properties/anchor/enum", packet.Anchor("").Values()},
 		{"/$defs/page/properties/text/properties/align/enum", packet.Align("").Values()},
 		{"/$defs/page/properties/text/properties/overflow/enum", packet.Overflow("").Values()},
+		{"/$defs/page/properties/text/properties/wrap/enum", packet.Wrap("").Values()},
 		{"/$defs/items/items/oneOf/3/properties/start_on/enum", packet.StartOn("").Values()},
 	} {
 		value := schema

@@ -26,9 +26,16 @@
 //   - U+0020 is the only breaking and justification space. Runs of spaces are preserved verbatim:
 //     leading and interior spaces occupy width. Spaces at a wrap point are consumed by the break.
 //     Trailing spaces of a line never count towards its width and are never justified.
-//   - U+00A0 and every other space character are ordinary glyphs: never a break opportunity,
+//   - U+00A0 and every other space character are ordinary glyphs: not ordinary break opportunities,
 //     never collapsed, never justified.
 //   - U+2028 and U+2029 are rejected.
+//
+// [WrapEmergency] first applies ordinary word wrapping, then splits oversized tokens at
+// extended-grapheme boundaries that are also safe shaping-cluster boundaries. It adds no
+// characters and does not reshape or split ligatures/context-dependent units. Even NBSP
+// tokens can split under this explicit policy. An indivisible unit can still overflow.
+// Indentation is retained on the first fragment, trailing spaces on the last. Following
+// words are not repacked into fragments. Page and ink overflow checks remain unchanged.
 //
 // # Placement
 //

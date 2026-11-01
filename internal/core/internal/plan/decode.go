@@ -699,6 +699,9 @@ func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
 		case "overflow":
 			from = &s.Text.Overflow.From
 			err = p.enumeration(&s.Text.Overflow.Value)
+		case "wrap":
+			from = &s.Text.Wrap.From
+			err = p.enumeration(&s.Text.Wrap.Value)
 		default:
 			return p.unknown(name)
 		}

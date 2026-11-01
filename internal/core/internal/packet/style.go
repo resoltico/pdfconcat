@@ -29,6 +29,7 @@ type TextStyle struct {
 	Anchor               Setting[Anchor]
 	X, Y, Width, Leading Setting[float64]
 	Align                Setting[Align]
+	Wrap                 Setting[Wrap]
 	Overflow             Setting[Overflow]
 }
 
@@ -44,6 +45,7 @@ func Defaults() PageStyle {
 	return PageStyle{Text: TextStyle{
 		Size: Setting[float64]{Value: 12}, Anchor: Setting[Anchor]{Value: AnchorCenter},
 		Align: Setting[Align]{Value: AlignCenter}, Leading: Setting[float64]{Value: 1.2},
+		Wrap:     Setting[Wrap]{Value: WrapWord},
 		Overflow: Setting[Overflow]{Value: OverflowError},
 	}}
 }
@@ -69,6 +71,7 @@ func (s PageStyle) Over(base PageStyle) PageStyle {
 	s.Text.Width = over(s.Text.Width, base.Text.Width)
 	s.Text.Leading = over(s.Text.Leading, base.Text.Leading)
 	s.Text.Align = over(s.Text.Align, base.Text.Align)
+	s.Text.Wrap = over(s.Text.Wrap, base.Text.Wrap)
 	s.Text.Overflow = over(s.Text.Overflow, base.Text.Overflow)
 	return s
 }

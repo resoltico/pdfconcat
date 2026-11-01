@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-text/typesetting/di"
 	gtfont "github.com/go-text/typesetting/font"
+	"github.com/go-text/typesetting/harfbuzz"
 	"github.com/go-text/typesetting/language"
 	"github.com/go-text/typesetting/shaping"
 	"golang.org/x/image/math/fixed"
@@ -30,6 +31,8 @@ type (
 	Cluster struct {
 		Text   string
 		Glyphs []Glyph
+		// unsafeToBreak means this cluster depends on preceding shaping context.
+		unsafeToBreak bool
 	}
 
 	// Shaper holds reusable shaping state. It is not safe for concurrent use; use one per goroutine.
@@ -238,6 +241,7 @@ func shapeRun(out shaping.Output, run shaping.Input, runes []rune, offset int) (
 		cluster := Cluster{Text: string(runes[start:end])}
 
 		for _, glyph := range glyphs[first:next] {
+			cluster.unsafeToBreak = cluster.unsafeToBreak || glyph.Mask&harfbuzz.GlyphUnsafeToBreak != 0
 			if glyph.GlyphID == 0 || glyph.GlyphID > maxGlyphID {
 				problems = append(problems, Problem{
 					Offset: offset + start, Rune: runes[start], Reason: "the font has no glyph for this character", missingGlyph: true,

@@ -30,9 +30,11 @@ update. The [installation guide](docs/INSTALL.md) covers uninstalling, options,
 manual downloads, verification and troubleshooting. Releases are not notarized
 by Apple or code-signed for Windows; the guide explains what that means.
 
-This source tree uses plan v4 and result/report v5. For a published binary, use
-the documentation and examples supplied in its release archive. Matching schema
-version numbers alone do not establish support for every documented field.
+This source tree uses plan v4 and result/report v5. For a published binary, read
+the documentation at its release tag, such as
+[v0.7.0](https://github.com/resoltico/pdfconcat/tree/v0.7.0); `pdfconcat version`
+prints the version. Matching schema version numbers alone do not establish
+support for every documented field.
 
 ## First packet
 
@@ -65,9 +67,9 @@ pdfconcat build -o blank.pdf --blank --fit-to A4
 
 This creates one blank A4 page. The bundled
 [generated-only example](examples/plans/generated-only.json) adds text pages and
-styled blanks. The example plans are in every release archive and in this
-repository; copy one to a writable folder before building it, because
-plan-relative outputs are created beside the plan.
+styled blanks. The [example plans](examples/plans) are in this repository; copy
+one to a writable folder before building it, because plan-relative outputs are
+created beside the plan.
 
 ## Keep the composition in a plan
 
@@ -225,4 +227,4 @@ and release procedures are in [CONTRIBUTING](CONTRIBUTING.md). The package map
 and execution pipeline are in [ARCHITECTURE](docs/ARCHITECTURE.md).
 
 Application code is [MPL-2.0](LICENSE). Bundled dependencies and fonts retain the
-licenses listed in [third-party notices](THIRD_PARTY_NOTICES.md).
+licenses listed in [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md); `pdfconcat licenses` prints them.

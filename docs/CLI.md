@@ -5,8 +5,12 @@ pdfconcat build [options] (--plan FILE|- | ITEM...)
 pdfconcat check [options] (--plan FILE|- | ITEM...)
 pdfconcat schema plan|result
 pdfconcat version [--json]
+pdfconcat licenses
 pdfconcat help [COMMAND]
 ```
+
+`licenses` prints the license notices of PDFConcat and of the third-party code
+and fonts inside the executable.
 
 Each `ITEM` is a PDF path or `--blank`. Items retain their supplied order and may
 contain only blanks when `--fit-to` supplies their size. A plan cannot be combined

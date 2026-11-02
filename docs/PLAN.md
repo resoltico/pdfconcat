@@ -372,7 +372,7 @@ A font's PostScript name must meet the PDF name-safety policy: a literal hash
 followed by two hexadecimal digits is refused by `check` and `build` as
 `font_invalid`. Use a font with a different PostScript name. Ordinary hashes and
 names resembling subset names remain supported. See the [font metadata
-requirements](PDF-POLICY.md#text-and-pruning) and [notices](../THIRD_PARTY_NOTICES.md).
+requirements](PDF-POLICY.md#text-and-pruning) and [notices](../../internal/legal/THIRD_PARTY_NOTICES.md).
 
 ## Strictness and limits
 

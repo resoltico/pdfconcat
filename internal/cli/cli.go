@@ -66,7 +66,7 @@ func Parse(args []string) (Command, *core.Result) {
 		return c, nil
 	case "--version":
 		c.Name = "version"
-	case "build", "check", "version", "schema":
+	case "build", "check", "version", "schema", "licenses":
 		c.Name = args[0]
 	case "help":
 		c.Help = true
@@ -97,6 +97,16 @@ func Parse(args []string) (Command, *core.Result) {
 			return failure("usage_invalid_value", "schema requires plan or result.", 1)
 		}
 		c.Schema = args[1]
+		return c, nil
+	}
+	if c.Name == "licenses" {
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+			c.Help = true
+			return c, nil
+		}
+		if len(args) > 1 {
+			return failure("usage_conflict", "licenses accepts no arguments.", 1)
+		}
 		return c, nil
 	}
 	seen := map[string]bool{}
@@ -230,7 +240,7 @@ func wantsJSON(args []string) bool {
 }
 
 func knownCommand(name string) bool {
-	return name == "build" || name == "check" || name == "schema" || name == "version"
+	return name == "build" || name == "check" || name == "schema" || name == "version" || name == "licenses"
 }
 
 // Help uses the same option declarations as Parse.
@@ -238,10 +248,12 @@ func Help(command string) string {
 	var b strings.Builder
 	switch command {
 	case "":
-		b.WriteString("PDFConcat assembles selected PDF pages, sections and generated pages from one reviewed plan.\n\nCommands: build, check, schema plan|result, version, help [COMMAND]\nUse pdfconcat help build for inputs and options.\n")
+		b.WriteString("PDFConcat assembles selected PDF pages, sections and generated pages from one reviewed plan.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n")
 		return b.String()
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"
+	case "licenses":
+		return "Usage: pdfconcat licenses\nPrint the licenses of PDFConcat and of the third-party software it contains.\n"
 	case "version":
 		b.WriteString("Usage: pdfconcat version [--json]\n")
 	default:

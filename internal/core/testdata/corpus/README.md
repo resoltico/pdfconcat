@@ -2,14 +2,15 @@
 
 These six PDFs complement precise synthetic [pdffixture](../../../pdffixture)
 inputs. They are controlled producer exports, not customer documents or a PDF
-conformance claim. Ordinary offline Go tests read frozen bytes and stage isolated
-copies. Producer tools never run in tests or CI.
+conformance claim. Ordinary Go tests read frozen bytes and stage isolated copies
+without external-network access. A loopback canary tests retained URI behavior.
+Producer tools never run in tests or CI.
 
 ## Use the frozen corpus
 
 The [corpus tests](../../corpus_test.go) and adjacent `corpus*_test.go` files define
 the cases. See [provenance](provenance.json) for frozen asset identities and
-producer facts, and [notices](NOTICE.txt) for copyright and license details.
+producer facts (including authoring tool versions), and [notices](NOTICE.txt) for copyright and license details.
 Public provenance uses corpus- or repository-relative paths. Font-specific
 notices also apply to font subsets embedded in the PDFs.
 
@@ -64,7 +65,7 @@ preparation, LibreOffice version and export arguments. The
 [object-stream encoding recipe](sources/qpdf_report_encoding.txt) records the
 qpdf arguments and independent equivalence checks.
 
-Compile the Typst source with:
+Use the Typst version declared in `provenance.json` to compile:
 
 ```sh
 typst compile --ignore-system-fonts --creation-timestamp 0 sources/technical-note.typ /absolute/fresh/technical-note.pdf

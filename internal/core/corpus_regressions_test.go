@@ -66,12 +66,15 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 				if r.Status != "failed" || len(r.Diagnostics) != 20 || r.DiagnosticsOmitted != 2 || r.Report.Written {
 					t.Fatal(r)
 				}
-				for _, d := range r.Diagnostics {
+				if r.Diagnostics[0].Code.String() != "report_write_failed" || r.Diagnostics[0].File != report || r.Diagnostics[0].Detail == "" {
+					t.Fatal("late report failure or target context was hidden", r)
+				}
+				for _, d := range r.Diagnostics[1:] {
 					if d.Code.String() != "source_invalid" {
-						t.Fatal("late failure incorrectly substituted for visible prefix", r)
+						t.Fatal("invalid-source peers changed", r)
 					}
 				}
-			} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stderr.String(), "2 more diagnostics") {
+			} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stderr.String(), "2 more diagnostics") || !strings.Contains(stderr.String(), "report_write_failed") || strings.Contains(stderr.String(), "use --report") {
 				t.Fatal(stdout.String())
 			}
 			if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "stdout"), stdout.Bytes(), 0600); err != nil {
@@ -81,7 +84,7 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 	}
 	badReport := filepath.Join(dir, "absent-parent", "core.json")
 	full := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.Items(items), WorkingDir: dir, Report: badReport})
-	if len(full.Diagnostics) != 22 || full.Diagnostics[21].Code.String() != "report_write_failed" || full.Status != "failed" || core.ExitCode(full) != 1 {
+	if len(full.Diagnostics) != 22 || full.Diagnostics[0].Code.String() != "report_write_failed" || full.Status != "failed" || core.ExitCode(full) != 1 {
 		t.Fatal(full)
 	}
 	goodReport := filepath.Join(t.TempDir(), "report.json")

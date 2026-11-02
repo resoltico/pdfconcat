@@ -101,7 +101,7 @@ func publish(temp, target string, overwrite bool, noReplace func(string, string)
 		return false, err
 	}
 	if err = link(temp, target); err != nil {
-		return false, fmt.Errorf("no-replace rename and link publication are unavailable; consider --overwrite: %w", err)
+		return false, fmt.Errorf("publishing without replacing the destination failed: %w", err)
 	}
 	if err = remove(temp); err != nil {
 		return true, err

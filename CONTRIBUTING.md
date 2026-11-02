@@ -5,7 +5,7 @@ covers development from a source checkout; binary release archives do not contai
 the test sources or corpus.
 
 - [Build and ordinary tests](#build-and-ordinary-tests)
-- [Install a development command](#install-a-development-command)
+- [Install with Go](#install-with-go)
 - [Stock tools](#stock-tools)
 - [Test scope](#what-we-test-and-what-we-do-not)
 - [Installer verification](#installer-verification)
@@ -47,9 +47,15 @@ tests on those three operating systems, cross-builds, release packaging and
 native installation through `Required CI`. That aggregate name is a required repository
 context; do not casually rename it.
 
-## Install a development command
+## Install with Go
 
-For development convenience, Go can install the latest published tag:
+To install the current checkout into Go's executable directory:
+
+```sh
+go install ./cmd/pdfconcat
+```
+
+To install the latest published source release instead:
 
 ```sh
 go install github.com/resoltico/pdfconcat/cmd/pdfconcat@latest
@@ -72,7 +78,7 @@ tool itself and fail to execute it.
 
 ```sh
 go build -modfile=tools/go.mod -o /tmp/pdfconcat-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint
-for goos in linux darwin windows; do GOOS="$goos" /tmp/pdfconcat-lint run ./...; done
+(for goos in linux darwin windows; do GOOS="$goos" /tmp/pdfconcat-lint run ./... || exit; done)
 go tool -modfile=tools/go.mod govulncheck ./...
 actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
 go run "github.com/rhysd/actionlint/cmd/actionlint@$actionlint_version"
@@ -160,8 +166,9 @@ terminal theme.
 
 Frozen, fictional producer exports, authored sources and font notices live in
 `internal/core/testdata/corpus` in a source checkout. Authoritative ordinary Go
-case tables are in `internal/core/corpus*_test.go`; no producer or network access
-is needed by tests. This is finite pairwise/higher-order capability coverage,
+case tables are in `internal/core/corpus*_test.go`; no producer or external-network
+access is needed by tests. A bounded loopback HTTP canary verifies that the CLI
+retains URI annotations without fetching them. This is finite pairwise/higher-order capability coverage,
 not exhaustive arbitrary PDF permutations. Binary archives do not include the
 source-only corpus; these commands and paths refer to a source checkout. See the
 [corpus guide](https://github.com/resoltico/pdfconcat/blob/main/internal/core/testdata/corpus/README.md)
@@ -247,21 +254,10 @@ embeds is covered. Two snapshot builds of one commit must produce identical
 Release builds pass `-trimpath` and `-ldflags=-w`. They keep the Go symbol
 table, without DWARF data, so that `govulncheck -mode=binary` and similar
 scanners see which packages are linked; stripping it with `-s` makes them
-report every advisory for a linked module. Go has no separate optimization
-switch: release and ordinary builds compile identically.
+report every advisory for a linked module. Release and ordinary builds use the
+compiler's default optimization settings.
 
-Profile-guided optimization is not used. With a CPU profile of
-`BenchmarkPacket`, PGO measured 1.5% faster on Apple M4 (101.6 ms against
-103.1 ms, standard deviation 2.3 ms over ten runs), within noise: the profile is
-dominated by system calls, memory return to the OS and garbage collection, which
-PGO does not change. Remeasure before adopting it:
-
-```sh
-go test -run '^$' -bench '^BenchmarkPacket$' -benchtime 15s -cpuprofile /tmp/packet.pgo ./internal/core
-go test -c -pgo=off -o /tmp/off.test ./internal/core
-go test -c -pgo=/tmp/packet.pgo -o /tmp/on.test ./internal/core
-(cd internal/core && for i in 1 2 3 4 5 6 7 8 9 10; do /tmp/off.test -test.run '^$' -test.bench '^BenchmarkPacket$' -test.benchtime 2s; /tmp/on.test -test.run '^$' -test.bench '^BenchmarkPacket$' -test.benchtime 2s; done)
-```
+Profile-guided optimization is not enabled for release builds.
 
 GoReleaser's before hooks generate Windows resources with the pinned
 `go-winres` (file properties and an `asInvoker` manifest, as git-ignored

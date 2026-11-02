@@ -4,52 +4,67 @@
 package pdf
 
 import (
+	"bytes"
+	"encoding/json/v2"
 	"errors"
-	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 )
 
-func TestPageDamageNoticeKeepsRepairAndSkipGuards(t *testing.T) {
-	active := model.NewValidationNotice(model.NoticePhaseValidate, model.NoticeSkipped, "page 2: active content: JavaScript in page additional action /O (obj#:5)", nil)
-	active.PageNumber = 2
-	for _, kind := range []string{"JavaScript", "Sound", "Movie", "Rendition"} {
-		notice := active
-		notice.Message = fmt.Sprintf("page 2: active content: %s in annotation action (obj#:5)", kind)
-		if pageDamageNotice(notice) {
-			t.Fatalf("retained active content refused: %+v", notice)
-		}
+func noticeReport(t *testing.T, notices ...model.ValidationNotice) model.ValidationReport {
+	t.Helper()
+	ctx, err := model.NewContext(bytes.NewReader(nil), model.NewStatelessConfiguration())
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		name   string
-		change func(*model.ValidationNotice)
-	}{
-		{"repaired", func(n *model.ValidationNotice) { n.Disposition = model.NoticeRepaired }},
-		{"read phase", func(n *model.ValidationNotice) { n.Phase = model.NoticePhaseRead }},
-		{"cause", func(n *model.ValidationNotice) { n.Cause = errors.New("content skipped") }},
-		{"path", func(n *model.ValidationNotice) { n.Path = "page.Contents" }},
-		{"different page", func(n *model.ValidationNotice) { n.PageNumber = 3 }},
-		{"unknown active kind", func(n *model.ValidationNotice) { n.Message = "page 2: active content: unknown in annotation action" }},
-		{"ordinary skip", func(n *model.ValidationNotice) { n.Message = "page 2: content stream skipped" }},
+	for _, n := range notices {
+		ctx.AddValidationNotice(n)
+	}
+	return ctx.ValidationReport()
+}
+
+func TestValidationNoticesDoNotInferContentLossFromWording(t *testing.T) {
+	for _, message := range []string{
+		"page 2: active content: JavaScript in annotation action",
+		"page 2: content stream skipped", "completely changed upstream wording", "",
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			notice := active
-			tc.change(&notice)
-			if !pageDamageNotice(notice) {
-				t.Fatalf("damage guard bypassed: %+v", notice)
-			}
-		})
+		n := model.NewValidationNotice(model.NoticePhaseValidate, model.NoticeSkipped, message, errors.New("a validation divergence"))
+		n.ObjectNumber, n.PageNumber, n.Path = 5, 2, "Pages.Contents"
+		ds, err := validationNotices(noticeReport(t, n))
+		if err != nil || len(ds) != 1 || ds[0].Code != diag.SourceValidationNotice || ds[0].Severity != diag.Warning {
+			t.Fatalf("wording selected admission policy: %+v %v", ds, err)
+		}
+		if ds[0].PDFLocation == nil || *ds[0].PDFLocation != (diag.PDFLocation{Object: 5, Page: 2, Path: "Pages.Contents"}) || !strings.Contains(ds[0].Detail, message) {
+			t.Fatalf("notice evidence lost: %+v", ds)
+		}
 	}
-	for _, disposition := range []model.NoticeDisposition{model.NoticeRepaired, model.NoticeSkipped} {
-		notice := model.NewValidationNotice(model.NoticePhaseValidate, disposition, "content changed", nil)
-		notice.Path = "Pages.Contents"
-		if !pageDamageNotice(notice) {
-			t.Fatal("page path no longer protects content", notice)
+}
+
+func TestReportedRepairsAreRefusedByDisposition(t *testing.T) {
+	for _, phase := range []model.NoticePhase{model.NoticePhaseParse, model.NoticePhaseRead, model.NoticePhaseValidate} {
+		for _, message := range []string{"page 2: active content: JavaScript in annotation action", "unrelated wording", ""} {
+			n := model.NewValidationNotice(phase, model.NoticeRepaired, message, nil)
+			n.PageNumber = 2
+			advisory := model.NewValidationNotice(model.NoticePhaseValidate, model.NoticeDigested, "another finding", nil)
+			ds, err := validationNotices(noticeReport(t, advisory, n, advisory))
+			if err == nil || diagnostic(err, diag.SourceInvalid).Code != diag.SourceUnsupported || len(ds) != 3 {
+				t.Fatalf("repair accepted or other evidence lost: %+v %v", ds, err)
+			}
 		}
-		notice.Path = ""
-		if pageDamageNotice(notice) {
-			t.Fatal("unlocated non-page notice treated as page damage", notice)
-		}
+	}
+}
+
+func TestValidationNoticeEvidenceIsSafeToEncode(t *testing.T) {
+	notice := model.NewValidationNotice(model.NoticePhaseValidate, model.NoticeSkipped, "backend\xff", nil)
+	notice.Path = "entry\xff"
+	ds, err := validationNotices(noticeReport(t, notice))
+	if err != nil || len(ds) != 1 {
+		t.Fatal(ds, err)
+	}
+	if _, err := json.Marshal(ds); err != nil {
+		t.Fatalf("backend evidence broke result encoding: %v", err)
 	}
 }

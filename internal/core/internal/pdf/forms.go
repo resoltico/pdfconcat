@@ -77,9 +77,12 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			return err
 		}
 		if depth > 64 {
-			return refuse(diag.SourceInvalid, "Form field tree exceeds depth 64.")
+			return refuse(diag.SourceUnsupported, "Form field tree exceeds the supported depth of 64.")
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
+			if !liveReference(s, ref) {
+				return refuse(diag.SourceInvalid, "A form-field reference is missing, free, or has the wrong object generation.")
+			}
 			if seen[ref] {
 				return refuse(diag.SourceInvalid, "Form field tree repeats a node.")
 			}

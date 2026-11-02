@@ -2,8 +2,10 @@
 
 PDFConcat is one self-contained program. The installer downloads it from this
 project's GitHub releases, checks it and puts it in a folder in your user
-account. It needs no administrator password, no Go, no Homebrew and no other
-software.
+account without an administrator password. The program needs no Go, Homebrew,
+external PDF engine or font installation. The macOS/Linux installer uses standard
+shell tools, `tar`, `curl` or `wget`, and a SHA-256 tool (`sha256sum`, `shasum` or
+`openssl`). Windows uses PowerShell's download, archive and checksum commands.
 
 - [macOS and Linux](#macos-and-linux)
 - [Windows](#windows)
@@ -25,24 +27,9 @@ curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/insta
 
 If `curl` is missing, use `wget -qO- https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh`.
 
-It takes a few seconds and shows each step:
-
-```text
-PDFConcat installer
-
-  ✓ System      macOS 15.5 · Apple silicon (arm64)
-  ✓ Downloaded  pdfconcat_darwin_arm64.tar.gz · 10.6 MB
-                from the latest release
-  ✓ Verified    SHA-256 matches the release checksums
-  ✓ Tested      pdfconcat 0.7.0 runs on this system
-  ✓ Installed   ~/.local/bin/pdfconcat
-  ✓ PATH        added ~/.local/bin via ~/.zshrc
-
-  PDFConcat 0.7.0 is installed.
-
-  Open a new terminal, or run this to use it now:
-      export PATH="$HOME/.local/bin:$PATH"
-```
+The installer identifies the platform, downloads the matching archive, verifies
+its checksum and test-runs the program before installation. It prints the selected
+program path and any PATH command needed for the current terminal.
 
 Then check it:
 
@@ -51,8 +38,10 @@ pdfconcat version
 ```
 
 Supported systems: macOS 15 or later on Apple silicon or Intel, and Linux on
-x86-64 or arm64. The Linux program is statically linked and works on any
-distribution.
+x86-64 or arm64. Linux archives are built with `CGO_ENABLED=0` and require no
+system C library. The installer test-runs the binary before replacing an installed
+copy; static linking does not guarantee compatibility with every kernel or device
+policy.
 
 ## Windows
 
@@ -74,20 +63,31 @@ Supported systems: Windows 10 and 11 on x64 or Arm64.
 
 ## Update
 
-Run the installation command again. It downloads the latest release, checks it
+Run the installation command again. Without a version override it downloads the
+latest release, checks it
 and only then replaces the installed program, so a failed download leaves your
-working copy in place. It reports the change, for example
-`updated from 0.6.2`. A `pdfconcat` that is already running finishes with the
-old version.
+working copy in place. It reports the installed version and selected path.
+A running `pdfconcat` process continues using the executable it started with.
 
 To install a specific release instead of the latest, pass its version:
 
 ```sh
-curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh -s -- --version 0.7.0
+curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh -s -- --version 0.8.0
 ```
 
 ```powershell
-$env:PDFCONCAT_VERSION = '0.7.0'; irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex
+$env:PDFCONCAT_VERSION = '0.8.0'; irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex
+```
+
+An environment-variable version pin applies to subsequent installer commands in
+that session. To return to the latest release, clear it first:
+
+```sh
+unset PDFCONCAT_VERSION
+```
+
+```powershell
+Remove-Item Env:PDFCONCAT_VERSION -ErrorAction SilentlyContinue
 ```
 
 ## Uninstall
@@ -112,13 +112,20 @@ Linux) or `-InstallDir DIR` (Windows) to the uninstall command too.
 
 Without an internet connection, uninstall by hand:
 
-- **macOS and Linux:** delete `~/.local/bin/pdfconcat`. Then delete each line
-  ending in `# added by the PDFConcat installer` from your shell startup files
-  (`~/.zshrc`, `~/.bashrc`, `~/.bash_profile` or `~/.profile`), and delete
-  `~/.config/fish/conf.d/pdfconcat.fish` if it exists.
-- **Windows:** delete the folder `%LOCALAPPDATA%\Programs\PDFConcat`. Then press
-  Start, type **environment**, open **Edit environment variables for your
-  account**, and remove that folder from **Path**.
+- **macOS and Linux:** delete `pdfconcat` from the selected install directory:
+  `XDG_BIN_HOME` when set, otherwise `~/.local/bin`, unless you supplied a custom
+  directory. Remove only PATH lines ending in `# added by the PDFConcat installer`
+  from the shell files it uses: `${ZDOTDIR:-$HOME}/.zshrc` for zsh; `~/.bashrc` and
+  the selected existing `~/.bash_profile`, `~/.bash_login` or `~/.profile` for bash;
+  `~/.profile` for other POSIX shells. For Fish, remove
+  `${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/pdfconcat.fish` only when its first
+  line is the PDFConcat installer marker.
+- **Windows:** delete only `pdfconcat.exe` and an installer-created
+  `pdfconcat.exe.old` from the selected install directory (by default,
+  `%LOCALAPPDATA%\Programs\PDFConcat`). Remove the directory only when empty.
+  When that folder is no longer needed, remove its user PATH entry through
+  **Edit environment variables for your account → Path**. Preserve unrelated
+  files and PATH entries in a shared custom directory.
 
 ## Options
 
@@ -143,7 +150,7 @@ and `checksums.txt`. The checksum check still applies.
 | | macOS and Linux | Windows |
 | --- | --- | --- |
 | Program | `~/.local/bin/pdfconcat`, or `$XDG_BIN_HOME/pdfconcat` when `XDG_BIN_HOME` is set | `%LOCALAPPDATA%\Programs\PDFConcat\pdfconcat.exe` |
-| PATH | If the folder is not already on PATH, one line in the startup file of your login shell: `~/.zshrc` for zsh; `~/.bashrc` and your login file for bash; `~/.profile` otherwise. Fish gets `~/.config/fish/conf.d/pdfconcat.fish`. | If the folder is not already on PATH, it is added to the start of your user PATH. |
+| PATH | If missing from PATH, a marked line in the login shell's startup files; `ZDOTDIR` and `XDG_CONFIG_HOME` overrides are honored. Fish uses its `conf.d/pdfconcat.fish` fragment. | If the folder is not already on PATH, it is added to the start of your user PATH. |
 
 The added line only puts the folder on PATH when it is missing, and it ends with
 `# added by the PDFConcat installer` so that uninstall can find it. Running the
@@ -192,11 +199,11 @@ sh install.sh
 
 **Code signing.** The macOS program has an ad hoc signature, which Apple silicon
 requires, but it is not signed with an Apple Developer ID or notarized by Apple.
-The Windows program is not code-signed. Programs downloaded by `curl`, `wget` or
-PowerShell are not marked as coming from the internet, so Gatekeeper and
-SmartScreen do not interrupt the installer. Browser downloads are marked; see
-[Manual installation](#manual-installation). Windows 11 Smart App Control, when
-turned on, may block unsigned programs such as PDFConcat.
+The Windows program is not code-signed. The installer does not disable Gatekeeper,
+SmartScreen or other operating-system protections. Download markings and managed
+policies can affect execution; browser downloads commonly carry an internet mark.
+See [Manual installation](#manual-installation). Windows 11 Smart App Control,
+when enabled, may block unsigned programs such as PDFConcat.
 
 See also [Security](../SECURITY.md#installation-and-release-trust).
 
@@ -233,16 +240,17 @@ Extract the archive. It holds the program, `pdfconcat` or `pdfconcat.exe`, and
 its license notices. Move the program into a folder on your PATH, or run it by
 its full path; `pdfconcat licenses` prints the same notices.
 
-A browser marks downloaded files as coming from the internet:
+Browser downloads commonly carry an internet mark:
 
-- **macOS** refuses to open a browser-downloaded PDFConcat because it is not
+- **macOS** may refuse to open a browser-downloaded PDFConcat because it is not
   notarized. After checking the checksum, clear the mark from the extracted
   program with `xattr -d com.apple.quarantine pdfconcat`. Alternatively, run it
   once, then choose **Open Anyway** in **System Settings → Privacy & Security**.
 - **Windows** may show a SmartScreen warning. After checking the checksum, run
   `Unblock-File .\pdfconcat.exe` in PowerShell.
 
-The installer avoids both steps, so prefer it when you can.
+The installer automates download verification and installation; system policies
+can still block execution.
 
 ## Troubleshooting
 
@@ -252,8 +260,9 @@ Open a new terminal window: PATH changes apply to terminals started after the
 installation. On macOS and Linux you can instead run the `export PATH=...` line
 the installer printed. If a new window still cannot find it, your shell may read
 a startup file the installer did not edit. Add
-`export PATH="$HOME/.local/bin:$PATH"` to that file, or run the program by its
-full path, `~/.local/bin/pdfconcat`.
+`export PATH="$HOME/.local/bin:$PATH"` for the default directory. For an XDG or
+custom directory, use the selected path and command printed by the installer.
+You can also run that executable by its full path.
 
 ### A different `pdfconcat` runs
 
@@ -261,13 +270,6 @@ Another copy earlier on your PATH takes precedence; the installer warns when it
 sees one. Find it with `command -v pdfconcat` (macOS and Linux) or
 `Get-Command pdfconcat` (PowerShell), then remove that copy using the method
 that installed it.
-
-PDFConcat 0.6.1 and 0.6.2 used a different macOS setup that installed into
-`/usr/local`. Remove it with its own helper:
-
-```sh
-/bin/bash /usr/local/libexec/pdfconcat/current/setup.sh uninstall
-```
 
 ### The download fails
 

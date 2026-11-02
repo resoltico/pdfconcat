@@ -349,9 +349,9 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 		code diag.Code
 	}{
 		{"page tree at depth 64 with link", pageTreeWithLink(64), diag.Code{}},
-		{"page tree over depth 64", pageTreeWithLink(65), diag.SourceDamaged},
+		{"page tree over depth 64", pageTreeWithLink(65), diag.SourceUnsupported},
 		{"field tree at depth 64 with widget", fieldTreeWithWidget(64), diag.Code{}},
-		{"field tree over depth 64", fieldTreeWithWidget(65), diag.SourceInvalid},
+		{"field tree over depth 64", fieldTreeWithWidget(65), diag.SourceUnsupported},
 		{"excessive direct nesting", insertEntry(pdffixture.Plain("nested"), 1, "/Private "+strings.Repeat("<< /Private ", 130)+"null"+strings.Repeat(" >>", 130)), diag.SourceInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

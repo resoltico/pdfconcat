@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v5 and its complete factual outcomes.
+// Package result defines result v6 and its complete factual outcomes.
 package result
 
 import (
@@ -12,13 +12,13 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 )
 
-// Schema covers result v5, full reports and version objects.
+// Schema covers result v6, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 5
+const WireVersion = 6
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -132,8 +132,15 @@ func (r Result) Full() Result {
 
 func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 	output := make([]diag.Diagnostic, 0, len(input))
-	groups := map[string]int{}
-	seen := map[string]map[string]bool{}
+	type findingKey struct {
+		code                        diag.Code
+		file, message, detail       string
+		location                    diag.Location
+		pdfLocation                 diag.PDFLocation
+		hasLocation, hasPDFLocation bool
+	}
+	groups := map[findingKey]int{}
+	seen := map[findingKey]map[string]bool{}
 	for _, d := range input {
 		d.Items = slices.Clone(d.Items)
 		d.ItemsOmitted = 0
@@ -141,7 +148,15 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 			output = append(output, d)
 			continue
 		}
-		key := d.Code.String() + "\x00" + d.File
+		key := findingKey{code: d.Code, file: d.File, message: d.Message, detail: d.Detail}
+		if d.Location != nil {
+			key.location = *d.Location
+			key.hasLocation = true
+		}
+		if d.PDFLocation != nil {
+			key.pdfLocation = *d.PDFLocation
+			key.hasPDFLocation = true
+		}
 		index, exists := groups[key]
 		if !exists {
 			index = len(output)
@@ -158,13 +173,7 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 		}
 	}
 	slices.SortStableFunc(output, func(a, b diag.Diagnostic) int {
-		if a.Severity == b.Severity {
-			return 0
-		}
-		if a.Severity == "error" {
-			return -1
-		}
-		return 1
+		return diag.Priority(b) - diag.Priority(a)
 	})
 	return output
 }

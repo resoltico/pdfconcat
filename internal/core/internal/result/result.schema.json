@@ -28,7 +28,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 5
+          "const": 6
         },
         "command": {
           "enum": [
@@ -190,7 +190,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 5
+          "const": 6
         },
         "command": {
           "const": "version"
@@ -405,6 +405,12 @@
         },
         "location": {
           "$ref": "#/$defs/location"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "pdf_location": {
+          "$ref": "#/$defs/pdfLocation"
         }
       }
     },
@@ -697,6 +703,25 @@
               }
             }
           ]
+        }
+      }
+    },
+    "pdfLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "object": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

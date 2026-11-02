@@ -192,7 +192,7 @@ func TestLinkFallbackStateAndNoClobber(t *testing.T) {
 	if published || err == nil {
 		t.Fatalf("link fallback clobbered target: %v %v", published, err)
 	}
-	if !strings.Contains(err.Error(), "--overwrite") {
+	if !strings.Contains(err.Error(), "without replacing the destination") {
 		t.Fatalf("fallback failure is not actionable: %v", err)
 	}
 }

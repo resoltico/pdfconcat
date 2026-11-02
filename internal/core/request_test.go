@@ -268,7 +268,7 @@ func TestInvocationFailureOmitsEmptyConsumersAndKeepsMetadataStrict(t *testing.T
 	}
 }
 
-func TestSourceInspectionDiagnosticsFollowFirstUse(t *testing.T) {
+func TestSourceInspectionDiagnosticsFollowFirstUseWithinOutcomePriority(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "broken.pdf"), []byte("not a PDF"), 0600); err != nil {
 		t.Fatal(err)
@@ -288,8 +288,8 @@ func TestSourceInspectionDiagnosticsFollowFirstUse(t *testing.T) {
 		items      []string
 	}{
 		{"missing-first.pdf", "source_unreadable", []string{"first", "repeat"}},
-		{"broken.pdf", "source_invalid", []string{"broken"}},
 		{"missing-last.pdf", "source_unreadable", []string{"last"}},
+		{"broken.pdf", "source_invalid", []string{"broken"}},
 	} {
 		got := result.Diagnostics[i]
 		if filepath.Base(got.File) != want.file || got.Code.String() != want.code || !slices.Equal(got.Items, want.items) {

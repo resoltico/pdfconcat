@@ -23,7 +23,7 @@ func CheckCompatibility(a Assembly) Compatibility {
 	result := Compatibility{version: model.V17}
 	for _, part := range a.Parts {
 		if part.Kind == packet.PartSource && (part.Occurrence == nil || part.Occurrence.File == nil || part.Occurrence.Facts == nil) {
-			d := diag.New(diag.SourceInvalid, "Source occurrence facts are unavailable.", part.Ref)
+			d := diag.New(diag.SourceProcessingFailed, "Source occurrence facts are unavailable.", part.Ref)
 			d.File = part.Source
 			result.Diagnostics = append(result.Diagnostics, d)
 		}

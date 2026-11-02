@@ -15,6 +15,7 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/fault"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
@@ -43,53 +44,126 @@ type SourceFacts struct {
 }
 
 type policyError struct {
-	code  diag.Code
-	err   error
-	file  string
-	items []string
+	finding diag.Diagnostic
+	err     error
 }
 
-func (e *policyError) Error() string { return e.err.Error() }
+func (e *policyError) Error() string { return e.finding.Message }
 func (e *policyError) Unwrap() error { return e.err }
 func refuse(code diag.Code, message string) error {
-	return &policyError{code: code, err: errors.New(message)}
+	return &policyError{finding: diag.New(code, message), err: errors.New(message)}
+}
+
+func pdfFailure(code diag.Code, message string, err error) error {
+	d := diag.New(code, message)
+	d.Detail = strings.ToValidUTF8(err.Error(), "�")
+	var policy *policyError
+	if errors.As(err, &policy) {
+		d.PDFLocation = policy.finding.PDFLocation
+		if policy.finding.Detail != "" {
+			d.Detail += ": " + policy.finding.Detail
+		}
+	}
+	return &policyError{finding: d, err: err}
 }
 
 func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 	code := fallback
 	var policy *policyError
-	if errors.As(err, &policy) {
-		code = policy.code
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		code = diag.Interrupted
+	errors.As(err, &policy)
+	var backendFault fault.Panic
+	if code == diag.SourceInvalid && errors.As(err, &backendFault) {
+		code = diag.SourceProcessingFailed
 	}
 	d := diag.New(code, err.Error())
 	if policy != nil {
-		d.File = policy.file
-		d.Items = policy.items
+		d = policy.finding
+	}
+	if policy == nil && code == diag.SourceInvalid {
+		d.Message = "The PDF could not be parsed or validated. Obtain a reviewed repair or deliver the original separately."
+		d.Detail = strings.ToValidUTF8(err.Error(), "�")
+	}
+	if policy == nil && code == diag.SourceProcessingFailed {
+		d.Message = "The PDF backend failed unexpectedly."
+		d.Detail = strings.ToValidUTF8(err.Error(), "�")
+	}
+	var attributed *model.ValidationError
+	if d.PDFLocation == nil && errors.As(err, &attributed) && attributed.ObjectNumber() > 0 {
+		d.PDFLocation = &diag.PDFLocation{Object: attributed.ObjectNumber()}
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		interrupted := diag.New(diag.Interrupted, "The operation was interrupted.")
+		d.Code, d.Severity, d.Message = interrupted.Code, interrupted.Severity, interrupted.Message
 	}
 	return d
 }
 
-func read(c context.Context, data []byte) (s *model.Context, err error) {
+func readSource(c context.Context, data []byte) (s *model.Context, ds []diag.Diagnostic, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = pdfFailure(diag.SourceProcessingFailed, "The PDF backend failed unexpectedly.", fmt.Errorf("%v", value))
+		}
+	}()
 	conf, err := configuration()
 	if err != nil {
-		return s, err
+		return s, ds, pdfFailure(diag.SourceProcessingFailed, "The PDF backend could not be initialized.", err)
 	}
+	conf.ValidationMode = model.ValidationStrict
 	s, err = api.ReadContext(c, bytes.NewReader(data), conf)
+	if errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) || s != nil && s.Encrypt != nil {
+		return s, ds, refuse(diag.SourceEncrypted, "Encrypted sources are unsupported, including PDFs that open without a password. Request an unrestricted, unencrypted assembly copy or deliver the originals separately.")
+	}
 	if err != nil {
-		if errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) {
-			return s, refuse(diag.SourceEncrypted, "Encrypted sources are not supported (including password-protected input).")
+		return s, ds, err
+	}
+	if err = checkDocument(c, s); err != nil {
+		return s, ds, err
+	}
+	cat, err := s.Catalog()
+	if err != nil {
+		return s, ds, err
+	}
+	// Remove only source viewer directives, after inspecting the original graph.
+	// Other discarded catalog structures still require their own validation.
+	for _, key := range []string{"PageLayout", "PageMode", "ViewerPreferences"} {
+		if _, present := cat[key]; !present {
+			continue
 		}
-		return s, err
+		delete(cat, key)
+		d := diag.New(diag.SourceViewerSettingsRemoved, "Source viewer settings are omitted from composed output.")
+		d.PDFLocation = &diag.PDFLocation{Object: s.Root.ObjectNumber.Value(), Path: "Catalog." + key}
+		ds = append(ds, d)
 	}
-	if s.Encrypt != nil {
-		return s, refuse(diag.SourceEncrypted, "Encrypted sources are not supported.")
+	s.PageLayout, s.PageMode, s.ViewerPref = nil, nil, nil
+	// Parsing is strict; semantic compatibility validation tolerates ancillary
+	// producer differences while page/content preservation is checked directly.
+	s.Configuration.ValidationMode = model.ValidationRelaxed
+	s.XRefTable.ValidationMode = model.ValidationRelaxed
+	report, err := validatePreservingPages(c, s)
+	findings, repair := validationNotices(report)
+	ds = append(ds, findings...)
+	if err != nil {
+		if repair != nil {
+			ds = append(ds, diagnostic(repair, diag.SourceUnsupported))
+		}
+		return s, ds, err
 	}
+	if repair != nil {
+		return s, ds, repair
+	}
+	if err = validateContentEncoding(c, s); err != nil {
+		return s, ds, err
+	}
+
+	return s, ds, nil
+}
+
+// checkDocument enforces structural and fidelity safeguards on original source
+// graphs and serialized output alike. Viewer normalization is not part of it.
+func checkDocument(c context.Context, s *model.Context) error {
 	pages, err := rawPages(c, s)
 	if err != nil {
-		return s, err
+		return err
 	}
 	s.PageCount = len(pages)
 	if err = walkObjects(c, s, func(d types.Dict) error {
@@ -107,7 +181,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 				return e
 			}
 			if resourceType == types.Name("Annot") || resourceFieldType != nil {
-				return refuse(diag.SourceInvalid, "A resource dictionary shared with an annotation or field is unsupported; upstream validation would discard that role.")
+				return refuse(diag.SourceUnsupported, "A resource dictionary shared with an annotation or field is unsupported; upstream validation would discard that role.")
 			}
 		}
 		subtype, e := nameValue(s, d["Subtype"])
@@ -130,7 +204,7 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 				return e
 			}
 			if value != nil {
-				return refuse(diag.SourceSigned, "Signature values are not supported; unsigned null fields are allowed.")
+				return refuse(diag.SourceSigned, "A populated signature field is unsupported because composition cannot preserve its signature assurance. Deliver the original separately; unsigned null fields are allowed.")
 			}
 		}
 		kind, e := nameValue(s, d["Type"])
@@ -138,80 +212,50 @@ func read(c context.Context, data []byte) (s *model.Context, err error) {
 			return e
 		}
 		if kind == types.Name("Sig") || kind == types.Name("DocTimeStamp") {
-			return refuse(diag.SourceSigned, "Signature and timestamp values are not supported.")
+			return refuse(diag.SourceSigned, "The source declares a signature or timestamp value whose assurance composition cannot preserve. Deliver the original separately; signatures are not authenticated.")
 		}
 		for key := range d {
 			decoded, e := types.DecodeName(key)
 			if e == nil && decoded != key {
-				return refuse(diag.SourceInvalid, fmt.Sprintf("Unsupported literal-hash dictionary key %q; upstream would change its identity.", key))
+				return refuse(diag.SourceUnsupported, fmt.Sprintf("Unsupported literal-hash dictionary key %q; upstream would change its identity.", key))
 			}
 		}
 		return nil
 	}); err != nil {
-		return s, err
+		return err
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return s, err
+		return err
 	}
 	for _, policy := range []struct {
 		key     string
 		code    diag.Code
 		message string
 	}{
-		{"Perms", diag.SourceSigned, "Certified sources are not supported."},
+		{"Perms", diag.SourceSigned, "The source declares catalog permission structures, which composition does not preserve. Deliver the original separately; certification is not authenticated."},
 		{"DocTimeStamp", diag.SourceSigned, "Document timestamps are not supported."},
-		{"OCProperties", diag.SourceOptionalContent, "Optional content is not supported."},
+		{"OCProperties", diag.SourceOptionalContent, "The source declares optional-content settings (visibility layers), whose display state composition does not preserve. Deliver the original separately."},
 	} {
 		value, e := s.Dereference(cat[policy.key])
 		if e != nil {
-			return s, e
+			return e
 		}
 		if value != nil {
-			return s, refuse(policy.code, policy.message)
+			return refuse(policy.code, policy.message)
 		}
 	}
 	rendering, e := s.Dereference(cat["NeedsRendering"])
 	if e != nil {
-		return s, e
+		return e
 	}
 	if rendering == types.Boolean(true) {
-		return s, refuse(diag.SourceDynamicForm, "Dynamic forms are not supported.")
+		return refuse(diag.SourceDynamicForm, "The source requests dynamic rendering, whose generated appearance composition cannot preserve. Deliver the original separately.")
 	}
 	if _, err = fields(c, s); err != nil {
-		return s, err
+		return err
 	}
-	report, err := api.ValidateContextWithReport(c, s)
-	if err != nil {
-		return s, err
-	}
-	for _, n := range report.Notices() {
-		if pageDamageNotice(n) {
-			return s, refuse(diag.SourceDamaged, n.Message)
-		}
-	}
-	return s, nil
-}
-
-// pageDamageNotice keeps the repair guard separate from pdfcpu's informational
-// active-content notices. In v0.16.3 their producer records retained content as
-// causeless validation skips with an empty path and this location/kind format.
-func pageDamageNotice(n model.ValidationNotice) bool {
-	if n.Disposition != model.NoticeRepaired && n.Disposition != model.NoticeSkipped {
-		return false
-	}
-	if n.Phase == model.NoticePhaseValidate && n.Disposition == model.NoticeSkipped && n.Cause == nil && n.Path == "" && n.PageNumber >= 0 {
-		location := "document"
-		if n.PageNumber > 0 {
-			location = fmt.Sprintf("page %d", n.PageNumber)
-		}
-		for _, kind := range []string{"JavaScript", "Sound", "Movie", "Rendition"} {
-			if strings.HasPrefix(n.Message, location+": active content: "+kind+" in ") {
-				return false
-			}
-		}
-	}
-	return n.PageNumber > 0 || strings.Contains(strings.ToLower(n.Path), "page") || strings.Contains(strings.ToLower(n.Message), "page")
+	return nil
 }
 
 type pageRef struct {
@@ -233,11 +277,14 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			return 0, err
 		}
 		if depth > 64 {
-			return 0, refuse(diag.SourceDamaged, "Page tree exceeds depth 64.")
+			return 0, refuse(diag.SourceUnsupported, "Page tree exceeds the supported depth of 64.")
 		}
 		ref, indirect := o.(types.IndirectRef)
 		if !indirect || visited[ref] {
 			return 0, refuse(diag.SourceDamaged, "Page tree contains a direct, repeated or cyclic node.")
+		}
+		if !liveReference(s, ref) {
+			return 0, refuse(diag.SourceDamaged, "A page-tree reference is missing, free, or has the wrong object generation.")
 		}
 		visited[ref] = true
 		d, err := s.DereferenceDict(o)
@@ -291,7 +338,7 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 	var walk func(types.Object, int) error
 	walk = func(o types.Object, depth int) error {
 		if depth > 128 {
-			return refuse(diag.SourceInvalid, "Direct object nesting exceeds 128.")
+			return refuse(diag.SourceUnsupported, "Direct object nesting exceeds 128.")
 		}
 		switch v := o.(type) {
 		case types.Dict:
@@ -308,7 +355,7 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 		case types.Name:
 			decoded, err := types.DecodeName(string(v))
 			if err == nil && decoded != string(v) {
-				return refuse(diag.SourceInvalid, "Unsupported literal-hash name identity; upstream may decode it twice.")
+				return refuse(diag.SourceUnsupported, "Unsupported literal-hash name identity; upstream may decode it twice.")
 			}
 		case types.Array:
 			for _, child := range v {
@@ -351,7 +398,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	var ds []diag.Diagnostic
 	add := func(code diag.Code, message string) {
 		for _, d := range ds {
-			if d.Code == code {
+			if d.Code == code && d.Message == message {
 				return
 			}
 		}
@@ -518,4 +565,11 @@ func generation(e *model.XRefTableEntry) int {
 		return 0
 	}
 	return *e.Generation
+}
+
+// liveReference checks identity before dereferencing: the backend's low-level
+// dereference API can resolve an object number despite a generation mismatch.
+func liveReference(s *model.Context, ref types.IndirectRef) bool {
+	e := s.Table[ref.ObjectNumber.Value()]
+	return e != nil && !e.Free && generation(e) == ref.GenerationNumber.Value()
 }

@@ -68,17 +68,17 @@ func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
 		}
 	}
 	if omitted > 0 {
-		if _, err := fmt.Fprintf(w, "%d more preview rows; use --report for full details.\n", omitted); err != nil {
+		if _, err := fmt.Fprintf(w, "%d more preview rows; %s\n", omitted, reportHint(r.Report)); err != nil {
 			return err
 		}
 	}
 	for _, d := range r.Diagnostics {
-		if _, err := fmt.Fprintln(stderr, diagnosticText(d)); err != nil {
+		if _, err := fmt.Fprintln(stderr, diagnosticText(d, r.Report)); err != nil {
 			return err
 		}
 	}
 	if r.DiagnosticsOmitted > 0 {
-		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; use --report for full details.\n", r.DiagnosticsOmitted); err != nil {
+		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; %s\n", r.DiagnosticsOmitted, reportHint(r.Report)); err != nil {
 			return err
 		}
 	}
@@ -90,10 +90,40 @@ func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
 	return nil
 }
 
+// reportHint describes access to uncapped details using actual report visibility.
+func reportHint(report *core.Report) string {
+	if report == nil {
+		return "use --report for full details."
+	}
+	if report.Written {
+		return "see the saved report for uncapped processing details."
+	}
+	return "full report unavailable; resolve the report failure before requesting it again."
+}
+
 // diagnosticText keeps each diagnostic on one terminal-safe line.
-func diagnosticText(d core.Diagnostic) string {
+func diagnosticText(d core.Diagnostic, report *core.Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s: %s", d.Severity, d.Code, printableMessage(d.Message))
+	if location := d.PDFLocation; location != nil {
+		if location.Object > 0 {
+			fmt.Fprintf(&b, " [PDF object %d]", location.Object)
+		}
+		if location.Page > 0 {
+			fmt.Fprintf(&b, " [PDF page %d]", location.Page)
+		}
+		if location.Path != "" {
+			fmt.Fprintf(&b, " [PDF path %s]", strconv.Quote(location.Path))
+		}
+	}
+	switch d.Code.String() {
+	case "output_required":
+		b.WriteString(" Use -o FILE or plan output.")
+	case "page_size_required":
+		b.WriteString(" Use --fit-to SIZE or an explicit plan page size.")
+	case "output_exists", "report_exists":
+		b.WriteString(" --overwrite requests replacement when permitted.")
+	}
 	file := d.File
 	if d.Location != nil && d.Location.File != "" {
 		file = d.Location.File
@@ -123,9 +153,12 @@ func diagnosticText(d core.Diagnostic) string {
 			if len(items) > 0 {
 				b.WriteString("; ")
 			}
-			fmt.Fprintf(&b, "%d more; use --report for full details", d.ItemsOmitted)
+			fmt.Fprintf(&b, "%d more; %s", d.ItemsOmitted, strings.TrimSuffix(reportHint(report), "."))
 		}
 		b.WriteByte(']')
+	}
+	if d.Detail != "" {
+		fmt.Fprintf(&b, " [detail %s]", strconv.Quote(d.Detail))
 	}
 	return b.String()
 }
@@ -176,7 +209,7 @@ func previewRows(r core.Result) ([]string, int) {
 				}
 				source = strings.Join(spans, ",")
 				if len(mapping) > 20 {
-					source += fmt.Sprintf(" (%d more spans; use --report)", len(mapping)-20)
+					source += fmt.Sprintf(" (%d more spans; %s)", len(mapping)-20, strings.TrimSuffix(reportHint(r.Report), "."))
 				}
 			}
 			rows = append(rows, fmt.Sprintf("Source %s: selected %s → pages %s", strconv.Quote(part.Path), source, pages(part.OutputPages)))

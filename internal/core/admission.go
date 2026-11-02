@@ -114,7 +114,7 @@ func admit(ctx context.Context, req Request) *admission {
 		declared.FitTo = &size
 	}
 	if req.Operation == Build && declared.Output == "" {
-		a.diagnostics = append(a.diagnostics, diag.New(diag.UsageMissingOutput, "Give -o FILE or plan output."))
+		a.diagnostics = append(a.diagnostics, diag.New(diag.OutputRequired, "An output destination is required for build."))
 	}
 	refusals := a.roles.Check()
 	a.diagnostics = append(a.diagnostics, refusals...)

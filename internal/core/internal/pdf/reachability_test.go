@@ -125,7 +125,7 @@ func TestReachabilityKeepsIndirectObjectChainsFromReadContext(t *testing.T) {
 	last := bytes.LastIndex(page, []byte(">>"))
 	doc.Objs[2] = append(append(append([]byte{}, page[:last]...), []byte(" /Annots [6 0 R] ")...), page[last:]...)
 	doc.Objs = append(doc.Objs, []byte("<< /Subtype /Link /Rect [10 10 20 20] /Dest [3 0 R /Fit] /Private 7 0 R >>"), []byte("8 0 R"), []byte("<< /Marker (reachable) /Cycle 7 0 R >>"))
-	s, err := read(t.Context(), doc.Bytes())
+	s, _, err := readSource(t.Context(), doc.Bytes())
 	if err != nil {
 		t.Fatalf("source read rejected the graph before cleanup: %v", err)
 	}

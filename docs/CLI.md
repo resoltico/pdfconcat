@@ -1,4 +1,4 @@
-# Command line and result v5
+# Command line and result v6
 
 ```text
 pdfconcat build [options] (--plan FILE|- | ITEM...)
@@ -85,7 +85,7 @@ are retained.
 
 ```json
 {
-  "format_version": 5,
+  "format_version": 6,
   "command": "build",
   "status": "ok",
   "output": {
@@ -120,12 +120,19 @@ pages. Warnings do not make an outcome invalid.
 | `failed` | 1 | Environment, backend, verification or publication failure |
 | `interrupted` | 130 | Cancelled |
 
-Interrupted takes precedence over failed, then invalid. Errors precede warnings
-in their output stream, in stage order. The summary shows at most 20 diagnostics, with
+Interrupted takes precedence over failed, then invalid for status and exit.
+Diagnostic presentation keeps output-publication and report-writing failures
+first, then interruption, other failures, invalid-input errors and warnings.
+Stage/first-use order stays stable within each priority group. This keeps bounded
+publication failures and the cause of the overall outcome visible under caps.
+The summary shows at most 20 diagnostics, with
 `diagnostics_omitted` for the rest. Each diagnostic shows at most 20 consumer
-pointers, with `items_omitted`. A full report has no such caps.
+pointers, with `items_omitted`. A full report has no such caps. Omission hints distinguish a saved report from
+an unavailable requested report; they do not recommend reading a failed report.
+A saved report holds uncapped processing details but cannot predict its own late
+publication/durability error; the final CLI result remains authoritative.
 
-Diagnostics include severity, stable code, free-English message and, when known,
+Diagnostics include severity, stable code, free-form English message and, when known,
 file, consumer pointers and plan location. Locations have zero-based byte offset,
 one-based byte line/column and JSON pointer. Stdin uses a virtual file label.
 Messages may change; branch on code/status rather than matching their prose.
@@ -134,7 +141,8 @@ Text diagnostics include the source or font file, plan line/column and JSON
 pointer when known, plus consuming item pointers. Paths and pointers are quoted;
 control characters in paths and messages are escaped while printable Unicode
 stays readable. The same 20-diagnostic and 20-consumer limits apply, with omission
-counts and a `--report` hint. JSON and full reports preserve the original values.
+counts and report guidance based on actual report availability. JSON and full
+reports preserve the original values.
 
 ## Reports and committed state
 
@@ -172,7 +180,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 5,
+  "format_version": 6,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -289,6 +297,29 @@ pdfconcat build --plan plan.json -o book.pdf
 ```
 
 
+## Diagnostic evidence
+
+Core diagnostics own the condition, explanation and terminology. The CLI adds
+command syntax to text remedies; JSON and reports retain the core explanation.
+`detail`, when present, contains backend evidence rather than a stable product
+message. `pdf_location` can identify a positive `object` number, positive `page`
+number, or dictionary `path`; absent fields mean attribution is unavailable.
+It is separate from `location`, which identifies plan text. Consumers should
+branch on `code`, not backend text or a reported path. `source_validation_notice`
+retains backend compatibility evidence, including phase and disposition in
+`detail`. A skipped validation notice does not mean that content was removed;
+explicitly reported repairs cause a separate `source_unsupported` refusal.
+
+Warnings merge their consuming `items` only when their code, file, message,
+detail and both locations are equivalent. Different viewer entries therefore
+remain different findings, including when a source is repeated. Full reports
+retain all findings; stdout summaries still apply the documented caps.
+
+`source_invalid` means parsing or validation failed. `source_unsupported` means
+a supported-fidelity boundary was reached. `source_processing_failed` is a backend
+failure, not proof of invalid input. Both invalid and unsupported input select
+status `invalid`; a processing failure selects `failed`.
+
 ## Diagnostic codes
 
 The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning class is empty
@@ -298,76 +329,80 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 
 | Code | Severity | Class | Meaning |
 | --- | --- | --- | --- |
+| `request_invalid` | error | invalid | invalid application request envelope |
 | `source_selection_out_of_range` | error | invalid | selected page range exceeds the original source page count |
 | `source_selection_form_unsupported` | error | invalid | partial page selection of a source with form fields or widgets is unsupported |
 | `source_navigation_removed` | warning | — | navigation to omitted source pages was removed for affected occurrences |
 | `source_outline_depth_unsupported` | error | invalid | authored sections and imported bookmarks exceed the supported outline hierarchy |
-| `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
+| `source_form_unsupported` | error | invalid | nonempty forms require identical resolved DR/DA/Q representations |
+| `source_uri_base_removed` | warning | — | source URI Base is removed; retained relative actions may resolve differently |
+| `usage_unknown_command` | error | invalid | first argument is not a command |
+| `usage_unknown_option` | error | invalid | option not defined for the command |
+| `usage_missing_value` | error | invalid | option needs a value |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
+| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
+| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
+| `output_required` | error | invalid | build requires an output destination |
+| `plan_unreadable` | error | failed | plan file or stdin could not be read |
+| `plan_too_large` | error | invalid | plan exceeds 64 MiB |
+| `plan_syntax` | error | invalid | not one valid JSON object in UTF-8 (incl. trailing data, invalid UTF-8, comments) |
+| `plan_version_unsupported` | error | invalid | required plan version is missing or unsupported |
+| `plan_unknown_member` | error | invalid | member not defined at that place (case-sensitive) |
+| `plan_duplicate_member` | error | invalid | member repeated in one object |
+| `plan_null` | error | invalid | `null` anywhere |
+| `plan_type` | error | invalid | wrong JSON type |
+| `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
+| `plan_item_shape` | error | invalid | an item object without exactly one supported source, page, group or contents shape |
+| `plan_limit` | error | invalid | nesting, entries, count or total generated pages over the limit |
+| `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
+| `output_exists` | error | invalid | output exists and replacement was not authorized |
+| `report_exists` | error | invalid | report exists and replacement was not authorized, or plan inputs are unknown |
+| `output_not_regular` | error | invalid | output exists and is not a regular file (directory, symlink, device) |
+| `report_not_regular` | error | invalid | same for the report |
+| `output_is_input` | error | invalid | output is (or aliases) a plan, font or source file |
+| `report_is_input` | error | invalid | report is (or aliases) an input |
+| `report_is_output` | error | invalid | report and output are the same file |
+| `font_unreadable` | error | failed | font file could not be read |
+| `font_invalid` | error | invalid | not a supported static TrueType (`glyf`) font, damaged, or its PostScript name cannot be preserved |
+| `font_not_embeddable` | error | invalid | `OS/2.fsType` forbids embedding |
+| `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
+| `text_glyph_missing` | error | invalid | the font cannot render a character sequence |
+| `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
+| `page_size_required` | error | invalid | `inherit` with no source page to inherit from |
+| `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
+| `source_unreadable` | error | failed | source file could not be read |
+| `source_changed` | error | failed | source bytes at merge time differ from the inspected bytes |
+| `source_invalid` | error | invalid | PDF parsing or validation failed |
+| `source_unsupported` | error | invalid | source structure cannot be composed with the supported fidelity guarantees |
+| `source_processing_failed` | error | failed | unexpected PDF backend failure, including a recovered panic |
+| `source_validation_notice` | warning | — | backend compatibility notice; skipped validation does not establish content removal |
+| `source_viewer_settings_removed` | warning | — | source catalog PageLayout, PageMode or ViewerPreferences removed before validation |
+| `source_damaged` | error | invalid | broken page tree, missing/malformed content streams, or validation changing page order or encoded contents |
+| `source_encrypted` | error | invalid | encrypted, including empty-password encryption |
+| `source_signed` | error | invalid | signature value, catalog permission structures (`/Perms`) or document timestamp |
+| `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
+| `source_optional_content` | error | invalid | `/OCProperties` present |
 | `fit_destination_unsupported` | error | invalid | fitting internal page destinations with numeric position coordinates is unsupported |
 | `source_output_incompatible` | error | invalid | retained annotations lack appearances required by the effective PDF 2.0 output |
 | `fit_form_unsupported` | error | invalid | `fit_to` with a source that has form widgets |
-| `font_invalid` | error | invalid | not a supported static TrueType (`glyf`) font, damaged, or its PostScript name cannot be preserved |
-| `font_not_embeddable` | error | invalid | `OS/2.fsType` forbids embedding |
-| `font_unreadable` | error | failed | font file could not be read |
-| `interrupted` | error | interrupted | cancelled by a signal |
-| `output_exists` | error | invalid | output exists and `--overwrite` not given |
+| `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
+| `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |
 | `output_invalid` | error | failed | the written output did not validate |
-| `output_is_input` | error | invalid | output is (or aliases) a plan, font or source file |
-| `output_not_regular` | error | invalid | output exists and is not a regular file (directory, symlink, device) |
 | `output_page_count_mismatch` | error | failed | written page count ≠ expected |
 | `output_publish_failed` | error | failed | the final rename failed (incl. no-replace unsupported and link fallback failed) |
-| `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |
-| `page_size_required` | error | invalid | `inherit` with no source page to inherit from |
-| `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
-| `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
-| `plan_duplicate_member` | error | invalid | member repeated in one object |
-| `plan_item_shape` | error | invalid | an item object without exactly one supported source, page, group or contents shape |
-| `plan_limit` | error | invalid | nesting, entries, count or total generated pages over the limit |
-| `plan_null` | error | invalid | `null` anywhere |
-| `plan_syntax` | error | invalid | not one valid JSON object in UTF-8 (incl. trailing data, invalid UTF-8, comments) |
-| `plan_too_large` | error | invalid | plan exceeds 64 MiB |
-| `plan_type` | error | invalid | wrong JSON type |
-| `plan_unknown_member` | error | invalid | member not defined at that place (case-sensitive) |
-| `plan_unreadable` | error | failed | plan file or stdin could not be read |
-| `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
-| `plan_version_unsupported` | error | invalid | required plan version is missing or unsupported |
-| `report_exists` | error | invalid | report exists and `--overwrite` was not given, or plan inputs are unknown |
-| `report_is_input` | error | invalid | report is (or aliases) an input |
-| `report_is_output` | error | invalid | report and output are the same file |
-| `report_not_regular` | error | invalid | same for the report |
 | `report_write_failed` | error | failed | writing or publishing the report failed |
-| `request_invalid` | error | invalid | invalid application request envelope |
-| `report_inspection_failed` | error | failed | The report destination could not be inspected |
-| `output_inspection_failed` | error | failed | The output destination could not be inspected |
-| `working_directory_unavailable` | error | failed | The process working directory could not be determined |
-| `source_changed` | error | failed | source bytes at merge time differ from the inspected bytes |
-| `source_damaged` | error | invalid | broken page tree (missing/empty kid, wrong count) or content-replacing repair |
-| `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
-| `source_encrypted` | error | invalid | encrypted, including empty-password encryption |
-| `source_form_unsupported` | error | invalid | nonempty forms require identical resolved DR/DA/Q representations |
-| `source_invalid` | error | invalid | unsupported unsafe PDF shape or parse/validation failure (including recovered panics) |
-| `source_optional_content` | error | invalid | `/OCProperties` present |
-| `source_signed` | error | invalid | signature value, certification (`/Perms`) or document timestamp |
-| `source_unreadable` | error | failed | source file could not be read |
-| `text_glyph_missing` | error | invalid | the font cannot render a character sequence |
-| `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
-| `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
-| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
-| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
-| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
-| `usage_missing_output` | error | invalid | `build` without `-o` and without plan `output` |
-| `usage_missing_value` | error | invalid | option needs a value |
-| `usage_unknown_command` | error | invalid | first argument is not a command |
-| `usage_unknown_option` | error | invalid | option not defined for the command |
-| `destinations_dropped` | warning | — | named destinations whose target is not a page of the same document were omitted |
-| `destinations_renamed` | warning | — | colliding named destinations were renamed for later occurrences |
-| `form_appearance_regeneration_requested` | warning | — | a source requests `NeedAppearances`; viewers may redraw all fields |
-| `form_fields_renamed` | warning | — | pdfcpu namespaces later nonempty forms even without collisions; build reports actual names |
-| `source_attachments_removed` | warning | — | embedded-files name tree or catalog `/AF` removed (page attachments remain) |
-| `source_document_actions_removed` | warning | — | `/OpenAction`, catalog `/AA` or document JavaScript removed |
-| `source_output_intents_removed` | warning | — | output intents removed; output makes no PDF/A or PDF/X claim |
-| `source_page_labels_removed` | warning | — | page labels removed |
-| `source_structure_removed` | warning | — | tagged-PDF structure removed; output is not tagged |
-| `source_uri_base_removed` | warning | — | source URI Base is removed; retained relative actions may resolve differently |
-| `source_xfa_removed` | warning | — | XFA removed; the static AcroForm remains |
+| `interrupted` | error | interrupted | cancelled by a signal |
 | `text_overflow_allowed` | warning | — | `overflow: allow` and measured text extends past the page or block |
+| `form_fields_renamed` | warning | — | pdfcpu namespaces later nonempty forms even without collisions; build reports actual names |
+| `form_appearance_regeneration_requested` | warning | — | a source requests `NeedAppearances`; viewers may redraw all fields |
+| `destinations_renamed` | warning | — | colliding named destinations were renamed for later occurrences |
+| `destinations_dropped` | warning | — | named destinations whose target is not a page of the same document were omitted |
+| `source_xfa_removed` | warning | — | XFA removed; the static AcroForm remains |
+| `source_structure_removed` | warning | — | tagged-PDF structure removed; output is not tagged |
+| `source_page_labels_removed` | warning | — | page labels removed |
+| `source_output_intents_removed` | warning | — | output intents removed; output makes no PDF/A or PDF/X claim |
+| `source_document_actions_removed` | warning | — | `/OpenAction`, catalog `/AA` or document JavaScript removed |
+| `source_attachments_removed` | warning | — | embedded-files name tree or catalog `/AF` removed (page attachments remain) |
+| `working_directory_unavailable` | error | failed | The process working directory could not be determined |
+| `output_inspection_failed` | error | failed | The output destination could not be inspected |
+| `report_inspection_failed` | error | failed | The report destination could not be inspected |

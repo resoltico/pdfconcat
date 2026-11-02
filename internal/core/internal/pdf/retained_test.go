@@ -11,7 +11,7 @@ import (
 )
 
 func TestRetainedTraversalRolesAndCycles(t *testing.T) {
-	s, err := read(t.Context(), pdffixture.Plain("traversal").Bytes())
+	s, _, err := readSource(t.Context(), pdffixture.Plain("traversal").Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}

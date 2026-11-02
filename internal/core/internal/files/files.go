@@ -75,7 +75,7 @@ func (f Roles) checkTarget(path, role string, overwrite bool) []diag.Diagnostic 
 			add(notRegular, "Destination must be a regular file; symlinks, directories and devices are refused.")
 		}
 		if !overwrite {
-			add(exists, "Destination exists; use --overwrite (reports with unknown inputs always require a new path).")
+			add(exists, "Destination exists; authorize replacement or choose a new path. Reports with unknown inputs require a new path.")
 		}
 	case !errors.Is(err, fs.ErrNotExist):
 		add(inspection, "Cannot inspect destination: "+err.Error())

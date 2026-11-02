@@ -93,11 +93,18 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 		if topOutside {
 			crop = "[0 30 310 460]"
 		}
-		for _, rotation := range []int{0, 90, 180, 270, -90, 450} {
+		for _, geometry := range []struct {
+			rotation int
+			unit     float64
+		}{{0, 2}, {90, 2}, {180, 2}, {270, 2}, {-90, 2}, {450, 2}, {0, 0.5}, {90, 0.5}} {
+			rotation, sourceUnit := geometry.rotation, geometry.unit
 			for _, fit := range []bool{false, true} {
-				t.Run(fmt.Sprintf("topOutside%v/rotate%d/fit%v", topOutside, rotation, fit), func(t *testing.T) {
-					fixture := pdffixture.WithBoxes("SOURCE", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[10 20 330 440]", Crop: crop, Rotate: strconv.Itoa(rotation), UserUnit: "2"})
-					s, err := read(t.Context(), fixture.Bytes())
+				if sourceUnit == 0.5 && (topOutside || fit) {
+					continue
+				}
+				t.Run(fmt.Sprintf("topOutside%v/rotate%d/fit%v/unit%g", topOutside, rotation, fit, sourceUnit), func(t *testing.T) {
+					fixture := pdffixture.WithBoxes("SOURCE", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[10 20 330 440]", Crop: crop, Rotate: strconv.Itoa(rotation), UserUnit: strconv.FormatFloat(sourceUnit, 'f', -1, 64)})
+					s, _, err := readSource(t.Context(), fixture.Bytes())
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -142,7 +149,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 					if err != nil {
 						t.Fatal(err)
 					}
-					s, err = read(t.Context(), baselineBytes)
+					s, _, err = readSource(t.Context(), baselineBytes)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -207,12 +214,12 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 						t.Fatal("footer changed viewport")
 					}
 					// Independent physical geometry: Crop intersect Media is 300x400
-					// source units at UserUnit 2; fitting produces 400x500 pt.
-					physicalWidth, physicalHeight := 600.0, 800.0
+					// source units; fitting produces 400x500 pt.
+					physicalWidth, physicalHeight := 300*sourceUnit, 400*sourceUnit
 					if (rotation%360+360)%180 != 0 {
 						physicalWidth, physicalHeight = physicalHeight, physicalWidth
 					}
-					unit := 2.0
+					unit := sourceUnit
 					if fit {
 						physicalWidth, physicalHeight, unit = 400, 500, 1
 					}
@@ -271,7 +278,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 
 func TestFooterCopiesInheritedResourcesAndPreservesSharedContent(t *testing.T) {
 	fixture := pdffixture.Pages("SHARED", 2)
-	s, err := read(t.Context(), fixture.Bytes())
+	s, _, err := readSource(t.Context(), fixture.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +399,7 @@ func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 
 func TestFooterOnLargeSourceDoesNotImposeGeneratedCanvasLimit(t *testing.T) {
 	fixture := pdffixture.WithBoxes("LARGE", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 50000 50000]"})
-	s, err := read(t.Context(), fixture.Bytes())
+	s, _, err := readSource(t.Context(), fixture.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +424,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 			var err error
 			if tc.kind == "source" {
 				fixture := pdffixture.WithBoxes("VIEW", pdffixture.PageBoxes{Media: "[0 0 612 792]"}, pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[10 20 330 440]", Crop: "[0 30 310 430]", Rotate: "90", UserUnit: "2"})
-				s, err = read(t.Context(), fixture.Bytes())
+				s, _, err = readSource(t.Context(), fixture.Bytes())
 				if err != nil {
 					t.Fatal(err)
 				}

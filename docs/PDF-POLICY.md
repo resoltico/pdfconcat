@@ -9,12 +9,14 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Source feature | Behavior |
 | --- | --- |
 | Encryption, including empty passwords | Refuse `source_encrypted`, including recognized password errors before a context is returned |
-| Signature values, certification or document timestamps | Refuse `source_signed`; signatures are not authenticated |
+| Signature values, catalog permission structures or document timestamps | Refuse `source_signed`; signatures are not authenticated |
 | Empty unsigned signature fields, including null values | Keep |
 | `NeedsRendering true` | Refuse `source_dynamic_form` |
 | `OCProperties` | Refuse `source_optional_content` |
-| Damaged page tree | Refuse `source_damaged` before validator repair |
-| Parse/validation failure, ordinary panic or unsupported unsafe shape | Refuse `source_invalid` |
+| Broken page tree or missing/malformed page contents | Refuse `source_damaged` before semantic validation |
+| Parse/validation failure | Refuse `source_invalid`, with backend detail and object attribution when available |
+| Unsupported structure or fidelity boundary | Refuse `source_unsupported` |
+| Unexpected backend failure, including recovered panics | Fail `source_processing_failed`; this does not establish source invalidity |
 | Content, ordinary annotations and links | Keep through upstream merge, subject to the limits below |
 | Static AcroForm fields | Require compatible resolved `/DR`, form-level `/DA` and `/Q`; otherwise `source_form_unsupported` |
 | Later nonempty forms | Backend may namespace fields even when original names do not collide; build reports actual mappings |
@@ -26,9 +28,90 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Tags, page labels and output intents | Remove with warnings; output makes no tagging/PDF/A/PDF/X claim |
 | Catalog `OpenAction`/`AA` and JavaScript name tree | Remove with warning |
 | Embedded-files index and catalog `AF` | Remove with warning; page FileAttachment annotations remain |
-| Document Info and catalog-level XMP, viewer preferences and page mode/layout | Replace/remove; metadata attached to retained pages or other objects may remain |
+| Catalog `PageLayout`, `PageMode`, `ViewerPreferences` | Remove before semantic validation, with `source_viewer_settings_removed` per entry |
+| Document Info and catalog-level XMP | Replace/remove; metadata attached to retained pages or other objects may remain |
 | Page/annotation actions and scripts | Keep; PDFConcat does not execute them or verify network targets |
 | Catalog URI Base | Remove and warn that retained relative actions may resolve differently |
+
+### Admission and viewer settings
+
+Sources are parsed offline in strict mode and checked against whole-source
+security and structural rules. PDFConcat explicitly removes the three viewer
+entries above before pdfcpu's relaxed semantic validation. Original source bytes
+and hashes remain unchanged.
+Inspection and assembly use this same admission path; assembly rereads and checks
+each original digest before admission. Findings already collected survive a later
+validation failure.
+
+Source viewer directives do not govern the composed document. Their catalog
+entries are removed whether their values are valid, invalid, direct or indirect;
+PDF null is equivalent to absence. Only the catalog references are removed, so
+objects shared with retained content remain intact. This includes the nonstandard
+`/PageLayout /PDLayoutDontCare`. Removal does not excuse parse failures or
+whole-source refusals, including signatures in otherwise discarded objects.
+
+Other discarded structures are validated according to their feature-specific
+rules. Removing tags, output intents or actions has different consequences from
+removing viewer settings; there is no general repair or sanitization mode.
+
+Encrypted sources are refused even when an empty user password makes them
+readable. Readability does not establish assembly permission. PDFConcat does not
+override restrictions or implement an encrypted-output policy. Request an
+unrestricted, unencrypted assembly copy from the supplier, or deliver originals
+separately with a guide. Preparing a derivative with another tool requires its
+own review; successful opening alone does not establish fidelity.
+
+### Validation evidence and page preservation
+
+Before semantic validation, each page's content must resolve to an existing
+stream or an array of existing stream references. Page-tree and content-stream
+references must match live object generations; missing/free objects, dangling
+references, null array members and non-stream content are refused. Absent/null
+Contents is a valid blank page, and an empty array contains no content to retain.
+
+Source admission, final in-memory assembly validation and serialized output
+verification record page order, content-stream reference order and hashes of
+encoded stream bytes before validation, then check them again afterward. Repeated
+or shared streams retain their multiplicity and order. This bounded check does
+not compare all resources, forms, metadata, decoded caches or rendered pixels;
+those representations may be normalized by the backend. It does not establish
+semantic equivalence of arbitrary PDF objects.
+
+Backend notices are preserved as `source_validation_notice` evidence, with phase
+and disposition in `detail` and available PDF locations. Notice wording never
+selects admission policy. A skipped validation divergence does not establish that
+PDF content was removed: retained scripts can produce such notices. Explicitly
+reported repairs are refused as `source_unsupported`. Notices are not a complete
+repair log; the page/content checks operate independently of them.
+
+### Page-content encodings
+
+Before occurrence selection, every original page-content stream must decode,
+including streams on omitted pages and every member of an array. Failures are
+`source_invalid`, or `source_unsupported` for a recognized unsupported encoding,
+with original source page/stream attribution. An unknown filter name is invalid
+input; backend error wording does not choose its classification.
+
+Generic byte filters use pdfcpu's decoder and predictor handling, one stage at a
+time on the same source context. Each Flate stage also passes an independent
+standard-library zlib read-to-EOF/checksum check; pdfcpu's deliberate truncated-
+Flate recovery is not accepted for page programs. An initial Identity Crypt
+filter, including its default Name, changes no bytes and remains supported;
+encrypted files are still refused. Image-only filters are not treated as decoded
+page commands. This check does not decode every image XObject payload.
+
+Shared streams decode once per admission, while each array occurrence counts
+toward its page's combined-content limit. Unfiltered bytes are bounded too.
+Intermediate stage buffers conservatively count toward the existing cumulative
+decoder allowance; no budget is reset for filter prefixes. PNG predictor framing
+is checked without counting its per-row control byte as decoded page content.
+Validated final caches are retained for backend reuse. Raw bytes, filter
+declarations and dictionaries stay unchanged.
+
+The staged serialized output receives the same encoding check before publication.
+This establishes bounded encoding decodability and strict Flate integrity, not
+complete content-operator grammar, resource validity, PDF conformance or universal
+preflight prediction. Merge/optimization or later backend operations can still fail.
 
 ### Structural rejection rules
 
@@ -36,7 +119,8 @@ The page tree must have nonempty dictionaries, valid Page/Pages types and an
 exact leaf count. A Page cannot have effective non-null Kids, including an empty
 array. Missing, repeated or cyclic nodes are refused. The raw page-tree check
 runs before validation; page, field and destination walks have depth bounds and
-inspect effective indirect values.
+inspect effective indirect values. Field and outline walks also check reference
+generations before dereferencing.
 
 Ambiguous canonical dictionary keys and name values containing a literal hash
 followed by hex digits are refused because upstream can decode their identity
@@ -163,6 +247,18 @@ internal caches so writing cannot recreate removed name trees. Effective version
 fields are synchronized before validation and writing: output is at least PDF
 1.7, or PDF 2.0 if any source is 2.0.
 
+### Output verification
+
+The staged, serialized PDF is reopened with strict validation and without source
+normalization. Its catalog and name-tree policy is checked before semantic
+validation can change the document. Encryption, forbidden catalog entries, XFA,
+broken page trees, reported repairs and changes to page/content identity are
+rejected. Page count
+must match the resolved packet before publication. This check is independent of
+source admission policy, but uses the same PDF engine; the test suite also uses
+qpdf and Poppler for independent structural and rendering evidence. Strict
+validation is not a complete PDF conformance or arbitrary-input fidelity proof.
+
 ## Text and pruning
 
 Text is shaped and measured with the original static TrueType program. ToUnicode
@@ -226,12 +322,14 @@ unchanged.
 
 ### Parsing and numeric precision
 
-Successful parsing or validation does not establish that arbitrary malformed
-input retains its meaning. Upstream relaxed parsing can accept malformed object
-suffixes, duplicate decoded keys including null omissions, malformed, overflowing
-or underflowing numeric tokens, and normalized malformed free-head entries.
-Some legal comment-separated indirect-reference spellings are unsupported and
-return `source_invalid`.
+Strict object reading rejects covered syntax defects, including duplicate keys
+and non-name dictionary keys. It does not certify complete PDF conformance or
+prove that no lower-level reader recovery occurred; malformed cross-reference
+bookkeeping can still be normalized. Compatibility validation remains relaxed,
+so ancillary producer differences do not become blanket source refusals. Some
+legal comment-separated indirect-reference spellings remain unsupported and
+return `source_invalid`. Successful parsing or validation does not establish that
+arbitrary malformed input retains its meaning.
 
 Finite PDF real numbers are serialized by upstream to at most twelve fractional
 digits; bitwise numeric round trips are not promised. Upstream owns content-stream

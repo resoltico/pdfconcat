@@ -6,6 +6,9 @@ package core
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -23,6 +26,8 @@ type (
 	Diagnostic = diag.Diagnostic
 	// Location is the complete factual contract exposed by core.
 	Location = diag.Location
+	// PDFLocation identifies a PDF object, page or dictionary entry.
+	PDFLocation = diag.PDFLocation
 	// Code is the complete factual contract exposed by core.
 	Code = diag.Code
 	// Severity is the complete factual contract exposed by core.
@@ -113,7 +118,37 @@ func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		code = diag.Interrupted
 	}
-	d := diag.New(code, err.Error())
+	operation := "I/O operation failed"
+	switch code {
+	case diag.PlanUnreadable, diag.PlanTooLarge:
+		operation = "Cannot read plan"
+	case diag.FontUnreadable:
+		operation = "Cannot read font file"
+	case diag.SourceUnreadable:
+		operation = "Cannot read source file"
+	case diag.OutputWriteFailed:
+		operation = "Cannot write output PDF"
+	case diag.OutputPublishFailed:
+		operation = "Output publication reported an error"
+	case diag.ReportWriteFailed:
+		operation = "Report writing or publication reported an error"
+	case diag.Interrupted:
+		operation = "The operation was interrupted"
+	}
+	cause := err
+	nativeDetail := false
+	var pathError *fs.PathError
+	var linkError *os.LinkError
+	switch {
+	case errors.As(err, &pathError):
+		cause, nativeDetail = pathError.Err, true
+	case errors.As(err, &linkError):
+		cause, nativeDetail = linkError.Err, true
+	}
+	d := diag.New(code, operation+": "+cause.Error()+".")
+	if nativeDetail {
+		d.Detail = strings.ToValidUTF8(err.Error(), "�")
+	}
 	if file != "<stdin>" {
 		d.File = file
 	}

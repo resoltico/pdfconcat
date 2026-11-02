@@ -30,11 +30,11 @@ update. The [installation guide](docs/INSTALL.md) covers uninstalling, options,
 manual downloads, verification and troubleshooting. Releases are not notarized
 by Apple or code-signed for Windows; the guide explains what that means.
 
-This source tree uses plan v4 and result/report v5. For a published binary, read
-the documentation at its release tag, such as
-[v0.7.0](https://github.com/resoltico/pdfconcat/tree/v0.7.0); `pdfconcat version`
-prints the version. Matching schema version numbers alone do not establish
-support for every documented field.
+PDFConcat 0.8.0 uses plan v4 and result/report v6. These are the
+[0.8.0 instructions](https://github.com/resoltico/pdfconcat/tree/v0.8.0).
+`pdfconcat version` identifies the installed program; consult the tag matching
+that version. Matching schema numbers alone do not establish support for every
+documented field.
 
 ## First packet
 
@@ -123,8 +123,8 @@ interleaving, PDF pipelines, encryption or form filling. Use **PDFConcat** when
 you want to describe a packet's sources, sections and generated pages in one
 plan, check its layout, and retain an assembly report.
 
-The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**,
-checked on **1 November 2026**. The PDFConcat column describes this source tree.
+The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**.
+The PDFConcat column describes 0.8.0.
 
 **●** means built-in support for the task as described; **—** means no dedicated
 built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu
@@ -204,7 +204,7 @@ pages may describe a later version.
 ## Limits
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
-- Encrypted PDFs, populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
+- Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).
 - Forms and numeric internal destinations restrict fitting. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
 - Footer numbers may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#physical-footer-numbers).

@@ -81,7 +81,7 @@ func TestAssemblyRejectsMissingOccurrenceBeforeReadingOrWriting(t *testing.T) {
 	var output bytes.Buffer
 	assembly := pdf.Assembly{Parts: []pdf.Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: filepath.Join(t.TempDir(), "absent.pdf")}, Pages: 1}}}}
 	_, err := pdf.Assemble(t.Context(), assembly, &output)
-	if err == nil || pdf.Diagnostic(err).Code != diag.SourceInvalid || output.Len() != 0 {
+	if err == nil || pdf.Diagnostic(err).Code != diag.SourceProcessingFailed || output.Len() != 0 {
 		t.Fatalf("missing inspection facts were consumed: %v, bytes=%d", err, output.Len())
 	}
 }

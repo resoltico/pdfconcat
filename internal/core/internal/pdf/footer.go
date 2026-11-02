@@ -112,7 +112,8 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 		placed, e := footer.Place(viewport.size, int64(page))
 		if e != nil {
 			diagnostic := compose.Diagnostic(e, "")
-			return &policyError{code: diagnostic.Code, err: e, file: part.Source, items: []string{part.Ref, "/page_numbers"}}
+			diagnostic.File, diagnostic.Items = part.Source, []string{part.Ref, "/page_numbers"}
+			return &policyError{finding: diagnostic, err: e}
 		}
 		_, _, attrs, e := s.PageDict(c, page, false)
 		if e != nil {

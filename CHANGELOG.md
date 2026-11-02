@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-02
+
+- macOS setup shows the managed command's full path for verification, avoiding misleading advice when an alias, function or another executable shadows `pdfconcat`.
+- Native install checks cover zsh autoload functions, aliases and alternate commands, including preservation after uninstall.
+
 ## [0.6.1] - 2026-11-02
 
 - macOS binaries require macOS 15+. One setup tool installs, updates and removes the ad hoc signed command, including offline uninstall; see [macOS setup](docs/MACOS.md).

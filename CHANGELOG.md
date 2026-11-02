@@ -2,9 +2,11 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-02
+
 - **Breaking:** the macOS `/usr/local` setup from 0.6.1 and 0.6.2 is replaced. Remove it with `/bin/bash /usr/local/libexec/pdfconcat/current/setup.sh uninstall`, then use the new installer.
 - **Breaking:** release archive names no longer contain the version (`pdfconcat_linux_amd64.tar.gz`), giving stable `releases/latest/download/` links. Update scripts that build versioned names.
-- One-command installers for macOS and Linux (`install.sh`) and Windows (`install.ps1`) install, update and uninstall per user without administrator access; see [installation](docs/INSTALL.md).
+- Per-user installers, `install.sh` (macOS, Linux) and `install.ps1` (Windows), need no admin access; see [installation](https://github.com/resoltico/pdfconcat/blob/v0.7.0/docs/INSTALL.md).
 - Installers verify the archive's SHA-256 checksum and test-run the program before replacing a working copy. They add one marked PATH line or user PATH entry that uninstall removes.
 - Installers are published beside the archives and covered by `checksums.txt` and build-provenance attestations. Archives include `docs/INSTALL.md` instead of `docs/MACOS.md`.
 - CI installs, updates and uninstalls the exact release archives on Linux x86-64 and arm64, macOS Apple silicon and Intel, and Windows x64 and Arm64.

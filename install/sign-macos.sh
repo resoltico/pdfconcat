@@ -18,7 +18,14 @@ fi
 
 /usr/bin/codesign --force --sign - --timestamp=none "$2"
 /usr/bin/codesign --verify --strict "$2"
-if ! /usr/bin/codesign --display --verbose=4 "$2" 2>&1 | /usr/bin/grep -q '^Signature=adhoc$'; then
+if ! signing_details=$(/usr/bin/codesign --display --verbose=4 "$2" 2>&1); then
+  printf '%s\n' "$signing_details" >&2
+  exit 1
+fi
+# Read the complete metadata before matching. A grep -q pipeline can close
+# early and turn codesign's later writes into SIGPIPE under pipefail.
+if ! /usr/bin/grep -Fx 'Signature=adhoc' <<< "$signing_details" > /dev/null; then
+  printf '%s\n' "$signing_details" >&2
   printf 'Expected an ad hoc signature: %s\n' "$2" >&2
   exit 1
 fi

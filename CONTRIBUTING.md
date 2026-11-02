@@ -153,6 +153,13 @@ case exercises the published GitHub release path:
 /bin/bash install/macos_test.sh --network
 ```
 
+The network case checks post-install guidance from isolated zsh sessions with
+autoloaded functions, aliases and alternate PATH executables, including a
+function that rejects `version`. It compares those bare commands with the
+managed executable's full path and checks that removal preserves the other
+definitions. These sessions use test-owned shell files; they do not read or
+change personal shell profiles or functions.
+
 To install and remove an exact native archive from a GoReleaser output directory,
 use `/bin/bash install/macos_test.sh --package-dir /absolute/path/to/dist`.
 This mode requires a stable version label accepted by setup; ordinary snapshot
@@ -187,8 +194,9 @@ version and actual result. Check:
   running under Rosetta still installs the native `arm64` release.
 - An account without administrator access and, where available, managed-device
   restrictions; the documented explanation must match the failure.
-- A custom PATH or another command named `pdfconcat`; distinguish installation
-  success from which command the user's shell selects.
+- A custom PATH, alias or function named `pdfconcat`; verify the managed copy
+  by full path and distinguish it from what the user's shell selects, including
+  after removal. Opening a new Terminal may reload the same definitions.
 - Download interruption, verification failure and unavailable network access;
   check that an existing working installation remains usable.
 - Offline removal through the installed helper, including the missing-binary

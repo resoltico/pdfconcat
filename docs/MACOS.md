@@ -84,21 +84,24 @@ download alone means installation succeeded.
 
 ### 4. Check the installed command
 
-Open a new Terminal window with **Command–N**, then run:
+Run the installed command by its full path:
 
 ```sh
-pdfconcat version
+/usr/local/bin/pdfconcat version
 ```
 
-PDFConcat should print its version information. If Terminal says `command not
-found`, use [the command-discovery check below](#terminal-says-command-not-found).
+PDFConcat should print its version information. This full path selects the
+setup-managed executable even when an alias, shell function or another program
+uses the name `pdfconcat`. Setup leaves those shell settings alone; opening a
+new Terminal window may load them again. See [command discovery](#terminal-runs-a-different-copy)
+if the bare name behaves differently.
 
 To check that it can create a PDF, run these commands in a writable folder where
 `pdfconcat-blank.pdf` does not already exist:
 
 ```sh
-pdfconcat check --blank --fit-to A4
-pdfconcat build -o pdfconcat-blank.pdf --blank --fit-to A4
+/usr/local/bin/pdfconcat check --blank --fit-to A4
+/usr/local/bin/pdfconcat build -o pdfconcat-blank.pdf --blank --fit-to A4
 ```
 
 The second command creates a one-page blank A4 PDF in that folder. You can keep
@@ -115,8 +118,8 @@ installed version. A download or verification failure does not replace your
 working executable. It checks the existing managed files before changing them;
 if those files were modified or unrelated files were added, it stops for review.
 
-After a successful update, open a new Terminal window and run `pdfconcat version`
-again. Updating the program does not update or remove your PDFs, plans or reports.
+After a successful update, run `/usr/local/bin/pdfconcat version` again.
+Updating the program does not update or remove your PDFs, plans or reports.
 Let an existing PDFConcat task finish before updating so that you can identify
 which version produced its output.
 
@@ -143,15 +146,22 @@ This uses the installed helper, so removal does not need a download or an
 internet connection. The helper is removed along with the installation; its
 path will no longer exist after successful removal.
 
-Open a new Terminal window and run:
+To check whether the managed locations remain, run:
 
 ```sh
-command -v pdfconcat
+if [ -e /usr/local/bin/pdfconcat ] || [ -L /usr/local/bin/pdfconcat ] ||
+   [ -e /usr/local/libexec/pdfconcat ] || [ -L /usr/local/libexec/pdfconcat ]; then
+  printf 'An installation path remains. Keep the setup result for review.\n'
+else
+  printf 'The managed installation is absent.\n'
+fi
 ```
 
-No output means that this shell no longer finds a command with that name. If a
-path is printed, [another copy may remain](#terminal-runs-a-different-copy).
-Setup leaves the shared `/usr/local/bin` directory in place.
+This checks the installation's paths, including dangling links. Setup leaves the
+shared `/usr/local/bin` directory in place. A bare `pdfconcat` command can still
+invoke an alias, function or another executable after successful removal. Use
+[command discovery](#terminal-runs-a-different-copy) to identify it; its presence
+does not establish that the managed installation remains.
 
 If setup finds modified files, unknown files or a foreign command link, it stops
 instead of deleting them. Follow [the preservation message below](#setup-reports-modified-or-unexpected-files).
@@ -189,8 +199,8 @@ To try the generated-only plan without source PDFs:
 4. Run:
 
    ```sh
-   pdfconcat check --plan examples/plans/generated-only.json
-   pdfconcat build --plan examples/plans/generated-only.json
+   /usr/local/bin/pdfconcat check --plan examples/plans/generated-only.json
+   /usr/local/bin/pdfconcat build --plan examples/plans/generated-only.json
    ```
 
 The plan creates `Dividers.pdf` beside the copied plan, containing two text
@@ -204,8 +214,8 @@ requirements. Your working copies remain when PDFConcat is updated or removed.
 
 ### Terminal says command not found
 
-First open a new Terminal window. If `pdfconcat version` still fails, run the
-installed command by its full path:
+If the bare name `pdfconcat` is not found, run the installed command by its full
+path:
 
 ```sh
 /usr/local/bin/pdfconcat version
@@ -222,20 +232,32 @@ disable macOS protections to hide the error.
 
 ### Terminal runs a different copy
 
-In a new Terminal window, run:
+If `pdfconcat version` reports `ERROR Unknown option: version`, or help describes
+a different interface such as BLK, pdfcpu or Ghostscript commands, inspect what
+your current shell selects. Those messages alone do not identify a PDFConcat
+release or establish that setup failed. In the same Terminal, run:
 
 ```sh
-command -v pdfconcat
 type -a pdfconcat
+/usr/local/bin/pdfconcat version
+/usr/local/bin/pdfconcat --help
 ```
 
-The setup-managed command is `/usr/local/bin/pdfconcat`. Other paths, aliases
-or shell functions can select a different copy, even after installation or
-removal here. Compare the selected version with
-`/usr/local/bin/pdfconcat version` when that installation exists.
+The setup-managed command is `/usr/local/bin/pdfconcat`. `type -a` lists matching
+aliases, shell functions and executable paths in that shell; compare them with
+the full-path version and help when the managed installation exists. Setup runs
+in a separate Bash process, which cannot determine every alias or function in
+your calling shell. A new Terminal window can load the same definitions again.
 
-Use the installation method that owns another copy to remove it. Setup does
-not overwrite or uninstall software it cannot identify as its own.
+After uninstall, the full path should be absent while `type -a` may still list
+other definitions. Likewise, output from `command -v pdfconcat` can describe an
+alias or function rather than a file path. Neither command establishes whether
+the managed installation remains; check its fixed paths as described above.
+
+Use the full path to work with the managed program. If you want to change a
+different command, first identify who maintains it and how it was installed;
+use that method's instructions. Setup does not edit shell definitions or
+overwrite or uninstall software it cannot identify as its own.
 
 ### Setup found an existing installation it does not own
 

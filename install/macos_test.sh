@@ -467,7 +467,97 @@ if [ "$TC_NETWORK" -eq 1 ]; then
         /usr/bin/curl --connect-timeout 1 --max-time 3 --silent --show-error \
         --output /dev/null https://github.com/resoltico/pdfconcat/releases/latest
     /usr/bin/grep -Fq '127.0.0.1' "$TC_TEMP/curl-config-control.log" || tc_fail 'The curl control did not exercise the configured unreachable proxy'
-    /usr/bin/env CURL_HOME="$TC_TEMP/curl-config" /bin/bash "$TC_SETUP" install --yes
+    # Exercise the actual success path from a zsh parent. Its unexported
+    # autoload function is invisible to setup's Bash child, even with /usr/local/bin
+    # first in PATH. These private fixtures never read or change user dotfiles.
+    TC_SHADOW="$TC_TEMP/zsh-shadow"
+    /bin/mkdir -p "$TC_SHADOW/functions" "$TC_SHADOW/bin" "$TC_SHADOW/zdot"
+    /bin/cat >"$TC_SHADOW/functions/pdfconcat" <<'ZSH'
+case "${1:-}" in
+    --help) print -r -- 'Private legacy pdfconcat fixture: BLK/pdfcpu/gs' ;;
+    *) print -u2 -r -- "ERROR Unknown option: ${1:-}"; return 2 ;;
+esac
+ZSH
+    /bin/cat >"$TC_SHADOW/alias-probe.zsh" <<'ZSH'
+pdfconcat version
+ZSH
+    /bin/cat >"$TC_SHADOW/bin/pdfconcat" <<'SH'
+#!/bin/sh
+printf 'private PATH shadow\n'
+SH
+    /bin/chmod 755 "$TC_SHADOW/bin/pdfconcat"
+    /bin/cat >"$TC_SHADOW/parent.zsh" <<'ZSH'
+set -eu
+mode=$1
+fixture=$2
+setup=$3
+arch=$4
+export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+case "$mode" in
+    autoload-*) fpath=("$fixture/functions"); autoload -Uz pdfconcat ;;
+    alias-*) alias pdfconcat='print -r -- private alias shadow' ;;
+    path-*) export PATH="$fixture/bin:/usr/bin:/bin" ;;
+    *) print -u2 -r -- 'Unknown shadow test mode'; exit 1 ;;
+esac
+
+assert_shadow() {
+    case "$mode" in
+        autoload-*)
+            if pdfconcat version >"$fixture/$mode-shadow.log" 2>&1; then
+                print -u2 -r -- 'Expected the private legacy function to reject version'
+                return 1
+            fi
+            /usr/bin/grep -Fxq 'ERROR Unknown option: version' "$fixture/$mode-shadow.log"
+            [[ $(pdfconcat --help) == 'Private legacy pdfconcat fixture: BLK/pdfcpu/gs' ]]
+            ;;
+        alias-*)
+            # Source a fixed probe so zsh expands the alias after its definition.
+            # No setup output or dynamically constructed command is evaluated.
+            [[ $(source "$fixture/alias-probe.zsh") == 'private alias shadow version' ]]
+            ;;
+        path-*) [[ $(pdfconcat version) == 'private PATH shadow' ]] ;;
+    esac
+}
+assert_shadow
+
+case "$mode" in
+    *-install)
+        [[ "$mode" != alias-install ]] || export PATH=/nonexistent
+        /bin/bash "$setup" install --yes >"$fixture/$mode-setup.log" 2>&1
+        /bin/cat "$fixture/$mode-setup.log"
+        recommendation=$(/usr/bin/sed -n 's/^Check the installed command: //p' "$fixture/$mode-setup.log")
+        [[ "$recommendation" == '/usr/local/bin/pdfconcat version' ]]
+        /usr/bin/grep -Fxq 'A bare pdfconcat command may select an alias, shell function, or another executable.' "$fixture/$mode-setup.log"
+        /usr/bin/grep -Fxq 'Help: https://github.com/resoltico/pdfconcat/blob/main/docs/MACOS.md#troubleshooting' "$fixture/$mode-setup.log"
+        # Execute the exact verified recommendation without evaluating log text.
+        /usr/local/bin/pdfconcat version >"$fixture/$mode-version.txt"
+        /usr/local/bin/pdfconcat version --json >"$fixture/$mode-version.json"
+        installed_version=$(/usr/bin/sed -n 's/^Installed PDFConcat v\([0-9.]*\)\.$/\1/p' "$fixture/$mode-setup.log")
+        [[ -n "$installed_version" ]]
+        [[ $(/usr/bin/plutil -extract version raw -o - "$fixture/$mode-version.json") == "$installed_version" ]]
+        [[ $(/usr/bin/plutil -extract platform raw -o - "$fixture/$mode-version.json") == "darwin/$arch" ]]
+        ;;
+    path-check)
+        # The captured recommendation also works when PATH finds a foreign file.
+        recommendation=$(/usr/bin/sed -n 's/^Check the installed command: //p' "$fixture/alias-install-setup.log")
+        [[ "$recommendation" == '/usr/local/bin/pdfconcat version' ]]
+        /usr/local/bin/pdfconcat version
+        /usr/local/bin/pdfconcat version --json >"$fixture/path-version.json"
+        [[ $(/usr/bin/plutil -extract version raw -o - "$fixture/path-version.json") == $(/usr/bin/plutil -extract version raw -o - "$fixture/alias-install-version.json") ]]
+        [[ $(/usr/bin/plutil -extract platform raw -o - "$fixture/path-version.json") == "darwin/$arch" ]]
+        ;;
+    *-removed)
+        # Shell shadows can remain after managed files are successfully removed.
+        [[ ! -e /usr/local/bin/pdfconcat && ! -L /usr/local/bin/pdfconcat ]]
+        [[ ! -e /usr/local/libexec/pdfconcat && ! -L /usr/local/libexec/pdfconcat ]]
+        ;;
+esac
+assert_shadow
+ZSH
+    /usr/bin/shasum -a 256 "$TC_SHADOW/functions/pdfconcat" "$TC_SHADOW/alias-probe.zsh" \
+        "$TC_SHADOW/bin/pdfconcat" "$TC_SHADOW/parent.zsh" >"$TC_SHADOW/fixtures-before.txt"
+    /usr/bin/env CURL_HOME="$TC_TEMP/curl-config" ZDOTDIR="$TC_SHADOW/zdot" /bin/zsh -f \
+        "$TC_SHADOW/parent.zsh" autoload-install "$TC_SHADOW" "$TC_SETUP" "$TC_ARCH"
     [ -L "$TC_BIN" ] || tc_fail 'Public installation did not create the command link'
     tc_assert_readable_links
     tc_source pc_validate_state
@@ -476,11 +566,23 @@ if [ "$TC_NETWORK" -eq 1 ]; then
     /usr/bin/grep -q 'Signature=adhoc' "$TC_TEMP/network-signature.log" || tc_fail 'Public release was not installed with an ad hoc signature'
     "$TC_BIN" version
     tc_smoke_pdf
-    tc_case 'Repeat the real installation with a custom PATH and remove it using the installed helper'
-    /usr/bin/env PATH=/nonexistent /bin/bash "$TC_SETUP" install --yes
+    tc_case 'Repeat the real installation beneath a private zsh alias and unusable PATH'
+    /usr/bin/env ZDOTDIR="$TC_SHADOW/zdot" /bin/zsh -f \
+        "$TC_SHADOW/parent.zsh" alias-install "$TC_SHADOW" "$TC_SETUP" "$TC_ARCH"
     tc_assert_readable_links
     tc_source pc_validate_state
+    tc_case 'The absolute recommendation bypasses a private executable earlier in PATH'
+    /usr/bin/env ZDOTDIR="$TC_SHADOW/zdot" /bin/zsh -f \
+        "$TC_SHADOW/parent.zsh" path-check "$TC_SHADOW" "$TC_SETUP" "$TC_ARCH"
+    tc_case 'Installed-helper removal preserves private function, alias and PATH shadows'
     tc_uninstall_helper
+    for TC_SHADOW_KIND in autoload alias path; do
+        /usr/bin/env ZDOTDIR="$TC_SHADOW/zdot" /bin/zsh -f \
+            "$TC_SHADOW/parent.zsh" "$TC_SHADOW_KIND-removed" "$TC_SHADOW" "$TC_SETUP" "$TC_ARCH"
+    done
+    /usr/bin/shasum -a 256 "$TC_SHADOW/functions/pdfconcat" "$TC_SHADOW/alias-probe.zsh" \
+        "$TC_SHADOW/bin/pdfconcat" "$TC_SHADOW/parent.zsh" >"$TC_SHADOW/fixtures-after.txt"
+    /usr/bin/cmp "$TC_SHADOW/fixtures-before.txt" "$TC_SHADOW/fixtures-after.txt"
 fi
 
 tc_case 'Reject a checksum mismatch before any installation is created'

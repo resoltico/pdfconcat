@@ -23,6 +23,11 @@ This installation uses ad hoc code signing and is not notarized by Apple. The
 guide explains what that means, every installation step, the password prompt,
 and how to remove the installation without removing your documents.
 
+Check the managed copy with `/usr/local/bin/pdfconcat version`. When following
+the examples below, you can replace `pdfconcat` with `/usr/local/bin/pdfconcat`
+to select that copy directly. An alias, shell function or another executable
+may otherwise take precedence; see [command discovery](docs/MACOS.md#terminal-runs-a-different-copy).
+
 ### Linux and Windows
 
 Download the archive for your operating system and CPU from
@@ -40,15 +45,18 @@ archive root. From the extracted directory, run:
 .\pdfconcat.exe version
 ```
 
-To use the `pdfconcat` commands below from any directory, place the executable in
-a directory on your `PATH`, or add its directory to `PATH`. Otherwise, replace
-`pdfconcat` in each command with the executable's relative or absolute path.
+On Linux and Windows, to use `pdfconcat` from any directory, place the extracted
+executable in a directory on your `PATH`, or add its directory to `PATH`.
+Otherwise, replace `pdfconcat` with the executable's relative or absolute path.
 
 This source tree uses plan v4 and result/report v5. For a published binary, use
 the documentation and examples supplied in its release archive. Matching schema
 version numbers alone do not establish support for every documented field.
 
 ## First packet
+
+The examples assume `pdfconcat` selects the intended executable. Use its full
+path if another command with that name takes precedence.
 
 Use two PDFs of your own, named `cover.pdf` and `appendix.pdf` in the current
 directory:

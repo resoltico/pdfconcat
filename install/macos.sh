@@ -615,7 +615,7 @@ HELP
 }
 
 pc_install() (
-    local work='' version arch asset base caller status resolved
+    local work='' version arch asset base caller status
     umask 077
     pc_validate_state || return
     arch=$(pc_architecture) || return
@@ -647,18 +647,9 @@ pc_install() (
     fi
     printf 'macOS may now ask for your administrator password.\n'
     /usr/bin/sudo /usr/bin/env -u BASH_ENV -u ENV /bin/bash "$PC_SCRIPT" __root-install "$caller" "$work/generation" || return
-    resolved=$(command -v pdfconcat) || resolved=''
-    if [[ "$resolved" == "$PC_BIN" ]]; then
-        printf '\nOpen a new Terminal window, then check: pdfconcat version\n'
-    elif [[ -n "$resolved" ]]; then
-        printf '\nYour current PATH finds another command first: %s\n' "$(pc_display_path "$resolved")"
-        printf 'The installed copy is available as: %s\n' "$PC_BIN"
-        printf 'Help: https://github.com/resoltico/pdfconcat/blob/main/docs/MACOS.md#troubleshooting\n'
-    else
-        printf '\nYour current PATH does not find /usr/local/bin/pdfconcat.\n'
-        printf 'The installed copy is available as: %s\n' "$PC_BIN"
-        printf 'Help: https://github.com/resoltico/pdfconcat/blob/main/docs/MACOS.md#troubleshooting\n'
-    fi
+    printf '\nCheck the installed command: %s version\n' "$PC_BIN"
+    printf 'A bare pdfconcat command may select an alias, shell function, or another executable.\n'
+    printf 'Help: https://github.com/resoltico/pdfconcat/blob/main/docs/MACOS.md#troubleshooting\n'
 )
 
 pc_uninstall() {

@@ -15,6 +15,20 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -X main.version={{ .Version }}
+    overrides:
+      - goos: darwin
+        goarch: amd64
+        goamd64: v1
+        ldflags:
+          - -s -w -X main.version={{ .Version }} -macos=15.0.0
+      - goos: darwin
+        goarch: arm64
+        goarm64: v8.0
+        ldflags:
+          - -s -w -X main.version={{ .Version }} -macos=15.0.0
+    hooks:
+      post:
+        - /bin/bash install/sign-macos.sh "{{ .Os }}" "{{ .Path }}"
 
 archives:
   - id: default
@@ -36,6 +50,7 @@ archives:
       - docs/ARCHITECTURE.md
       - docs/PLAN.md
       - docs/CLI.md
+      - docs/MACOS.md
       - src: examples/plans/*.json
         dst: examples/plans
         strip_parent: true

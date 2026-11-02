@@ -50,6 +50,8 @@ jobs:
         run: |
           actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
           go run "github.com/rhysd/actionlint/cmd/actionlint@$actionlint_version"
+      - name: Setup shell lint
+        run: shellcheck --shell=bash install/*.sh
       - name: Known vulnerabilities
         run: go tool -modfile=tools/go.mod govulncheck ./...
 
@@ -109,10 +111,82 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} go build -trimpath -o /dev/null ./cmd/pdfconcat
           done
 
+  macos-install:
+    name: macOS setup (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            network: --network
+          - os: macos-15-intel
+            network: --network
+          - os: macos-26
+            network: ""
+          - os: macos-26-intel
+            network: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
+        with:
+          go-version-file: go.mod
+      - name: Native install, update, and uninstall lifecycle
+        env:
+          NETWORK_CHECK: ${{ matrix.network }}
+        run: /bin/bash install/macos_test.sh ${NETWORK_CHECK:+"$NETWORK_CHECK"}
+
+  package:
+    name: Release packaging
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
+        with:
+          go-version-file: go.mod
+      - name: Build release archives without publishing
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: release --snapshot --clean --skip=publish
+      - name: Verify packaged macOS binaries and documentation
+        run: |
+          case "$(/usr/bin/uname -m)" in
+            arm64) native_arch=arm64 ;;
+            x86_64) native_arch=amd64 ;;
+            *) exit 1 ;;
+          esac
+          cd dist
+          /usr/bin/shasum -a 256 --check checksums.txt
+          for arch in amd64 arm64; do
+            staging_dir=$(/usr/bin/mktemp -d "$RUNNER_TEMP/pdfconcat-package.XXXXXX")
+            /usr/bin/tar -xzf pdfconcat_*_darwin_"$arch".tar.gz -C "$staging_dir"
+            test -s "$staging_dir/docs/MACOS.md"
+            test -s "$staging_dir/THIRD_PARTY_NOTICES.md"
+            /usr/bin/codesign --verify --strict "$staging_dir/pdfconcat"
+            /usr/bin/codesign --display --verbose=4 "$staging_dir/pdfconcat" 2>&1 | /usr/bin/grep '^Signature=adhoc$'
+            /usr/bin/otool -l "$staging_dir/pdfconcat" | /usr/bin/grep -E 'minos 15\.0(\.0)?$'
+            if [ "$arch" = "$native_arch" ]; then
+              "$staging_dir/pdfconcat" version
+              "$staging_dir/pdfconcat" check --blank --fit-to A4
+              "$staging_dir/pdfconcat" build -o "$staging_dir/blank.pdf" --blank --fit-to A4
+              test -s "$staging_dir/blank.pdf"
+            fi
+            /bin/rm -rf "$staging_dir"
+          done
+
   required:
     name: Required CI
     if: always()
-    needs: [lint, test, build]
+    needs: [lint, test, build, macos-install, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

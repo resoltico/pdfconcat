@@ -7,8 +7,8 @@ pc_init_paths() {
     PC_BIN=/usr/local/bin/pdfconcat
     PC_LOCK=/var/run/pdfconcat-setup.lock
     PC_SCRIPT=${BASH_SOURCE[0]}
-    PC_CURRENT_ID=
-    PC_CURRENT_VERSION=
+    PC_CURRENT_ID=''
+    PC_CURRENT_VERSION=''
     PC_ROOT_PRESENT=0
 }
 
@@ -115,8 +115,7 @@ pc_validate_generation() {
     local dir=$1 owner=$2 allow_missing=$3 line kind mode hash rel extra actual found item count=0
     local binary=0 helper=0 payload=0
     local names=()
-    PC_GENERATION_VERSION=
-    PC_GENERATION_ARCH=
+    PC_GENERATION_VERSION=''
     PC_MISSING_BINARY=0
     pc_check_dir "$dir" "$owner" || return
     pc_check_file "$dir/receipt" "$owner" 644 || return
@@ -130,15 +129,16 @@ pc_validate_generation() {
     pc_valid_version "$PC_GENERATION_VERSION" || { pc_error 'Invalid receipt version.'; return 1; }
     IFS= read -r line <&3 || return
     [[ "$line" == 'architecture arm64' || "$line" == 'architecture amd64' ]] || { pc_error 'Invalid receipt architecture.'; return 1; }
-    PC_GENERATION_ARCH=${line#architecture }
     while IFS= read -r line <&3 || [[ -n "$line" ]]; do
-        kind= mode= hash= rel= extra=
+        kind='' mode='' hash='' rel='' extra=''
         case "$line" in
             'd '*) kind=d; rel=${line#d } ;;
             'f '*) IFS=' ' read -r kind mode hash rel extra <<< "$line" ;;
             *) pc_error 'Invalid inventory record.'; return 1 ;;
         esac
-        pc_valid_path "$rel" && [[ -z "$extra" ]] || { pc_error 'Invalid inventory path.'; return 1; }
+        if ! pc_valid_path "$rel" || [[ -n "$extra" ]]; then
+            pc_error 'Invalid inventory path.'; return 1
+        fi
         if [[ $count -gt 0 ]]; then
             for item in "${names[@]}"; do
                 [[ "$item" != "$rel" ]] || { pc_error "Duplicate inventory entry: $rel"; return 1; }
@@ -181,8 +181,8 @@ pc_validate_generation() {
 
 pc_validate_state() {
     local entry id target
-    PC_CURRENT_ID=
-    PC_CURRENT_VERSION=
+    PC_CURRENT_ID=''
+    PC_CURRENT_VERSION=''
     PC_ROOT_PRESENT=0
     pc_check_parents "${PC_ROOT%/*}" || return
     pc_check_parents "${PC_BIN%/*}" || return
@@ -207,34 +207,64 @@ pc_validate_state() {
         done
     fi
     if pc_exists "$PC_ROOT/current"; then
-        [[ -L "$PC_ROOT/current" && $(pc_uid "$PC_ROOT/current") == 0 ]] || { pc_error 'The current-release pointer is not owned by this installer.'; return 1; }
+        [[ -L "$PC_ROOT/current" && $(pc_uid "$PC_ROOT/current") == 0 && $(pc_mode "$PC_ROOT/current") == 755 ]] || {
+            pc_error 'The current-release pointer has unexpected ownership or permissions; it has been preserved.'; return 1;
+        }
         pc_check_no_acl "$PC_ROOT/current" || return
         target=$(/usr/bin/readlink "$PC_ROOT/current") || return
         id=${target#releases/}
-        [[ "$target" == "releases/$id" ]] && pc_valid_hash "$id" || { pc_error 'The current-release pointer is invalid.'; return 1; }
+        if [[ "$target" != "releases/$id" ]] || ! pc_valid_hash "$id"; then
+            pc_error 'The current-release pointer is invalid.'; return 1
+        fi
         pc_validate_generation "$PC_ROOT/releases/$id" 0 1 || return
         PC_CURRENT_ID=$id
         PC_CURRENT_VERSION=$PC_GENERATION_VERSION
     fi
     if pc_exists "$PC_BIN"; then
-        [[ -L "$PC_BIN" && $(pc_uid "$PC_BIN") == 0 ]] || { pc_error "A different installation occupies $PC_BIN; nothing was changed."; return 1; }
+        [[ -L "$PC_BIN" && $(pc_uid "$PC_BIN") == 0 && $(pc_mode "$PC_BIN") == 755 ]] || {
+            pc_error "An unexpected command or changed permissions were preserved: $PC_BIN"; return 1;
+        }
         pc_check_no_acl "$PC_BIN" || return
         [[ $(/usr/bin/readlink "$PC_BIN") == "$PC_ROOT/current/payload/pdfconcat" ]] || { pc_error "An unexpected command link has been preserved: $PC_BIN"; return 1; }
         [[ -n "$PC_CURRENT_ID" ]] || { pc_error 'The command link has no managed current release.'; return 1; }
     fi
 }
 
-pc_delete_generation() {
-    local dir=$1 id=${1##*/}
-    [[ "${dir%/*}" == "$PC_ROOT/releases" ]] && pc_valid_hash "$id" || {
-        pc_error 'Refusing to remove an unexpected directory.'; return 1;
-    }
+pc_retire_generation() {
+    local dir=$1 stage=$2 id=${1##*/}
+    if [[ "${dir%/*}" != "$PC_ROOT/releases" ]] || ! pc_valid_hash "$id"; then
+        pc_error 'Refusing to remove an unexpected directory.'; return 1
+    fi
     pc_validate_generation "$dir" 0 1 || return
     [[ $(pc_sha256 "$dir/receipt") == "$id" ]] || { pc_error 'The receipt does not match its directory.'; return 1; }
-    # All entries, hashes, types, owners and permissions were checked. The
-    # project-owned directories are not writable by ordinary accounts.
-    /bin/rm -rf -- "$dir"
+    if [[ -L "$PC_ROOT/current" && $(/usr/bin/readlink "$PC_ROOT/current") == "releases/$id" ]]; then
+        pc_error 'Refusing to retire the active release.'; return 1
+    fi
+    [[ "${stage%/*}" == /private/tmp && "$stage" == /private/tmp/pdfconcat-stage.* &&
+       -d "$stage" && ! -L "$stage" && $(pc_uid "$stage") == 0 && $(pc_mode "$stage") == 700 ]] || {
+        pc_error 'A private retirement directory is required.'; return 1;
+    }
+    pc_check_no_acl "$stage" || return
+    ! pc_exists "$stage/generation" || { pc_error 'The retirement destination is not empty.'; return 1; }
+    [[ $(pc_device "$dir") == $(pc_device "$stage") ]] || {
+        pc_error 'Temporary storage and the installed release must be on the same filesystem; the release was preserved.'; return 1;
+    }
+    # Move the complete checked inventory out atomically before recursive
+    # deletion. An interruption cannot leave a torn receipt in releases/.
+    /bin/mv "$dir" "$stage/generation"
 }
+
+pc_delete_generation() (
+    local dir=$1 stage=''
+    umask 077
+    stage=$(/usr/bin/mktemp -d /private/tmp/pdfconcat-stage.XXXXXXXX) || return
+    trap 'if [[ -n "$stage" && -d "$stage" && ! -L "$stage" ]]; then /bin/rm -rf -- "$stage"; fi' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM HUP
+    pc_retire_generation "$dir" "$stage" || return
+    /bin/rm -rf -- "$stage" || return
+    stage=''
+)
 
 pc_clean_old_generations() {
     local entry
@@ -280,18 +310,21 @@ pc_normalize_stage() {
     done < <(cd "$dir" && /usr/bin/find . -print0)
 }
 
-pc_create_command_link() {
+pc_create_command_link() (
     # BSD ln normally treats an existing destination directory as a container.
     # -F prevents that; -i with closed input refuses every replacement instead
     # of letting -F imply force. -h also refuses to follow a destination link.
     # If a destination appears later, symlink(2) fails atomically with EEXIST.
-    /bin/ln -sFhi "$PC_ROOT/current/payload/pdfconcat" "$PC_BIN" < /dev/null
-}
+    # macOS applies umask to symlinks; ordinary users must be able to read this
+    # link even though the surrounding privileged worker uses private defaults.
+    umask 022
+    /bin/ln -sFhi "$PC_ROOT/current/payload/pdfconcat" "$PC_BIN"
+) < /dev/null
 
 # The caller holds PC_LOCK. Tests source these functions and hold the same
 # native lock around their isolated worker; main never accepts path overrides.
 pc_publish_generation() (
-    local candidate=$1 source_uid=$2 id stage= entry new_version
+    local candidate=$1 source_uid=$2 id stage='' new_version
     [[ $EUID == 0 && "$source_uid" =~ ^[0-9]+$ ]] || { pc_error 'A privileged installation worker is required.'; return 1; }
     pc_validate_generation "$candidate" "$source_uid" 0 || return
     new_version=$PC_GENERATION_VERSION
@@ -344,7 +377,7 @@ pc_publish_generation() (
     fi
     # Both rename sources share the destination filesystem. BSD mv -h replaces
     # the symlink itself instead of following an existing directory symlink.
-    /bin/ln -s "releases/$id" "$stage/current" || return
+    (umask 022; /bin/ln -s "releases/$id" "$stage/current") || return
     /bin/mv -fh "$stage/current" "$PC_ROOT/current" || return
     if ! pc_exists "$PC_BIN"; then
         # Creating a symlink is atomic and refuses a destination that appeared
@@ -390,14 +423,16 @@ pc_download() {
 
 pc_prepare_archive() {
     local archive=$1 checksums=$2 asset=$3 version=$4 arch=$5 dir=$6
-    local expected= actual hash name extra rel archive_count=0 matches=0
+    local expected='' actual hash name extra rel archive_count=0 matches=0
     [[ "$asset" == "pdfconcat_${version#v}_darwin_${arch}.tar.gz" ]] || { pc_error 'Unexpected archive name.'; return 1; }
     pc_valid_version "$version" || { pc_error 'Invalid release version.'; return 1; }
     [[ "$arch" == arm64 || "$arch" == amd64 ]] || { pc_error 'Invalid CPU architecture.'; return 1; }
     [[ -f "$archive" && ! -L "$archive" && -f "$checksums" && ! -L "$checksums" ]] || return 1
     while IFS=' ' read -r hash name extra || [[ -n "$hash$name$extra" ]]; do
         [[ "$name" == "$asset" ]] || continue
-        [[ -z "$extra" ]] && pc_valid_hash "$hash" || { pc_error 'The release checksum entry is invalid.'; return 1; }
+        if [[ -n "$extra" ]] || ! pc_valid_hash "$hash"; then
+            pc_error 'The release checksum entry is invalid.'; return 1
+        fi
         expected=$hash
         matches=$((matches + 1))
     done < "$checksums"
@@ -452,7 +487,9 @@ pc_require_macos() {
     [[ $(/usr/bin/uname -s) == Darwin ]] || { pc_error 'This setup is for macOS 15 or later.'; return 1; }
     version=$(/usr/bin/sw_vers -productVersion) || return
     major=${version%%.*}
-    [[ "$major" =~ ^[0-9]{1,3}$ ]] && ((10#$major >= 15)) || { pc_error 'macOS 15 or later is required.'; return 1; }
+    if ! [[ "$major" =~ ^[0-9]{1,3}$ ]] || ((10#$major < 15)); then
+        pc_error 'macOS 15 or later is required.'; return 1
+    fi
 }
 
 pc_architecture() {
@@ -552,7 +589,7 @@ HELP
 }
 
 pc_install() (
-    local work= version arch asset base caller status resolved
+    local work='' version arch asset base caller status resolved
     umask 077
     pc_validate_state || return
     arch=$(pc_architecture) || return
@@ -590,7 +627,7 @@ pc_install() (
     fi
     printf 'macOS may now ask for your administrator password.\n'
     /usr/bin/sudo /usr/bin/env -u BASH_ENV -u ENV /bin/bash "$PC_SCRIPT" __root-install "$caller" "$work/generation" || return
-    resolved=$(command -v pdfconcat) || resolved=
+    resolved=$(command -v pdfconcat) || resolved=''
     if [[ "$resolved" == "$PC_BIN" ]]; then
         printf '\nOpen a new Terminal window, then check: pdfconcat version\n'
     elif [[ -n "$resolved" ]]; then

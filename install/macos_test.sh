@@ -19,7 +19,7 @@ if [ "$(/usr/bin/uname -s)" != Darwin ]; then
     exit 1
 fi
 
-TC_REPO=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")/.." && pwd -P)
+TC_REPO=$(CDPATH='' cd -- "$(/usr/bin/dirname -- "$0")/.." && pwd -P)
 readonly TC_SETUP="$TC_REPO/install/macos.sh"
 readonly TC_SIGN="$TC_REPO/install/sign-macos.sh"
 readonly TC_ROOT=/usr/local/libexec/pdfconcat
@@ -37,10 +37,11 @@ fi
 /usr/bin/sudo -n /usr/bin/true
 TC_GO=$(command -v go)
 TC_TEMP=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/pdfconcat-installer-tests.XXXXXX")
-TC_TEMP=$(CDPATH= cd -- "$TC_TEMP" && pwd -P)
+TC_TEMP=$(CDPATH='' cd -- "$TC_TEMP" && pwd -P)
 TC_CASES=0
 TC_CHILD_PID=
 TC_HOLDER_PID=
+TC_RETIRED_STAGE=
 TC_OWNS_PATHS=1
 
 tc_cleanup() {
@@ -61,6 +62,9 @@ tc_cleanup() {
         # Never remove or change permissions on their shared parent directories.
         /usr/bin/sudo /bin/rm -f -- "$TC_BIN" || true
         /usr/bin/sudo /bin/rm -rf -- "$TC_ROOT" || true
+    fi
+    if [[ "$TC_RETIRED_STAGE" =~ ^/private/tmp/pdfconcat-stage\.[A-Za-z0-9]+$ ]]; then
+        /usr/bin/sudo /bin/rm -rf -- "$TC_RETIRED_STAGE" || true
     fi
     if [ "$status" -eq 0 ]; then
         /bin/rm -rf -- "$TC_TEMP"
@@ -132,8 +136,22 @@ tc_root() {
 }
 
 tc_assert_absent() {
-    [ ! -e "$TC_BIN" ] && [ ! -L "$TC_BIN" ] || tc_fail 'Public command remains'
-    [ ! -e "$TC_ROOT" ] && [ ! -L "$TC_ROOT" ] || tc_fail 'Managed installation remains'
+    [[ ! -e "$TC_BIN" && ! -L "$TC_BIN" ]] || tc_fail 'Public command remains'
+    [[ ! -e "$TC_ROOT" && ! -L "$TC_ROOT" ]] || tc_fail 'Managed installation remains'
+}
+
+tc_assert_readable_links() {
+    local public_target current_target
+    [[ -L "$TC_BIN" && -L "$TC_ROOT/current" ]] || tc_fail 'Managed command and current-release links are required'
+    [ "$(/usr/bin/stat -f '%Lp' "$TC_BIN")" = 755 ] || tc_fail 'Public command link is not readable by ordinary users'
+    [ "$(/usr/bin/stat -f '%Lp' "$TC_ROOT/current")" = 755 ] || tc_fail 'Current-release link is not readable by ordinary users'
+    # On macOS a root-owned mode-700 symlink can prevent ordinary readlink and
+    # ACL inspection. Check those operations without sudo as well as execution.
+    public_target=$(/usr/bin/readlink "$TC_BIN") || tc_fail 'Ordinary-user readlink failed on the public command'
+    current_target=$(/usr/bin/readlink "$TC_ROOT/current") || tc_fail 'Ordinary-user readlink failed on the current release'
+    [ "$public_target" = "$TC_ROOT/current/payload/pdfconcat" ] || tc_fail 'Public command link has an unexpected target'
+    case "$current_target" in releases/*) ;; *) tc_fail 'Current-release link has an unexpected target' ;; esac
+    /bin/ls -lde "$TC_BIN" "$TC_ROOT/current" >"$TC_TEMP/link-metadata.log"
 }
 
 tc_assert_version() {
@@ -143,6 +161,7 @@ tc_assert_version() {
         *"${expected#v}"*) ;;
         *) tc_fail "Expected version $expected; received $actual" ;;
     esac
+    tc_assert_readable_links
     tc_source pc_validate_state
     /usr/bin/codesign --verify --strict --verbose=2 "$TC_BIN"
     /usr/bin/codesign -d --verbose=4 "$TC_BIN" >"$TC_TEMP/signature.log" 2>&1
@@ -226,8 +245,8 @@ tc_uninstall_helper() {
         # and that sandboxed sudo can execute a non-networked command first.
         if /usr/bin/curl -q --fail --silent --show-error --connect-timeout 3 --max-time 6 \
                 --output /dev/null "$endpoint" >"$TC_TEMP/network-control.log" 2>&1 &&
-            /usr/bin/sudo /usr/bin/curl -q --fail --silent --show-error --connect-timeout 3 --max-time 6 \
-                --output /dev/null "$endpoint" >>"$TC_TEMP/network-control.log" 2>&1 &&
+            { /usr/bin/sudo /usr/bin/curl -q --fail --silent --show-error --connect-timeout 3 --max-time 6 \
+                --output /dev/null "$endpoint"; } >>"$TC_TEMP/network-control.log" 2>&1 &&
             /usr/bin/sandbox-exec -p "$profile" /usr/bin/sudo -n /usr/bin/true \
                 >>"$TC_TEMP/network-control.log" 2>&1; then
             if /usr/bin/sandbox-exec -p "$profile" /usr/bin/curl -q --fail --silent --show-error \
@@ -257,7 +276,10 @@ tc_smoke_pdf() {
     local smoke
     smoke=$(/usr/bin/mktemp -d "$TC_TEMP/smoke.XXXXXX")
     /bin/cp "$TC_REPO/examples/plans/generated-only.json" "$smoke/plan.json"
-    "$TC_BIN" build --plan "$smoke/plan.json" -o "$smoke/Dividers.pdf" >"$smoke/build.log" 2>&1
+    if ! "$TC_BIN" build --plan "$smoke/plan.json" -o "$smoke/Dividers.pdf" >"$smoke/build.log" 2>&1; then
+        /bin/cat "$smoke/build.log" >&2
+        tc_fail 'The source-free PDF build failed'
+    fi
     [ -s "$smoke/Dividers.pdf" ] || tc_fail 'Generated-only PDF is missing'
     [ "$(/usr/bin/head -c 5 "$smoke/Dividers.pdf")" = '%PDF-' ] || tc_fail 'Output lacks a PDF header'
     TC_USER_PDF="$smoke/Dividers.pdf"
@@ -305,6 +327,7 @@ if [ "$TC_NETWORK" -eq 1 ]; then
     tc_case 'Install the current public GitHub release through the real command'
     /bin/bash "$TC_SETUP" install --yes
     [ -L "$TC_BIN" ] || tc_fail 'Public installation did not create the command link'
+    tc_assert_readable_links
     tc_source pc_validate_state
     /usr/bin/codesign --verify --strict --verbose=2 "$TC_BIN"
     /usr/bin/codesign -d --verbose=4 "$TC_BIN" >"$TC_TEMP/network-signature.log" 2>&1
@@ -313,6 +336,7 @@ if [ "$TC_NETWORK" -eq 1 ]; then
     tc_smoke_pdf
     tc_case 'Repeat the real installation with a custom PATH and remove it using the installed helper'
     /usr/bin/env PATH=/nonexistent /bin/bash "$TC_SETUP" install --yes
+    tc_assert_readable_links
     tc_source pc_validate_state
     tc_uninstall_helper
 fi
@@ -391,7 +415,7 @@ tc_expect_failure link-existing-symlink /bin/bash -c "$TC_LINK_BODY" bash "$TC_S
 /bin/cp "$TC_LINK_DIR/sentinel" "$TC_LINK_DIR/destination/keep.txt"
 tc_expect_failure link-existing-directory /bin/bash -c "$TC_LINK_BODY" bash "$TC_SETUP" "$TC_LINK_DIR/root" "$TC_LINK_DIR/destination"
 /usr/bin/cmp "$TC_LINK_DIR/sentinel" "$TC_LINK_DIR/destination/keep.txt" || tc_fail 'Link primitive replaced a directory or its content'
-[ ! -e "$TC_LINK_DIR/destination/pdfconcat" ] && [ ! -L "$TC_LINK_DIR/destination/pdfconcat" ] || tc_fail 'Link primitive treated an existing directory as a container'
+[[ ! -e "$TC_LINK_DIR/destination/pdfconcat" && ! -L "$TC_LINK_DIR/destination/pdfconcat" ]] || tc_fail 'Link primitive treated an existing directory as a container'
 /bin/bash -c "$TC_LINK_BODY" bash "$TC_SETUP" "$TC_LINK_DIR/root" "$TC_LINK_DIR/new-command"
 [ "$(/usr/bin/readlink "$TC_LINK_DIR/new-command")" = "$TC_LINK_DIR/root/current/payload/pdfconcat" ] || tc_fail 'Link primitive failed to create an absent destination'
 
@@ -409,9 +433,13 @@ tc_expect_failure foreign-executable tc_publish "$TC_TEMP/stage-a"
 /usr/bin/sudo /bin/rm "$TC_BIN"
 
 tc_case 'Preserve a foreign symlink and its target'
-/usr/bin/sudo /bin/ln -s "$TC_TEMP/foreign" "$TC_BIN"
+/usr/bin/sudo /bin/bash -c 'umask 022; /bin/ln -s "$1" "$2"' bash "$TC_TEMP/foreign" "$TC_BIN"
+TC_FOREIGN_LINK_METADATA=$(/usr/bin/sudo /usr/bin/stat -f '%u:%g:%Lp' "$TC_BIN")
+[ "$(/usr/bin/sudo /usr/bin/readlink "$TC_BIN")" = "$TC_TEMP/foreign" ] || tc_fail 'Foreign link fixture has the wrong target'
+[ "$(/usr/bin/readlink "$TC_BIN")" = "$TC_TEMP/foreign" ] || tc_fail 'Foreign link fixture is not readable by the ordinary test account'
 tc_expect_failure foreign-symlink tc_publish "$TC_TEMP/stage-a"
 [ "$(/usr/bin/readlink "$TC_BIN")" = "$TC_TEMP/foreign" ] || tc_fail 'Foreign symlink was changed'
+[ "$(/usr/bin/sudo /usr/bin/stat -f '%u:%g:%Lp' "$TC_BIN")" = "$TC_FOREIGN_LINK_METADATA" ] || tc_fail 'Foreign symlink ownership or permissions were changed'
 [ "$(/bin/cat "$TC_TEMP/foreign")" = 'foreign executable sentinel' ] || tc_fail 'Foreign symlink target was changed'
 /usr/bin/sudo /bin/rm "$TC_BIN"
 
@@ -495,6 +523,25 @@ tc_assert_version v90.0.1
 [ "$(/usr/bin/stat -L -f '%i' "$TC_BIN")" != "$TC_INODE_A" ] || tc_fail 'Upgrade reused the old executable inode'
 tc_smoke_pdf
 
+tc_case 'Retirement removes an old generation from managed state before partial cleanup'
+# Reconstruct a complete old generation alongside the active release: the
+# legitimate state immediately before cleanup in a successful update.
+[[ ! -e "$TC_ROOT/$TC_CURRENT_A" && ! -L "$TC_ROOT/$TC_CURRENT_A" ]] || tc_fail 'The old generation was not cleaned after update'
+tc_root /usr/bin/ditto "$TC_TEMP/stage-a" "$TC_ROOT/$TC_CURRENT_A"
+tc_root pc_normalize_stage "$TC_ROOT/$TC_CURRENT_A"
+tc_source pc_validate_state
+TC_RETIRED_STAGE=$(/usr/bin/sudo /usr/bin/mktemp -d /private/tmp/pdfconcat-stage.XXXXXXXX)
+tc_expect_failure retire-current tc_root pc_retire_generation "$(tc_current_dir)" "$TC_RETIRED_STAGE"
+tc_assert_version v90.0.1
+tc_root pc_retire_generation "$TC_ROOT/$TC_CURRENT_A" "$TC_RETIRED_STAGE"
+[[ ! -e "$TC_ROOT/$TC_CURRENT_A" && ! -L "$TC_ROOT/$TC_CURRENT_A" ]] || tc_fail 'Retirement left the old generation in managed state'
+# Stop at the real atomic filesystem boundary, then leave a partially removed
+# retired tree. This models interrupted cleanup without a timing-dependent kill.
+/usr/bin/sudo /bin/rm "$TC_RETIRED_STAGE/generation/payload/README.md"
+tc_assert_version v90.0.1
+tc_publish "$TC_TEMP/stage-b"
+tc_assert_version v90.0.1
+
 tc_case 'Refuse a downgrade and preserve the newer working command'
 TC_HASH_B=$(tc_sha256 "$TC_BIN")
 tc_expect_failure downgrade tc_publish "$TC_TEMP/stage-a"
@@ -513,7 +560,8 @@ tc_assert_running_version v90.0.1
 tc_assert_version v90.0.1
 
 tc_case 'A second manager refuses an active native lock; an interrupted holder releases it'
-/usr/bin/sudo /bin/bash -c '
+{
+    /usr/bin/sudo /bin/bash -c '
     set -eu
     umask 077
     exec 9<> "$2"
@@ -523,7 +571,8 @@ tc_case 'A second manager refuses an active native lock; an interrupted holder r
     trap '\''/bin/kill -TERM "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; exit 143'\'' TERM HUP INT
     printf "%s\n" "$$" > "$1"
     wait "$sleeper"
-' bash "$TC_TEMP/lock-ready" "$TC_LOCK" >"$TC_TEMP/lock-holder.log" 2>&1 &
+' bash "$TC_TEMP/lock-ready" "$TC_LOCK"
+} >"$TC_TEMP/lock-holder.log" 2>&1 &
 TC_CHILD_PID=$!
 for ((TC_POLL = 0; TC_POLL < 50; TC_POLL++)); do
     [ ! -f "$TC_TEMP/lock-ready" ] || break
@@ -543,7 +592,7 @@ tc_root pc_validate_state
 
 tc_case 'The installed helper removes a missing-binary installation with an empty PATH'
 /usr/bin/sudo /bin/rm "$TC_CURRENT_DIR/payload/pdfconcat"
-[ -L "$TC_BIN" ] && [ ! -e "$TC_BIN" ] || tc_fail 'Missing-binary fixture is not a dangling managed command link'
+[[ -L "$TC_BIN" && ! -e "$TC_BIN" ]] || tc_fail 'Missing-binary fixture is not a dangling managed command link'
 /usr/bin/env PATH= /bin/bash "$TC_ROOT/current/setup.sh" uninstall --yes
 tc_assert_absent
 
@@ -577,17 +626,20 @@ BASH
 [ "$(/usr/bin/stat -f '%Lp' "$TC_ISOLATED/bin")" = 755 ] || tc_fail 'Created command parent has unexpected permissions'
 /usr/bin/sudo /bin/bash -c "$TC_ISOLATED_BODY" \
     bash "$TC_LOCK" "$TC_SETUP" "$TC_ISOLATED" pc_remove_installation
-[ ! -e "$TC_ISOLATED/bin/pdfconcat" ] && [ ! -L "$TC_ISOLATED/bin/pdfconcat" ] || tc_fail 'Isolated command remains'
+[[ ! -e "$TC_ISOLATED/bin/pdfconcat" && ! -L "$TC_ISOLATED/bin/pdfconcat" ]] || tc_fail 'Isolated command remains'
 [ ! -e "$TC_ISOLATED/libexec/pdfconcat" ] || tc_fail 'Isolated supporting files remain'
-[ -d "$TC_ISOLATED/bin" ] && [ -d "$TC_ISOLATED/libexec" ] || tc_fail 'Removal deleted shared parent directories'
+[[ -d "$TC_ISOLATED/bin" && -d "$TC_ISOLATED/libexec" ]] || tc_fail 'Removal deleted shared parent directories'
 /usr/bin/sudo /bin/rmdir "$TC_ISOLATED/bin" "$TC_ISOLATED/libexec" "$TC_ISOLATED"
 
 tc_case 'Existing parent ownership and permissions, and shell configuration, remain unchanged'
 tc_snapshot_environment >"$TC_TEMP/environment-after.txt"
 /usr/bin/diff -u "$TC_TEMP/environment-before.txt" "$TC_TEMP/environment-after.txt"
 tc_assert_absent
-[ -s "$TC_USER_PDF" ] && [ "$(tc_sha256 "$TC_USER_PDF")" = "$TC_USER_PDF_HASH" ] || tc_fail 'Removal changed a user-generated PDF outside the installation'
+[[ -s "$TC_USER_PDF" && "$(tc_sha256 "$TC_USER_PDF")" = "$TC_USER_PDF_HASH" ]] || tc_fail 'Removal changed a user-generated PDF outside the installation'
 [ "$(tc_sha256 "$TC_ARCHIVE_SENTINEL")" = "$TC_ARCHIVE_SENTINEL_HASH" ] || tc_fail 'Lifecycle changed the external archive sentinel'
+/usr/bin/sudo /bin/bash -c '[[ -d "$1/generation" && ! -e "$1/generation/payload/README.md" ]]' bash "$TC_RETIRED_STAGE"
+/usr/bin/sudo /bin/rm -rf -- "$TC_RETIRED_STAGE"
+TC_RETIRED_STAGE=
 
 printf '\nPASS: %s native lifecycle cases completed.\n' "$TC_CASES"
 printf 'Manual acceptance remains: real Terminal password/confirmation interaction, browser quarantine and Gatekeeper or organization policy, Rosetta, and a clean macOS 15.0 account.\n'

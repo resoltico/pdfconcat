@@ -5,10 +5,16 @@ set -euo pipefail
 umask 077
 
 TC_NETWORK=0
+TC_PACKAGE_DIR=
+tc_usage() { printf 'Usage: /bin/bash install/macos_test.sh [--network | --package-dir DIRECTORY]\n' >&2; }
 case "${1:-}" in
     '') ;;
     --network) TC_NETWORK=1; shift ;;
-    *) printf 'Usage: /bin/bash install/macos_test.sh [--network]\n' >&2; exit 2 ;;
+    --package-dir)
+        [ "$#" -eq 2 ] && [ -n "$2" ] || { tc_usage; exit 2; }
+        TC_PACKAGE_DIR=$(CDPATH='' cd -- "$2" && pwd -P) || exit 2
+        shift 2 ;;
+    *) tc_usage; exit 2 ;;
 esac
 if [ "$#" -ne 0 ]; then
     printf 'Unexpected test arguments.\n' >&2
@@ -34,8 +40,10 @@ if [ -e "$TC_BIN" ] || [ -L "$TC_BIN" ] || [ -e "$TC_ROOT" ] || [ -L "$TC_ROOT" 
     printf 'Refusing to test over an existing PDFConcat installation or destination.\n' >&2
     exit 1
 fi
-/usr/bin/sudo -n /usr/bin/true
-TC_GO=$(command -v go)
+if ! /usr/bin/sudo -n /usr/bin/true; then
+    printf 'Administrator authorization is unavailable. In an interactive Terminal, run sudo -v, then retry these checks.\n' >&2
+    exit 1
+fi
 TC_TEMP=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/pdfconcat-installer-tests.XXXXXX")
 TC_TEMP=$(CDPATH='' cd -- "$TC_TEMP" && pwd -P)
 TC_CASES=0
@@ -224,7 +232,44 @@ tc_prepare() {
 }
 
 tc_publish() {
-    tc_root pc_publish_generation "$1" "$TC_UID"
+    /usr/bin/sudo /usr/bin/env -u BASH_ENV -u ENV /bin/bash "$TC_SETUP" __root-install "$TC_UID" "$1"
+}
+
+# Private-prefix checks exercise the real worker's policy and locking, without
+# changing shared destination parents or exposing path overrides in setup's CLI.
+TC_WORKER_BODY=$(/bin/cat <<'BASH'
+set -euo pipefail
+source "$1"
+pc_init_paths
+PC_SCRIPT=$1
+PC_ROOT=$2/libexec/pdfconcat
+PC_BIN=$2/bin/pdfconcat
+PC_LOCK=$2/setup.lock
+shift 2
+pc_root_worker "$@"
+BASH
+)
+
+tc_worker() {
+    local prefix=$1
+    shift
+    /usr/bin/sudo /usr/bin/env -u BASH_ENV -u ENV /bin/bash -c "$TC_WORKER_BODY" bash "$TC_SETUP" "$prefix" "$@"
+}
+
+# Independently required representative release assets, not a second copy of
+# the full GoReleaser manifest. Explicit returns also keep negative controls valid.
+tc_package_payload() {
+    local dir=$1 reference=${2:-} rel
+    for rel in README.md docs/MACOS.md THIRD_PARTY_NOTICES.md \
+        examples/plans/generated-only.json schemas/plan.schema.json schemas/result.schema.json; do
+        if [[ ! -f "$dir/$rel" || -L "$dir/$rel" || ! -s "$dir/$rel" ]]; then
+            printf 'Required package asset is missing or invalid: %s\n' "$rel" >&2
+            return 1
+        fi
+        if [[ -n "$reference" ]]; then
+            /usr/bin/cmp "$reference/$rel" "$dir/$rel" || return
+        fi
+    done
 }
 
 tc_replace_binary() {
@@ -318,6 +363,72 @@ for TC_PARENT in /usr/local /usr/local/bin /usr/local/libexec /var/run; do
     fi
 done >"$TC_TEMP/existing-parents.txt"
 tc_snapshot_environment >"$TC_TEMP/environment-before.txt"
+
+if [[ -n "$TC_PACKAGE_DIR" ]]; then
+    tc_case 'Install the exact current GoReleaser archive through the production worker'
+    TC_PACKAGES=("$TC_PACKAGE_DIR"/pdfconcat_*_darwin_"$TC_ARCH".tar.gz)
+    [[ ${#TC_PACKAGES[@]} == 1 && -f "${TC_PACKAGES[0]}" && ! -L "${TC_PACKAGES[0]}" ]] || tc_fail 'Expected exactly one native package archive'
+    TC_PACKAGE=${TC_PACKAGES[0]}
+    TC_ASSET=${TC_PACKAGE##*/}
+    TC_VERSION=${TC_ASSET#pdfconcat_}
+    TC_VERSION=v${TC_VERSION%_darwin_"$TC_ARCH".tar.gz}
+    tc_source pc_valid_version "$TC_VERSION" || tc_fail 'Native package filename must contain a stable version'
+    /bin/mkdir "$TC_TEMP/package-work" "$TC_TEMP/package-raw"
+    tc_source pc_prepare_archive "$TC_PACKAGE" "$TC_PACKAGE_DIR/checksums.txt" \
+        "$TC_ASSET" "$TC_VERSION" "$TC_ARCH" "$TC_TEMP/package-work"
+    TC_CANDIDATE="$TC_TEMP/package-work/generation"
+    # Extract only after production preparation has checked archive paths/types.
+    /usr/bin/tar -xzf "$TC_PACKAGE" -C "$TC_TEMP/package-raw"
+    tc_package_payload "$TC_CANDIDATE/payload" "$TC_TEMP/package-raw"
+    printf 'Outside user file must survive package installation and removal.\n' >"$TC_TEMP/user-file.txt"
+    TC_OUTSIDE_HASH=$(tc_sha256 "$TC_TEMP/user-file.txt")
+    tc_publish "$TC_CANDIDATE"
+    tc_assert_version "$TC_VERSION"
+    "$TC_BIN" version --json >"$TC_TEMP/installed-version.json"
+    [[ $(/usr/bin/plutil -extract version raw -o - "$TC_TEMP/installed-version.json") == "${TC_VERSION#v}" ]] || tc_fail 'Installed package version differs'
+    [[ $(/usr/bin/plutil -extract platform raw -o - "$TC_TEMP/installed-version.json") == "darwin/$TC_ARCH" ]] || tc_fail 'Installed package platform differs'
+    tc_package_payload "$TC_ROOT/current/payload" "$TC_CANDIDATE/payload"
+    /usr/bin/cmp "$TC_CANDIDATE/payload/pdfconcat" "$TC_BIN"
+    /usr/bin/cmp "$TC_SETUP" "$TC_ROOT/current/setup.sh"
+    /bin/bash "$TC_ROOT/current/setup.sh" uninstall --yes
+    tc_assert_absent
+    [[ $(tc_sha256 "$TC_TEMP/user-file.txt") == "$TC_OUTSIDE_HASH" ]] || tc_fail 'Package lifecycle changed an outside user file'
+
+    tc_case 'Package assertions detect missing documentation independently of preparation'
+    /usr/bin/ditto "$TC_TEMP/package-raw" "$TC_TEMP/missing-doc"
+    /bin/rm "$TC_TEMP/missing-doc/docs/MACOS.md"
+    tc_expect_failure package-missing-doc tc_package_payload "$TC_TEMP/missing-doc"
+    /usr/bin/grep -Fxq 'Required package asset is missing or invalid: docs/MACOS.md' "$TC_TEMP/package-missing-doc.log" || tc_fail 'Missing-document control failed for another reason'
+
+    tc_case 'Production preparation rejects an archive missing its executable'
+    /bin/mkdir "$TC_TEMP/missing-executable" "$TC_TEMP/missing-executable/work"
+    /bin/rm "$TC_TEMP/package-raw/pdfconcat"
+    (
+        cd "$TC_TEMP/package-raw"
+        /usr/bin/tar -czf "$TC_TEMP/missing-executable/$TC_ASSET" -- *
+    )
+    printf '%s  %s\n' "$(tc_sha256 "$TC_TEMP/missing-executable/$TC_ASSET")" "$TC_ASSET" >"$TC_TEMP/missing-executable/checksums.txt"
+    tc_expect_failure package-missing-executable tc_source pc_prepare_archive \
+        "$TC_TEMP/missing-executable/$TC_ASSET" "$TC_TEMP/missing-executable/checksums.txt" \
+        "$TC_ASSET" "$TC_VERSION" "$TC_ARCH" "$TC_TEMP/missing-executable/work"
+    /usr/bin/grep -Fq 'does not contain the PDFConcat executable' "$TC_TEMP/package-missing-executable.log" || tc_fail 'Missing-executable control failed for another reason'
+    tc_assert_absent
+    tc_snapshot_environment >"$TC_TEMP/environment-after.txt"
+    /usr/bin/diff -u "$TC_TEMP/environment-before.txt" "$TC_TEMP/environment-after.txt"
+    printf '\nPASS: %s current-package install/uninstall cases completed.\n' "$TC_CASES"
+    exit 0
+fi
+
+TC_GO=$(command -v go)
+
+tc_case 'Diagnostic paths escape control characters and keep ordinary paths readable'
+[[ $(tc_source pc_display_path /usr/local/bin/pdfconcat) == /usr/local/bin/pdfconcat ]] || tc_fail 'Ordinary path display changed'
+[[ $(/usr/bin/env LC_ALL=C /bin/bash -c "$TC_SOURCE_BODY" bash "$TC_SETUP" pc_display_path '/Users/Rīga/customer file.pdf') == "\$'/Users/R\\304\\253ga/customer file.pdf'" ]] || tc_fail 'Unicode path bytes were not escaped consistently'
+[[ $(tc_source pc_display_path $'customer\nreceipt') == "\$'customer\\nreceipt'" ]] || tc_fail 'Newline path was not escaped'
+[[ $(tc_source pc_display_path $'customer\treceipt') == "\$'customer\\treceipt'" ]] || tc_fail 'Tab path was not escaped'
+[[ $(tc_source pc_display_path $'customer\rreceipt') == "\$'customer\\rreceipt'" ]] || tc_fail 'Carriage-return path was not escaped'
+[[ $(tc_source pc_display_path $'customer\033receipt') == "\$'customer\\Ereceipt'" ]] || tc_fail 'Escape path was not escaped'
+[[ $(/usr/bin/env LC_ALL=en_US.UTF-8 /bin/bash -c "$TC_SOURCE_BODY" bash "$TC_SETUP" pc_display_path $'customer\342\200\256receipt') == "\$'customer\\342\\200\\256receipt'" ]] || tc_fail 'Bidirectional-control bytes were not escaped as ASCII'
 
 tc_case 'Release discovery accepts only an exact stable tag URL in this repository'
 for TC_VALID_VERSION in v0.0.0 v90.0.1; do
@@ -527,6 +638,11 @@ TC_ODD_FILE="$TC_CURRENT_DIR/payload/"$'pdfconcat\nreceipt'
 /usr/bin/sudo /usr/bin/install -o root -g wheel -m 644 "$TC_TEMP/foreign" "$TC_ODD_FILE"
 tc_expect_failure newline-file-update tc_publish "$TC_TEMP/stage-b"
 tc_expect_failure newline-file-remove tc_root pc_remove_installation
+for TC_LOG in "$TC_TEMP/newline-file-update.log" "$TC_TEMP/newline-file-remove.log"; do
+    [[ $(/usr/bin/wc -l < "$TC_LOG") -eq 1 ]] || tc_fail 'Filename newline split a preservation diagnostic'
+    /usr/bin/grep -Fq 'unrecognized file has been preserved' "$TC_LOG" || tc_fail 'Newline filename failed for another reason'
+    /usr/bin/grep -Fq '\nreceipt' "$TC_LOG" || tc_fail 'Preservation diagnostic did not escape the filename newline'
+done
 /usr/bin/cmp "$TC_TEMP/foreign" "$TC_ODD_FILE" || tc_fail 'Unknown newline-containing file was changed'
 tc_assert_command_hash "$TC_HASH_A"
 tc_assert_running_version v90.0.0
@@ -628,35 +744,77 @@ tc_case 'Repeated removal succeeds without recreating installation state'
 /usr/bin/env PATH=/nonexistent /bin/bash "$TC_SETUP" uninstall --yes
 tc_assert_absent
 
-tc_case 'Internal lifecycle functions create missing destination directories and leave shared parents'
-# This isolated function-level check cannot change the public CLI destinations.
-# Do not delete /usr/local/bin on a runner to simulate a newly installed Mac.
+tc_case 'The isolated production worker verifies caller identity before creating state'
 TC_ISOLATED="$TC_TEMP/isolated-prefix"
-TC_ISOLATED_BODY=$(/bin/cat <<'BASH'
-set -euo pipefail
-umask 077
-exec 9<> "$1"
-/usr/bin/lockf -s -t 0 9
-shift
-source "$1"
-pc_init_paths
-PC_SCRIPT=$1
-PC_ROOT=$2/libexec/pdfconcat
-PC_BIN=$2/bin/pdfconcat
-shift 2
-"$@"
-BASH
-)
-/usr/bin/sudo /bin/bash -c "$TC_ISOLATED_BODY" \
-    bash "$TC_LOCK" "$TC_SETUP" "$TC_ISOLATED" pc_publish_generation "$TC_TEMP/stage-a" "$TC_UID"
+/bin/mkdir "$TC_ISOLATED"
+printf 'Private lock target must remain unchanged.\n' >"$TC_TEMP/lock-sentinel"
+TC_LOCK_SENTINEL_HASH=$(tc_sha256 "$TC_TEMP/lock-sentinel")
+tc_expect_failure worker-caller tc_worker "$TC_ISOLATED" uninstall "$((TC_UID + 1))"
+/usr/bin/grep -Fq 'requesting user could not be verified' "$TC_TEMP/worker-caller.log" || tc_fail 'Caller mismatch did not reach the caller guard'
+[[ ! -e "$TC_ISOLATED/setup.lock" ]] || tc_fail 'Caller rejection created a lock'
+
+tc_case 'The isolated worker preserves symlink and nonempty locks'
+/usr/bin/sudo /bin/ln -s "$TC_TEMP/lock-sentinel" "$TC_ISOLATED/setup.lock"
+TC_LOCK_LINK_METADATA=$(/usr/bin/sudo /usr/bin/stat -f '%u:%g:%Lp' "$TC_ISOLATED/setup.lock")
+tc_expect_failure worker-link-lock tc_worker "$TC_ISOLATED" uninstall "$TC_UID"
+/usr/bin/grep -Fq 'Expected a regular file' "$TC_TEMP/worker-link-lock.log" || tc_fail 'Symlink lock did not reach the file guard'
+[[ $(/usr/bin/sudo /usr/bin/readlink "$TC_ISOLATED/setup.lock") == "$TC_TEMP/lock-sentinel" ]] || tc_fail 'Symlink lock target changed'
+[[ $(/usr/bin/sudo /usr/bin/stat -f '%u:%g:%Lp' "$TC_ISOLATED/setup.lock") == "$TC_LOCK_LINK_METADATA" ]] || tc_fail 'Symlink lock metadata changed'
+[[ $(tc_sha256 "$TC_TEMP/lock-sentinel") == "$TC_LOCK_SENTINEL_HASH" ]] || tc_fail 'Symlink lock target bytes changed'
+/usr/bin/sudo /bin/rm "$TC_ISOLATED/setup.lock"
+/usr/bin/sudo /usr/bin/install -o root -g wheel -m 600 "$TC_TEMP/lock-sentinel" "$TC_ISOLATED/setup.lock"
+tc_expect_failure worker-nonempty-lock tc_worker "$TC_ISOLATED" uninstall "$TC_UID"
+/usr/bin/grep -Fq 'lock file is unexpected' "$TC_TEMP/worker-nonempty-lock.log" || tc_fail 'Nonempty lock did not reach the size guard'
+/usr/bin/sudo /usr/bin/cmp "$TC_TEMP/lock-sentinel" "$TC_ISOLATED/setup.lock"
+[[ $(/usr/bin/sudo /usr/bin/stat -f '%u:%g:%Lp' "$TC_ISOLATED/setup.lock") == 0:0:600 ]] || tc_fail 'Nonempty lock metadata changed'
+/usr/bin/sudo /bin/rm "$TC_ISOLATED/setup.lock"
+
+tc_case 'The isolated worker refuses unsafe parent modes and unrelated ownership'
+/bin/chmod 777 "$TC_ISOLATED"
+TC_PARENT_METADATA=$(/usr/bin/stat -f '%u:%g:%Lp' "$TC_ISOLATED")
+tc_expect_failure worker-writable-parent tc_worker "$TC_ISOLATED" uninstall "$TC_UID"
+/usr/bin/grep -Fq 'allows writes by other users' "$TC_TEMP/worker-writable-parent.log" || tc_fail 'Writable parent did not reach its guard'
+[[ $(/usr/bin/stat -f '%u:%g:%Lp' "$TC_ISOLATED") == "$TC_PARENT_METADATA" ]] || tc_fail 'Unsafe parent metadata changed'
+[[ ! -e "$TC_ISOLATED/setup.lock" ]] || tc_fail 'Parent refusal created a lock'
+/bin/chmod 755 "$TC_ISOLATED"
+/usr/bin/sudo /usr/sbin/chown 65534:0 "$TC_ISOLATED"
+tc_expect_failure worker-foreign-parent tc_worker "$TC_ISOLATED" uninstall "$TC_UID"
+/usr/bin/grep -Fq 'belongs to another user' "$TC_TEMP/worker-foreign-parent.log" || tc_fail 'Foreign ownership did not reach its guard'
+[[ $(/usr/bin/stat -f '%u:%g:%Lp' "$TC_ISOLATED") == 65534:0:755 ]] || tc_fail 'Foreign parent metadata changed'
+[[ ! -e "$TC_ISOLATED/setup.lock" ]] || tc_fail 'Ownership refusal created a lock'
+/usr/bin/sudo /usr/sbin/chown "$TC_UID":0 "$TC_ISOLATED"
+
+tc_case 'The ACL primitive preserves custom access controls and accepts their absence'
+# The production parent policy checks ACLs under /usr/local only. Exercise its
+# ACL primitive privately rather than changing an existing shared parent.
+/bin/mkdir "$TC_TEMP/acl-control"
+tc_source pc_check_no_acl "$TC_TEMP/acl-control"
+/bin/chmod +a "user:$(/usr/bin/id -un) allow read,readattr,readextattr,readsecurity" "$TC_TEMP/acl-control"
+/bin/ls -lde "$TC_TEMP/acl-control" >"$TC_TEMP/acl-before.txt"
+tc_expect_failure worker-parent-acl tc_source pc_check_no_acl "$TC_TEMP/acl-control"
+/usr/bin/grep -Fq 'Custom access controls were preserved' "$TC_TEMP/worker-parent-acl.log" || tc_fail 'ACL rejection did not reach the ACL guard'
+/bin/ls -lde "$TC_TEMP/acl-control" >"$TC_TEMP/acl-after.txt"
+/usr/bin/cmp "$TC_TEMP/acl-before.txt" "$TC_TEMP/acl-after.txt"
+/bin/chmod -N "$TC_TEMP/acl-control"
+tc_source pc_check_no_acl "$TC_TEMP/acl-control"
+
+tc_case 'The production worker accepts caller-owned parents and creates its own lock'
+tc_worker "$TC_ISOLATED" uninstall "$TC_UID"
+[[ $(/usr/bin/sudo /usr/bin/stat -f '%u:%g:%Lp:%z' "$TC_ISOLATED/setup.lock") == 0:0:600:0 ]] || tc_fail 'Worker created an unexpected lock'
+[[ ! -e "$TC_ISOLATED/bin" && ! -e "$TC_ISOLATED/libexec" ]] || tc_fail 'Absent uninstall created destination directories'
+
+tc_case 'The production worker accepts root-owned parents and creates missing destinations'
+# Do not delete /usr/local/bin on a runner to simulate a newly installed Mac.
+/usr/bin/sudo /usr/sbin/chown 0:0 "$TC_ISOLATED"
+tc_worker "$TC_ISOLATED" install "$TC_UID" "$TC_TEMP/stage-a"
 [ -x "$TC_ISOLATED/bin/pdfconcat" ] || tc_fail 'Missing-directory installation did not create a runnable command'
 "$TC_ISOLATED/bin/pdfconcat" version
 [ "$(/usr/bin/stat -f '%Lp' "$TC_ISOLATED/bin")" = 755 ] || tc_fail 'Created command parent has unexpected permissions'
-/usr/bin/sudo /bin/bash -c "$TC_ISOLATED_BODY" \
-    bash "$TC_LOCK" "$TC_SETUP" "$TC_ISOLATED" pc_remove_installation
+tc_worker "$TC_ISOLATED" uninstall "$TC_UID"
 [[ ! -e "$TC_ISOLATED/bin/pdfconcat" && ! -L "$TC_ISOLATED/bin/pdfconcat" ]] || tc_fail 'Isolated command remains'
 [ ! -e "$TC_ISOLATED/libexec/pdfconcat" ] || tc_fail 'Isolated supporting files remain'
 [[ -d "$TC_ISOLATED/bin" && -d "$TC_ISOLATED/libexec" ]] || tc_fail 'Removal deleted shared parent directories'
+/usr/bin/sudo /bin/rm "$TC_ISOLATED/setup.lock"
 /usr/bin/sudo /bin/rmdir "$TC_ISOLATED/bin" "$TC_ISOLATED/libexec" "$TC_ISOLATED"
 
 tc_case 'Existing parent ownership and permissions, and shell configuration, remain unchanged'

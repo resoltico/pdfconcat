@@ -132,21 +132,35 @@ permission. The harness refuses to start when those locations already contain
 an installation; do not remove an existing installation merely to satisfy a test
 precondition. The ordinary Go test command does not run these checks.
 
-From the checkout, with the Go version declared in `go.mod`:
+From the checkout, with the Go version declared in `go.mod`, run as your ordinary
+administrator account. Authorize `sudo` first; the harness checks administrator
+access without prompting at startup:
 
 ```sh
+sudo -v
 /bin/bash install/macos_test.sh
 ```
 
-The native checks build real PDFConcat fixtures, exercise ad hoc signing,
-installation, repeat installation, updates and removal, and check refusal of
-foreign or modified files. They also check that parent-directory permissions
-and shell configuration are preserved. The optional network case exercises the
-published GitHub release path:
+The native checks build real PDFConcat fixtures and install them through setup's
+privileged entry point. They exercise ad hoc signing, repeat installation,
+updates and removal, and check refusal of foreign or modified files. Isolated
+worker cases check caller identity, lock validation and parent-directory policy
+without changing shared parent attributes. The checks also verify preservation
+of parent-directory permissions and shell configuration. The optional network
+case exercises the published GitHub release path:
 
 ```sh
 /bin/bash install/macos_test.sh --network
 ```
+
+To install and remove an exact native archive from a GoReleaser output directory,
+use `/bin/bash install/macos_test.sh --package-dir /absolute/path/to/dist`.
+This mode requires a stable version label accepted by setup; ordinary snapshot
+versions are not accepted. It checks representative documentation, examples and
+schemas, installed executable bytes and outside-file preservation, then removes
+the installation through its installed helper. Repeat `sudo -v` if authorization
+expires before another harness invocation. The same disposable-Mac restriction
+applies to every mode.
 
 The native CI matrix in [the workflow](.github/workflows/ci.yml) covers macOS 15
 and macOS 26 on Apple Silicon and Intel. The macOS 15 jobs also run the network
@@ -272,12 +286,21 @@ native version invocations. Verify the macOS signing and setup contract using th
 checks above, including actual installed bytes and removal. Snapshot success is
 not release publication.
 
-The CI packaging job builds a snapshot without publishing, checks the archive
-checksums, and inspects both Darwin executables for valid ad hoc signatures and
-the declared minimum OS. It also checks that the macOS guide and third-party
-notices are present in the archives, then runs the native archive's executable
-for a version check and blank-PDF build. This verifies the packaged artifacts;
-the lifecycle and interactive checks above exercise installation and removal.
+The CI packaging job builds the current checkout through `.goreleaser.yml`
+without publishing. It selects a reachable stable tag accepted by setup and
+passes it through `GORELEASER_CURRENT_TAG` as the test archive's version label.
+These current-source archives are test artifacts, not published release
+artifacts. Only that unpublished build skips GoReleaser's ref validation;
+the actual release job retains validation.
+
+CI checks archive checksums and both Darwin executables' ad hoc signatures and
+minimum OS. It runs the native archive's executable for a version check and
+blank-PDF build, then passes that exact archive to the harness's `--package-dir`
+mode. That case prepares and installs the archive through the production worker,
+checks installed assets and executable bytes, and removes it through the
+installed helper. Missing-document and missing-executable controls check failure
+detection. The separate lifecycle matrix and interactive checks above cover
+additional states and environments.
 
 A `v*` tag runs the reusable CI, extracts the matching nonempty changelog section,
 builds the configured targets with GoReleaser and publishes archives/checksums

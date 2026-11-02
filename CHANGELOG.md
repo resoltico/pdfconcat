@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
-- macOS binaries now require macOS 15+. One setup tool installs, updates and removes the ad hoc signed command, including offline uninstall; see [macOS setup](docs/MACOS.md).
+## [0.6.1] - 2026-11-02
+
+- macOS binaries require macOS 15+. One setup tool installs, updates and removes the ad hoc signed command, including offline uninstall; see [macOS setup](docs/MACOS.md).
+- Setup displays unusual paths with escaped control characters so preservation errors identify filenames without splitting lines or changing Terminal display.
+- Native macOS CI installs and removes archives built from current source and tests privileged setup safeguards for lock files and destination permissions.
 
 ## [0.6.0] - 2026-11-01
 

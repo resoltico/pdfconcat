@@ -1,0 +1,5 @@
+# Exceptions for the shell scripts in install/ and .github/scripts/. Keep each one explained.
+
+# SC2016: install.sh deliberately writes literal $HOME and $PATH into shell
+# startup files, so the templates use single quotes.
+disable=SC2016

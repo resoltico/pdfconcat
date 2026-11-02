@@ -12,51 +12,29 @@ configuration directory are needed at runtime.
 
 ## Install
 
-### macOS 15 or later
-
-Follow the [macOS setup guide](docs/MACOS.md) to install, update or uninstall
-PDFConcat. One setup tool selects the appropriate download for your Mac and
-installs the command at `/usr/local/bin/pdfconcat`. Administrator permission is
-required; setup leaves your Terminal settings alone.
-
-This installation uses ad hoc code signing and is not notarized by Apple. The
-guide explains what that means, every installation step, the password prompt,
-and how to remove the installation without removing your documents.
-
-Check the managed copy with `/usr/local/bin/pdfconcat version`. When following
-the examples below, you can replace `pdfconcat` with `/usr/local/bin/pdfconcat`
-to select that copy directly. An alias, shell function or another executable
-may otherwise take precedence; see [command discovery](docs/MACOS.md#terminal-runs-a-different-copy).
-
-### Linux and Windows
-
-Download the archive for your operating system and CPU from
-[published releases](https://github.com/resoltico/pdfconcat/releases), verify it
-against that release's `checksums.txt`, and extract it. The executable is at the
-archive root. From the extracted directory, run:
+On macOS 15+ or Linux:
 
 ```sh
-# Linux
-./pdfconcat version
+curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh
 ```
+
+On Windows 10 or 11, in PowerShell:
 
 ```powershell
-# Windows PowerShell
-.\pdfconcat.exe version
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
 ```
 
-On Linux and Windows, to use `pdfconcat` from any directory, place the extracted
-executable in a directory on your `PATH`, or add its directory to `PATH`.
-Otherwise, replace `pdfconcat` with the executable's relative or absolute path.
+The installer puts one self-contained program in your user account, with no
+administrator password, and adds it to your PATH. Run the same command again to
+update. The [installation guide](docs/INSTALL.md) covers uninstalling, options,
+manual downloads, verification and troubleshooting. Releases are not notarized
+by Apple or code-signed for Windows; the guide explains what that means.
 
 This source tree uses plan v4 and result/report v5. For a published binary, use
 the documentation and examples supplied in its release archive. Matching schema
 version numbers alone do not establish support for every documented field.
 
 ## First packet
-
-The examples assume `pdfconcat` selects the intended executable. Use its full
-path if another command with that name takes precedence.
 
 Use two PDFs of your own, named `cover.pdf` and `appendix.pdf` in the current
 directory:
@@ -87,8 +65,9 @@ pdfconcat build -o blank.pdf --blank --fit-to A4
 
 This creates one blank A4 page. The bundled
 [generated-only example](examples/plans/generated-only.json) adds text pages and
-styled blanks. On macOS, [copy the installed examples to a writable folder](docs/MACOS.md#try-the-examples)
-before building a plan; plan-relative outputs are created beside the plan.
+styled blanks. The example plans are in every release archive and in this
+repository; copy one to a writable folder before building it, because
+plan-relative outputs are created beside the plan.
 
 ## Keep the composition in a plan
 

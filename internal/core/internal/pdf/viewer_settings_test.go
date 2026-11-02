@@ -84,7 +84,7 @@ func TestViewerPreferenceRemovalPreservesSharedResources(t *testing.T) {
 	insertEntry(doc, 1, "/ViewerPreferences 6 0 R")
 	out := assembleSourceBytes(t, doc.Bytes())
 	// Poppler versions differ on one terminal LF even with -eol unix. The
-    // complete marker, not that formatting difference, proves font retention.
+	// complete marker, not that formatting difference, proves font retention.
 	if got := extractRaw(t, out); len(got) != 1 || strings.TrimSuffix(got[0], "\n") != "shared-resource" {
 		t.Fatalf("shared resource was changed: %q", got)
 	}

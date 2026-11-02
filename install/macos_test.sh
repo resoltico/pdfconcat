@@ -11,7 +11,10 @@ case "${1:-}" in
     '') ;;
     --network) TC_NETWORK=1; shift ;;
     --package-dir)
-        [ "$#" -eq 2 ] && [ -n "$2" ] || { tc_usage; exit 2; }
+        if [ "$#" -ne 2 ] || [ -z "${2:-}" ]; then
+            tc_usage
+            exit 2
+        fi
         TC_PACKAGE_DIR=$(CDPATH='' cd -- "$2" && pwd -P) || exit 2
         shift 2 ;;
     *) tc_usage; exit 2 ;;

@@ -135,45 +135,69 @@ plan, check its layout, and retain an assembly report.
 
 The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**,
 checked on **1 November 2026**. The PDFConcat column describes this source tree.
-"No dedicated command" means no equivalent integrated CLI workflow in that
-release; it does not rule out obtaining the result with several commands and an
-external script.
+
+**●** means built-in support for the task as described; **—** means no dedicated
+built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu
+may require several commands. A dash does not rule out an external script, and
+dots do not imply identical defaults or preservation guarantees.
 
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
-| --- | --- | --- |
-| Merge PDFs in a chosen order | `merge`; optional filename sorting | Ordered operands or plan items |
-| Append to an existing PDF; automatically interleave two PDFs | `merge --mode append`; `merge --mode zip` | No append or automatic interleave mode |
-| Read/write PDF bytes through stdin/stdout | Supported with command/mode limits [1] | PDF inputs and output are files; a JSON plan may come from stdin |
-| Select, repeat or reorder pages | `collect` with page expressions | Selected ranges in ordered source occurrences; repetition/reordering uses separate occurrences |
-| Add blank pages | `pages insert`; `merge --divider` between documents | `--blank`, generated page items and automatic odd-start padding |
-| Preserve imported bookmarks | File merges support filename wrappers or `--bookmark-mode preserve` [2] | Retained source bookmarks appear beneath the nearest authored section [2] |
-| Author bookmarks | `bookmarks import` accepts a bookmark tree with explicit page targets and styles | Titled plan sections generate bookmarks to their first non-padding page |
-| Keep original page sizes or fit to a paper size | Merge without resizing; `resize` when fitting is wanted | Keep source sizes by default; optional `fit_to` / `--fit-to` |
-| Generate text pages from JSON | `create` also supports images, tables, headers/footers and forms | Generated page items and section title dividers |
-| Use a bundled font for Latin, Greek and Cyrillic text | Roboto Regular, automatically initialized in the configuration font store [3] | Noto Sans Regular, used directly without a configuration/font directory |
-| Add page numbers | Text stamps support current/total page numbers and an offset | Physical footer numbers integrated with the plan; padding counts in the sequence but has no printed footer |
-| Assemble sources, nested sections and title dividers in one JSON plan | No dedicated packet assembly plan | Supported by plan v4 |
-| Automatically start authored sections on odd pages | No dedicated section-alignment command | `start_on: "odd"` inserts padding when needed |
-| Generate linked contents from sections and final page numbers | No dedicated command | A `contents` item derives entries and targets from the plan |
-| Check planned text layout without producing an output PDF | No equivalent packet-plan preflight command [4] | `check` predicts layout and checks generated-text overflow |
-| Report input SHA-256 identities and source-to-output page ranges | No equivalent assembly report; `info --json` inspects PDF properties | Full JSON assembly report with `--report` |
-| Split PDFs; apply general stamps/watermarks; encrypt/decrypt; fill forms | Dedicated commands | Outside the tool's scope |
+| --- | :---: | :---: |
+| Merge PDFs in a chosen order | ● | ● |
+| Append PDFs to an existing output file | ● | — |
+| Automatically interleave two PDFs: A1, B1, A2, B2, … | ● | — |
+| Read PDF input from stdin and write PDF output to stdout [1] | ● | — |
+| Select, repeat or reorder source pages [2] | ● | ● |
+| Keep source pages at their original sizes | ● | ● |
+| Insert blank pages | ● | ● |
+| Preserve imported source bookmarks [3] | ● | ● |
+| Create bookmarks [3] | ● | ● |
+| Fit pages to a chosen paper size | ● | ● |
+| Generate text pages from JSON | ● | ● |
+| Generate Latin, Greek and Cyrillic text with a bundled font [4] | ● | ● |
+| Add physical page numbers [5] | ● | ● |
+| Describe the complete packet in one JSON assembly plan | — | ● |
+| Define nested sections and title dividers in that plan | — | ● |
+| Automatically pad sections to start on odd pages | — | ● |
+| Generate linked contents from sections and final page numbers | — | ● |
+| Check a packet plan's text layout without creating a PDF [6] | — | ● |
+| Report input SHA-256 hashes and source-to-output page ranges [6] | — | ● |
+| Split a PDF into multiple output files in one command | ● | — |
+| Apply general text, image or PDF stamps and watermarks | ● | — |
+| Encrypt, decrypt and manage PDF passwords | ● | — |
+| Fill interactive forms | ● | — |
 
-1. For pdfcpu merge, create mode accepts one stdin input; create and zip can
-   write to stdout. Append and zip do not accept stdin; append does not write to
-   stdout. This does not make every merge mode a full PDF pipeline.
-2. pdfcpu normally wraps source bookmarks under filenames; `--bookmark-mode preserve`
-   avoids those wrappers. Zip does not preserve source outlines, and
-   stdin merge does not import later inputs' bookmark trees. PDFConcat prunes
-   local navigation to omitted pages and applies its
-   [source policy](docs/PDF-POLICY.md#source-policy). Support here does not promise
-   identical navigation or preservation of every PDF feature.
-3. pdfcpu includes Roboto; no separate font download is required for it. Its
-   `--conf disable` mode can avoid filesystem configuration for operations that
-   do not need user fonts, but does not make that font store available.
-4. pdfcpu validates PDF structures and validates/renders JSON during `create`.
-   PDFConcat's distinction is a separate assembly check, not exclusive access to
-   validation. PDFConcat `check` can still write a report when requested.
+1. **PDF streams.** For pdfcpu merge, create mode accepts one stdin input; create
+   and zip can write to stdout. Append and zip do not accept stdin, and append
+   cannot write to stdout. PDFConcat accepts a JSON plan from stdin, but its PDF
+   inputs and output are files.
+2. **Page selection.** pdfcpu's `collect` command uses page expressions for
+   selection, repetition and reordering. PDFConcat uses ascending, non-overlapping
+   ranges within each source occurrence; repetition or reordering uses separate
+   occurrences.
+3. **Bookmarks.** pdfcpu normally wraps merged source bookmarks under filenames;
+   `--bookmark-mode preserve` avoids those wrappers. Zip does not preserve source
+   outlines, and stdin merge does not import later inputs' bookmark trees.
+   Its `bookmarks import` command accepts explicit page targets and styles.
+   PDFConcat creates bookmarks from titled plan sections, targeting their first
+   non-padding page, and retains source bookmarks beneath the nearest authored
+   section. It prunes local navigation to omitted pages and applies its
+   [source policy](docs/PDF-POLICY.md#source-policy).
+4. **Bundled fonts.** Both tools include a font for Latin, Greek and Cyrillic.
+   pdfcpu automatically initializes Roboto Regular in its configuration font
+   store; no separate font download is required. PDFConcat uses Noto Sans
+   directly without a configuration/font directory. pdfcpu's `--conf disable`
+   mode can avoid filesystem configuration for operations that do not need user
+   fonts, but does not make that font store available.
+5. **Page numbers.** pdfcpu text stamps support current/total page numbers and an
+   offset. PDFConcat's footer numbers follow physical page positions; automatic
+   padding counts in the sequence but has no printed footer.
+6. **Plan checks and reports.** pdfcpu validates PDF structures and validates
+   JSON during `create`; `info --json` reports document properties. PDFConcat
+   provides a separate `check` command for planned layout and generated-text
+   overflow, plus an assembly report with input hashes and page mappings.
+   `check` can write a report when requested; a successful check does not
+   guarantee a later build or publication.
 
 Version-specific pdfcpu sources:
 [document commands](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/document.go),

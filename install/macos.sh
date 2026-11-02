@@ -415,10 +415,34 @@ pc_remove_installation() {
 }
 
 pc_download() {
-    /usr/bin/curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    /usr/bin/curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 \
         --fail --location --silent --show-error --connect-timeout 15 \
         --max-time 300 --retry 2 --retry-delay 2 --retry-max-time 600 \
         --max-filesize 104857600 --output "$2" "$1"
+}
+
+pc_version_from_release_url() {
+    local url=$1 version
+    case "$url" in
+        https://github.com/resoltico/pdfconcat/releases/tag/*)
+            version=${url#https://github.com/resoltico/pdfconcat/releases/tag/}
+            ;;
+        *) pc_error 'GitHub returned an unexpected release destination.'; return 1 ;;
+    esac
+    pc_valid_version "$version" || { pc_error 'GitHub returned an unsupported release version.'; return 1; }
+    printf '%s\n' "$version"
+}
+
+pc_latest_version() {
+    local destination
+    # GitHub documents /releases/latest as its stable latest-release link.
+    # Read the final URL rather than depending on anonymous REST API quotas.
+    destination=$(/usr/bin/curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        --fail --location --head --silent --show-error --connect-timeout 15 \
+        --max-time 60 --retry 2 --retry-delay 2 --retry-max-time 120 \
+        --max-redirs 5 --output /dev/null --write-out '%{url_effective}' \
+        https://github.com/resoltico/pdfconcat/releases/latest) || return
+    pc_version_from_release_url "$destination"
 }
 
 pc_prepare_archive() {
@@ -599,14 +623,8 @@ pc_install() (
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
     printf 'Checking the latest stable PDFConcat release on GitHub...\n'
-    pc_download https://api.github.com/repos/resoltico/pdfconcat/releases/latest "$work/release.json" || {
+    version=$(pc_latest_version) || {
         pc_error 'Could not read the release information. Check your connection and try again.'; return 1;
-    }
-    version=$(/usr/bin/plutil -extract tag_name raw -o - "$work/release.json") || return
-    pc_valid_version "$version" || { pc_error 'GitHub returned an unsupported release version.'; return 1; }
-    [[ $(/usr/bin/plutil -extract draft raw -o - "$work/release.json") == false &&
-       $(/usr/bin/plutil -extract prerelease raw -o - "$work/release.json") == false ]] || {
-        pc_error 'The selected release is not a stable public release.'; return 1;
     }
     asset="pdfconcat_${version#v}_darwin_${arch}.tar.gz"
     base="https://github.com/resoltico/pdfconcat/releases/download/$version"

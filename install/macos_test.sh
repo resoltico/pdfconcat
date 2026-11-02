@@ -319,13 +319,41 @@ for TC_PARENT in /usr/local /usr/local/bin /usr/local/libexec /var/run; do
 done >"$TC_TEMP/existing-parents.txt"
 tc_snapshot_environment >"$TC_TEMP/environment-before.txt"
 
+tc_case 'Release discovery accepts only an exact stable tag URL in this repository'
+for TC_VALID_VERSION in v0.0.0 v90.0.1; do
+    [ "$(tc_source pc_version_from_release_url "https://github.com/resoltico/pdfconcat/releases/tag/$TC_VALID_VERSION")" = "$TC_VALID_VERSION" ] || tc_fail 'A stable release URL was not parsed exactly'
+done
+TC_URL_CASE=0
+for TC_BAD_RELEASE_URL in \
+    'http://github.com/resoltico/pdfconcat/releases/tag/v1.2.3' \
+    'https://github.com.example.invalid/resoltico/pdfconcat/releases/tag/v1.2.3' \
+    'https://github.com/another-owner/pdfconcat/releases/tag/v1.2.3' \
+    'https://github.com/resoltico/another-repository/releases/tag/v1.2.3' \
+    'https://github.com/resoltico/pdfconcat/tree/v1.2.3' \
+    'https://github.com/resoltico/pdfconcat/releases/tag/v1.2.3-rc.1' \
+    'https://github.com/resoltico/pdfconcat/releases/tag/v1.2.3?download=1' \
+    'https://github.com/resoltico/pdfconcat/releases/tag/v1.2.3#fragment' \
+    'https://github.com/resoltico/pdfconcat/releases/tag/v1.2.3%2fextra' \
+    'https://github.com/resoltico%2fpdfconcat/releases/tag/v1.2.3' \
+    'https://github.com/resoltico/pdfconcat/releases/tag/v01.2.3' \
+    'https://github.com/resoltico/pdfconcat/releases/tag/v1.2.3/'; do
+    TC_URL_CASE=$((TC_URL_CASE + 1))
+    tc_expect_failure "release-url-$TC_URL_CASE" tc_source pc_version_from_release_url "$TC_BAD_RELEASE_URL"
+done
+
 tc_case 'Build and ad hoc sign two native executable fixtures with minimum macOS 15'
 tc_build_fixture fixture-a v90.0.0
 tc_build_fixture fixture-b v90.0.1
 
 if [ "$TC_NETWORK" -eq 1 ]; then
-    tc_case 'Install the current public GitHub release through the real command'
-    /bin/bash "$TC_SETUP" install --yes
+    tc_case 'Install the current public GitHub release while ignoring conflicting curl configuration'
+    /bin/mkdir "$TC_TEMP/curl-config"
+    printf 'proxy = "http://127.0.0.1:1"\nnoproxy = ""\n' >"$TC_TEMP/curl-config/.curlrc"
+    tc_expect_failure curl-config-control /usr/bin/env CURL_HOME="$TC_TEMP/curl-config" \
+        /usr/bin/curl --connect-timeout 1 --max-time 3 --silent --show-error \
+        --output /dev/null https://github.com/resoltico/pdfconcat/releases/latest
+    /usr/bin/grep -Fq '127.0.0.1' "$TC_TEMP/curl-config-control.log" || tc_fail 'The curl control did not exercise the configured unreachable proxy'
+    /usr/bin/env CURL_HOME="$TC_TEMP/curl-config" /bin/bash "$TC_SETUP" install --yes
     [ -L "$TC_BIN" ] || tc_fail 'Public installation did not create the command link'
     tc_assert_readable_links
     tc_source pc_validate_state

@@ -51,7 +51,7 @@ set -eu
 pdfconcat_setup_dir=$(/usr/bin/mktemp -d)
 pdfconcat_cleanup() { /bin/rm -rf -- "$pdfconcat_setup_dir"; }
 trap pdfconcat_cleanup EXIT
-/usr/bin/curl --fail --show-error --location --proto "=https" --proto-redir "=https" \
+/usr/bin/curl -q --fail --show-error --location --proto "=https" --proto-redir "=https" \
   --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 \
   --output "$pdfconcat_setup_dir/setup.sh" \
   "https://raw.githubusercontent.com/resoltico/pdfconcat/main/install/macos.sh"

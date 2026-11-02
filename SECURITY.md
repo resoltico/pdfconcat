@@ -22,7 +22,8 @@ program and, unless disabled, one marked PATH line or user PATH entry. Because
 the checksums come from the same release as the archive, a match detects a
 damaged download, not a compromised release or repository. Release archives,
 `checksums.txt` and both installers carry GitHub build-provenance attestations
-from the release workflow; `gh attestation verify` checks them.
+from the release workflow; `gh attestation verify` checks them. Per-executable
+CycloneDX SBOMs list the linked modules for dependency and license audits.
 
 macOS executables have an [ad hoc signature](https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc),
 which does not identify the publisher. PDFConcat has no Apple Developer ID

@@ -137,17 +137,32 @@ jobs:
           distribution: goreleaser
           version: v2.19.0
           args: release --snapshot --clean
-      - name: Verify checksums, macOS signatures and minimum OS
+      - name: Verify checksums, archive contents, macOS signatures and minimum OS
         run: |
           # The installers are published from install/, not dist/.
           /usr/bin/shasum -a 256 --check --strict <(/usr/bin/sed -E 's#  (install\.(sh|ps1))$#  install/\1#' dist/checksums.txt | /usr/bin/sed -E 's#  (pdfconcat_)#  dist/\1#')
-          test "$(/usr/bin/grep -c -E '  (install\.(sh|ps1)|pdfconcat_[a-z]+_(amd64|arm64)\.(tar\.gz|zip))$' dist/checksums.txt)" = 8
+          test "$(/usr/bin/grep -c -E '  (install\.(sh|ps1)|pdfconcat_[a-z]+_(amd64|arm64)\.(tar\.gz|zip|cdx\.json))$' dist/checksums.txt)" = 14
+          # Each SBOM describes its own executable's platform.
+          for sbom in dist/pdfconcat_*.cdx.json; do
+            platform=${sbom#dist/pdfconcat_}; platform=${platform%.cdx.json}
+            goos=${platform%_*} goarch=${platform#*_}
+            test "$(jq -r '[.components[].purl | capture("goarch=(?<a>[^&]+)&goos=(?<o>[^&]+)") | "\(.o)_\(.a)"] | unique | join(",")' "$sbom")" = "${goos}_${goarch}"
+          done
+          # Archives hold the program and its license notices, nothing else.
+          expected=$( (echo LICENSE; echo THIRD_PARTY_NOTICES.md; cd internal/legal && /bin/ls licenses/*.txt) | LC_ALL=C sort)
+          for archive in dist/pdfconcat_*.tar.gz dist/pdfconcat_*.zip; do
+            case "$archive" in
+              *.zip) members=$(/usr/bin/zipinfo -1 "$archive") program=pdfconcat.exe ;;
+              *) members=$(/usr/bin/tar -tzf "$archive") program=pdfconcat ;;
+            esac
+            test "$(printf '%s\n' "$members" | LC_ALL=C sort)" = "$(printf '%s\n%s\n' "$expected" "$program" | LC_ALL=C sort)"
+          done
+          go build -modfile=tools/go.mod -o "$RUNNER_TEMP/govulncheck" golang.org/x/vuln/cmd/govulncheck
           cd dist
           for arch in amd64 arm64; do
             staging_dir=$(/usr/bin/mktemp -d "$RUNNER_TEMP/pdfconcat-package.XXXXXX")
             /usr/bin/tar -xzf "pdfconcat_darwin_$arch.tar.gz" -C "$staging_dir"
-            test -s "$staging_dir/docs/INSTALL.md"
-            test -s "$staging_dir/THIRD_PARTY_NOTICES.md"
+            "$RUNNER_TEMP/govulncheck" -mode=binary "$staging_dir/pdfconcat"
             /usr/bin/codesign --verify --strict "$staging_dir/pdfconcat"
             /usr/bin/codesign --display --verbose=4 "$staging_dir/pdfconcat" 2>&1 | /usr/bin/grep '^Signature=adhoc$'
             /usr/bin/otool -l "$staging_dir/pdfconcat" | /usr/bin/grep -E 'minos 15\.0(\.0)?$'

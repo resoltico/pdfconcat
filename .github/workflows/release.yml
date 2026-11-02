@@ -53,5 +53,6 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+            dist/*.cdx.json
             install/install.sh
             install/install.ps1

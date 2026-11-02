@@ -2,6 +2,21 @@ version: 2
 
 project_name: pdfconcat
 
+before:
+  hooks:
+    # Windows file properties (product, version, copyright) and an asInvoker
+    # manifest. The .syso files are build inputs only and are git-ignored.
+    - >-
+      go tool -modfile=tools/go.mod go-winres simply --arch amd64,arm64
+      --out cmd/pdfconcat/rsrc --manifest cli --icon ""
+      --product-name PDFConcat --file-description "PDFConcat PDF packet assembler"
+      --copyright "Copyright (c) 2026 Ervins Strauhmanis. Licensed under MPL-2.0."
+      --original-filename pdfconcat.exe
+      --product-version "{{ .Version }}" --file-version "{{ .Version }}"
+    # A host build of the SBOM tool: `go tool` would build it for the SBOM's
+    # target platform instead.
+    - go build -trimpath -modfile=tools/go.mod -o .tools/bin/cyclonedx-gomod github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod
+
 builds:
   - id: pdfconcat
     main: ./cmd/pdfconcat
@@ -13,19 +28,21 @@ builds:
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
+    # -w drops DWARF debug data. The symbol table stays (no -s) so binary-mode
+    # vulnerability scanners can tell which packages are actually linked.
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -w -X main.version={{ .Version }}
     overrides:
       - goos: darwin
         goarch: amd64
         goamd64: v1
         ldflags:
-          - -s -w -X main.version={{ .Version }} -macos=15.0.0
+          - -w -X main.version={{ .Version }} -macos=15.0.0
       - goos: darwin
         goarch: arm64
         goarm64: v8.0
         ldflags:
-          - -s -w -X main.version={{ .Version }} -macos=15.0.0
+          - -w -X main.version={{ .Version }} -macos=15.0.0
     hooks:
       post:
         - /bin/bash .github/scripts/sign-macos.sh "{{ .Os }}" "{{ .Path }}"
@@ -38,32 +55,44 @@ archives:
         formats: [zip]
     # Unversioned names give every release stable latest/download URLs for the installers.
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    # The program plus the license notices that must accompany it. Documentation
+    # lives on GitHub at the release tag; `pdfconcat schema` prints the schemas.
+    # Fixed ownership and times keep archives reproducible.
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
+      mtime: "{{ .CommitDate }}"
     files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
-      - go.mod
-      - go.sum
-      - THIRD_PARTY_NOTICES.md
-      - CONTRIBUTING.md
-      - SECURITY.md
-      - docs/PDF-POLICY.md
-      - docs/ARCHITECTURE.md
-      - docs/PLAN.md
-      - docs/CLI.md
-      - docs/INSTALL.md
-      - src: examples/plans/*.json
-        dst: examples/plans
+      - src: LICENSE
+        info: &file_info
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: internal/legal/THIRD_PARTY_NOTICES.md
         strip_parent: true
-      - src: third_party/licenses/*.txt
-        dst: third_party/licenses
+        info: *file_info
+      - src: internal/legal/licenses/*.txt
+        dst: licenses
         strip_parent: true
-      - src: internal/core/internal/plan/plan.schema.json
-        dst: schemas
-        strip_parent: true
-      - src: internal/core/internal/result/result.schema.json
-        dst: schemas
-        strip_parent: true
+        info: *file_info
+
+# One CycloneDX SBOM per executable, read from the module list Go embeds in it.
+# GOOS/GOARCH label its package URLs with the executable's platform. Licenses
+# are detected from the module cache and recorded as evidence; detecting the
+# main module's license downloads the tagged release through the Go proxy, so
+# snapshot SBOMs omit it with a warning. No serial number or timestamp keeps
+# the documents reproducible. GoReleaser runs this inside dist/.
+sboms:
+  - id: cyclonedx
+    artifacts: binary
+    documents: ["{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}.cdx.json"]
+    cmd: ../.tools/bin/cyclonedx-gomod
+    env:
+      - GOOS={{ .Os }}
+      - GOARCH={{ .Arch }}
+    args: ["bin", "-json", "-licenses", "-noserial", "-notimestamp", "-output", "$document", "$artifact"]
 
 checksum:
   name_template: checksums.txt

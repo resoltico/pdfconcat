@@ -55,6 +55,8 @@ try {
         Check 'exe installed' (Test-Path $exe)
         if (-not (Test-Path $exe)) { continue }
         Check 'installed exe runs' ((& $exe version) -match '^pdfconcat ')
+        $info = (Get-Item $exe).VersionInfo
+        Check 'exe has Windows version information' ($info.ProductName -eq 'PDFConcat' -and $info.LegalCopyright -match 'MPL-2.0' -and $info.FileVersion)
         $pdf = Join-Path $work "$shell-blank.pdf"
         & $exe build -o $pdf --blank --fit-to A4 | Out-Null
         Check 'installed exe builds a PDF' ($LASTEXITCODE -eq 0 -and (Test-Path $pdf))

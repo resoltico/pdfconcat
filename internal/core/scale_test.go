@@ -109,6 +109,53 @@ func BenchmarkBuild(b *testing.B) {
 	}
 }
 
+// BenchmarkPacket builds a representative packet from the frozen corpus:
+// real source PDFs, nested sections with title dividers, linked contents,
+// generated text pages, footer numbers and a report. Use it to measure
+// performance changes, including profile-guided optimization; see CONTRIBUTING.
+func BenchmarkPacket(b *testing.B) {
+	dir := b.TempDir()
+	sources := []string{"business-report.pdf", "business-report-object-streams.pdf", "office-report.pdf", "scan-invoice.pdf", "technical-note.pdf"}
+	for _, name := range sources {
+		data, err := os.ReadFile(filepath.Join("testdata", "corpus", name))
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			b.Fatal(err)
+		}
+	}
+	items := []any{map[string]any{"page": map[string]any{"text": map[string]any{"value": "Quarterly review packet\nPielikums Ā ļ ķ · Ελληνικά · Кириллица", "size": 28}}}, map[string]any{"contents": map[string]any{}}}
+	for n := range 40 {
+		items = append(items, map[string]any{
+			"title":    fmt.Sprintf("Part %d: %s", n+1, sources[n%len(sources)]),
+			"start_on": "odd",
+			"divider":  map[string]any{},
+			"items": []any{
+				map[string]any{"source": sources[n%len(sources)]},
+				map[string]any{"page": map[string]any{"text": map[string]any{"value": fmt.Sprintf("Notes for part %d. Pārskats par ceturksni, kopsavilkums un pielikumi.", n+1), "size": 14}}},
+			},
+		})
+	}
+	data, err := json.Marshal(map[string]any{"version": 4, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": items})
+	if err != nil {
+		b.Fatal(err)
+	}
+	plan := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(plan, data, 0600); err != nil {
+		b.Fatal(err)
+	}
+	request := core.Request{Operation: core.Build, Input: core.PlanFile{Path: plan}, WorkingDir: dir, Report: filepath.Join(dir, "report.json"), Overwrite: true}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		r := core.Execute(b.Context(), request)
+		if r.Status != "ok" || !r.Output.Published {
+			b.Fatalf("build: %+v", r.Diagnostics)
+		}
+	}
+}
+
 func corpusScaleProfiles(t *testing.T) {
 	cli := corpusBinary(t, "pdfconcat-scale", "../../cmd/pdfconcat")
 	for _, tc := range []struct {

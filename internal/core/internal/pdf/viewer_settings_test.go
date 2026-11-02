@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
@@ -82,7 +83,9 @@ func TestViewerPreferenceRemovalPreservesSharedResources(t *testing.T) {
 	doc.Objs[2] = bytes.ReplaceAll(doc.Objs[2], []byte("/Resources << /Font << /F1 5 0 R >> >>"), []byte("/Resources 6 0 R"))
 	insertEntry(doc, 1, "/ViewerPreferences 6 0 R")
 	out := assembleSourceBytes(t, doc.Bytes())
-	if got := extractRaw(t, out); len(got) != 1 || got[0] != "shared-resource" {
+	// Poppler versions differ on one terminal LF even with -eol unix. The
+    // complete marker, not that formatting difference, proves font retention.
+	if got := extractRaw(t, out); len(got) != 1 || strings.TrimSuffix(got[0], "\n") != "shared-resource" {
 		t.Fatalf("shared resource was changed: %q", got)
 	}
 }

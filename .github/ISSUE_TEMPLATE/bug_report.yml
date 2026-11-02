@@ -20,6 +20,13 @@ body:
       options: [macOS, Windows, Linux, Other]
     validations:
       required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options: [Installer script, Downloaded archive, Built from source, Other]
+    validations:
+      required: true
   - type: textarea
     id: command
     attributes:

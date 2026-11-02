@@ -28,7 +28,7 @@ builds:
           - -s -w -X main.version={{ .Version }} -macos=15.0.0
     hooks:
       post:
-        - /bin/bash install/sign-macos.sh "{{ .Os }}" "{{ .Path }}"
+        - /bin/bash .github/scripts/sign-macos.sh "{{ .Os }}" "{{ .Path }}"
 
 archives:
   - id: default
@@ -36,7 +36,8 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Unversioned names give every release stable latest/download URLs for the installers.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
@@ -50,7 +51,7 @@ archives:
       - docs/ARCHITECTURE.md
       - docs/PLAN.md
       - docs/CLI.md
-      - docs/MACOS.md
+      - docs/INSTALL.md
       - src: examples/plans/*.json
         dst: examples/plans
         strip_parent: true
@@ -66,7 +67,14 @@ archives:
 
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: ./install/install.sh
+    - glob: ./install/install.ps1
 
 # Keep notes loading enabled; the workflow supplies --release-notes from CHANGELOG.md.
 release:
   prerelease: auto
+  # The installers are published beside the archives they install.
+  extra_files:
+    - glob: ./install/install.sh
+    - glob: ./install/install.ps1

@@ -50,8 +50,15 @@ jobs:
         run: |
           actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
           go run "github.com/rhysd/actionlint/cmd/actionlint@$actionlint_version"
-      - name: Setup shell lint
-        run: shellcheck --shell=bash install/*.sh
+      - name: Installer shell lint
+        run: shellcheck install/*.sh .github/scripts/*.sh
+      - name: Installer PowerShell lint
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $findings = @(Invoke-ScriptAnalyzer -Path install -Settings install/PSScriptAnalyzerSettings.psd1)
+          $findings | Format-Table -AutoSize RuleName, ScriptName, Line, Message
+          if ($findings.Count) { exit 1 }
       - name: Known vulnerabilities
         run: go tool -modfile=tools/go.mod govulncheck ./...
 
@@ -111,36 +118,9 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} go build -trimpath -o /dev/null ./cmd/pdfconcat
           done
 
-  macos-install:
-    name: macOS setup (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            network: --network
-          - os: macos-15-intel
-            network: --network
-          - os: macos-26
-            network: ""
-          - os: macos-26-intel
-            network: ""
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
-        with:
-          go-version-file: go.mod
-      - name: Native install, update, and uninstall lifecycle
-        env:
-          NETWORK_CHECK: ${{ matrix.network }}
-        run: /bin/bash install/macos_test.sh ${NETWORK_CHECK:+"$NETWORK_CHECK"}
-
   package:
     name: Release packaging
+    # Darwin executables are ad hoc signed during the build, which needs macOS.
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -151,63 +131,70 @@ jobs:
       - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
           go-version-file: go.mod
-      - name: Select a stable version for current-source test archives
-        shell: bash
-        run: |
-          source install/macos.sh
-          package_tag=''
-          while IFS= read -r tag; do
-            if pc_valid_version "$tag"; then
-              package_tag=$tag
-              break
-            fi
-          done < <(git tag --merged HEAD --sort=-version:refname)
-          if [ -z "$package_tag" ]; then
-            echo "A reachable stable release tag is required for package integration testing."
-            exit 1
-          fi
-          echo "GORELEASER_CURRENT_TAG=$package_tag" >> "$GITHUB_ENV"
-      - name: Build current-source test archives without publishing
+      - name: Build current-source release files without publishing
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: v2.19.0
-          # HEAD need not be tagged. Keep stable archive versions for the real
-          # installer; only this unpublished test build skips ref validation.
-          args: release --clean --skip=publish,validate
-      - name: Verify packaged macOS binaries and documentation
+          args: release --snapshot --clean
+      - name: Verify checksums, macOS signatures and minimum OS
         run: |
-          case "$(/usr/bin/uname -m)" in
-            arm64) native_arch=arm64 ;;
-            x86_64) native_arch=amd64 ;;
-            *) exit 1 ;;
-          esac
+          # The installers are published from install/, not dist/.
+          /usr/bin/shasum -a 256 --check --strict <(/usr/bin/sed -E 's#  (install\.(sh|ps1))$#  install/\1#' dist/checksums.txt | /usr/bin/sed -E 's#  (pdfconcat_)#  dist/\1#')
+          test "$(/usr/bin/grep -c -E '  (install\.(sh|ps1)|pdfconcat_[a-z]+_(amd64|arm64)\.(tar\.gz|zip))$' dist/checksums.txt)" = 8
           cd dist
-          /usr/bin/shasum -a 256 --check checksums.txt
           for arch in amd64 arm64; do
             staging_dir=$(/usr/bin/mktemp -d "$RUNNER_TEMP/pdfconcat-package.XXXXXX")
-            /usr/bin/tar -xzf pdfconcat_*_darwin_"$arch".tar.gz -C "$staging_dir"
-            test -s "$staging_dir/docs/MACOS.md"
+            /usr/bin/tar -xzf "pdfconcat_darwin_$arch.tar.gz" -C "$staging_dir"
+            test -s "$staging_dir/docs/INSTALL.md"
             test -s "$staging_dir/THIRD_PARTY_NOTICES.md"
             /usr/bin/codesign --verify --strict "$staging_dir/pdfconcat"
             /usr/bin/codesign --display --verbose=4 "$staging_dir/pdfconcat" 2>&1 | /usr/bin/grep '^Signature=adhoc$'
             /usr/bin/otool -l "$staging_dir/pdfconcat" | /usr/bin/grep -E 'minos 15\.0(\.0)?$'
-            if [ "$arch" = "$native_arch" ]; then
-              "$staging_dir/pdfconcat" version
-              "$staging_dir/pdfconcat" check --blank --fit-to A4
-              "$staging_dir/pdfconcat" build -o "$staging_dir/blank.pdf" --blank --fit-to A4
-              test -s "$staging_dir/blank.pdf"
-            fi
             /bin/rm -rf "$staging_dir"
           done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          if-no-files-found: error
+          retention-days: 3
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
 
-      - name: Install and remove the exact native release archive
-        run: /bin/bash install/macos_test.sh --package-dir "$PWD/dist"
+  install:
+    name: Install (${{ matrix.os }})
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, macos-15-intel, macos-26, windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release
+      - name: Shells for startup-file checks
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y zsh fish
+      - name: Install, update and uninstall the release archives
+        if: runner.os != 'Windows'
+        run: bash install/install_test.sh "$PWD/release"
+      - name: Install, update and uninstall the release archives
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install/install_test.ps1 -Dist "$PWD\release"
 
   required:
     name: Required CI
     if: always()
-    needs: [lint, test, build, macos-install, package]
+    needs: [lint, test, build, package, install]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

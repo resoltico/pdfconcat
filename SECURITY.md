@@ -12,36 +12,26 @@ Once a private channel is established, include the PDFConcat version, platform,
 command and a minimal synthetic reproduction where possible. Keep confidential
 PDFs out of public issues and pull requests.
 
-## macOS setup and release trust
+## Installation and release trust
 
-The [macOS setup tool](docs/MACOS.md) downloads a stable release from this
-project's GitHub repository, checks the archive against that release's SHA-256
-manifest, and applies and verifies an ad hoc signature on the staged executable.
-An [ad hoc signature](https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc)
-does not identify the publisher. PDFConcat does not provide a Developer ID
-signature or Apple notarization.
+The [installers](docs/INSTALL.md) download a release archive and its
+`checksums.txt` from this project's GitHub releases over HTTPS, check the
+archive's SHA-256 checksum, and run the downloaded program once as the current
+user before installing it. They need no administrator access and write only the
+program and, unless disabled, one marked PATH line or user PATH entry. Because
+the checksums come from the same release as the archive, a match detects a
+damaged download, not a compromised release or repository. Release archives,
+`checksums.txt` and both installers carry GitHub build-provenance attestations
+from the release workflow; `gh attestation verify` checks them.
 
-The documented bootstrap downloads the setup script from this repository's
-`main` branch over HTTPS and executes it only after the download succeeds. Both
-that script and the release checksum manifest come from the project; a matching
-checksum detects a mismatched download, not an independently authenticated
-publisher. Install only when you trust this repository and the software it
-publishes. GitHub build provenance and macOS code signing are different checks.
-
-Setup performs downloads as the ordinary user. It also runs the staged
-executable as that user to check its reported release and platform before
-requesting administrator permission for installation. Uninstall requests
-administrator permission without downloading anything. Setup owns the command link and
-managed files listed in the setup guide. It refuses to overwrite a foreign
-installation or remove modified or unexpected files. Installation records and
-hashes support that ownership check; they are not protection against a trusted
-administrator changing the installed software or the records.
-
-Setup does not edit shell startup files, disable Gatekeeper or System Integrity
-Protection, or remove quarantine attributes. Managed devices or other local
-security policies may still refuse execution. Report the exact failure instead
-of disabling those policies. See the setup guide for removal, command-resolution
-checks and the files that setup leaves untouched.
+macOS executables have an [ad hoc signature](https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc),
+which does not identify the publisher. PDFConcat has no Apple Developer ID
+signature or notarization, and Windows executables are not code-signed. The
+installers do not disable Gatekeeper, SmartScreen or other protections. Manual
+browser downloads carry the operating system's internet mark; the installation
+guide describes clearing it only after the checksum has been checked. Managed
+devices and features such as Windows Smart App Control may still refuse
+execution.
 
 ## Input and PDF behaviour
 

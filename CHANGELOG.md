@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **Breaking:** the macOS `/usr/local` setup from 0.6.1 and 0.6.2 is replaced. Remove it with `/bin/bash /usr/local/libexec/pdfconcat/current/setup.sh uninstall`, then use the new installer.
+- **Breaking:** release archive names no longer contain the version (`pdfconcat_linux_amd64.tar.gz`), giving stable `releases/latest/download/` links. Update scripts that build versioned names.
+- One-command installers for macOS and Linux (`install.sh`) and Windows (`install.ps1`) install, update and uninstall per user without administrator access; see [installation](docs/INSTALL.md).
+- Installers verify the archive's SHA-256 checksum and test-run the program before replacing a working copy. They add one marked PATH line or user PATH entry that uninstall removes.
+- Installers are published beside the archives and covered by `checksums.txt` and build-provenance attestations. Archives include `docs/INSTALL.md` instead of `docs/MACOS.md`.
+- CI installs, updates and uninstalls the exact release archives on Linux x86-64 and arm64, macOS Apple silicon and Intel, and Windows x64 and Arm64.
+
 ## [0.6.2] - 2026-11-02
 
 - macOS setup shows the managed command's full path for verification, avoiding misleading advice when an alias, function or another executable shadows `pdfconcat`.
@@ -9,7 +16,7 @@
 
 ## [0.6.1] - 2026-11-02
 
-- macOS binaries require macOS 15+. One setup tool installs, updates and removes the ad hoc signed command, including offline uninstall; see [macOS setup](docs/MACOS.md).
+- macOS binaries require macOS 15+. One setup tool installs, updates and removes the ad hoc signed command, including offline uninstall; see [macOS setup](https://github.com/resoltico/pdfconcat/blob/v0.6.1/docs/MACOS.md).
 - Setup displays unusual paths with escaped control characters so preservation errors identify filenames without splitting lines or changing Terminal display.
 - Native macOS CI installs and removes archives built from current source and tests privileged setup safeguards for lock files and destination permissions.
 

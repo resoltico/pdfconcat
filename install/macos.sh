@@ -13,6 +13,8 @@ pc_init_paths() {
 }
 
 pc_error() { printf 'PDFConcat setup: %s\n' "$*" >&2; return 1; }
+# Render paths as shell-quoted bytes so controls cannot alter Terminal output.
+pc_display_path() { local LC_ALL=C; printf '%q' "$1"; }
 pc_exists() { [[ -e "$1" || -L "$1" ]]; }
 pc_sha256() { /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'; }
 pc_uid() { /usr/bin/stat -f '%u' "$1"; }
@@ -26,7 +28,7 @@ pc_check_no_acl() {
     # With -e, macOS ls prints each ACL entry on another line. Extended
     # attributes alone (including quarantine) do not add lines here.
     [[ "$metadata" != *$'\n'* ]] || {
-        pc_error "Custom access controls were preserved: $1. Ask your Mac administrator for help."; return 1;
+        pc_error "Custom access controls were preserved: $(pc_display_path "$1"). Ask your Mac administrator for help."; return 1;
     }
 }
 
@@ -40,18 +42,18 @@ pc_valid_path() {
 
 pc_check_dir() {
     local path=$1 owner=$2
-    [[ -d "$path" && ! -L "$path" ]] || { pc_error "Expected a real directory: $path"; return 1; }
+    [[ -d "$path" && ! -L "$path" ]] || { pc_error "Expected a real directory: $(pc_display_path "$path")"; return 1; }
     [[ $(pc_uid "$path") == "$owner" && $(pc_mode "$path") == 755 ]] || {
-        pc_error "Unexpected ownership or permissions; nothing was removed: $path"; return 1;
+        pc_error "Unexpected ownership or permissions; nothing was removed: $(pc_display_path "$path")"; return 1;
     }
     pc_check_no_acl "$path"
 }
 
 pc_check_file() {
     local path=$1 owner=$2 mode=$3
-    [[ -f "$path" && ! -L "$path" ]] || { pc_error "Expected a regular file: $path"; return 1; }
+    [[ -f "$path" && ! -L "$path" ]] || { pc_error "Expected a regular file: $(pc_display_path "$path")"; return 1; }
     [[ $(pc_uid "$path") == "$owner" && $(pc_mode "$path") == "$mode" && $(pc_links "$path") == 1 ]] || {
-        pc_error "Unexpected ownership, permissions, or hard links: $path"; return 1;
+        pc_error "Unexpected ownership, permissions, or hard links: $(pc_display_path "$path")"; return 1;
     }
     pc_check_no_acl "$path"
 }
@@ -62,7 +64,7 @@ pc_check_parents() {
     local path=$1
     while [[ "$path" != / ]]; do
         if pc_exists "$path"; then
-            [[ -d "$path" && ! -L "$path" ]] || { pc_error "Destination parent is not a real directory: $path"; return 1; }
+            [[ -d "$path" && ! -L "$path" ]] || { pc_error "Destination parent is not a real directory: $(pc_display_path "$path")"; return 1; }
         fi
         path=${path%/*}
         [[ -n "$path" ]] || path=/
@@ -91,8 +93,8 @@ pc_make_receipt() {
         while IFS= read -r -d '' rel; do
             rel=${rel#./}
             [[ "$rel" == . || "$rel" == receipt ]] && continue
-            pc_valid_path "$rel" || { pc_error "Unsupported archive path: $rel"; return 1; }
-            [[ ! -L "$dir/$rel" ]] || { pc_error "Links are not allowed in the release: $rel"; return 1; }
+            pc_valid_path "$rel" || { pc_error "Unsupported archive path: $(pc_display_path "$rel")"; return 1; }
+            [[ ! -L "$dir/$rel" ]] || { pc_error "Links are not allowed in the release: $(pc_display_path "$rel")"; return 1; }
             if [[ -d "$dir/$rel" ]]; then
                 /bin/chmod 755 "$dir/$rel" || return
                 printf 'd %s\n' "$rel"
@@ -103,7 +105,7 @@ pc_make_receipt() {
                 hash=$(pc_sha256 "$dir/$rel") || return
                 printf 'f %s %s %s\n' "$mode" "$hash" "$rel"
             else
-                pc_error "Unsupported release file type: $rel"; return 1
+                pc_error "Unsupported release file type: $(pc_display_path "$rel")"; return 1
             fi
         done < <(cd "$dir" && /usr/bin/find . -print0) | LC_ALL=C /usr/bin/sort
     } > "$dir/receipt" || return
@@ -141,7 +143,7 @@ pc_validate_generation() {
         fi
         if [[ $count -gt 0 ]]; then
             for item in "${names[@]}"; do
-                [[ "$item" != "$rel" ]] || { pc_error "Duplicate inventory entry: $rel"; return 1; }
+                [[ "$item" != "$rel" ]] || { pc_error "Duplicate inventory entry: $(pc_display_path "$rel")"; return 1; }
             done
         fi
         names+=("$rel")
@@ -165,7 +167,7 @@ pc_validate_generation() {
             fi
             pc_check_file "$dir/$rel" "$owner" "$mode" || return
             actual=$(pc_sha256 "$dir/$rel") || return
-            [[ "$actual" == "$hash" ]] || { pc_error "A managed file was changed; it has been preserved: $dir/$rel"; return 1; }
+            [[ "$actual" == "$hash" ]] || { pc_error "A managed file was changed; it has been preserved: $(pc_display_path "$dir/$rel")"; return 1; }
         fi
     done
     } 3< "$dir/receipt"
@@ -175,7 +177,7 @@ pc_validate_generation() {
         [[ "$rel" == . || "$rel" == receipt ]] && continue
         found=0
         for item in "${names[@]}"; do [[ "$item" != "$rel" ]] || found=1; done
-        [[ "$found" == 1 ]] || { pc_error "An unrecognized file has been preserved: $dir/$rel"; return 1; }
+        [[ "$found" == 1 ]] || { pc_error "An unrecognized file has been preserved: $(pc_display_path "$dir/$rel")"; return 1; }
     done < <(cd "$dir" && /usr/bin/find . -print0)
 }
 
@@ -194,16 +196,16 @@ pc_validate_state() {
     pc_check_dir "$PC_ROOT" 0 || return
     for entry in "$PC_ROOT"/* "$PC_ROOT"/.[!.]* "$PC_ROOT"/..?*; do
         pc_exists "$entry" || continue
-        case "${entry##*/}" in current|releases) ;; *) pc_error "An unrecognized item has been preserved: $entry"; return 1 ;; esac
+        case "${entry##*/}" in current|releases) ;; *) pc_error "An unrecognized item has been preserved: $(pc_display_path "$entry")"; return 1 ;; esac
     done
     if pc_exists "$PC_ROOT/releases"; then
         pc_check_dir "$PC_ROOT/releases" 0 || return
         for entry in "$PC_ROOT/releases"/* "$PC_ROOT/releases"/.[!.]* "$PC_ROOT/releases"/..?*; do
             pc_exists "$entry" || continue
             id=${entry##*/}
-            pc_valid_hash "$id" || { pc_error "Unrecognized release directory: $entry"; return 1; }
+            pc_valid_hash "$id" || { pc_error "Unrecognized release directory: $(pc_display_path "$entry")"; return 1; }
             pc_validate_generation "$entry" 0 1 || return
-            [[ $(pc_sha256 "$entry/receipt") == "$id" ]] || { pc_error "The installation receipt was changed: $entry/receipt"; return 1; }
+            [[ $(pc_sha256 "$entry/receipt") == "$id" ]] || { pc_error "The installation receipt was changed: $(pc_display_path "$entry/receipt")"; return 1; }
         done
     fi
     if pc_exists "$PC_ROOT/current"; then
@@ -293,7 +295,7 @@ pc_normalize_stage() {
     while IFS= read -r -d '' rel; do
         rel=${rel#./}
         [[ "$rel" == . || "$rel" == receipt ]] || pc_valid_path "$rel" || {
-            pc_error "Unsupported staged path: $rel"; return 1;
+            pc_error "Unsupported staged path: $(pc_display_path "$rel")"; return 1;
         }
         [[ ! -L "$dir/$rel" ]] || { pc_error 'A staged link was refused.'; return 1; }
         if [[ -d "$dir/$rel" ]]; then
@@ -468,7 +470,7 @@ pc_prepare_archive() {
     /usr/bin/tar -tf "$archive" > "$dir/archive-list" || return
     while IFS= read -r rel || [[ -n "$rel" ]]; do
         rel=${rel%/}
-        pc_valid_path "payload/$rel" || { pc_error "Unsafe archive member: $rel"; return 1; }
+        pc_valid_path "payload/$rel" || { pc_error "Unsafe archive member: $(pc_display_path "$rel")"; return 1; }
         archive_count=$((archive_count + 1))
         [[ "$archive_count" -le 512 ]] || { pc_error 'The release archive contains too many entries.'; return 1; }
     done < "$dir/archive-list"
@@ -548,13 +550,13 @@ pc_check_privileged_parents() {
             mode=$(pc_mode "$path") || return
             group=$(/usr/bin/stat -f '%g' "$path") || return
             [[ "$owner" == 0 || "$owner" == "$caller" ]] || {
-                pc_error "Destination parent belongs to another user: $path. Ask your Mac administrator for help."; return 1;
+                pc_error "Destination parent belongs to another user: $(pc_display_path "$path"). Ask your Mac administrator for help."; return 1;
             }
             if (( (8#$mode & 2) != 0 && (8#$mode & 512) == 0 )); then
-                pc_error "Destination parent allows writes by other users: $path"; return 1
+                pc_error "Destination parent allows writes by other users: $(pc_display_path "$path")"; return 1
             fi
             if (( (8#$mode & 16) != 0 )) && [[ "$group" != 0 && "$group" != 80 ]]; then
-                pc_error "Destination parent has an unsupported writable group: $path"; return 1
+                pc_error "Destination parent has an unsupported writable group: $(pc_display_path "$path")"; return 1
             fi
             case "$path" in /usr/local|/usr/local/*) pc_check_no_acl "$path" || return ;; esac
         fi
@@ -649,7 +651,7 @@ pc_install() (
     if [[ "$resolved" == "$PC_BIN" ]]; then
         printf '\nOpen a new Terminal window, then check: pdfconcat version\n'
     elif [[ -n "$resolved" ]]; then
-        printf '\nYour current PATH finds another command first: %s\n' "$resolved"
+        printf '\nYour current PATH finds another command first: %s\n' "$(pc_display_path "$resolved")"
         printf 'The installed copy is available as: %s\n' "$PC_BIN"
         printf 'Help: https://github.com/resoltico/pdfconcat/blob/main/docs/MACOS.md#troubleshooting\n'
     else

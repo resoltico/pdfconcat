@@ -151,12 +151,30 @@ jobs:
       - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
           go-version-file: go.mod
-      - name: Build release archives without publishing
+      - name: Select a stable version for current-source test archives
+        shell: bash
+        run: |
+          source install/macos.sh
+          package_tag=''
+          while IFS= read -r tag; do
+            if pc_valid_version "$tag"; then
+              package_tag=$tag
+              break
+            fi
+          done < <(git tag --merged HEAD --sort=-version:refname)
+          if [ -z "$package_tag" ]; then
+            echo "A reachable stable release tag is required for package integration testing."
+            exit 1
+          fi
+          echo "GORELEASER_CURRENT_TAG=$package_tag" >> "$GITHUB_ENV"
+      - name: Build current-source test archives without publishing
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: v2.19.0
-          args: release --snapshot --clean --skip=publish
+          # HEAD need not be tagged. Keep stable archive versions for the real
+          # installer; only this unpublished test build skips ref validation.
+          args: release --clean --skip=publish,validate
       - name: Verify packaged macOS binaries and documentation
         run: |
           case "$(/usr/bin/uname -m)" in
@@ -182,6 +200,9 @@ jobs:
             fi
             /bin/rm -rf "$staging_dir"
           done
+
+      - name: Install and remove the exact native release archive
+        run: /bin/bash install/macos_test.sh --package-dir "$PWD/dist"
 
   required:
     name: Required CI

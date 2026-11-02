@@ -29,18 +29,24 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 		facts.SHA256 = sha256.Sum256(data)
 		facts.Bytes = int64(len(data))
 		if value := recover(); value != nil {
-			ds = append(ds, diag.New(diag.SourceInvalid, fmt.Sprintf("PDF parser panic: %v", value)))
+			d := diag.New(diag.SourceProcessingFailed, "The PDF backend failed unexpectedly.")
+			d.Detail = fmt.Sprint(value)
+			ds = append(ds, d)
 		}
 	}()
-	s, err := read(c, data)
+	s, findings, err := readSource(c, data)
+	ds = append(ds, findings...)
 	if err != nil {
-		if s != nil {
+		if s != nil && s.XRefTable != nil {
 			facts.Pages = s.PageCount
-			facts.Version = s.XRefTable.Version().String()
+			if s.HeaderVersion != nil || s.RootVersion != nil {
+				facts.Version = s.XRefTable.Version().String()
+			}
 		}
-		return facts, occurrences, []diag.Diagnostic{diagnostic(err, diag.SourceInvalid)}
+		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
-	facts, ds, err = observe(c, s)
+	facts, findings, err = observe(c, s)
+	ds = append(ds, findings...)
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}

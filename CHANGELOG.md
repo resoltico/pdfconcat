@@ -2,13 +2,27 @@
 
 ## [Unreleased]
 
-- **Breaking:** release archives hold only the program, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/`. Read docs and examples at the release tag; `pdfconcat schema` prints the schemas.
-- `pdfconcat licenses` prints the license notices built into the executable, so a copy installed without its archive still carries them.
-- Notices now cover go-text's HarfBuzz port and pdfcpu's `pkcs7` package (both MIT), pdfcpu's embedded Roboto font (Apache-2.0) and its Adobe Core 14 font metrics.
-- Release executables keep the Go symbol table (DWARF is still dropped), so binary vulnerability scanners report only linked packages. Executables are about 7% larger.
-- Release archives are reproducible: members have root ownership and commit timestamps instead of the build machine's.
-- Windows executables carry file properties (product, version, copyright) and an `asInvoker` manifest, so Explorer and security tools can identify them.
-- Each release publishes a CycloneDX SBOM per executable (`pdfconcat_linux_amd64.cdx.json`) listing linked modules, versions and detected licenses, with provenance.
+## [0.8.0] - 2026-11-02
+
+- **Breaking:** results, reports and JSON version objects use `format_version: 6`; update schema consumers. Plans remain version 4.
+- **Breaking:** `output_required` replaces `usage_missing_output`; unsupported shapes use `source_unsupported`, and unexpected backend faults use `source_processing_failed` with status `failed`.
+- **Breaking:** strict source reading and content checks reject covered syntax defects, incomplete Flate and damaged references, including omitted pages. Original files stay unchanged.
+- **Breaking:** publication failures lead diagnostics, followed by interruption, other failures, invalid input and warnings. Peer stage/first-use order remains stable.
+- **Breaking:** archives contain the program, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/`. Read docs/examples at the release tag; `pdfconcat schema` prints the schemas.
+- Source page layout, page mode and viewer preferences are removed with `source_viewer_settings_removed` warnings; PDFs with `PDLayoutDontCare` can be composed.
+- Encoding failures identify files, pages, streams and items. Validated decoded caches preserve original encoded data; repeated content-array members count toward page limits.
+- Filter stages share the existing cumulative decoder allowance; intermediate buffers are conservatively charged, so large multi-filter inputs may be refused earlier.
+- Output verification checks catalog/page policy, expected page count and encodings in strict mode; validation must preserve page order, content references and encoded bytes.
+- Diagnostics retain backend `detail` and optional `pdf_location`. Distinct warnings and findings preceding later source failures remain in complete reports.
+- Reported repairs are refused; `source_validation_notice` preserves other backend evidence without interpreting message text as proof of content removal.
+- Report omission hints reflect report availability. I/O messages identify the public operation/cause, with native staging evidence retained in `detail`.
+- Encrypted, signed/permission-structure, visibility-layer and dynamic-rendering refusals explain preservation limits and suggest delivering originals separately.
+- `pdfconcat licenses` prints the notices embedded in the executable, including when installed without its archive.
+- Notices cover go-text’s HarfBuzz port, pdfcpu’s `pkcs7` package and Roboto font, and Adobe Core 14 font metrics.
+- Release executables retain Go symbol data for package-aware vulnerability scans; DWARF is omitted and binaries are larger.
+- Archive members use fixed owners and commit timestamps for reproducible release archives.
+- Windows executables include product/version properties and an `asInvoker` manifest.
+- Each release publishes a CycloneDX SBOM per executable with linked-module versions, detected licenses and build provenance.
 
 ## [0.7.0] - 2026-11-02
 

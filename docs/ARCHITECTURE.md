@@ -86,7 +86,9 @@ contents page count are known. Padding has no declared item index.
 
 1. Admission resolves roles and acquires/decodes a plan or direct items.
 2. Inspection loads fonts and checks text, then inspects distinct sources with
-   at most `GOMAXPROCS` workers. Findings are merged in first-use order.
+   at most `GOMAXPROCS` workers. Inspection findings are merged in first-use order;
+   final results apply the shared [diagnostic priority](CLI.md#output), preserving
+   stage/first-use order within peers.
 3. Composition prepares contents, resolves physical layout, checks compatibility
    and footers, and lays out generated text.
 4. Build prepares font resources, stages the PDF, assembles, verifies and publishes.
@@ -115,5 +117,24 @@ The typesetter owns wrapping policy. Emergency wrapping intersects Unicode
 grapheme boundaries with the shaper's safe cluster boundaries, retaining shaped
 glyphs rather than reshaping or inserting source characters. It preserves the
 ordinary wrapping pass and leaves indivisible runs to the same overflow checks.
+
+### PDF validation boundary
+
 The PDF adapter owns source graphs, per-occurrence navigation and final PDF
-validation. See [PDF policy](PDF-POLICY.md) for its fidelity and resource limits.
+validation. Source admission parses strictly, checks original security and
+structure, removes source viewer directives, and validates semantic compatibility.
+It returns accumulated findings alongside any failure. Inspection and assembly
+share this path.
+
+Output verification uses strict validation without source normalization and
+checks catalog policy before validation. A shared validation boundary checks page
+order, live content-stream references and encoded bytes before and after
+validation. Source admission and serialized output also check every page-content
+encoding. Flate EOF/checksum checks use the standard library alongside backend
+stage/predictor decoders and same-context budgets. Validated decoded caches are
+immutable; original encoded data is retained.
+
+Validation notices are evidence; their message text does not select policy.
+Diagnostic wrappers preserve backend detail and PDF locations. Result coalescing
+merges only equivalent findings and unions their consuming item references.
+See [PDF policy](PDF-POLICY.md) for fidelity and resource limits.

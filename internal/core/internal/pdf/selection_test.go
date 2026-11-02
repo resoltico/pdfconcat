@@ -214,7 +214,7 @@ func TestNativeSourceOutlinesRemainStyledAndNested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := read(t.Context(), data)
+	s, _, err := readSource(t.Context(), data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestSelectedOutlinesKeepNativeClosedContainerAndActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := read(t.Context(), data)
+	s, _, err := readSource(t.Context(), data)
 	if err != nil {
 		t.Fatal(err)
 	}

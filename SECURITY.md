@@ -44,10 +44,24 @@ or active scripts embedded in source PDFs, but retained page/annotation actions
 may execute in a PDF viewer. Removing document-level scripts/attachments is not
 sanitization.
 
-Encrypted sources, signature values/certification/timestamps, dynamic forms,
-optional content and known content-dropping page-tree shapes are refused. Empty
+Encrypted sources (including empty-password encryption), signature values,
+catalog permission structures, timestamps, dynamic forms, optional content and
+known content-dropping page-tree shapes are refused. Empty
 unsigned signature fields remain supported. Signatures are not authenticated.
-Upstream relaxed parsing may accept other repairs/malformed syntax; see the
+Viewer directives are removed from imported catalogs after original-file checks;
+this does not sanitize retained content. Serialized output is checked separately
+with strict validation and without source normalization before publication.
+Source parsing is strict and semantic compatibility validation remains relaxed.
+Every original page-content stream must decode before selection, including
+omitted pages. Truncated/corrupt Flate programs are refused using independent
+EOF/checksum checks; encoded source data is not silently repaired. Decoder
+per-stream, combined-page and cumulative limits apply; intermediate filter
+buffers are conservatively charged too. This does not validate every image
+payload or arbitrary content-operator grammar.
+Page order and encoded content-stream identity are checked around validation;
+these checks do not establish arbitrary PDF semantic or rendering equivalence.
+Backend notices are incomplete evidence of repairs; their wording does not select
+admission policy. Lower-level reader recovery can still occur; see the
 [feature policy and limitations](docs/PDF-POLICY.md).
 
 Page selection is visible-page composition, not redaction. It does not promise

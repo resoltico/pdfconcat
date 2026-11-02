@@ -26,11 +26,12 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	var current *Part
 	defer func() {
 		if value := recover(); value != nil {
-			err = refuse(diag.AssemblyFailed, fmt.Sprintf("PDF backend panic: %v", value))
+			err = pdfFailure(diag.AssemblyFailed, "The PDF backend failed during assembly.", fmt.Errorf("%v", value))
 		}
 		if err != nil && current != nil {
 			d := diagnostic(err, diag.AssemblyFailed)
-			err = &policyError{code: d.Code, err: err, file: current.Source, items: []string{current.Ref}}
+			d.File, d.Items = current.Source, []string{current.Ref}
+			err = &policyError{finding: d, err: err}
 		}
 	}()
 	if err = c.Err(); err != nil {
@@ -54,7 +55,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	compatibility := CheckCompatibility(a)
 	if len(compatibility.Diagnostics) > 0 {
 		d := compatibility.Diagnostics[0]
-		return result, &policyError{code: d.Code, err: errors.New(d.Message), file: d.File, items: d.Items}
+		return result, &policyError{finding: d, err: errors.New(d.Message)}
 	}
 	needAppearances := false
 	add := func(code diag.Code, message string, index int) {
@@ -71,13 +72,15 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		if part.Source != "" {
 			data, e := files.Read(c, part.Source, 0)
 			if e != nil {
-				return result, &policyError{code: diag.SourceUnreadable, err: e}
+				return result, &policyError{finding: diag.New(diag.SourceUnreadable, e.Error()), err: e}
 			}
 			inspected := part.Occurrence.File
 			if sha256.Sum256(data) != inspected.SHA256 {
 				return result, refuse(diag.SourceChanged, "Source bytes changed after inspection: "+part.Source)
 			}
-			s, err = read(c, data)
+			// Inspection already reported source findings; re-admission enforces the
+			// same policy against the bytes just checked above.
+			s, _, err = readSource(c, data)
 			if err != nil {
 				return result, err
 			}
@@ -173,11 +176,18 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	if err = cleanCatalog(dest, compatibility.version, needAppearances); err != nil {
 		return result, err
 	}
+	// Source tolerance must not repair defects introduced by composition.
+	dest.Configuration.ValidationMode = model.ValidationStrict
+	dest.XRefTable.ValidationMode = model.ValidationStrict
 	if err = api.OptimizeContext(c, dest); err != nil {
 		return result, err
 	}
-	if err = api.ValidateContext(c, dest); err != nil {
-		return result, err
+	report, validationErr := validatePreservingPages(c, dest)
+	if validationErr != nil {
+		return result, pdfFailure(diag.AssemblyFailed, "The composed PDF failed final validation.", validationErr)
+	}
+	if _, repair := validationNotices(report); repair != nil {
+		return result, pdfFailure(diag.AssemblyFailed, "The composed PDF required an unsupported repair.", repair)
 	}
 	if err = freeUnreachable(c, dest); err != nil {
 		return result, err
@@ -185,7 +195,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	output := &outputWriter{writer: w}
 	err = api.WriteContext(c, dest, output)
 	if output.err != nil {
-		return result, &policyError{code: diag.OutputWriteFailed, err: output.err}
+		return result, &policyError{finding: diag.New(diag.OutputWriteFailed, output.err.Error()), err: output.err}
 	}
 	return result, err
 }
@@ -245,44 +255,19 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 func Verify(c context.Context, path string, expected int64) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
-			err = refuse(diag.OutputInvalid, fmt.Sprintf("Output parser panic: %v", value))
+			err = pdfFailure(diag.OutputInvalid, "The composed PDF could not be verified.", fmt.Errorf("%v", value))
 		}
 	}()
 	data, err := files.Read(c, path, 0)
 	if err != nil {
-		return &policyError{code: diag.OutputInvalid, err: err}
+		return pdfFailure(diag.OutputInvalid, "The composed PDF failed output verification.", err)
 	}
-	s, err := read(c, data)
+	s, err := readOutput(c, data)
 	if err != nil {
-		return &policyError{code: diag.OutputInvalid, err: err}
+		return pdfFailure(diag.OutputInvalid, "The composed PDF failed output verification.", err)
 	}
 	if int64(s.PageCount) != expected {
 		return refuse(diag.OutputPageCountMismatch, fmt.Sprintf("Expected %d output pages; found %d.", expected, s.PageCount))
-	}
-	cat, err := s.Catalog()
-	if err != nil {
-		return &policyError{code: diag.OutputInvalid, err: err}
-	}
-	for key := range cat {
-		if !catalogKeys[key] {
-			return refuse(diag.OutputInvalid, "Unexpected output catalog key: "+key)
-		}
-	}
-	names, err := s.DereferenceDict(cat["Names"])
-	if err != nil {
-		return err
-	}
-	for key := range names {
-		if key != "Dests" {
-			return refuse(diag.OutputInvalid, "Unexpected output name tree: "+key)
-		}
-	}
-	form, err := s.DereferenceDict(cat["AcroForm"])
-	if err != nil {
-		return err
-	}
-	if form["XFA"] != nil {
-		return refuse(diag.OutputInvalid, "XFA remains in output.")
 	}
 	return nil
 }

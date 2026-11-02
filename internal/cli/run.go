@@ -45,7 +45,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return render(*failure)
 		}
 		for _, d := range Summary(*failure).Diagnostics {
-			if _, err := fmt.Fprintln(stderr, diagnosticText(d)); err != nil {
+			if _, err := fmt.Fprintln(stderr, diagnosticText(d, failure.Report)); err != nil {
 				return 1
 			}
 		}

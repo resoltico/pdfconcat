@@ -58,7 +58,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 				case nil, types.Name, types.Integer, types.Float:
 					dest.tail = append(dest.tail, value)
 				default:
-					return destination{}, refuse(diag.SourceInvalid, "Unsupported destination coordinate value.")
+					return destination{}, refuse(diag.SourceUnsupported, "Unsupported destination coordinate value.")
 				}
 			}
 		}
@@ -79,7 +79,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return err
 		}
 		if depth > 64 {
-			return refuse(diag.SourceInvalid, "Destination name tree exceeds depth 64.")
+			return refuse(diag.SourceUnsupported, "Destination name tree exceeds depth 64.")
 		}
 		if o == nil {
 			return nil
@@ -111,7 +111,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 				return e
 			}
 			if _, exists := result[name]; exists {
-				return refuse(diag.SourceInvalid, "Duplicate destination byte-string keys are unsupported.")
+				return refuse(diag.SourceUnsupported, "Duplicate destination byte-string keys are unsupported.")
 			}
 			result[name] = dest
 		}
@@ -139,7 +139,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return nil, e
 		}
 		if existing, ok := result[name]; ok && (existing.page != dest.page || !reflect.DeepEqual(existing.tail, dest.tail)) {
-			return nil, refuse(diag.SourceInvalid, "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
+			return nil, refuse(diag.SourceUnsupported, "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
 		}
 		result[name] = dest
 	}

@@ -51,7 +51,7 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 }
 func TestParserRetainsCompleteNormalizedFailure(t *testing.T) {
 	command, failure := cli.Parse([]string{"check", "--bad", "--json"})
-	if !command.JSON || failure == nil || failure.FormatVersion != 5 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
+	if !command.JSON || failure == nil || failure.FormatVersion != 6 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
 		t.Fatalf("complete parse outcome: %+v %+v", command, failure)
 	}
 }

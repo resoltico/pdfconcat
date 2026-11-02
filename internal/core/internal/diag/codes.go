@@ -86,15 +86,25 @@ type Location struct {
 	Ref    string `json:"pointer"`
 }
 
+// PDFLocation identifies a PDF object, page or dictionary entry when known.
+// Zero page/object numbers mean that attribution is unavailable.
+type PDFLocation struct {
+	Object int    `json:"object,omitzero"`
+	Page   int    `json:"page,omitzero"`
+	Path   string `json:"path,omitempty"`
+}
+
 // Diagnostic is a located error or warning with its consuming plan entries.
 type Diagnostic struct {
-	Severity     Severity  `json:"severity"`
-	Code         Code      `json:"code"`
-	Message      string    `json:"message"`
-	File         string    `json:"file,omitempty"`
-	Items        []string  `json:"items,omitempty"`
-	ItemsOmitted int       `json:"items_omitted"`
-	Location     *Location `json:"location,omitempty"`
+	Severity     Severity     `json:"severity"`
+	Code         Code         `json:"code"`
+	Message      string       `json:"message"`
+	Detail       string       `json:"detail,omitempty"`
+	PDFLocation  *PDFLocation `json:"pdf_location,omitempty"`
+	File         string       `json:"file,omitempty"`
+	Items        []string     `json:"items,omitempty"`
+	ItemsOmitted int          `json:"items_omitted"`
+	Location     *Location    `json:"location,omitempty"`
 }
 
 // Registry returns a copy so callers cannot change the public code definitions.
@@ -121,7 +131,7 @@ var (
 	UsageInvalidValue                   = define("usage_invalid_value", Error, Invalid, "option value not allowed (`--fit-to`, `schema` name, \u2026)")
 	UsageConflict                       = define("usage_conflict", Error, Invalid, "`--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option")
 	UsageMissingInput                   = define("usage_missing_input", Error, Invalid, "neither `--plan` nor PDF or `--blank` operands")
-	UsageMissingOutput                  = define("usage_missing_output", Error, Invalid, "`build` without `-o` and without plan `output`")
+	OutputRequired                      = define("output_required", Error, Invalid, "build requires an output destination")
 	PlanUnreadable                      = define("plan_unreadable", Error, Failed, "plan file or stdin could not be read")
 	PlanTooLarge                        = define("plan_too_large", Error, Invalid, "plan exceeds 64 MiB")
 	PlanSyntax                          = define("plan_syntax", Error, Invalid, "not one valid JSON object in UTF-8 (incl. trailing data, invalid UTF-8, comments)")
@@ -134,8 +144,8 @@ var (
 	PlanItemShape                       = define("plan_item_shape", Error, Invalid, "an item object without exactly one supported source, page, group or contents shape")
 	PlanLimit                           = define("plan_limit", Error, Invalid, "nesting, entries, count or total generated pages over the limit")
 	PathInvalid                         = define("path_invalid", Error, Invalid, "empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\\x`)")
-	OutputExists                        = define("output_exists", Error, Invalid, "output exists and `--overwrite` not given")
-	ReportExists                        = define("report_exists", Error, Invalid, "report exists and `--overwrite` was not given, or plan inputs are unknown")
+	OutputExists                        = define("output_exists", Error, Invalid, "output exists and replacement was not authorized")
+	ReportExists                        = define("report_exists", Error, Invalid, "report exists and replacement was not authorized, or plan inputs are unknown")
 	OutputNotRegular                    = define("output_not_regular", Error, Invalid, "output exists and is not a regular file (directory, symlink, device)")
 	ReportNotRegular                    = define("report_not_regular", Error, Invalid, "same for the report")
 	OutputIsInput                       = define("output_is_input", Error, Invalid, "output is (or aliases) a plan, font or source file")
@@ -151,10 +161,14 @@ var (
 	PageSizeTooLarge                    = define("page_size_too_large", Error, Invalid, "inherited size above 14,400 pt; give an explicit size")
 	SourceUnreadable                    = define("source_unreadable", Error, Failed, "source file could not be read")
 	SourceChanged                       = define("source_changed", Error, Failed, "source bytes at merge time differ from the inspected bytes")
-	SourceInvalid                       = define("source_invalid", Error, Invalid, "unsupported unsafe PDF shape or parse/validation failure (including recovered panics)")
-	SourceDamaged                       = define("source_damaged", Error, Invalid, "broken page tree (missing/empty kid, wrong count) or content-replacing repair")
+	SourceInvalid                       = define("source_invalid", Error, Invalid, "PDF parsing or validation failed")
+	SourceUnsupported                   = define("source_unsupported", Error, Invalid, "source structure cannot be composed with the supported fidelity guarantees")
+	SourceProcessingFailed              = define("source_processing_failed", Error, Failed, "unexpected PDF backend failure, including a recovered panic")
+	SourceValidationNotice              = define("source_validation_notice", Warning, NoClass, "backend compatibility notice; skipped validation does not establish content removal")
+	SourceViewerSettingsRemoved         = define("source_viewer_settings_removed", Warning, NoClass, "source catalog PageLayout, PageMode or ViewerPreferences removed before validation")
+	SourceDamaged                       = define("source_damaged", Error, Invalid, "broken page tree, missing/malformed content streams, or validation changing page order or encoded contents")
 	SourceEncrypted                     = define("source_encrypted", Error, Invalid, "encrypted, including empty-password encryption")
-	SourceSigned                        = define("source_signed", Error, Invalid, "signature value, certification (`/Perms`) or document timestamp")
+	SourceSigned                        = define("source_signed", Error, Invalid, "signature value, catalog permission structures (`/Perms`) or document timestamp")
 	SourceDynamicForm                   = define("source_dynamic_form", Error, Invalid, "source requests NeedsRendering true")
 	SourceOptionalContent               = define("source_optional_content", Error, Invalid, "`/OCProperties` present")
 	FitDestinationUnsupported           = define("fit_destination_unsupported", Error, Invalid, "fitting internal page destinations with numeric position coordinates is unsupported")
@@ -194,25 +208,46 @@ func New(code Code, message string, items ...string) Diagnostic {
 	return Diagnostic{Severity: definition.Severity, Code: code, Message: strings.ToValidUTF8(message, "�"), Items: items}
 }
 
-// Outcome gives cancellation precedence over environmental failure over invalid input.
-func Outcome(diagnostics []Diagnostic) (Status, int) {
-	status, exit := OK, 0
-	for _, d := range diagnostics {
-		if d.Severity != Error {
-			continue
-		}
+// diagnosticOutcome defines final-outcome precedence and base ordering together.
+type diagnosticOutcome struct {
+	status         Status
+	exit, priority int
+}
+
+func outcomeOf(d Diagnostic) diagnosticOutcome {
+	if d.Severity == Error {
 		switch definitions[d.Code].Class {
-		case NoClass:
-			continue
 		case ClassInterrupted:
-			return StatusInterrupted, 130
+			return diagnosticOutcome{StatusInterrupted, 130, 3}
 		case Failed:
-			status, exit = StatusFailed, 1
+			return diagnosticOutcome{StatusFailed, 1, 2}
 		case Invalid:
-			if status == OK {
-				status, exit = StatusInvalid, 2
-			}
+			return diagnosticOutcome{StatusInvalid, 2, 1}
+		case NoClass:
 		}
 	}
-	return status, exit
+	return diagnosticOutcome{OK, 0, 0}
+}
+
+// Priority keeps publication failures visible before outcome-ranked diagnostics.
+// Their visibility/publication consequences matter independently of overall
+// cancellation or input failure. Execution emits at most one failure per output
+// publication/report role. Equal priorities retain their original order.
+func Priority(d Diagnostic) int {
+	if d.Severity == Error && (d.Code == ReportWriteFailed || d.Code == OutputPublishFailed) {
+		return 4
+	}
+	return outcomeOf(d).priority
+}
+
+// Outcome gives cancellation precedence over environmental failure over invalid input.
+func Outcome(diagnostics []Diagnostic) (Status, int) {
+	outcome := diagnosticOutcome{OK, 0, 0}
+	for _, d := range diagnostics {
+		candidate := outcomeOf(d)
+		if candidate.priority > outcome.priority {
+			outcome = candidate
+		}
+	}
+	return outcome.status, outcome.exit
 }

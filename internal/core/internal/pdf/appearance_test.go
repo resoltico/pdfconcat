@@ -35,7 +35,7 @@ func TestAppearanceInspectionBoundaries(t *testing.T) {
 		{name: "field widget linked annotation", subtype: "Widget", rect: []int{0, 0, 10, 10}, field: true, ap: true, linked: true, issue: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := read(t.Context(), pdffixture.Plain("appearance").Bytes())
+			s, _, err := readSource(t.Context(), pdffixture.Plain("appearance").Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +121,7 @@ func TestAppearanceInspectionBoundaries(t *testing.T) {
 }
 
 func TestUpstreamWriterRequiresPDF20Appearances(t *testing.T) {
-	s, err := read(t.Context(), pdffixture.Form("form").Bytes())
+	s, _, err := readSource(t.Context(), pdffixture.Form("form").Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestUpstreamWriterRequiresPDF20Appearances(t *testing.T) {
 	if err := api.WriteContext(t.Context(), s, &output); err != nil {
 		t.Fatalf("PDF 1.7 control: %v", err)
 	}
-	s, err = read(t.Context(), pdffixture.Form("form").Bytes())
+	s, _, err = readSource(t.Context(), pdffixture.Form("form").Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}

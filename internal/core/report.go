@@ -37,8 +37,7 @@ func writeReport(r *result.Result, roles files.Roles) {
 		}
 	}
 	if err != nil {
-		d := diag.New(diag.ReportWriteFailed, err.Error())
-		d.File = roles.Report
+		d := ioDiagnostic(diag.ReportWriteFailed, err, roles.Report)
 		r.Diagnostics = append(r.Diagnostics, d)
 	}
 }

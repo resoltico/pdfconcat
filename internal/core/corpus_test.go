@@ -305,6 +305,7 @@ func TestCorpus(t *testing.T) {
 	}
 	t.Run("producers", corpusProducers)
 	t.Run("cli-contracts", func(t *testing.T) { corpusCLIContracts(t, cli) })
+	t.Run("uri-offline", func(t *testing.T) { corpusURICanary(t, cli) })
 	t.Run("concurrent-publication", func(t *testing.T) { corpusCLIConcurrentPublication(t, cli) })
 	t.Run("blank-neighbors", func(t *testing.T) { corpusBlankNeighbors(t, cli) })
 	t.Run("workflows", func(t *testing.T) { corpusWorkflows(t, cli) })

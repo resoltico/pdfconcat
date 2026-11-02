@@ -102,7 +102,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, core.VersionInfo{FormatVersion: 5, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, core.VersionInfo{FormatVersion: 6, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
@@ -234,5 +234,125 @@ func TestResultStreams(t *testing.T) {
 	}
 	if stderr.Len() != 0 || decoded.Status != "failed" {
 		t.Fatalf("JSON streams: %q / %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestPDFDiagnosticDetailsAreSafeAndRemainInJSON(t *testing.T) {
+	r := newResult(t, "check")
+	d := diagnostic(t, "error", "source_invalid", "Source validation failed.")
+	d.Detail = "backend\n\x1b[2Jfailure"
+	d.PDFLocation = &core.PDFLocation{Object: 12, Page: 3, Path: "Pages.Contents\n"}
+	r.Diagnostics = []core.Diagnostic{d}
+	var stdout, stderr bytes.Buffer
+	if err := cli.Render(&stdout, &stderr, r, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(stderr.String(), "\n") != 1 || strings.ContainsRune(stderr.String(), '\x1b') || !strings.Contains(stderr.String(), "PDF object 12") || !strings.Contains(stderr.String(), "PDF page 3") {
+		t.Fatalf("unsafe or incomplete text: %q", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := cli.Render(&stdout, &stderr, r, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded core.Result
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	validate(t, decoded)
+	if len(decoded.Diagnostics) != 1 || decoded.Diagnostics[0].Detail != d.Detail || decoded.Diagnostics[0].PDFLocation == nil || *decoded.Diagnostics[0].PDFLocation != *d.PDFLocation {
+		t.Fatalf("JSON lost backend evidence: %+v", decoded)
+	}
+}
+
+func TestCLIAddsSyntaxToCoreRequirements(t *testing.T) {
+	for _, tc := range []struct{ code, hint string }{
+		{"output_required", "-o FILE"}, {"page_size_required", "--fit-to SIZE"},
+		{"output_exists", "--overwrite"}, {"report_exists", "--overwrite"},
+	} {
+		r := newResult(t, "build")
+		r.Diagnostics = []core.Diagnostic{diagnostic(t, "error", tc.code, "Core requirement.")}
+		var stdout, stderr bytes.Buffer
+		if err := cli.Render(&stdout, &stderr, r, false); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(stderr.String(), tc.hint) {
+			t.Fatalf("missing CLI hint: %q", stderr.String())
+		}
+		if r.Diagnostics[0].Message != "Core requirement." {
+			t.Fatal("renderer changed core diagnostics")
+		}
+	}
+}
+
+func TestCapsPreserveTheOutcomeCausingDiagnostic(t *testing.T) {
+	r := newResult(t, "check")
+	for i := range 24 {
+		r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "source_invalid", fmt.Sprintf("invalid %d", i)))
+	}
+	r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "report_write_failed", "Report writing failed."))
+	summary := cli.Summary(r)
+	if summary.Status != "failed" || len(summary.Diagnostics) != 20 || summary.DiagnosticsOmitted != 5 || summary.Diagnostics[0].Code.String() != "report_write_failed" || summary.Diagnostics[1].Message != "invalid 0" {
+		t.Fatalf("causal failure or source order was hidden: %+v", summary)
+	}
+	r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "interrupted", "Interrupted."))
+	summary = cli.Summary(r)
+	if summary.Status != "interrupted" || summary.Diagnostics[0].Code.String() != "report_write_failed" || summary.Diagnostics[1].Code.String() != "interrupted" {
+		t.Fatalf("cancellation outcome or publication visibility was lost: %+v", summary)
+	}
+}
+
+func TestOmissionHintsReflectActualReportAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		report *core.Report
+		want   string
+	}{
+		{"not requested", nil, "use --report for full details"},
+		{"saved", &core.Report{Path: "/chosen/report.json", Written: true}, "see the saved report for uncapped processing details"},
+		{"unavailable", &core.Report{Path: "/chosen/report.json"}, "full report unavailable; resolve the report failure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newResult(t, "check")
+			r.Report = tc.report
+			var items []string
+			for i := range 23 {
+				items = append(items, fmt.Sprintf("/items/%d", i))
+			}
+			for i := range 25 {
+				r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "source_invalid", fmt.Sprintf("invalid %d", i), items...))
+				r.Parts = append(r.Parts, core.Part{Kind: core.PartSource, Item: fmt.Sprintf("/items/%d", i)})
+			}
+			r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "report_write_failed", "Report writing or publication reported an error."))
+			var stdout, stderr bytes.Buffer
+			if err := cli.Render(&stdout, &stderr, r, false); err != nil {
+				t.Fatal(err)
+			}
+			text := stdout.String() + stderr.String()
+			if !strings.Contains(text, tc.want) || !strings.Contains(stderr.String(), "report_write_failed") {
+				t.Fatalf("missing recovery context: %s", text)
+			}
+			if tc.report != nil && strings.Contains(text, "use --report") {
+				t.Fatalf("requested report was replaced with a generic hint: %s", text)
+			}
+			if tc.report != nil && tc.report.Written && !strings.Contains(stdout.String(), "written: true") {
+				t.Fatal("late failure erased visible report state")
+			}
+		})
+	}
+}
+
+func TestPublicationFailuresRemainVisibleWhenPeersAlreadyDetermineOutcome(t *testing.T) {
+	for _, name := range []string{"source_unreadable", "interrupted"} {
+		r := newResult(t, "check")
+		for i := range 24 {
+			r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", name, fmt.Sprintf("earlier %d", i)))
+		}
+		r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "report_write_failed", "Report publication failed."))
+		full := r.Full()
+		summary := cli.Summary(r)
+		if summary.Diagnostics[0].Code.String() != "report_write_failed" || summary.Diagnostics[1].Message != "earlier 0" || summary.Status != full.Status || core.ExitCode(summary) != core.ExitCode(full) {
+			t.Fatalf("publication or dominant outcome hidden: %+v", summary)
+		}
 	}
 }

@@ -71,7 +71,7 @@ func TestInspectionPolicy(t *testing.T) {
 		}, diag.SourceDamaged},
 		{"private hash crop", func() *pdffixture.Doc {
 			return insertEntry(pdffixture.Plain("visible"), 3, "/Cr#236fpBox [20 20 80 80]")
-		}, diag.SourceInvalid},
+		}, diag.SourceUnsupported},
 		{"tagged", func() *pdffixture.Doc { return pdffixture.Tagged("tag") }, diag.SourceStructureRemoved},
 		{"attachment", func() *pdffixture.Doc { return pdffixture.Attachment("file") }, diag.SourceAttachmentsRemoved},
 		{"page labels", func() *pdffixture.Doc {
@@ -111,8 +111,8 @@ func TestInspectionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ds := pdf.Inspect(t.Context(), hostile, nil); !codePresent(ds, diag.SourceDamaged) {
-		t.Fatalf("raw hostile refusal: %+v", ds)
+	if _, _, ds := pdf.Inspect(t.Context(), hostile, nil); !codePresent(ds, diag.SourceInvalid) {
+		t.Fatalf("strict parsing did not refuse the hostile input: %+v", ds)
 	}
 }
 
@@ -808,7 +808,7 @@ func TestResourceDictionarySharedWithAnnotationIsRefused(t *testing.T) {
 	d.Objs[2] = bytes.ReplaceAll(d.Objs[2], []byte("/Resources << /Font << /F1 5 0 R >> >>"), []byte("/Resources 6 0 R"))
 	insertEntry(d, 3, "/Annots [6 0 R]")
 	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
-	if !codePresent(ds, diag.SourceInvalid) {
+	if !codePresent(ds, diag.SourceUnsupported) {
 		t.Fatalf("shared dictionary role was not refused: %+v", ds)
 	}
 }
@@ -1064,7 +1064,7 @@ func TestConflictingDestinationNamespacesAreRefused(t *testing.T) {
 			if status, _ := diag.Outcome(ds); status != "ok" {
 				t.Fatalf("equivalent namespaces refused: %+v", ds)
 			}
-		} else if !codePresent(ds, diag.SourceInvalid) {
+		} else if !codePresent(ds, diag.SourceUnsupported) {
 			t.Fatalf("conflicting namespaces silently conflated: %+v", ds)
 		}
 	}

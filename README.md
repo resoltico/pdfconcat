@@ -12,13 +12,26 @@ configuration directory are needed at runtime.
 
 ## Install
 
+### macOS 15 or later
+
+Follow the [macOS setup guide](docs/MACOS.md) to install, update or uninstall
+PDFConcat. One setup tool selects the appropriate download for your Mac and
+installs the command at `/usr/local/bin/pdfconcat`. Administrator permission is
+required; setup leaves your Terminal settings alone.
+
+This installation uses ad hoc code signing and is not notarized by Apple. The
+guide explains what that means, every installation step, the password prompt,
+and how to remove the installation without removing your documents.
+
+### Linux and Windows
+
 Download the archive for your operating system and CPU from
 [published releases](https://github.com/resoltico/pdfconcat/releases), verify it
 against that release's `checksums.txt`, and extract it. The executable is at the
 archive root. From the extracted directory, run:
 
 ```sh
-# macOS or Linux
+# Linux
 ./pdfconcat version
 ```
 
@@ -30,19 +43,6 @@ archive root. From the extracted directory, run:
 To use the `pdfconcat` commands below from any directory, place the executable in
 a directory on your `PATH`, or add its directory to `PATH`. Otherwise, replace
 `pdfconcat` in each command with the executable's relative or absolute path.
-
-### Install with Go
-
-With the Go version declared in [go.mod](go.mod), install the latest published tag:
-
-```sh
-go install github.com/resoltico/pdfconcat/cmd/pdfconcat@latest
-```
-
-The executable goes into the directory printed by `go env GOBIN`. If that value
-is empty, it goes into `bin` beneath the first directory printed by
-`go env GOPATH`. Add that installation directory to `PATH`, then run
-`pdfconcat version`.
 
 This source tree uses plan v4 and result/report v5. For a published binary, use
 the documentation and examples supplied in its release archive. Matching schema
@@ -69,17 +69,18 @@ existing regular output/report files. Text summaries go to stdout and diagnostic
 to stderr. Add `--json` for one machine-readable result. Options may appear
 between operands; `--` makes subsequent arguments literal paths.
 
-To try the tool without supplying any PDFs, use the bundled
-[generated-only example](examples/plans/generated-only.json). From an extracted
-release archive or repository checkout:
+To try the tool without supplying any PDFs, run these commands in a writable
+folder where `blank.pdf` does not already exist:
 
 ```sh
-pdfconcat check --plan examples/plans/generated-only.json
-pdfconcat build --plan examples/plans/generated-only.json
+pdfconcat check --blank --fit-to A4
+pdfconcat build -o blank.pdf --blank --fit-to A4
 ```
 
-It creates `Dividers.pdf` beside the plan, containing two text pages and three
-blank pages.
+This creates one blank A4 page. The bundled
+[generated-only example](examples/plans/generated-only.json) adds text pages and
+styled blanks. On macOS, [copy the installed examples to a writable folder](docs/MACOS.md#try-the-examples)
+before building a plan; plan-relative outputs are created beside the plan.
 
 ## Keep the composition in a plan
 

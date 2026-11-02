@@ -12,14 +12,46 @@ Once a private channel is established, include the PDFConcat version, platform,
 command and a minimal synthetic reproduction where possible. Keep confidential
 PDFs out of public issues and pull requests.
 
+## macOS setup and release trust
+
+The [macOS setup tool](docs/MACOS.md) downloads a stable release from this
+project's GitHub repository, checks the archive against that release's SHA-256
+manifest, and applies and verifies an ad hoc signature on the staged executable.
+An [ad hoc signature](https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc)
+does not identify the publisher. PDFConcat does not provide a Developer ID
+signature or Apple notarization.
+
+The documented bootstrap downloads the setup script from this repository's
+`main` branch over HTTPS and executes it only after the download succeeds. Both
+that script and the release checksum manifest come from the project; a matching
+checksum detects a mismatched download, not an independently authenticated
+publisher. Install only when you trust this repository and the software it
+publishes. GitHub build provenance and macOS code signing are different checks.
+
+Setup performs downloads as the ordinary user. It also runs the staged
+executable as that user to check its reported release and platform before
+requesting administrator permission for installation. Uninstall requests
+administrator permission without downloading anything. Setup owns the command link and
+managed files listed in the setup guide. It refuses to overwrite a foreign
+installation or remove modified or unexpected files. Installation records and
+hashes support that ownership check; they are not protection against a trusted
+administrator changing the installed software or the records.
+
+Setup does not edit shell startup files, disable Gatekeeper or System Integrity
+Protection, or remove quarantine attributes. Managed devices or other local
+security policies may still refuse execution. Report the exact failure instead
+of disabling those policies. See the setup guide for removal, command-resolution
+checks and the files that setup leaves untouched.
+
 ## Input and PDF behaviour
 
 PDFConcat is for trusted local files. It is not a sandbox or sanitizer. Malformed
 or highly compressed PDFs can exhaust memory/CPU or trigger fatal runtime limits;
 ordinary panic recovery cannot cover those failures. Use OS resource limits for
-untrusted/large inputs. No network destination or active script is executed or
-verified by PDFConcat, but retained page/annotation actions may execute in a PDF
-viewer. Removing document-level scripts/attachments is not sanitization.
+untrusted/large inputs. PDFConcat does not execute or verify network destinations
+or active scripts embedded in source PDFs, but retained page/annotation actions
+may execute in a PDF viewer. Removing document-level scripts/attachments is not
+sanitization.
 
 Encrypted sources, signature values/certification/timestamps, dynamic forms,
 optional content and known content-dropping page-tree shapes are refused. Empty

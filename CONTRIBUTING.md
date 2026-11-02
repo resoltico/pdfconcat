@@ -5,8 +5,10 @@ covers development from a source checkout; binary release archives do not contai
 the test sources or corpus.
 
 - [Build and ordinary tests](#build-and-ordinary-tests)
+- [Install a development command](#install-a-development-command)
 - [Stock tools](#stock-tools)
 - [Test scope](#what-we-test-and-what-we-do-not)
+- [macOS setup verification](#macos-setup-verification)
 - [Corpus investigations and regeneration](#permanent-corpus)
 - [Optional scale measurements](#scale)
 - [Release procedure](#release)
@@ -40,9 +42,29 @@ Missing or unsupported tools skip their tests locally; set
 PDFCONCAT_REQUIRE_ORACLE=1 go test -race -count=1 ./...
 ```
 
-Race tests run on Linux/macOS; Windows runs ordinary tests. CI has six jobs:
-lint, tests on those three operating systems, cross-build and `Required CI`.
-The aggregate name is a required repository context; do not casually rename it.
+Race tests run on Linux/macOS; Windows runs ordinary tests. CI gates lint,
+tests on those three operating systems, cross-builds, native macOS setup and
+release packaging through `Required CI`. That aggregate name is a required repository
+context; do not casually rename it.
+
+## Install a development command
+
+For development convenience, Go can install the latest published tag:
+
+```sh
+go install github.com/resoltico/pdfconcat/cmd/pdfconcat@latest
+```
+
+Use the Go version declared in [go.mod](go.mod). The executable goes into the
+directory printed by `go env GOBIN`, or `bin` beneath the first directory printed
+by `go env GOPATH` when GOBIN is empty. Use that executable's absolute path or
+add its directory to your development shell's PATH.
+
+Keep development executables separate from `/usr/local/bin/pdfconcat` and
+`/usr/local/libexec/pdfconcat`, which belong to the
+[macOS setup tool](docs/MACOS.md). A Go installation is not recorded or removed
+by that tool. Check command resolution when testing alongside an installed
+release; `go install` does not establish which copy a bare `pdfconcat` selects.
 
 ## Stock tools
 
@@ -85,6 +107,8 @@ We test behavior at the boundary where users rely on it:
   structural font/pruning checks.
 - File publication natively on Linux, macOS and Windows; core report safety
   and cancellation use small product tests.
+- macOS installation, update and removal against native filesystems and real
+  ad hoc signatures; see [setup verification](#macos-setup-verification).
 
 We deliberately do not gate on mutation testing, coverage percentages, fuzzing
 campaigns, dependency test suites, native ACL/console/closed-stream fault injection,
@@ -95,6 +119,77 @@ compilation covers additional CPU targets; it is not native execution proof.
 A new check needs a concrete user-visible risk and the cheapest meaningful test
 for it. Preserve failure visibility and expected test discovery. Do not create a
 check mainly to satisfy another check.
+
+## macOS setup verification
+
+The user contract is in [the macOS setup guide](docs/MACOS.md). Setup is release
+and installation machinery, separate from the PDF assembly CLI. It uses ad hoc
+signing only: there are no Developer ID credentials or notarization steps.
+
+Run lifecycle checks only on an expendable Mac or a clean virtual machine. They
+exercise the real managed locations under `/usr/local` and require administrator
+permission. The harness refuses to start when those locations already contain
+an installation; do not remove an existing installation merely to satisfy a test
+precondition. The ordinary Go test command does not run these checks.
+
+From the checkout, with the Go version declared in `go.mod`:
+
+```sh
+/bin/bash install/macos_test.sh
+```
+
+The native checks build real PDFConcat fixtures, exercise ad hoc signing,
+installation, repeat installation, updates and removal, and check refusal of
+foreign or modified files. They also check that parent-directory permissions
+and shell configuration are preserved. The optional network case exercises the
+published GitHub release path:
+
+```sh
+/bin/bash install/macos_test.sh --network
+```
+
+The native CI matrix in [the workflow](.github/workflows/ci.yml) covers macOS 15
+and macOS 26 on Apple Silicon and Intel. The macOS 15 jobs also run the network
+case. Keep those runner choices and required dependencies aligned with the
+supported minimum and architectures.
+Shell syntax checks on Linux are useful feedback, not evidence for native
+`codesign`, `sudo`, filesystem or Gatekeeper behavior. Cross-compilation alone
+does not exercise installation on the target architecture.
+
+### Checks on a developer Mac
+
+Before publishing a setup change, use a fresh macOS account or restored VM and
+follow the user guide exactly. Record the OS version, CPU architecture, release
+version and actual result. Check:
+
+- The complete copy-and-paste bootstrap, menu, confirmation and password prompt
+  in an ordinary user's Terminal; cancellation must leave the prior installation
+  usable.
+- A Mac without a previous PDFConcat installation, including genuinely absent
+  `/usr/local/bin`, and a Mac with an existing installation from this setup.
+- Apple Silicon and Intel execution on macOS 15 and a current macOS version;
+  record the exact OS point version instead of treating a runner label as proof
+  for every earlier point release. On Apple Silicon, also check that Terminal
+  running under Rosetta still installs the native `arm64` release.
+- An account without administrator access and, where available, managed-device
+  restrictions; the documented explanation must match the failure.
+- A custom PATH or another command named `pdfconcat`; distinguish installation
+  success from which command the user's shell selects.
+- Download interruption, verification failure and unavailable network access;
+  check that an existing working installation remains usable.
+- Offline removal through the installed helper, including the missing-binary
+  case, changed managed files and unrelated files added to the managed tree.
+- User-created PDFs, plans and reports before and after removal; the setup tool
+  must preserve them.
+- Any macOS privacy or security prompt caused by the documented workflow. If
+  investigating Safari downloads or quarantine, record that as a separate path;
+  do not claim it was tested by the Terminal download case.
+
+Use the observed messages to update the user guide. Do not suppress Gatekeeper,
+disable system protections, remove quarantine attributes, or count a successful
+ad hoc signature check as Apple notarization. Automated CI does not establish
+the behavior of Finder dialogs, administrator password entry, enterprise
+policies or every user's shell configuration.
 
 ## Permanent corpus
 
@@ -164,11 +259,29 @@ optional benchmark; no timing threshold gates builds.
 Release publication requires maintainer authorization. Review the intended commit, pending changelog outcomes, linked licenses/NOTICE files and installation instructions. The tag's version must have a matching nonempty changelog section. The release workflow runs the reusable CI before publication; keep `Required CI` intact.
 
 Validate GoReleaser at the exact version in `.github/workflows/release.yml`.
+Complete release packaging requires macOS: `install/sign-macos.sh` applies and
+verifies an ad hoc signature on each Darwin executable before it is archived.
+This needs no Developer ID credential or notarization service. The Darwin
+linker settings declare macOS 15.0.0 as the minimum; ordinary cross-compilation
+checks alone do not verify that metadata or the final signatures.
+
 Run every `goreleaser release --snapshot --clean` in an isolated clone: `--clean`
 deletes its dist directory. Preserve existing artifacts by using a separate clone.
-Inspect six archives, both schemas, documentation/licenses, checksums and a native
-version invocation. Snapshot success is not release publication.
+Inspect the release archives, both schemas, documentation/licenses, checksums and
+native version invocations. Verify the macOS signing and setup contract using the
+checks above, including actual installed bytes and removal. Snapshot success is
+not release publication.
+
+The CI packaging job builds a snapshot without publishing, checks the archive
+checksums, and inspects both Darwin executables for valid ad hoc signatures and
+the declared minimum OS. It also checks that the macOS guide and third-party
+notices are present in the archives, then runs the native archive's executable
+for a version check and blank-PDF build. This verifies the packaged artifacts;
+the lifecycle and interactive checks above exercise installation and removal.
 
 A `v*` tag runs the reusable CI, extracts the matching nonempty changelog section,
-builds six binaries with GoReleaser and publishes archives/checksums with provenance.
+builds the configured targets with GoReleaser and publishes archives/checksums
+with provenance. macOS executables use ad hoc signing only. Checksums and
+attestations must describe the final published artifacts after signing; they do
+not substitute for a native lifecycle test or establish notarization.
 Do not create tags, releases or upstream issues without maintainer authorization.

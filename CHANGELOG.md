@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- macOS binaries now require macOS 15+. One setup tool installs, updates and removes the ad hoc signed command, including offline uninstall; see [macOS setup](docs/MACOS.md).
+
 ## [0.6.0] - 2026-11-01
 
 - Consumers using `text.wrap` need a binary whose plan v4 schema includes it; 0.5.0 rejects the field. PDF extraction may include visual line breaks; canonical metadata stays caller-owned.

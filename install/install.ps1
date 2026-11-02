@@ -50,8 +50,10 @@ function Invoke-PDFConcatInstaller {
     }
     function Get-ReportedVersion([string]$Exe) {
         try {
-            $out = & $Exe version 2>$null | Select-Object -First 1
-            if ($LASTEXITCODE -eq 0 -and $out -match '^pdfconcat (\S+)') { return $Matches[1] }
+            # Collect all output first: in PowerShell 7, Select-Object -First
+            # can stop the program early and turn its exit status into a failure.
+            $out = @(& $Exe version 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $out.Count -gt 0 -and $out[0] -match '^pdfconcat (\S+)') { return $Matches[1] }
             return $null
         } catch {
             return $null

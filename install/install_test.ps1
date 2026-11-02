@@ -18,7 +18,12 @@ New-Item -ItemType Directory -Path $work | Out-Null
 $script:failures = 0
 
 function Check([string]$Why, [bool]$Condition) {
-    if (-not $Condition) { Write-Host "    FAIL: $Why" -ForegroundColor Red; $script:failures++ }
+    if (-not $Condition) {
+        Write-Host "    FAIL: $Why" -ForegroundColor Red
+        $script:failures++
+        $out = Join-Path $work 'out.txt'
+        if (Test-Path $out) { Get-Content $out | ForEach-Object { Write-Host "      | $_" } }
+    }
 }
 
 # Runs the installer as a file in a fresh process and returns its exit code;
@@ -48,6 +53,7 @@ try {
         Write-Host '--- fresh install, reinstall and uninstall'
         Check 'install succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
         Check 'exe installed' (Test-Path $exe)
+        if (-not (Test-Path $exe)) { continue }
         Check 'installed exe runs' ((& $exe version) -match '^pdfconcat ')
         $pdf = Join-Path $work "$shell-blank.pdf"
         & $exe build -o $pdf --blank --fit-to A4 | Out-Null

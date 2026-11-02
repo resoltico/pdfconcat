@@ -237,7 +237,9 @@ download_and_verify() {
     tar -xzf "$tmp/$asset" -C "$tmp/extract" pdfconcat 2>/dev/null ||
         die "$asset does not contain the pdfconcat executable."
     candidate=$tmp/extract/pdfconcat
-    [ -f "$candidate" ] && [ ! -h "$candidate" ] || die "$asset does not contain a regular pdfconcat file."
+    if [ ! -f "$candidate" ] || [ -h "$candidate" ]; then
+        die "$asset does not contain a regular pdfconcat file."
+    fi
     chmod 755 "$candidate"
 
     new_version=$(reported_version "$candidate") ||

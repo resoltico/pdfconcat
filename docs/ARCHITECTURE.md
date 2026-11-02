@@ -10,6 +10,7 @@ are documented in [PLAN](PLAN.md) and [CLI](CLI.md).
 | --- | --- |
 | `cmd/pdfconcat` | Signals, standard streams, working directory, linker version and process exit |
 | `internal/cli` | Argument grammar, help, stdin acquisition and text/JSON presentation |
+| `internal/legal` | Third-party notices and license texts, embedded for `pdfconcat licenses` and copied into archives |
 | `internal/core` | Admission, inspection, composition, build, result projection and reports |
 | `internal/core/internal/packet` | Sealed items, enums, styles, units, limits and physical layout |
 | `internal/core/internal/plan` | Located plan decoding and the embedded plan schema |
@@ -22,8 +23,8 @@ are documented in [PLAN](PLAN.md) and [CLI](CLI.md).
 | `internal/pdffixture`, `internal/oracle` | Test-only synthetic inputs and independent PDF observations |
 
 Go's nested `internal/` rule confines domain packages and adapters to the core
-tree. Production CLI code imports core and uses supplied streams and host
-capabilities. It opens no files or network connections and launches no processes.
+tree. Production CLI code imports core and legal and uses supplied streams and
+host capabilities. It opens no files or network connections and launches no processes.
 Depguard confines pdfcpu to pdf, go-text to typeset, native calls to files,
 and test support to tests. See [contributor checks](../CONTRIBUTING.md).
 

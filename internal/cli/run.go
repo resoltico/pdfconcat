@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/legal"
 )
 
 // Host supplies process capabilities without coupling the CLI to process globals.
@@ -72,6 +73,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		data, err := core.Schema(core.SchemaKind(command.Schema))
 		if err == nil {
 			_, err = stdout.Write(append(data, '\n'))
+		}
+		return query(err)
+	}
+	if command.Name == "licenses" {
+		text, err := legal.Text()
+		if err == nil {
+			_, err = io.WriteString(stdout, text)
 		}
 		return query(err)
 	}

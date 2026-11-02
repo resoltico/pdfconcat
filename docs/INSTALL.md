@@ -152,10 +152,10 @@ as in many dotfiles setups, stay links.
 
 Nothing else is changed: no administrator settings, background updater,
 scheduled task or file association. Downloads go to a temporary folder that is
-deleted when the installer finishes. The documentation, licenses, example plans
-and schemas are in each [release archive](https://github.com/resoltico/pdfconcat/releases)
-and in this repository; `pdfconcat schema plan` and `pdfconcat schema result`
-print the schemas of the installed program.
+deleted when the installer finishes. The installed program carries its own
+license notices (`pdfconcat licenses`) and schemas (`pdfconcat schema plan` and
+`pdfconcat schema result`). The documentation and example plans are in this
+repository at each release's tag.
 
 ## Trust and verification
 
@@ -169,12 +169,17 @@ downloads, not a compromised release.
 
 To check where a release came from, use GitHub's
 [artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations):
-every archive, `checksums.txt` and both installers carry build provenance from
-this repository's release workflow. With the [GitHub CLI](https://cli.github.com/):
+every archive, `checksums.txt`, both installers and the SBOMs carry build
+provenance from this repository's release workflow. With the
+[GitHub CLI](https://cli.github.com/):
 
 ```sh
 gh attestation verify pdfconcat_linux_amd64.tar.gz --repo resoltico/pdfconcat
 ```
+
+Each release also publishes a [CycloneDX](https://cyclonedx.org/) software bill
+of materials per executable, such as `pdfconcat_linux_amd64.cdx.json`, listing
+the Go modules linked into it with their versions, hashes and detected licenses.
 
 To read the installer before running it, download it, inspect it, then run the
 saved copy:
@@ -224,9 +229,9 @@ sha256sum --check --ignore-missing checksums.txt
 (Get-FileHash .\pdfconcat_windows_amd64.zip -Algorithm SHA256).Hash.ToLower()
 ```
 
-Extract the archive. The program, `pdfconcat` or `pdfconcat.exe`, is at its top
-level beside the documentation. Move it into a folder on your PATH, or run it by
-its full path.
+Extract the archive. It holds the program, `pdfconcat` or `pdfconcat.exe`, and
+its license notices. Move the program into a folder on your PATH, or run it by
+its full path; `pdfconcat licenses` prints the same notices.
 
 A browser marks downloaded files as coming from the internet:
 

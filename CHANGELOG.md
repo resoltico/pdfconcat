@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Breaking:** release archives hold only the program, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/`. Read docs and examples at the release tag; `pdfconcat schema` prints the schemas.
+- `pdfconcat licenses` prints the license notices built into the executable, so a copy installed without its archive still carries them.
+- Notices now cover go-text's HarfBuzz port and pdfcpu's `pkcs7` package (both MIT), pdfcpu's embedded Roboto font (Apache-2.0) and its Adobe Core 14 font metrics.
+- Release executables keep the Go symbol table (DWARF is still dropped), so binary vulnerability scanners report only linked packages. Executables are about 7% larger.
+- Release archives are reproducible: members have root ownership and commit timestamps instead of the build machine's.
+- Windows executables carry file properties (product, version, copyright) and an `asInvoker` manifest, so Explorer and security tools can identify them.
+- Each release publishes a CycloneDX SBOM per executable (`pdfconcat_linux_amd64.cdx.json`) listing linked modules, versions and detected licenses, with provenance.
+
 ## [0.7.0] - 2026-11-02
 
 - **Breaking:** the macOS `/usr/local` setup from 0.6.1 and 0.6.2 is replaced. Remove it with `/bin/bash /usr/local/libexec/pdfconcat/current/setup.sh uninstall`, then use the new installer.

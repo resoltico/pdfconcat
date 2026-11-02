@@ -217,7 +217,8 @@ PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 /usr/bin/time -l /tmp/pdfconcat-sca
 
 The external timer syntax shown is macOS. The test prints fixture and complete
 build durations and requires independent page counts. `BenchmarkBuild` is a small
-optional benchmark; no timing threshold gates builds.
+optional benchmark, and `BenchmarkPacket` builds a representative packet from
+the frozen corpus; no timing threshold gates builds.
 
 ## Release
 
@@ -231,15 +232,51 @@ Darwin linker settings declare macOS 15.0.0 as the minimum; ordinary
 cross-compilation checks alone do not verify that metadata or the signatures.
 
 Run every `goreleaser release --snapshot --clean` in an isolated clone: `--clean`
-deletes its dist directory. Inspect the archives, both schemas,
-documentation/licenses, checksums and native version invocations, then run the
+deletes its dist directory. Inspect the archives, checksums, native version
+invocations and `pdfconcat licenses`, then run the
 [installer harnesses](#installer-verification) against that dist directory.
 Snapshot success is not release publication.
+
+Archives contain only the program, `LICENSE`, the third-party notices and their
+license texts; the notices live in `internal/legal/` so that the executable
+embeds them too. `cmd/pdfconcat/notices_test.go` checks that every linked
+module, every license file inside a linked package and every asset a dependency
+embeds is covered. Two snapshot builds of one commit must produce identical
+`checksums.txt`: archive members use fixed owners and commit timestamps.
+
+Release builds pass `-trimpath` and `-ldflags=-w`. They keep the Go symbol
+table, without DWARF data, so that `govulncheck -mode=binary` and similar
+scanners see which packages are linked; stripping it with `-s` makes them
+report every advisory for a linked module. Go has no separate optimization
+switch: release and ordinary builds compile identically.
+
+Profile-guided optimization is not used. With a CPU profile of
+`BenchmarkPacket`, PGO measured 1.5% faster on Apple M4 (101.6 ms against
+103.1 ms, standard deviation 2.3 ms over ten runs), within noise: the profile is
+dominated by system calls, memory return to the OS and garbage collection, which
+PGO does not change. Remeasure before adopting it:
+
+```sh
+go test -run '^$' -bench '^BenchmarkPacket$' -benchtime 15s -cpuprofile /tmp/packet.pgo ./internal/core
+go test -c -pgo=off -o /tmp/off.test ./internal/core
+go test -c -pgo=/tmp/packet.pgo -o /tmp/on.test ./internal/core
+(cd internal/core && for i in 1 2 3 4 5 6 7 8 9 10; do /tmp/off.test -test.run '^$' -test.bench '^BenchmarkPacket$' -test.benchtime 2s; /tmp/on.test -test.run '^$' -test.bench '^BenchmarkPacket$' -test.benchtime 2s; done)
+```
+
+GoReleaser's before hooks generate Windows resources with the pinned
+`go-winres` (file properties and an `asInvoker` manifest, as git-ignored
+`cmd/pdfconcat/rsrc_windows_*.syso`) and build the pinned `cyclonedx-gomod`
+into `.tools/bin`. That tool writes one CycloneDX SBOM per executable, from the
+module list embedded in it, without serial numbers or timestamps. Detecting the
+main module's license downloads the tagged release through the Go proxy, so
+snapshot SBOMs omit that one license with a warning.
 
 Archive names carry no version (`pdfconcat_linux_amd64.tar.gz`), which the
 installers and the guide's `latest/download` links rely on. The CI packaging job
 builds a snapshot of the current checkout the same way, checks checksums,
-Darwin signatures and minimum OS, and hands the files to the install matrix.
+exact archive contents, SBOM platforms, Darwin signatures and minimum OS, scans
+the Darwin executables with `govulncheck -mode=binary`, and hands the files to
+the install matrix.
 
 A `v*` tag runs the reusable CI, extracts the matching nonempty changelog section,
 builds the configured targets with GoReleaser and publishes the archives,

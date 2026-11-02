@@ -14,7 +14,7 @@ const DefaultFontName = "Noto Sans"
 // 431,364 bytes, SHA-256 f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8,
 // downloaded from the notofonts.github.io repository on GitHub (organization notofonts) at commit
 // 28b15b4b43b7bed62b5cf6e6b0b5ff5846270535, path fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf.
-// Its license text is fontdata/OFL.txt; the notice is in THIRD_PARTY_NOTICES.md.
+// Its license text is fontdata/OFL.txt; the notice is in internal/legal/THIRD_PARTY_NOTICES.md.
 //
 //go:embed fontdata/NotoSans-Regular.ttf
 var defaultFontBytes []byte

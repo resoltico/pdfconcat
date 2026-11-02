@@ -2,9 +2,12 @@ Run from the repository root. Authoring tools only; never part of tests/CI.
 Observed producer: LibreOffice 26.8.1.1 (AARCH64), writer_pdf_Export.
 Python: 3.12; fonttools 4.61.1.
 
-1. Create a fresh absolute AUTHORING directory outside the checkout.
+1. Set AUTHORING to a fresh absolute directory outside the checkout, then create
+   its font directory:
+   AUTHORING=/absolute/fresh/office
+   mkdir -p "$AUTHORING/fonts"
 2. python3 internal/core/testdata/corpus/sources/prepare_office_font.py "$AUTHORING/fonts/CorpusNotoSans-Regular.ttf"
-   Create the fonts directory first. This transient derivative changes only name
+   This transient derivative changes only name
    records in the authoritative bundled Noto Sans so exporter font selection is
    unambiguous. The Noto copyright, OFL and outlines remain intact. Do not commit
    a second standalone Noto font. Font software remains under its original OFL.

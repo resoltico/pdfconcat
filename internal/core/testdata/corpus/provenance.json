@@ -369,14 +369,14 @@
     }
   ],
   "AuthoredSourcesSHA256": {
-    "sources/create_scan_sources.py": "f49c831dcab6dbdc0d25d557682568b3cac5974eb7c80223646f5a4103db30df",
-    "sources/export_office_report.txt": "35e665369cc5f13a172c84dbc516c7c5c63e06d7951ff30b854e221ffd7210ef",
-    "sources/generate_business_sources.py": "d00a2c099d64c074c83a8dccdcc0d0696e564babdecf8961e21fe32ee39b3968",
+    "sources/create_scan_sources.py": "e8eadbd5daa10f692339e83d295341b4c5098148f1b1261e3831998f5033c553",
+    "sources/export_office_report.txt": "80436ed56dbdec798947dd4503b40968ff2444e360a19e4e04f8eb65d9389920",
+    "sources/generate_business_sources.py": "aaa401cecf85f25fff98583d243c02dab6004dedf4bc45c597095d68ac68c73a",
     "sources/invoice-rgb.jpg": "7cef110905d85e5e39a4a7f07f7aeeaf3807e6b9eb53b7c031262912bb92b69d",
     "sources/invoice-rgb.png": "b2e07835b749d648ac58b4c90128e2341804e6d89cad18e40475c3fc290a907d",
     "sources/make_classic_incremental.py": "5869e9239639b35682ae2d430997876aa7ac34a97db4a4b7c4ea2ae666a16ccb",
     "sources/office-report.fodt": "2f5efa7d8443381bba35a2e669a7034fecc137ae2cb5e027a323efe9d9e25c27",
-    "sources/prepare_office_font.py": "dc8cc254e0df10467e9ffcf0449cf00bdd3455a5f26d6545e612f26c5249815a",
+    "sources/prepare_office_font.py": "ee3a067491f6224ffcb67a73535effb988e202cb366890d4a0727e7c03c9e34e",
     "sources/qpdf_report_encoding.txt": "4ccc9f57e317e609a6f17460c443a09d829fba935c29ebace7388726c64c35c0",
     "sources/receipt-gray.png": "a9f1ba984904fb543eb587804e7656af44ce7cf8c669ff49128ace44ece62456",
     "sources/technical-note.typ": "cac9b01d6726a53f0b8b5028a9330ec092e9d673abd9c7a1eccad3d8b071a9e4"

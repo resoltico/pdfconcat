@@ -8,7 +8,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab import rl_config
 p=argparse.ArgumentParser();p.add_argument('--output-dir',type=Path,required=True);a=p.parse_args();a.output_dir.mkdir(parents=True,exist_ok=True)
-corpus=Path(__file__).resolve().parents[1];font=ImageFont.truetype(str(corpus.parents[2]/'typeset/fontdata/NotoSans-Regular.ttf'),24)
+corpus=Path(__file__).resolve().parents[1];font=ImageFont.truetype(str(corpus.parents[1]/'internal/typeset/fontdata/NotoSans-Regular.ttf'),24)
 rl_config.useA85=0
 images=[]
 for name,mode,size,title in [('invoice-rgb','RGB',(600,800),'SYNTHETIC INVOICE'),('receipt-gray','L',(800,600),'FICTIONAL RECEIPT')]:

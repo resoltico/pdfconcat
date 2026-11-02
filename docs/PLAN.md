@@ -6,6 +6,10 @@ shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the [installation guidance](../README.md#install)
 for documentation matching a source build or published binary.
 
+For a first run without preparing source PDFs, use
+[the generated-only example](#examples). The following plan illustrates a fuller
+packet; its input paths are relative to the directory where you save the plan.
+
 ```json
 {
   "version": 4,
@@ -30,6 +34,37 @@ for documentation matching a source build or published binary.
   ]
 }
 ```
+
+## Examples
+
+Start with [generated-only.json](../examples/plans/generated-only.json). It creates
+two coloured text pages followed by three blank pages and needs no source PDFs
+or external font. From the repository root, with `pdfconcat` on PATH:
+
+```sh
+pdfconcat check --plan examples/plans/generated-only.json
+pdfconcat build --plan examples/plans/generated-only.json -o generated-pages.pdf
+```
+
+The other examples are templates: provide the inputs below or edit their paths.
+Paths in this table are relative to the saved plan's directory, including any
+`dir` scopes already declared in the plan. Copy a plan into your packet's working
+folder before adapting it. CLI `-o` and `--report` paths remain relative to the
+shell's working directory. Each source must satisfy the
+[source policy](PDF-POLICY.md#source-policy); unless a page minimum is given,
+the example includes the whole PDF.
+
+| Plan | Demonstrates | Inputs to provide |
+| --- | --- | --- |
+| [generated-only.json](../examples/plans/generated-only.json) | Coloured text pages and repeated blanks | None |
+| [basic.json](../examples/plans/basic.json) | PDFs mixed with text pages whose size comes from neighbouring sources | `cover.pdf`, `sections/01.pdf`, `sections/02.pdf`, `appendix.pdf` |
+| [latvian-text.json](../examples/plans/latvian-text.json) | Latin, Greek and Cyrillic text with the bundled font | `01.pdf`, `02.pdf` |
+| [font-file.json](../examples/plans/font-file.json) | A custom font, then an explicit return to the bundled font | `01.pdf`, `02.pdf`, and a supported static TrueType font at `fonts/Example.ttf` |
+| [grouped-directories.json](../examples/plans/grouped-directories.json) | Relative paths in nested directory scopes | `source/cover.pdf`, `source/part-1/01.pdf`, `source/part-1/02.pdf`, `source/part-2/01.pdf`, `source/part-2/02.pdf` |
+| [packet-composition.json](../examples/plans/packet-composition.json) | Selected pages, nested sections, a title divider, linked contents, odd starts and numbering | `inputs/cover.pdf`; `inputs/report.pdf` with at least 8 pages; `inputs/figures/plots.pdf` with at least 8 pages |
+
+An ordinary generated text page does not create a section or bookmark. The
+composition example uses titled groups and `divider` for that purpose.
 
 ## Members and paths
 
@@ -77,6 +112,22 @@ Adjacent pairs normalize to one range. A bound beyond the original source page
 count is `source_selection_out_of_range`. Omission and an explicit full-range
 selection have the same whole-source behavior. To repeat or reorder material,
 use separate source occurrences; there is no page-expression language.
+
+For example, this plan emits source page 3, then pages 1–2, then page 3 again.
+Save it beside a `source.pdf` with at least three pages. Each occurrence has its
+own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
+
+```json
+{
+  "version": 4,
+  "output": "reordered.pdf",
+  "items": [
+    { "source": "source.pdf", "pages": [[3, 3]] },
+    { "source": "source.pdf", "pages": [[1, 2]] },
+    { "source": "source.pdf", "pages": [[3, 3]] }
+  ]
+}
+```
 
 The entire source is still validated and hashed. Selection cannot hide a
 signature, encryption, damage or another whole-source refusal. The original
@@ -159,8 +210,17 @@ space or cause a refusal.
 ## Physical footer numbers
 
 Presence of `page_numbers` enables physical Arabic numbers; omission disables
-painting. An empty object enables the defaults. The only fields are `size`
-(default 9pt, positive length) and `margin` (default 8mm, nonnegative length).
+painting. An empty object enables the defaults. The only fields are:
+
+| Field | Default | Accepted range after unit conversion |
+| --- | --- | --- |
+| `size` | 9 pt | 1–14,400 pt |
+| `margin` | 8 mm | 0–14,400 pt |
+
+Both accept point numbers or the length strings described under
+[generated pages](#generated-pages-and-layering). A value within these ranges
+must also fit the actual page.
+
 Numbers use black bundled Noto Sans at the bottom center, with the bottom ink
 edge at `margin`, after fitting. Every non-padding page is numbered, including
 covers, authored blanks, dividers and contents. Automatic odd-start padding

@@ -92,10 +92,15 @@ contents page count are known. Padding has no declared item index.
 5. Projection creates the result from the facts each stage actually returned.
 6. Report publication rechecks destination roles after any PDF publication.
 
-A stage runs only when preceding stages have no errors. Projection alone creates
-result parts, sections, counts and PDF publication facts. It preserves readable
-refused sources' known hashes, byte counts and page counts. Unknown facts remain
-null. Report writing records its own visibility and any trailing failure.
+Inspection, composition and build proceed only while preceding processing stages
+have no errors. Build runs only for `Build` requests. After admission, projection
+still runs when processing has failed, and a requested report can still be
+published when its destination rules allow it.
+
+Projection creates result parts, sections, counts and PDF publication facts from
+the returned stage outcomes. It preserves readable refused sources' known hashes,
+byte counts and page counts. Unknown facts remain null. Report writing records
+its own visibility and any trailing failure.
 
 Per-item inspection facts align with `Plan.Leaves()`; physical facts and rename
 slots align with `Layout.Parts`. Each physical part retains its declared item

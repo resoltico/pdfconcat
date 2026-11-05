@@ -718,3 +718,17 @@ func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts) (packet.L
 	}
 	return packet.Resolve(p, shapes, 0)
 }
+
+func TestFitAnnotationCompatibilityUsesSelectedPages(t *testing.T) {
+	doc := pdffixture.FitAnnotation("FreeText", "/Contents (Hello world) /DA (/Helv 10 Tf 0 g)", false, 0, 4)
+	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 7 0 R] >>")
+	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
+	_, facts := inspectSelection(t, doc, []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 1, Last: 1}}}, {Item: "good", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
+	if facts["bad"].AnnotationFittingIssue == "" || facts["good"].AnnotationFittingIssue != "" {
+		t.Fatalf("selection facts: %+v", facts)
+	}
+	path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "/items/0", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 500})
+	if len(ds) != 0 || path == "" {
+		t.Fatalf("unselected unsupported annotation blocked fit: %s %+v", path, ds)
+	}
+}

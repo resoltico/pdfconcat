@@ -32,7 +32,7 @@ var options = []option{
 	{"--plan", "", "FILE|-", "Read a plan v4 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
-	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; refuses widgets and numeric local destinations."},
+	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; annotation, widget and destination limits apply."},
 	{"--report", "", "FILE", "Write a full JSON report."},
 	{"--overwrite", "", "", "Replace existing output/report files."},
 	{"--json", "", "", "Print one JSON result to standard output."},
@@ -228,12 +228,22 @@ func wantsJSON(args []string) bool {
 	default:
 		return false
 	}
-	for _, arg := range args[1:] {
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--" {
 			break
 		}
 		if arg == "--json" {
 			return true
+		}
+		spec, _, equals := optionToken(arg)
+		if optionAllowed(args[0], spec) && spec.value != "" && !equals {
+			// A consumed literal -- is a value, not the option delimiter.
+			// Reuse Parse's ownership rule even while discovering format after
+			// an earlier failure, without changing first-fault validation.
+			if next, ok := separateValueIndex(args, i); ok {
+				i = next
+			}
 		}
 	}
 	return false
@@ -273,6 +283,12 @@ func Help(command string) string {
 			names += " " + o.value
 		}
 		fmt.Fprintf(&b, "  %-28s %s\n", names, o.description)
+	}
+	if command == "build" || command == "check" {
+		b.WriteString("\nFitting refuses widgets and numeric internal destination coordinates.\n")
+		b.WriteString("FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances.\n")
+		b.WriteString("Link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.\n")
+		b.WriteString("See https://github.com/resoltico/pdfconcat/blob/main/docs/PDF-POLICY.md#fitting\n")
 	}
 	return b.String()
 }

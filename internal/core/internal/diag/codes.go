@@ -173,6 +173,7 @@ var (
 	SourceOptionalContent               = define("source_optional_content", Error, Invalid, "`/OCProperties` present")
 	FitDestinationUnsupported           = define("fit_destination_unsupported", Error, Invalid, "fitting internal page destinations with numeric position coordinates is unsupported")
 	SourceOutputIncompatible            = define("source_output_incompatible", Error, Invalid, "retained annotations lack appearances required by the effective PDF 2.0 output")
+	FitAnnotationUnsupported            = define("fit_annotation_unsupported", Error, Invalid, "fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame")
 	FitFormUnsupported                  = define("fit_form_unsupported", Error, Invalid, "`fit_to` with a source that has form widgets")
 	AssemblyFailed                      = define("assembly_failed", Error, Failed, "PDF/text backend failed during assembly or shaping (including recovered panics)")
 	OutputWriteFailed                   = define("output_write_failed", Error, Failed, "writing the staged output failed (disk full, permissions)")

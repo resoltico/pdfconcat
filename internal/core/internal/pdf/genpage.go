@@ -404,18 +404,21 @@ func buildGeneratedPageTree(c context.Context, s *model.Context, refs []types.In
 }
 
 func finalizeGeneratedLinks(c context.Context, s *model.Context, links []generatedLink) error {
+	if len(links) == 0 {
+		return c.Err()
+	}
+	pages, err := rawPages(c, s)
+	if err != nil {
+		return err
+	}
 	for _, link := range links {
 		if err := c.Err(); err != nil {
 			return err
 		}
-		if link.target < 1 || link.target > int64(s.PageCount) {
+		if link.target < 1 || link.target > int64(len(pages)) {
 			return ErrInvalidPage
 		}
-		_, ref, _, err := s.PageDict(c, int(link.target), false)
-		if err != nil {
-			return err
-		}
-		link.dict["Dest"] = types.Array{*ref, types.Name("Fit")}
+		link.dict["Dest"] = types.Array{pages[int(link.target)-1].ref, types.Name("Fit")}
 	}
 	return nil
 }

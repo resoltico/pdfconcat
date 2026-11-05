@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- Every source page, including omitted pages, must have finite positive physical dimensions; empty effective frames are refused with page/object diagnostics.
+- Fitting transforms Caret insets with supplied appearances and preserves reversed rectangle corners; legal reversed page boxes are accepted.
+- Fitting retains zero-area FreeText without requiring an appearance; Text icons and path annotations keep their distinct rules.
+- Inspection, selection, fitting and footers resolve inherited page geometry in a single tree traversal, avoiding repeated flat-tree scans.
+- CLI JSON errors respect a literal `--` consumed as an option value; fitting help explains annotation limits.
+
+- Fitting requires normal appearances for visible FreeText, Text icons, Carets and captioned Lines; supply reviewed appearances or use original sizes.
+- Fitting requires normal appearances for rotated NoRotate and boundary-crossing annotations; use original sizes when appearances cannot be supplied.
+- Fitting refuses interactive annotation hit areas crossing the source frame, including activation, hover and focus actions; use original sizes.
+- Fitting preserves pattern scale, phase and orientation, including shared resources and nested Forms.
+- Fitting transforms annotation paths, insets and borders; appearance states retain their displayed orientation when page rotation is baked.
+- Fitting clips artwork to the CropBox–MediaBox intersection and uses that frame for scaling, keeping hidden marks out of new margins.
+- Staged output verification checks Form stream integrity, including the original artwork carried by fitted pages.
+- Release packaging uses GoReleaser 2.20.0; contributor tools include go-git and x/net security fixes and stable YAML v4.
+
 ## [0.8.0] - 2026-11-02
 
 - **Breaking:** results, reports and JSON version objects use `format_version: 6`; update schema consumers. Plans remain version 4.

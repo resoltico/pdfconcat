@@ -171,7 +171,7 @@ func TestRetainedDestinationRoles(t *testing.T) {
 }
 
 func TestCompatibilityRefusesBeforePublication(t *testing.T) {
-	for _, kind := range []string{"coordinates", "Screen direct", "Screen chained", "appearance"} {
+	for _, kind := range []string{"coordinates", "Screen direct", "Screen chained", "appearance", "FreeText", "fallback boundary", "missing selected appearance", "NoRotate fallback", "Link boundary with appearance", "Screen boundary action", "Screen boundary hover", "Line caption", "Caret symbol", "Text icon bounds"} {
 		for _, reverse := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/reverse=%v", kind, reverse), func(t *testing.T) {
 				dir := t.TempDir()
@@ -185,6 +185,47 @@ func TestCompatibilityRefusesBeforePublication(t *testing.T) {
 					docs = []*pdffixture.Doc{defaultForm("FORM", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0), pdffixture.Versioned("plain", "2.0", "")}
 					code = diag.SourceOutputIncompatible
 					fit = ""
+				}
+				switch kind {
+				case "Text icon bounds":
+					doc := pdffixture.FitAnnotation("Text", "/Contents (EDGE NOTE)", false, 0, 4)
+					doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 0 0 0]"))
+					docs = []*pdffixture.Doc{doc}
+					code = diag.FitAnnotationUnsupported
+				case "Caret symbol":
+					docs = []*pdffixture.Doc{pdffixture.FitAnnotation("Caret", "/RD [3 4 6 8] /Sy /P", false, 0, 4)}
+					code = diag.FitAnnotationUnsupported
+				case "Line caption":
+					docs = []*pdffixture.Doc{pdffixture.FitAnnotation("Line", "/L [20 25 75 65] /Cap true /Contents (MEASURE 125) /CO [3 5]", false, 0, 4)}
+					code = diag.FitAnnotationUnsupported
+				case "Screen boundary action", "Screen boundary hover":
+					action := "/A << /S /URI /URI (https://example.invalid/) >>"
+					if kind == "Screen boundary hover" {
+						action = "/AA << /E << /S /URI /URI (https://example.invalid/) >> >>"
+					}
+					doc := pdffixture.FitAnnotation("Screen", action, true, 0, 4)
+					doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 -30 100 70]"))
+					docs = []*pdffixture.Doc{doc}
+					code = diag.FitAnnotationUnsupported
+				case "Link boundary with appearance":
+					doc := pdffixture.FitAnnotation("Link", "/A << /S /URI /URI (https://example.invalid/) >>", true, 0, 4)
+					doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 -30 100 70]"))
+					docs = []*pdffixture.Doc{doc}
+					code = diag.FitAnnotationUnsupported
+				case "NoRotate fallback":
+					docs = []*pdffixture.Doc{pdffixture.FitAnnotation("Line", "/L [40 40 60 50]", false, 90, 20)}
+					code = diag.FitAnnotationUnsupported
+				case "FreeText":
+					docs = []*pdffixture.Doc{pdffixture.FitAnnotation("FreeText", "/Contents (Hello world) /DA (/Helv 10 Tf 1 0 0 rg)", false, 90, 4)}
+					code = diag.FitAnnotationUnsupported
+				case "fallback boundary", "missing selected appearance":
+					doc := pdffixture.FitAnnotation("Line", "/L [10 -20 90 60]", kind == "missing selected appearance", 0, 4)
+					doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 -30 100 70]"))
+					if kind == "missing selected appearance" {
+						doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/N 7 0 R"), []byte("/N << /Off 7 0 R >>"))
+					}
+					docs = []*pdffixture.Doc{doc}
+					code = diag.FitAnnotationUnsupported
 				}
 				if reverse && len(docs) == 2 {
 					docs[0], docs[1] = docs[1], docs[0]
@@ -383,5 +424,89 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 	pageCycle.Objs[6] = []byte("<< /Type /Pages /Parent 2 0 R /Kids [2 0 R] /Count 1 >>")
 	if _, _, ds := pdf.Inspect(t.Context(), pageCycle.Bytes(), nil); !codePresent(ds, diag.SourceDamaged) {
 		t.Fatalf("cyclic page tree escaped source guard: %+v", ds)
+	}
+}
+
+func TestFittingAllowsNonInteractiveAppearanceBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, action string
+		flags        int
+	}{
+		{"NoView activation", "/A << /S /URI /URI (https://example.invalid/) >>", 36},
+		{"page lifecycle", "/AA << /PO << /S /URI /URI (https://example.invalid/) >> >>", 4},
+		{"no action", "", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := pdffixture.FitAnnotation("Screen", tc.action, true, 0, tc.flags)
+			doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 -30 100 70]"))
+			_, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+			if status, _ := diag.Outcome(ds); status != "ok" {
+				t.Fatal(ds)
+			}
+		})
+	}
+	for _, rect := range []string{"[40 40 40 40]", "[40 10 40 90]", "[10 40 90 40]"} {
+		t.Run("empty FreeText "+rect, func(t *testing.T) {
+			doc := pdffixture.FitAnnotation("FreeText", "/DA (/F1 10 Tf 0 g) /Contents (INVISIBLE)", false, 90, 4)
+			doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect "+rect))
+			path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+			if status, _ := diag.Outcome(ds); status != "ok" {
+				t.Fatal(ds)
+			}
+			annotations := fitAnnotationObjects(t, path)
+			if len(annotations) != 1 || annotations[0]["/Subtype"] != "/FreeText" {
+				t.Fatal("empty annotation was dropped")
+			}
+		})
+	}
+}
+
+func TestFittingPreservesExistingCaptionAppearance(t *testing.T) {
+	doc := pdffixture.FitAnnotation("Line", "/L [20 25 75 65] /Cap true /Contents (CAPTION) /CO [3 5]", true, 90, 4)
+	text := "1 0 0 RG 2 w 5 5 m 75 35 l S BT /F1 10 Tf 10 15 Td (CAPTION) Tj ET"
+	doc.Objs[6] = []byte(fmt.Sprintf("<< /Type /XObject /Subtype /Form /BBox [0 0 80 40] /Length %d >>\nstream\n%s\nendstream", len(text), text))
+	source := filepath.Join(t.TempDir(), "source.pdf")
+	if err := doc.WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+	if status, _ := diag.Outcome(ds); status != "ok" {
+		t.Fatal(ds)
+	}
+	fitCompareSheet(t, source, path, 3, 100)
+	annotations := fitAnnotationObjects(t, path)
+	if len(annotations) != 1 || annotations[0]["/Cap"] != true || annotations[0]["/Contents"] != "u:CAPTION" {
+		t.Fatal("caption metadata lost", annotations)
+	}
+	fitWantNumbers(t, annotations[0]["/CO"], []float64{9, 15})
+}
+
+func TestUnfittedCaretWithoutAppearanceRemainsSupported(t *testing.T) {
+	for _, symbol := range []string{"P", "None"} {
+		t.Run(symbol, func(t *testing.T) {
+			doc := pdffixture.FitAnnotation("Caret", "/RD [3 4 6 8] /Sy /"+symbol, false, 0, 4)
+			path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, nil)
+			if status, _ := diag.Outcome(ds); status != "ok" {
+				t.Fatal(ds)
+			}
+			annotations := fitAnnotationObjects(t, path)
+			if len(annotations) != 1 || annotations[0]["/Sy"] != "/"+symbol {
+				t.Fatal("caret lost", annotations)
+			}
+			fitWantNumbers(t, annotations[0]["/RD"], []float64{3, 4, 6, 8})
+		})
+	}
+}
+
+func TestUnfittedTextIconWithoutAppearanceRemainsSupported(t *testing.T) {
+	doc := pdffixture.FitAnnotation("Text", "/Contents (EDGE NOTE)", false, 0, 4)
+	doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 0 0 0]"))
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, nil)
+	if status, _ := diag.Outcome(ds); status != "ok" {
+		t.Fatal(ds)
+	}
+	annotations := fitAnnotationObjects(t, path)
+	if len(annotations) != 1 || annotations[0]["/Subtype"] != "/Text" {
+		t.Fatal("icon annotation lost", annotations)
 	}
 }

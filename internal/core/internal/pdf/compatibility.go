@@ -69,6 +69,9 @@ func CheckCompatibility(a Assembly) Compatibility {
 		if a.FitTo != nil && f.HasWidgets {
 			add(diag.FitFormUnsupported, "Fitting source form widgets is unsupported.")
 		}
+		if a.FitTo != nil && selected.AnnotationFittingIssue != "" {
+			add(diag.FitAnnotationUnsupported, fittingAnnotationMessage(selected.AnnotationFittingIssue))
+		}
 		if a.FitTo != nil && selected.HasCoordinateDestinations {
 			add(diag.FitDestinationUnsupported, "Fitting internal page destinations with numeric position coordinates is unsupported; use the original page sizes.")
 		}

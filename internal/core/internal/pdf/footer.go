@@ -6,7 +6,6 @@ package pdf
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
@@ -22,52 +21,19 @@ type physicalViewport struct {
 	matrix [6]float64
 }
 
-func pageViewport(c context.Context, s *model.Context, page int) (types.Dict, physicalViewport, error) {
-	d, _, attrs, err := s.PageDict(c, page, false)
-	if err != nil {
-		return nil, physicalViewport{}, err
-	}
-	box := *attrs.MediaBox
-	if crop := attrs.CropBox; crop != nil {
-		box.LL.X = math.Max(box.LL.X, crop.LL.X)
-		box.LL.Y = math.Max(box.LL.Y, crop.LL.Y)
-		box.UR.X = math.Min(box.UR.X, crop.UR.X)
-		box.UR.Y = math.Min(box.UR.Y, crop.UR.Y)
-	}
-	unit := 1.0
-	value, e := s.Dereference(d["UserUnit"])
-	if e != nil {
-		return nil, physicalViewport{}, e
-	}
-	switch v := value.(type) {
-	case types.Integer:
-		unit = float64(v)
-	case types.Float:
-		unit = float64(v)
-	}
-	size, err := displayedSize(c, s, page)
-	if err != nil {
-		return nil, physicalViewport{}, err
-	}
+func physicalPageViewport(g pageGeometry) physicalViewport {
+	box, unit := g.box, g.unit
 	inverse := 1 / unit
-	matrix := [6]float64{inverse, 0, 0, inverse, box.LL.X, box.LL.Y}
-	switch (attrs.Rotate%360 + 360) % 360 {
+	m := [6]float64{inverse, 0, 0, inverse, box.LL.X, box.LL.Y}
+	switch (g.attrs.Rotate%360 + 360) % 360 {
 	case 90:
-		matrix = [6]float64{0, inverse, -inverse, 0, box.UR.X, box.LL.Y}
+		m = [6]float64{0, inverse, -inverse, 0, box.UR.X, box.LL.Y}
 	case 180:
-		matrix = [6]float64{-inverse, 0, 0, -inverse, box.UR.X, box.UR.Y}
+		m = [6]float64{-inverse, 0, 0, -inverse, box.UR.X, box.UR.Y}
 	case 270:
-		matrix = [6]float64{0, -inverse, inverse, 0, box.LL.X, box.UR.Y}
+		m = [6]float64{0, -inverse, inverse, 0, box.LL.X, box.UR.Y}
 	}
-	return d, physicalViewport{size: size, matrix: matrix}, nil
-}
-
-func copiedDict(original types.Dict) types.Dict {
-	result := types.Dict{}
-	for key, value := range original {
-		result[key] = value
-	}
-	return result
+	return physicalViewport{size: g.size, matrix: m}
 }
 
 // applyPageNumbers adds fresh page-local wrappers and font dictionaries after
@@ -90,6 +56,10 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 	if err != nil {
 		return err
 	}
+	geometries, err := pageGeometries(c, s)
+	if err != nil {
+		return err
+	}
 	spanIndex := 0
 	for page := 1; page <= s.PageCount; page++ {
 		if err = c.Err(); err != nil {
@@ -105,26 +75,22 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 		if part.Kind == packet.PartPadding {
 			continue
 		}
-		d, viewport, e := pageViewport(c, s, page)
-		if e != nil {
-			return e
-		}
+		geometry := geometries[page-1]
+		d, viewport := geometry.dict, physicalPageViewport(geometry)
+
 		placed, e := footer.Place(viewport.size, int64(page))
 		if e != nil {
 			diagnostic := compose.Diagnostic(e, "")
 			diagnostic.File, diagnostic.Items = part.Source, []string{part.Ref, "/page_numbers"}
 			return &policyError{finding: diagnostic, err: e}
 		}
-		_, _, attrs, e := s.PageDict(c, page, false)
-		if e != nil {
-			return e
-		}
-		resources := copiedDict(attrs.Resources)
+		attrs := geometry.attrs
+		resources := clonedDirectDict(attrs.Resources)
 		fonts, e := s.DereferenceDict(resources["Font"])
 		if e != nil {
 			return e
 		}
-		fonts = copiedDict(fonts)
+		fonts = clonedDirectDict(fonts)
 		key := "PCFooter"
 		for index := 1; ; index++ {
 			if _, exists := fonts[key]; !exists {

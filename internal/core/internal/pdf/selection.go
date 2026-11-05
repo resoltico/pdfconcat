@@ -50,6 +50,7 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
+	var sourceGeometry []pageGeometry
 	for index, request := range requests {
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
 		if err == nil && !wholeSelection(ranges, s.PageCount) && (facts.HasFields || facts.HasWidgets) {
@@ -91,36 +92,22 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			continue
 		}
 		if request.MeasureFooter {
-			measured := map[int]packet.Size{}
-			for _, span := range ranges {
-				for number := span.First; number <= span.Last; number++ {
-					if _, known := facts.PageSizes[number]; known {
-						continue
-					}
-					size, e := displayedSize(c, s, number)
-					if e != nil {
-						err = e
-						break
-					}
-					measured[number] = size
-				}
+			if sourceGeometry == nil {
+				sourceGeometry, err = pageGeometries(c, s)
 				if err != nil {
-					break
+					return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 				}
-			}
-			if err != nil {
-				d := diagnostic(err, diag.SourceInvalid)
-				d.Items = []string{request.Item}
-				ds = append(ds, d)
-				continue
 			}
 			if facts.PageSizes == nil {
 				facts.PageSizes = map[int]packet.Size{}
 			}
-			for number, size := range measured {
-				facts.PageSizes[number] = size
+			for _, span := range ranges {
+				for number := span.First; number <= span.Last; number++ {
+					facts.PageSizes[number] = sourceGeometry[number-1].size
+				}
 			}
 		}
+
 		selectedFacts := selected.OccurrenceFacts
 		occurrences[index] = &selectedFacts
 		if removed {
@@ -197,16 +184,18 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	if wholeSelection(ranges, s.PageCount) {
 		return pruneNavigation(c, s)
 	}
+	geometries, err := pageGeometries(c, s)
+	if err != nil {
+		return false, err
+	}
 	selected := []pageRef{}
 	for _, span := range ranges {
 		for number := span.First; number <= span.Last; number++ {
 			if err := c.Err(); err != nil {
 				return false, err
 			}
-			d, ref, attrs, err := s.PageDict(c, number, false)
-			if err != nil {
-				return false, err
-			}
+			geometry := geometries[number-1]
+			d, attrs := geometry.dict, geometry.attrs
 			if attrs.Resources != nil {
 				d["Resources"] = attrs.Resources.Clone()
 			}
@@ -217,7 +206,7 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 				delete(d, "CropBox")
 			}
 			d["Rotate"] = types.Integer(attrs.Rotate)
-			selected = append(selected, pageRef{ref: *ref, dict: d})
+			selected = append(selected, geometry.pageRef)
 		}
 	}
 	root, err := s.Pages()

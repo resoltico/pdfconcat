@@ -101,7 +101,9 @@ pdfconcat build --plan packet.json --report review-packet.report.json
 
 The plan adds linked contents and an A4 section title page, starts the section on
 an odd physical page, and adds footer numbers. Source pages retain their sizes
-unless you request fitting. Relative source and output paths in this example
+unless you request fitting. Fitting preserves the visible source frame and
+pattern proportions; [annotation appearance limits](docs/PDF-POLICY.md#fitting)
+can require original page sizes. Relative source and output paths in this example
 are resolved beside the plan; the CLI `--report` path is relative to the current
 directory.
 

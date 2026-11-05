@@ -276,8 +276,10 @@ normal appearance. This exemption does not apply to Text icons or path annotatio
 
 Interactive regions include Links, activation actions (A), and annotation AA
 pointer/focus triggers E, X, D, U, Fo and Bl. NoView annotations have no on-screen
-hit area; page-lifecycle actions alone do not create one. Appearance clipping
-still applies to printed artwork. Supply reviewed normal appearances for the
+hit area. ReadOnly also disables user interaction for non-widget annotations;
+Widgets use field flags and remain unsupported for fitting. ReadOnly does not
+waive appearance requirements or clipping. Page-lifecycle actions alone do not
+create an interactive area. Appearance clipping still applies to printed artwork. Supply reviewed normal appearances for the
 appearance-related cases, or use original page sizes; crossing interactive regions
 require original sizes. Ordinary contained uncaptioned Line, Ink, Polygon, PolyLine, Square,
 and Circle annotations remain supported without appearances. Text icons, Carets and captioned Lines can still be composed at original page

@@ -99,7 +99,9 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 				continue
 			}
 			hitArea := false
-			if flags&int(model.AnnNoView) == 0 {
+			// ReadOnly disables interaction, not painting; Widgets use field flags instead.
+			readOnly := flags&int(model.AnnReadOnly) != 0 && subtype != types.Name("Widget")
+			if flags&int(model.AnnNoView) == 0 && !readOnly {
 				action, err := s.Dereference(annot["A"])
 				if err != nil {
 					return "", err

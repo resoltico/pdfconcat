@@ -11,6 +11,7 @@
 - Fitting requires normal appearances for visible FreeText, Text icons, Carets and captioned Lines; supply reviewed appearances or use original sizes.
 - Fitting requires normal appearances for rotated NoRotate and boundary-crossing annotations; use original sizes when appearances cannot be supplied.
 - Fitting refuses interactive annotation hit areas crossing the source frame, including activation, hover and focus actions; use original sizes.
+- Fitting accepts ReadOnly non-widget annotations with complete appearances crossing the source frame, preserving clipping, flags and actions.
 - Fitting preserves pattern scale, phase and orientation, including shared resources and nested Forms.
 - Fitting transforms annotation paths, insets and borders; appearance states retain their displayed orientation when page rotation is baked.
 - Fitting clips artwork to the CropBox–MediaBox intersection and uses that frame for scaling, keeping hidden marks out of new margins.

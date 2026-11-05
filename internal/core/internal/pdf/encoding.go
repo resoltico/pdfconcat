@@ -68,10 +68,10 @@ func checkContentLength(n, limit int64) error {
 	return nil
 }
 
-// decodePageStream leaves Raw, Dict and FilterPipeline untouched. Singleton
+// decodeDrawingStream leaves Raw, Dict and FilterPipeline untouched. Singleton
 // stages use the SAME xref table's decoder, so intermediate buffers also count
 // toward its existing cumulative allowance. No private budget is reset or copied.
-func decodePageStream(c context.Context, s *model.Context, stream types.StreamDict) ([]byte, error) {
+func decodeDrawingStream(c context.Context, s *model.Context, stream types.StreamDict) ([]byte, error) {
 	data := stream.Raw
 	limit := s.DecodeLimit()
 	if len(stream.FilterPipeline) == 0 {
@@ -96,18 +96,18 @@ func decodePageStream(c context.Context, s *model.Context, stream types.StreamDi
 		// drawing commands. StreamDict can otherwise pass opaque images through.
 		switch f.Name {
 		case filter.DCT, filter.JPX, filter.JBIG2, filter.CCITTFax, "Crypt":
-			return nil, fmt.Errorf("page-content filter[%d] %q: %w", index, f.Name, filter.ErrUnsupportedFilter)
+			return nil, fmt.Errorf("drawing-content filter[%d] %q: %w", index, f.Name, filter.ErrUnsupportedFilter)
 		}
 		stage := types.StreamDict{Dict: stream.Dict, Raw: data, FilterPipeline: []types.PDFFilter{f}}
 		if err := s.DecodeStream(&stage); err != nil {
-			return nil, fmt.Errorf("page-content filter[%d] %q: %w", index, f.Name, err)
+			return nil, fmt.Errorf("drawing-content filter[%d] %q: %w", index, f.Name, err)
 		}
 		if err := checkContentLength(int64(len(stage.Content)), limit); err != nil {
 			return nil, err
 		}
 		if f.Name == filter.Flate {
 			if err := strictFlate(c, data, len(stage.Content), f.DecodeParms); err != nil {
-				return nil, fmt.Errorf("page-content filter[%d] %q integrity: %w", index, f.Name, err)
+				return nil, fmt.Errorf("drawing-content filter[%d] %q integrity: %w", index, f.Name, err)
 			}
 		}
 		data = stage.Content
@@ -158,7 +158,7 @@ func validateContentEncoding(c context.Context, s *model.Context) error {
 				if !ok {
 					return contentEncodingError(page+1, content.ref, errors.New("content object is not a stream"))
 				}
-				decoded, err := decodePageStream(c, s, stream)
+				decoded, err := decodeDrawingStream(c, s, stream)
 				if err != nil {
 					return contentEncodingError(page+1, content.ref, err)
 				}
@@ -172,6 +172,47 @@ func validateContentEncoding(c context.Context, s *model.Context) error {
 			}
 			combined += length
 		}
+	}
+	return c.Err()
+}
+
+// validateOutputFormEncoding keeps serialized fitting content inside the same
+// integrity boundary as page Contents. Forms now carry the original page program;
+// validating only the short outer Do stream would leave that program unchecked.
+func validateOutputFormEncoding(c context.Context, s *model.Context) error {
+	for number, entry := range s.Table {
+		if err := c.Err(); err != nil {
+			return err
+		}
+		if entry == nil || entry.Free {
+			continue
+		}
+		ref := types.IndirectRef{ObjectNumber: types.Integer(number), GenerationNumber: types.Integer(generation(entry))}
+		object, err := s.Dereference(ref)
+		if err != nil {
+			return err
+		}
+		stream, ok := object.(types.StreamDict)
+		if !ok {
+			continue
+		}
+		subtype, err := s.Dereference(stream.Dict["Subtype"])
+		if err != nil {
+			return err
+		}
+		if subtype != types.Name("Form") {
+			continue
+		}
+		decoded, err := decodeDrawingStream(c, s, stream)
+		if err != nil {
+			failure := contentEncodingError(0, ref, err)
+			finding := diagnostic(failure, diag.SourceInvalid)
+			finding.Message = "Output Form content could not be decoded completely."
+			finding.PDFLocation.Path = "XObject.Form"
+			return &policyError{finding: finding, err: err}
+		}
+		stream.Content = decoded
+		entry.Object = stream
 	}
 	return c.Err()
 }

@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/url"
 	"slices"
 	"strings"
@@ -28,6 +27,7 @@ type OccurrenceFacts struct {
 	DestNames                 []string
 	HasCoordinateDestinations bool
 	PDF20AppearanceIssue      string
+	AnnotationFittingIssue    string
 	OutlineDepth              int
 }
 
@@ -258,9 +258,15 @@ func checkDocument(c context.Context, s *model.Context) error {
 	return nil
 }
 
+type pageTreeNode struct {
+	dict   types.Dict
+	parent *pageTreeNode
+}
+
 type pageRef struct {
 	ref  types.IndirectRef
 	dict types.Dict
+	node *pageTreeNode
 }
 
 // rawPages rejects content-replacing tree repair before pdfcpu validation runs.
@@ -271,8 +277,8 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 	}
 	visited := map[types.IndirectRef]bool{}
 	var pages []pageRef
-	var walk func(types.Object, int) (int, error)
-	walk = func(o types.Object, depth int) (int, error) {
+	var walk func(types.Object, int, *pageTreeNode) (int, error)
+	walk = func(o types.Object, depth int, parent *pageTreeNode) (int, error) {
 		if err := c.Err(); err != nil {
 			return 0, err
 		}
@@ -295,6 +301,7 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 		if err != nil {
 			return 0, err
 		}
+		node := &pageTreeNode{dict: d, parent: parent}
 		switch typ {
 		case types.Name("Page"):
 			kids, err := s.Dereference(d["Kids"])
@@ -304,7 +311,7 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			if kids != nil {
 				return 0, refuse(diag.SourceDamaged, "A Page has non-null Kids; readers may drop its content.")
 			}
-			pages = append(pages, pageRef{ref: ref, dict: d})
+			pages = append(pages, pageRef{ref: ref, dict: d, node: node})
 			return 1, nil
 		case types.Name("Pages"):
 			kids, err := s.DereferenceArray(d["Kids"])
@@ -313,7 +320,7 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			}
 			count := 0
 			for _, kid := range kids {
-				n, err := walk(kid, depth+1)
+				n, err := walk(kid, depth+1, node)
 				if err != nil {
 					return 0, err
 				}
@@ -328,7 +335,7 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			return 0, refuse(diag.SourceDamaged, fmt.Sprintf("Page-tree node %s has no supported Type.", ref))
 		}
 	}
-	_, err = walk(catalog["Pages"], 0)
+	_, err = walk(catalog["Pages"], 0, nil)
 	return pages, err
 }
 
@@ -486,18 +493,13 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	if err != nil {
 		return facts, ds, err
 	}
-	for _, page := range []int{1, s.PageCount} {
-		size, e := displayedSize(c, s, page)
-		if e != nil {
-			return facts, ds, e
-		}
-		if page == 1 {
-			facts.FirstSize = size
-		}
-		if page == s.PageCount {
-			facts.LastSize = size
-		}
+	geometries, err := pageGeometries(c, s)
+	if err != nil {
+		return facts, ds, err
 	}
+	facts.FirstSize = geometries[0].size
+	facts.LastSize = geometries[len(geometries)-1].size
+
 	destinations, err := readDestinations(c, s)
 	if err != nil {
 		return facts, ds, err
@@ -516,6 +518,10 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	if err != nil {
 		return facts, ds, err
 	}
+	facts.AnnotationFittingIssue, err = annotationFittingIssue(c, s, geometries)
+	if err != nil {
+		return facts, ds, err
+	}
 	facts.Selection = []packet.PageRange{{First: 1, Last: s.PageCount}}
 	facts.OutlineDepth, err = outlineDepth(c, s)
 	if err != nil {
@@ -523,41 +529,6 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	}
 	slices.Sort(facts.DestNames)
 	return facts, ds, nil
-}
-
-func displayedSize(c context.Context, s *model.Context, page int) (packet.Size, error) {
-	d, _, attrs, err := s.PageDict(c, page, false)
-	if err != nil {
-		return packet.Size{}, err
-	}
-	box := *attrs.MediaBox
-	if crop := attrs.CropBox; crop != nil {
-		box.LL.X = math.Max(box.LL.X, crop.LL.X)
-		box.LL.Y = math.Max(box.LL.Y, crop.LL.Y)
-		box.UR.X = math.Min(box.UR.X, crop.UR.X)
-		box.UR.Y = math.Min(box.UR.Y, crop.UR.Y)
-	}
-	unit := 1.0
-	if v, err := s.Dereference(d["UserUnit"]); err != nil {
-		return packet.Size{}, err
-	} else if v != nil {
-		switch n := v.(type) {
-		case types.Integer:
-			unit = float64(n)
-		case types.Float:
-			unit = float64(n)
-		default:
-			return packet.Size{}, refuse(diag.SourceInvalid, "Invalid UserUnit.")
-		}
-	}
-	width, height := box.Width()*unit, box.Height()*unit
-	if attrs.Rotate%180 != 0 {
-		width, height = height, width
-	}
-	if width <= 0 || height <= 0 || math.IsInf(width, 0) || math.IsInf(height, 0) || math.IsNaN(width) || math.IsNaN(height) {
-		return packet.Size{}, refuse(diag.SourceInvalid, "Invalid physical page dimensions.")
-	}
-	return packet.Size{Width: width, Height: height}, nil
 }
 
 func generation(e *model.XRefTableEntry) int {

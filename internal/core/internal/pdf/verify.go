@@ -66,5 +66,8 @@ func readOutput(c context.Context, data []byte) (*model.Context, error) {
 	if err := validateContentEncoding(c, s); err != nil {
 		return nil, err
 	}
+	if err := validateOutputFormEncoding(c, s); err != nil {
+		return nil, err
+	}
 	return s, nil
 }

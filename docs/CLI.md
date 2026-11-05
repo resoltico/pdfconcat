@@ -60,8 +60,10 @@ pdfconcat build --blank --fit-to A4 -o blank.pdf
 ```
 
 `--fit-to` accepts the sheet grammar in [PLAN](PLAN.md#generated-pages-and-layering).
-See [PDF policy](PDF-POLICY.md#forms-fitting-and-catalog) for fitting refusals,
-forms, destination handling and the effective output version.
+Fitting centers the effective CropBox–MediaBox intersection on the chosen sheet,
+retaining its artwork clipping, pattern proportions and annotation geometry.
+See [PDF policy](PDF-POLICY.md#fitting) for annotation appearance limits, fitting
+refusals, forms, destination handling and the effective output version.
 
 Sections, dividers, contents, odd starts and page numbers are declared in
 [PLAN](PLAN.md). Its [examples index](PLAN.md#examples) lists ready-to-adapt plans
@@ -384,6 +386,7 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 | `source_optional_content` | error | invalid | `/OCProperties` present |
 | `fit_destination_unsupported` | error | invalid | fitting internal page destinations with numeric position coordinates is unsupported |
 | `source_output_incompatible` | error | invalid | retained annotations lack appearances required by the effective PDF 2.0 output |
+| `fit_annotation_unsupported` | error | invalid | fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame |
 | `fit_form_unsupported` | error | invalid | `fit_to` with a source that has form widgets |
 | `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
 | `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |

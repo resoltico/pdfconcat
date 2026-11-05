@@ -63,6 +63,13 @@ own review; successful opening alone does not establish fidelity.
 
 ### Validation evidence and page preservation
 
+Every source page, including omitted pages, must have finite positive displayed
+physical dimensions. Declared MediaBox/CropBox rectangles accept either order of
+opposite corners and are normalized before intersection. An empty or nonfinite
+effective intersection, invalid UserUnit or overflowing physical dimension is
+`source_invalid`, with the affected page/object under `Pages.EffectiveGeometry`.
+This whole-source requirement applies equally with and without fitting.
+
 Before semantic validation, each page's content must resolve to an existing
 stream or an array of existing stream references. Page-tree and content-stream
 references must match live object generations; missing/free objects, dangling
@@ -229,11 +236,58 @@ The coordinate guard covers retained named definitions, links, outlines and
 chained local GoTo actions. Print-box, bleed and imposition fidelity beyond these
 limits is not guaranteed.
 
-Fitting uses upstream proportional resize. Resized pages have UserUnit 1 so the
-target dimensions describe physical sheets. Nonzero output box origins are
-permitted; target side lengths are the contract. Explicit generated canvases
-retain authored layout and overflow checks before resizing; inherited canvases
-use the fit target.
+Fitting interprets annotation Rect and appearance BBox opposite corners in
+either order, preserving their displayed orientation. It uses the effective source frame: CropBox intersected with MediaBox,
+or MediaBox when CropBox is absent, including inherited boxes. That same frame
+determines the scale, placement and clipping. Source-invisible page artwork
+stays clipped in the new margins. Content remains vector/text inside a Form
+XObject; hidden objects may remain in the file. This is not redaction. Staged
+output verification checks Form stream encodings as well as page Contents.
+
+Pattern scale, phase and orientation follow the source artwork. Original pattern
+matrices and shared/nested resources are retained in their own coordinate spaces.
+Annotation rectangles, QuadPoints, Line endpoints, Ink strokes, Polygon/PolyLine
+vertices and FreeText callouts follow their displayed transform. Square, Circle,
+Caret and FreeText RD insets are distances; their sides follow baked rotation. Border
+widths/dashes and Line leader/caption offsets scale proportionally.
+
+Normal, rollover and down appearances, including named states, retain their
+mapping and orientation when page rotation is baked. Existing appearance streams
+and their resources remain shared safely; wrappers preserve source clipping and
+page-resource fallback. NoRotate (implicit for Text annotations) pivots about
+the original upper-left corner; NoZoom remains a viewer magnification rule.
+FreeText callouts and insets transform, but its default/rich-text style strings
+remain authored. Subsequent appearance regeneration after editing is viewer-dependent.
+
+`fit_annotation_unsupported` refuses these specific selected-page cases:
+
+- FreeText without a usable normal appearance, whose text layout cannot be preserved by coordinate changes alone.
+- A Text icon without a usable normal appearance, whose supplied Rect need not bound its viewer-generated icon and therefore cannot preserve source clipping.
+- A Caret without a usable normal appearance, whose viewer-generated symbol cannot be preserved by rectangle and inset changes alone.
+- A captioned Line (`Cap: true`) without a usable normal appearance, whose viewer-generated caption text layout cannot be preserved by coordinate changes alone.
+- A rotated NoRotate annotation (including Text) without a usable normal appearance, whose viewer-generated bounds/pivot cannot be preserved reliably.
+- An annotation without a usable normal appearance whose displayed rectangle crosses the source frame; page-content clipping cannot clip a viewer-generated appearance.
+- An interactive annotation hit area crossing the source frame, including annotations with appearances; fitting must not activate a previously clipped region in a margin.
+
+A usable normal appearance is an N stream or the stream selected by AS in an N
+state dictionary. Hidden annotations do not trigger these guards. FreeText with
+a zero-width or zero-height Rect has no display area and is retained without a
+normal appearance. This exemption does not apply to Text icons or path annotations.
+
+Interactive regions include Links, activation actions (A), and annotation AA
+pointer/focus triggers E, X, D, U, Fo and Bl. NoView annotations have no on-screen
+hit area; page-lifecycle actions alone do not create one. Appearance clipping
+still applies to printed artwork. Supply reviewed normal appearances for the
+appearance-related cases, or use original page sizes; crossing interactive regions
+require original sizes. Ordinary contained uncaptioned Line, Ink, Polygon, PolyLine, Square,
+and Circle annotations remain supported without appearances. Text icons, Carets and captioned Lines can still be composed at original page
+sizes without appearances.
+The guards apply equally in `check` and `build`, before output staging.
+
+Fitted pages have UserUnit 1 so target dimensions describe physical sheets.
+Nonzero output box origins are permitted; target side lengths are the contract.
+Explicit generated canvases retain authored layout and overflow checks before
+fitting; inherited canvases use the fit target.
 
 ### Catalog and metadata
 
@@ -329,7 +383,10 @@ bookkeeping can still be normalized. Compatibility validation remains relaxed,
 so ancillary producer differences do not become blanket source refusals. Some
 legal comment-separated indirect-reference spellings remain unsupported and
 return `source_invalid`. Successful parsing or validation does not establish that
-arbitrary malformed input retains its meaning.
+arbitrary malformed input retains its meaning. Content-operator resource binding
+is not exhaustively validated: a malformed source using an undefined font can be
+accepted and render differently across readers or fitting. Supply a reviewed
+valid source; composition does not reconstruct missing font bindings.
 
 Finite PDF real numbers are serialized by upstream to at most twelve fractional
 digits; bitwise numeric round trips are not promised. Upstream owns content-stream

@@ -126,6 +126,15 @@ structure, removes source viewer directives, and validates semantic compatibilit
 It returns accumulated findings alongside any failure. Inspection and assembly
 share this path.
 
+The adapter resolves page geometry from the validated Kids traversal in linear
+time. Each scoped view owns its effective frame, physical size and inherited
+attributes; null entries inherit, while local zero rotation and empty resources
+override ancestors. Declared rectangles normalize their opposite corners before
+intersection. Computed intersections remain signed so empty source frames cannot
+become visible artwork. Inspection, selection, fitting, generated links and
+footers consume batched page views rather than repeated root lookups. Views are
+rebuilt after tree or page mutations and are never cached on the backend context.
+
 Output verification uses strict validation without source normalization and
 checks catalog policy before validation. A shared validation boundary checks page
 order, live content-stream references and encoded bytes before and after

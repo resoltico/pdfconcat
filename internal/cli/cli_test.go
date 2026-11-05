@@ -70,7 +70,7 @@ func TestHelpAndVersionForms(t *testing.T) {
 	}
 	for _, command := range []string{"build", "check"} {
 		help := cli.Help(command)
-		for _, remedy := range []string{"size comes from a source", "--fit-to SIZE"} {
+		for _, remedy := range []string{"size comes from a source", "--fit-to SIZE", "FreeText", "Text icons", "Caret", "captioned Lines", "rotated NoRotate", "normal appearances", "Link hit areas", "PDF-POLICY.md#fitting"} {
 			if !strings.Contains(help, remedy) {
 				t.Fatalf("%s help omits %q: %s", command, remedy, help)
 			}
@@ -96,6 +96,18 @@ func TestUsageJSONSelectionAndFirstFailure(t *testing.T) {
 		code, item string
 	}{
 		{[]string{"check", "--bad", "--json"}, true, "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--output", "--", "--json", "--bad"}, true, "usage_unknown_option", "argv:4"},
+		{[]string{"build", "-o", "--", "--bad", "--json"}, true, "usage_unknown_option", "argv:3"},
+		{[]string{"check", "--bad", "--output", "--", "--json"}, true, "usage_unknown_option", "argv:1"},
+		{[]string{"check", "--plan", "--", "--json", "--bad"}, true, "usage_unknown_option", "argv:4"},
+		{[]string{"check", "--report", "--", "--bad", "--json"}, true, "usage_unknown_option", "argv:3"},
+		{[]string{"check", "--base-dir", "--", "--bad", "--json"}, true, "usage_unknown_option", "argv:3"},
+		{[]string{"check", "--fit-to", "--", "--json", "--blank"}, true, "usage_invalid_value", "argv:2"},
+		{[]string{"check", "--output=--", "--bad", "--json"}, true, "usage_unknown_option", "argv:2"},
+		{[]string{"check", "--bad", "--output", "--", "--", "--json"}, false, "usage_unknown_option", "argv:1"},
+		{[]string{"version", "--output", "--", "--json"}, false, "usage_unknown_option", "argv:1"},
+		{[]string{"--version", "--output", "--", "--json"}, false, "usage_unknown_option", "argv:1"},
+
 		{[]string{"check", "--json", "--bad"}, true, "usage_unknown_option", "argv:2"},
 		{[]string{"check", "--report=", "--json"}, true, "usage_invalid_value", "argv:1"},
 		{[]string{"check", "--report", "--json"}, true, "usage_missing_value", "argv:1"},

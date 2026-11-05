@@ -26,7 +26,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream cache 6.3.0 fix (actions/setup-go#794)
+      - uses: actions/setup-go@7d2730e317c8366225b42fced34583b26440a9cc # upstream cache 6.3.0 fix (actions/setup-go#794)
         with:
           go-version-file: go.mod
       - name: Release notes from CHANGELOG.md
@@ -43,7 +43,7 @@ jobs:
           fi
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          version: "v2.19.0"
+          version: "v2.20.0"
           args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

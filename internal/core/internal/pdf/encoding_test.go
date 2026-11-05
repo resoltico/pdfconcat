@@ -9,9 +9,13 @@ import (
 	"context"
 	"encoding/ascii85"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 
 	"github.com/pdfcpu/pdfcpu/pkg/filter"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -217,5 +221,68 @@ func TestExistingDecodedCacheCannotHideIncompleteEncoding(t *testing.T) {
 	s.Table[ref.ObjectNumber.Value()].Object = stream
 	if err = validateContentEncoding(t.Context(), s); err == nil || diagnostic(err, diag.SourceInvalid).Code != diag.SourceInvalid {
 		t.Fatalf("cached bytes bypassed encoded integrity: %v", err)
+	}
+}
+
+func TestOutputVerifiesFittedFormEncoding(t *testing.T) {
+	for _, damage := range []bool{false, true} {
+		t.Run(fmt.Sprintf("damage=%v", damage), func(t *testing.T) {
+			s, _, err := readSource(t.Context(), pdffixture.FitMarks("").Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fitContext(t.Context(), s, &packet.Size{Width: 300, Height: 500}); err != nil {
+				t.Fatal(err)
+			}
+			page, _, attrs, err := s.PageDict(t.Context(), 1, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resources, err := s.DereferenceDict(attrs.Resources["XObject"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref, ok := resources["PCSource"].(types.IndirectRef)
+			if !ok {
+				t.Fatal("fitted source Form missing")
+			}
+			object, err := s.Dereference(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream, ok := object.(types.StreamDict)
+			if !ok {
+				t.Fatal("source not stream")
+			}
+			if damage {
+				stream.Raw = stream.Raw[:len(stream.Raw)-1]
+				length := int64(len(stream.Raw))
+				stream.StreamLength = &length
+				stream.Dict["Length"] = types.Integer(len(stream.Raw))
+				stream.Content = nil
+				s.Table[ref.ObjectNumber.Value()].Object = stream
+			}
+			if page["Contents"] == nil {
+				t.Fatal("outer page content missing")
+			}
+			// The writer retains encoded Form bytes, including the deliberate fault.
+			var out bytes.Buffer
+			if err := api.WriteContext(t.Context(), s, &out); err != nil {
+				t.Fatal(err)
+			}
+			_, err = readOutput(t.Context(), out.Bytes())
+			if damage {
+				if err == nil {
+					t.Fatal("serialized source Form checksum bypassed output verification")
+				}
+				finding := diagnostic(err, diag.SourceInvalid)
+				if finding.PDFLocation == nil || finding.PDFLocation.Path != "XObject.Form" {
+					t.Fatalf("failed for unrelated reason: %v", err)
+				}
+			}
+			if !damage && err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

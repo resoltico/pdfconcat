@@ -23,6 +23,8 @@ func TestUsageStreamsBeforeIO(t *testing.T) {
 		{"check", "--report="},
 		{"check", "--report"},
 		{"build", "--plan", "--report", "report.json"},
+		{"check", "--output", "--", "--bad-option"},
+		{"build", "--bad-option", "--report", "--"},
 	} {
 		for _, asJSON := range []bool{false, true} {
 			args := append([]string(nil), base...)

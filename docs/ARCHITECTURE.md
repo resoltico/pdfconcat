@@ -4,6 +4,12 @@ The application core owns packet vocabulary and execution. Frontends submit a
 `core.Request` and receive a complete `core.Result`. Plan and result wire contracts
 are documented in [PLAN](PLAN.md) and [CLI](CLI.md).
 
+The [product scope](../README.md#scope-and-boundaries) covers PDF assembly and its
+navigation, separators, simple text inserts, numbering and fitting. The typesetter
+serves declared text pages, dividers, contents and footers. Ordinary text pages
+have one styled block; automatic pagination belongs to contents. Source PDF text
+is neither edited nor reflowed.
+
 ## Packages and boundaries
 
 | Package | Responsibility |

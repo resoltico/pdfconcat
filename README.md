@@ -1,15 +1,16 @@
 # PDFConcat
 
-PDFConcat is a command-line tool for combining PDFs and selected pages into one
-organized document. Merge whole files directly, or save a reusable JSON plan for
-excerpts, nested sections, title pages, a linked table of contents and page numbers.
-An optional assembly report records input file hashes and source-to-output page
-mappings.
+PDFConcat combines existing PDFs and selected pages into one ordered document.
+Optional assembly aids add separators, simple text inserts, navigation, page
+numbers and consistent sheet sizes. Merge whole files directly, or use a reusable
+JSON plan for selections and assembly aids. Check the plan before building and
+save a report with input file hashes and source-to-output page mappings.
 
 Source pages keep their original sizes unless you request fitting. Generated text
 uses bundled Noto Sans for Latin, Greek and Cyrillic; the program needs no external
 PDF tools, font installation or configuration directory at runtime.
 
+- [Understand the scope](#scope-and-boundaries)
 - [Install and verify](#install)
 - [Merge PDFs and insert blanks](#merge-pdfs)
 - [Fit pages to A4](#fit-page-sizes)
@@ -17,6 +18,45 @@ PDF tools, font installation or configuration directory at runtime.
 - [Automate commands and save reports](#automation-and-reports)
 - [Compare with the pdfcpu CLI](#pdfconcat-or-the-pdfcpu-cli)
 - [Check the limits](#limits)
+
+## Scope and boundaries
+
+The core job is to select, order and combine existing PDF pages into one output.
+Plans, checks and reports support repeatable, inspectable assembly. Handling page
+geometry, links, bookmarks and incompatible inputs is part of correct merging,
+subject to the [PDF policy](docs/PDF-POLICY.md). Merging does not promise lossless
+preservation of every source document feature.
+
+Assembly aids belong in PDFConcat when they organize the material, help readers
+navigate it or prepare its presentation:
+
+- Blanks and odd-page starts separate material and control physical page order.
+- Sections, bookmarks, title dividers, linked contents and physical page numbers
+  identify material and help readers navigate the combined document.
+- Fitting gives the assembled pages a common sheet size. It transforms source
+  presentation and has additional [compatibility limits](docs/PDF-POLICY.md#fitting).
+- Simple text pages supply covers, separators, explanatory notes and other
+  inserts. They support custom fonts, colors, backgrounds, positioning,
+  alignment, wrapping and overflow controls.
+
+Text-page authoring is limited to one styled text block on each declared page.
+Plans containing only generated pages are supported; source PDFs are optional.
+Text wraps within its block but does not flow onto additional pages. Linked
+contents has its own automatic pagination. Rich text, tables, image placement,
+multiple text columns, general-purpose document templates, Markdown/HTML
+conversion and editing or reflowing source-page text are outside the product's
+scope. Assemble PDFs prepared in another authoring tool when you need those layouts.
+
+Appending, automatic interleaving and PDF stdin/stdout are relevant merge
+workflows. PDFConcat can combine an existing PDF and additional inputs into a
+different output, and plans can specify an interleaved order explicitly. It does
+not update input files, interleave automatically or read/write PDF streams. See
+the [comparison](#pdfconcat-or-the-pdfcpu-cli) for these workflow differences.
+
+PDFConcat's purpose does not include general PDF editing, OCR, redaction, repair,
+sanitization, encryption management or form filling. Source validation supports
+assembly; it is not a universal PDF preflight service. See [limits](#limits) for
+the current input, fidelity and publication constraints.
 
 ## Install
 
@@ -193,10 +233,12 @@ PDFConcat uses [pdfcpu](https://github.com/pdfcpu/pdfcpu) as its PDF engine. Bot
 tools can merge documents, select pages, insert blanks, generate text, preserve
 bookmarks, resize pages and add page numbers. Their workflows and limits differ.
 
-Use **pdfcpu** for its broad range of PDF editing commands, appending, automatic
-interleaving, PDF pipelines, encryption or form filling. Use **PDFConcat** when
-you want to describe a packet's sources, sections and generated pages in one
-plan, check its layout, and retain an assembly report.
+Use **PDFConcat** for repeatable PDF assembly with a plan, layout checks and
+source-to-output reports, optionally adding separators, navigation and text
+inserts. Use **pdfcpu** when you need merge workflows PDFConcat currently lacks:
+appending by updating the existing destination, automatic interleaving or PDF stdin/stdout.
+pdfcpu also provides broader editing commands, including encryption and form
+filling, outside PDFConcat's [scope](#scope-and-boundaries).
 
 The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**.
 The PDFConcat column describes the current source.
@@ -209,19 +251,20 @@ dots do not imply identical defaults or preservation guarantees.
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
 | --- | :---: | :---: |
 | Merge PDFs in a chosen order | ● | ● |
-| Append PDFs to an existing output file | ● | — |
-| Automatically interleave two PDFs: A1, B1, A2, B2, … | ● | — |
-| Read PDF input from stdin and write PDF output to stdout [1] | ● | — |
+| Append PDFs by updating the existing destination [1] | ● | — |
+| Automatically interleave two PDFs: A1, B1, A2, B2, … [2] | ● | — |
+| Read PDF input from stdin for merging [1] | ● | — |
+| Write merged PDF output to stdout [1] | ● | — |
 | Select, repeat or reorder source pages [2] | ● | ● |
 | Keep source pages at their original sizes | ● | ● |
 | Insert blank pages | ● | ● |
 | Preserve imported source bookmarks [3] | ● | ● |
 | Create bookmarks [3] | ● | ● |
 | Fit pages to a chosen paper size | ● | ● |
-| Generate text pages from JSON | ● | ● |
+| Generate simple text pages from JSON | ● | ● |
 | Generate Latin, Greek and Cyrillic text with a bundled font [4] | ● | ● |
 | Add physical page numbers [5] | ● | ● |
-| Describe the complete packet in one JSON assembly plan | — | ● |
+| Describe supported packet assembly in one JSON plan | — | ● |
 | Define nested sections and title dividers in that plan | — | ● |
 | Automatically pad sections to start on odd pages | — | ● |
 | Generate linked contents from sections and final page numbers | — | ● |
@@ -233,14 +276,20 @@ dots do not imply identical defaults or preservation guarantees.
 | Encrypt, decrypt and manage PDF passwords | ● | — |
 | Fill interactive forms | ● | — |
 
-1. **PDF streams.** For pdfcpu merge, create mode accepts one stdin input; create
+1. **Append and PDF streams.** PDFConcat can combine an existing PDF followed by
+   additional inputs into a different output file. It cannot update that input
+   path, even with `--overwrite`; that option permits replacement, not appending.
+   For pdfcpu merge, create mode accepts one stdin input; create
    and zip can write to stdout. Append and zip do not accept stdin, and append
    cannot write to stdout. PDFConcat accepts a JSON plan from stdin, but its PDF
    inputs and output are files.
 2. **Page selection.** pdfcpu's `collect` command uses page expressions for
    selection, repetition and reordering. PDFConcat uses ascending, non-overlapping
    ranges within each source occurrence; repetition or reordering uses separate
-   occurrences.
+   occurrences. Alternating single-page occurrences can express an interleaved
+   order explicitly; PDFConcat has no automatic interleaving operation. The
+   [selection limits](docs/PLAN.md#source-selections), including partial selection
+   of forms, still apply.
 3. **Bookmarks.** pdfcpu normally wraps merged source bookmarks under filenames;
    `--bookmark-mode preserve` avoids those wrappers. Zip does not preserve source
    outlines, and stdin merge does not import later inputs' bookmark trees.

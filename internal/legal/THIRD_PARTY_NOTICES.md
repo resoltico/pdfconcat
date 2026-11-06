@@ -43,8 +43,8 @@ is not sold separately.
 
 pdfcpu embeds Roboto Regular 2.137, Copyright 2011 Google Inc., under the
 [Apache License 2.0](licenses/Apache-2.0.txt); Roboto is a trademark of Google.
-pdfcpu uses it for form filling, which PDFConcat does not perform, so Roboto
-does not appear in PDFConcat's output.
+PDFConcat does not use pdfcpu's bundled Roboto for generated text or form filling.
+Source PDFs and user-supplied font files can independently contain Roboto.
 
 ## Source-only test corpus
 

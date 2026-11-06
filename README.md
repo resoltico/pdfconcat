@@ -1,14 +1,22 @@
 # PDFConcat
 
-Assemble PDF documents and selected pages into a packet with sections, title
-pages, linked contents and page numbers. Save the composition in a JSON plan,
-check the planned layout, then build the PDF. An optional report records input
-file hashes and where their pages appear in the result.
+PDFConcat is a command-line tool for combining PDFs and selected pages into one
+organized document. Merge whole files directly, or save a reusable JSON plan for
+excerpts, nested sections, title pages, a linked table of contents and page numbers.
+An optional assembly report records input file hashes and source-to-output page
+mappings.
 
-You can also concatenate whole PDFs and insert blank pages directly on the
-command line. The executable includes its PDF engine and Noto Sans for generated
-Latin, Greek and Cyrillic text; no external PDF tools, font installation or
-configuration directory are needed at runtime.
+Source pages keep their original sizes unless you request fitting. Generated text
+uses bundled Noto Sans for Latin, Greek and Cyrillic; the program needs no external
+PDF tools, font installation or configuration directory at runtime.
+
+- [Install and verify](#install)
+- [Merge PDFs and insert blanks](#merge-pdfs)
+- [Fit pages to A4](#fit-page-sizes)
+- [Use a reusable plan and select pages](#keep-the-composition-in-a-plan)
+- [Automate commands and save reports](#automation-and-reports)
+- [Compare with the pdfcpu CLI](#pdfconcat-or-the-pdfcpu-cli)
+- [Check the limits](#limits)
 
 ## Install
 
@@ -24,55 +32,73 @@ On Windows 10 or 11, in PowerShell:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
 ```
 
-The installer puts one self-contained program in your user account, with no
-administrator password, and adds it to your PATH. Run the same command again to
-update. The [installation guide](docs/INSTALL.md) covers uninstalling, options,
-manual downloads, verification and troubleshooting. Releases are not notarized
-by Apple or code-signed for Windows; the guide explains what that means.
-
-Plans use format v4; results and reports use format v6. `pdfconcat version`
-identifies the installed program. These instructions describe the current source;
-for a released binary, use the documentation at its matching release tag.
-Matching schema numbers alone do not establish support for every documented field.
-
-## First packet
-
-Use two PDFs of your own, named `cover.pdf` and `appendix.pdf` in the current
-directory:
+The installer puts one self-contained program in your user account without an
+administrator password and configures PATH when needed. On macOS/Linux, follow
+any PATH command it prints for the current terminal. On Windows, open a new
+terminal window. Then verify the installation:
 
 ```sh
-pdfconcat check cover.pdf --blank appendix.pdf
-pdfconcat build -o packet.pdf cover.pdf --blank appendix.pdf --report packet.report.json
+pdfconcat version
 ```
 
-This places one blank page between the documents. Its displayed size is
-inherited from the preceding source page. `check` reads the inputs and predicts
-the assembly without creating a PDF; `build` creates the PDF and requested
-report. A successful check does not guarantee that a later build or file
+Run the same installation command again to update. The
+[installation guide](docs/INSTALL.md) covers supported architectures, uninstalling,
+custom paths, manual downloads, verification and troubleshooting. Releases are not
+notarized by Apple or code-signed for Windows; the guide explains what that means.
+
+## Merge PDFs
+
+Run these commands in a folder containing two PDFs of your own, `cover.pdf` and
+`appendix.pdf`. Choose an unused output name:
+
+```sh
+pdfconcat check cover.pdf appendix.pdf
+pdfconcat build -o packet.pdf cover.pdf appendix.pdf
+```
+
+Inputs appear in the order given. `check` reads and validates them without
+creating a PDF; `build` creates the assembled document. Original inputs stay
+unchanged. A successful check does not guarantee that a later build or file
 publication will succeed.
 
-Choose unused output names, or add `--overwrite` to permit replacement of
-existing regular output/report files. Text summaries go to stdout and diagnostics
-to stderr. Add `--json` for one machine-readable result. Options may appear
-between operands; `--` makes subsequent arguments literal paths.
+To put a blank page between the documents and save an assembly report:
 
-To try the tool without supplying any PDFs, run these commands in a writable
-folder where `blank.pdf` does not already exist:
+```sh
+pdfconcat build -o separated.pdf cover.pdf --blank appendix.pdf --report separated.report.json
+```
+
+The blank inherits the preceding source page's displayed size. Use `--overwrite`
+only when you intend to replace existing regular output/report files. Input
+files are protected from replacement.
+
+## Fit page sizes
+
+To place all source pages on portrait A4 sheets:
+
+```sh
+pdfconcat build -o packet-a4.pdf --fit-to A4 cover.pdf appendix.pdf
+```
+
+Fitting preserves proportions and clips source artwork to its original visible
+frame; it does not reflow text. Annotation appearances, interactive hit areas,
+forms and internal destinations can restrict fitting. If fitting is refused,
+follow the diagnostic and [fitting policy](docs/PDF-POLICY.md#fitting); some inputs
+need reviewed appearances or their original page sizes. Omit `--fit-to` to retain
+original sizes.
+
+For a first run without preparing any input PDFs, create one blank A4 page in a
+writable folder where `blank-a4.pdf` does not already exist:
 
 ```sh
 pdfconcat check --blank --fit-to A4
-pdfconcat build -o blank.pdf --blank --fit-to A4
+pdfconcat build -o blank-a4.pdf --blank --fit-to A4
 ```
-
-This creates one blank A4 page. The bundled
-[generated-only example](examples/plans/generated-only.json) adds text pages and
-styled blanks. The [example plans](examples/plans) are in this repository; copy
-one to a writable folder before building it, because plan-relative outputs are
-created beside the plan.
 
 ## Keep the composition in a plan
 
-Save this as `packet.json` beside your two source PDFs:
+A plan keeps sources, page selections and generated pages together so you can
+check and rebuild the same composition. Save this as `packet.json` beside your
+two source PDFs:
 
 ```json
 {
@@ -98,20 +124,59 @@ pdfconcat check --plan packet.json
 pdfconcat build --plan packet.json --report review-packet.report.json
 ```
 
-The plan adds linked contents and an A4 section title page, starts the section on
-an odd physical page, and adds footer numbers. Source pages retain their sizes
-unless you request fitting. Fitting preserves the visible source frame and
-pattern proportions; [annotation appearance limits](docs/PDF-POLICY.md#fitting)
-can require original page sizes. Relative source and output paths in this example
-are resolved beside the plan; the CLI `--report` path is relative to the current
-directory.
+This adds a linked table of contents and an A4 section title page, starts the
+section on an odd physical page, and adds footer numbers. Section titles also
+create PDF bookmarks. The A4 `page_defaults` style sets the section title page;
+it does not resize source pages. To fit the whole packet, add `"fit_to": "A4"` at the plan's top level.
 
-The [examples guide](docs/PLAN.md#examples) explains the supplied plans and the
-inputs each needs. Start with the
-[composition example](examples/plans/packet-composition.json) for excerpts and
-nested sections. The [plan reference](docs/PLAN.md) covers the JSON format, text
-layout and fonts; the [CLI reference](docs/CLI.md) covers commands, streams,
-results, reports, exit codes and overwrite behavior.
+For an excerpt, replace the appendix source item with the following, using an
+`appendix.pdf` with at least seven pages:
+
+```json
+{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }
+```
+
+This includes pages 2–4 and 7. Ranges within one item must ascend without overlaps;
+use separate source items to repeat or reorder material. The whole source is
+still validated, and omitted content is not guaranteed to be erased. See
+[source selections](docs/PLAN.md#source-selections) for the limits of page selection.
+
+Relative source and output paths in this plan resolve beside `packet.json`;
+CLI `-o` and `--report` paths resolve from the current working directory. The
+[plan reference](docs/PLAN.md) explains nested path scopes, layout and fonts.
+
+The [repository examples](docs/PLAN.md#examples) include a
+[generated-only plan](examples/plans/generated-only.json) needing no input PDFs
+or external fonts, and a [composition plan](examples/plans/packet-composition.json)
+with excerpts and nested sections. Examples are not included in binary archives.
+Save a copy into your working folder before adapting it; plan-relative outputs
+are created beside the saved plan.
+
+## Automation and reports
+
+Add `--json` to `check` or `build` for one machine-readable result. Without it,
+stdout contains a text summary and stderr contains diagnostics. Options may
+appear between inputs; `--` makes subsequent arguments literal paths. Quote
+paths containing spaces in your shell.
+
+`--report FILE` requests a full JSON assembly report from either command,
+including when processing fails. Rejected command-line arguments produce no report.
+It records input SHA-256 hashes, page mappings and uncapped diagnostics. PDF and report publication are separate operations;
+inspect the final result before retrying after a failure. See
+[results, reports and exit codes](docs/CLI.md#output).
+
+Plans use format v4; results and reports use format v6. Print their schemas with:
+
+```sh
+pdfconcat schema plan
+pdfconcat schema result
+```
+
+These instructions describe the current source. For a released binary, consult
+the documentation at its matching release tag; `pdfconcat version` identifies
+that version. Matching schema numbers alone do not establish support for every
+field. The [CLI reference](docs/CLI.md) covers stdin plans, argument handling,
+exit codes, diagnostics and publication facts.
 
 ## PDFConcat or the pdfcpu CLI?
 
@@ -151,6 +216,7 @@ dots do not imply identical defaults or preservation guarantees.
 | Define nested sections and title dividers in that plan | — | ● |
 | Automatically pad sections to start on odd pages | — | ● |
 | Generate linked contents from sections and final page numbers | — | ● |
+| Validate PDF structure without creating a PDF [6] | ● | ● |
 | Check a packet plan's text layout without creating a PDF [6] | — | ● |
 | Report input SHA-256 hashes and source-to-output page ranges [6] | — | ● |
 | Split a PDF into multiple output files in one command | ● | — |

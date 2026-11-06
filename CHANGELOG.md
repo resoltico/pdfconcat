@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- PDF and report destinations can use the filesystem's full filename length without staging-name overhead rejecting otherwise legal paths.
 - Every source page, including omitted pages, must have finite positive physical dimensions; empty effective frames are refused with page/object diagnostics.
 - Fitting transforms Caret insets with supplied appearances and preserves reversed rectangle corners; legal reversed page boxes are accepted.
 - Fitting retains zero-area FreeText without requiring an appearance; Text icons and path annotations keep their distinct rules.

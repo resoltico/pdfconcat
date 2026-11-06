@@ -5,6 +5,7 @@ package files
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -135,6 +136,52 @@ func TestRealNoReplaceCommit(t *testing.T) {
 	data, err := os.ReadFile(target)
 	if err != nil || string(data) != "complete" {
 		t.Fatalf("published target %q %v", data, err)
+	}
+}
+
+func TestLongDestinationNames(t *testing.T) {
+	for _, extension := range []string{".pdf", ".json"} {
+		for _, overwrite := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/overwrite=%t", extension, overwrite), func(t *testing.T) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, strings.Repeat("n", 255-len(extension))+extension)
+				// Establish that the destination itself is legal on this filesystem.
+				if err := os.WriteFile(target, []byte("original"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if !overwrite {
+					if err := os.Remove(target); err != nil {
+						t.Fatal(err)
+					}
+				}
+				f, err := Create(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = f.Abort() })
+				if filepath.Dir(f.Path()) != dir {
+					t.Fatal("stage must remain beside the destination")
+				}
+				if _, err = f.WriteString("complete"); err != nil {
+					t.Fatal(err)
+				}
+				published, err := f.Commit(overwrite)
+				if err != nil || !published {
+					t.Fatalf("commit %v %v", published, err)
+				}
+				if err = f.Abort(); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(target)
+				if err != nil || string(data) != "complete" {
+					t.Fatalf("published target %q %v", data, err)
+				}
+				entries, err := os.ReadDir(dir)
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("unexpected staging entries %v %v", entries, err)
+				}
+			})
+		}
 	}
 }
 

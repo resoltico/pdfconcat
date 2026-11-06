@@ -168,7 +168,7 @@ func corpusStagedBuildSIGINT(t *testing.T) {
 			ready := false
 			deadline := time.Now().Add(45 * time.Second)
 			for time.Now().Before(deadline) {
-				names, err := filepath.Glob(filepath.Join(dir, ".packet.pdf.*.tmp"))
+				names, err := filepath.Glob(filepath.Join(dir, ".pdfconcat.*.tmp"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -190,7 +190,7 @@ func corpusStagedBuildSIGINT(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, "packet.pdf")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("final output visible: %v", err)
 			}
-			temps, err := filepath.Glob(filepath.Join(dir, ".packet.pdf.*.tmp"))
+			temps, err := filepath.Glob(filepath.Join(dir, ".pdfconcat.*.tmp"))
 			if err != nil || len(temps) != 0 {
 				t.Fatalf("owned staging cleanup: %v %v", temps, err)
 			}

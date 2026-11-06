@@ -34,7 +34,8 @@ func Create(target string) (*Staged, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	temp := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+"."+rand.Text()+".tmp")
+	// Keep the sibling name independent of the target's filesystem name budget.
+	temp := filepath.Join(filepath.Dir(target), ".pdfconcat."+rand.Text()+".tmp")
 	f, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return nil, err

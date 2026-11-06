@@ -129,11 +129,20 @@ section on an odd physical page, and adds footer numbers. Section titles also
 create PDF bookmarks. The A4 `page_defaults` style sets the section title page;
 it does not resize source pages. To fit the whole packet, add `"fit_to": "A4"` at the plan's top level.
 
-For an excerpt, replace the appendix source item with the following, using an
+For an excerpt, save this complete plan as `excerpt.json`, using an
 `appendix.pdf` with at least seven pages:
 
 ```json
-{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }
+{
+  "version": 4,
+  "output": "excerpt.pdf",
+  "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
+}
+```
+
+```sh
+pdfconcat check --plan excerpt.json
+pdfconcat build --plan excerpt.json
 ```
 
 This includes pages 2–4 and 7. Ranges within one item must ascend without overlaps;
@@ -141,7 +150,7 @@ use separate source items to repeat or reorder material. The whole source is
 still validated, and omitted content is not guaranteed to be erased. See
 [source selections](docs/PLAN.md#source-selections) for the limits of page selection.
 
-Relative source and output paths in this plan resolve beside `packet.json`;
+Relative source and output paths resolve beside the saved plan file;
 CLI `-o` and `--report` paths resolve from the current working directory. The
 [plan reference](docs/PLAN.md) explains nested path scopes, layout and fonts.
 

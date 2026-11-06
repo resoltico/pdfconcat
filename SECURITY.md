@@ -18,9 +18,9 @@ The [installers](docs/INSTALL.md) download a release archive and its
 `checksums.txt` from this project's GitHub releases over HTTPS, check the
 archive's SHA-256 checksum, and run the downloaded program once as the current
 user before installing it. They need no administrator access and write only the
-program and, unless disabled, one marked PATH line or user PATH entry. Because
-the checksums come from the same release as the archive, a match detects a
-damaged download, not a compromised release or repository. Release archives,
+program and, unless disabled, marked shell startup entries or a user PATH entry.
+Because the checksums come from the same release as the archive, a match detects
+a damaged download, not a compromised release or repository. Release archives,
 `checksums.txt` and both installers carry GitHub build-provenance attestations
 from the release workflow; `gh attestation verify` checks them. Per-executable
 CycloneDX SBOMs list the linked modules for dependency and license audits.

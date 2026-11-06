@@ -51,9 +51,9 @@ Open PowerShell (press Start, type **PowerShell**, press Enter) and run:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
 ```
 
-`-ExecutionPolicy ByPass` applies only to this one command; your PowerShell
-settings are not changed. The installer shows the same steps as on macOS and
-Linux. Open a new terminal window afterwards, then check it:
+`-ExecutionPolicy ByPass` applies to the launched PowerShell session; it does not
+change persistent settings or override Group Policy. The installer shows the
+same steps as on macOS and Linux. Open a new terminal window afterwards, then check it:
 
 ```powershell
 pdfconcat version
@@ -142,20 +142,22 @@ Windows, set the environment variable before `irm ... | iex`, or pass options
 through the script block form shown under [Uninstall](#uninstall).
 
 `PDFCONCAT_DOWNLOAD_BASE` downloads release files from another location instead
-of GitHub: an `https://` mirror or a local folder holding the release's archives
-and `checksums.txt`. The checksum check still applies.
+of GitHub: an `https://` mirror or an absolute local folder holding the release's
+archives and `checksums.txt`. The checksum check still applies.
 
 ## What the installer changes
 
 | | macOS and Linux | Windows |
 | --- | --- | --- |
 | Program | `~/.local/bin/pdfconcat`, or `$XDG_BIN_HOME/pdfconcat` when `XDG_BIN_HOME` is set | `%LOCALAPPDATA%\Programs\PDFConcat\pdfconcat.exe` |
-| PATH | If missing from PATH, a marked line in the login shell's startup files; `ZDOTDIR` and `XDG_CONFIG_HOME` overrides are honored. Fish uses its `conf.d/pdfconcat.fish` fragment. | If the folder is not already on PATH, it is added to the start of your user PATH. |
+| PATH | If missing from PATH, marked entries in the login shell's startup files; `ZDOTDIR` and `XDG_CONFIG_HOME` overrides are honored. Fish uses its `conf.d/pdfconcat.fish` fragment. | If the folder is not already on PATH, it is added to the start of your user PATH. |
 
-The added line only puts the folder on PATH when it is missing, and it ends with
-`# added by the PDFConcat installer` so that uninstall can find it. Running the
-installer again never adds a second copy. Startup files that are symbolic links,
-as in many dotfiles setups, stay links.
+For bash, the installer updates both `~/.bashrc` and one login startup file.
+It also creates a Fish fragment when Fish is the login shell or its configuration
+directory exists. Each POSIX shell entry only adds the folder when missing and
+ends with `# added by the PDFConcat installer`; the Fish fragment starts with
+that marker. Uninstall uses these markers to identify its entries. Reinstalling
+does not duplicate entries. Startup files that are symbolic links stay links.
 
 Nothing else is changed: no administrator settings, background updater,
 scheduled task or file association. Downloads go to a temporary folder that is
@@ -275,10 +277,12 @@ that installed it.
 
 Check your internet connection and that
 [github.com/resoltico/pdfconcat/releases](https://github.com/resoltico/pdfconcat/releases)
-opens. `curl` and `wget` use the `HTTPS_PROXY` environment variable; PowerShell
-uses the Windows proxy settings. On networks that block GitHub, place the
-release files on an internal server or folder and point
-`PDFCONCAT_DOWNLOAD_BASE` at it.
+opens. On macOS/Linux, export lowercase `https_proxy` with your proxy URL; both
+[`curl`](https://curl.se/libcurl/c/libcurl-env.html) and
+[`wget`](https://www.gnu.org/software/wget/manual/html_node/Proxies.html) support it.
+The documented Windows command uses Windows PowerShell's system proxy settings.
+On networks that block GitHub, place the release files on an HTTPS mirror or in
+an absolute local folder and point `PDFCONCAT_DOWNLOAD_BASE` at it.
 
 ### The checksum does not match
 
@@ -294,8 +298,11 @@ version older than 15, or a managed computer whose policy blocks programs that
 are not notarized or signed. Ask the computer's administrator about such a
 policy rather than disabling system protections.
 
-### PowerShell says running scripts is disabled
+### PowerShell refuses a saved installer script
 
-Use the complete command shown under [Windows](#windows), including
-`powershell -ExecutionPolicy ByPass -c`. Pasting only `irm ... | iex` into a
-PowerShell window with a restrictive policy can fail.
+When running a saved `install.ps1`, inspect the effective policies with
+`Get-ExecutionPolicy -List`. Script-file restrictions differ from executing the
+downloaded command text in the [Windows installation command](#windows).
+Process-level `-ExecutionPolicy Bypass` does not change persistent settings and
+cannot override Group Policy. Follow your organization's policy on managed
+devices. See [PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1).

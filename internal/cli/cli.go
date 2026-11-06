@@ -258,7 +258,7 @@ func Help(command string) string {
 	var b strings.Builder
 	switch command {
 	case "":
-		b.WriteString("PDFConcat assembles selected PDF pages, sections and generated pages from one reviewed plan.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n")
+		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n")
 		return b.String()
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"

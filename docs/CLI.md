@@ -1,5 +1,9 @@
 # Command line and result v6
 
+PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
+selections, sections, navigation and simple text inserts; see the
+[product scope](../README.md#scope-and-boundaries) and [plan reference](PLAN.md).
+
 ```text
 pdfconcat build [options] (--plan FILE|- | ITEM...)
 pdfconcat check [options] (--plan FILE|- | ITEM...)
@@ -72,6 +76,10 @@ and their required inputs, including a plan that needs no source PDFs.
 `--plan -` reads standard input with the plan byte limit. A read failure or
 cancellation during acquisition returns `plan_unreadable` or `interrupted`
 without writing a requested report.
+
+PDF sources and output use regular files, not stdin/stdout. To extend an existing
+PDF, pass it as the first source and choose a different output path. An output
+cannot alias an input, even with `--overwrite`; replacement is not appending.
 
 ## Output
 

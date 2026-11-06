@@ -3,8 +3,9 @@
 A plan is one UTF-8 JSON object with `version: 4`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
-operands and `--blank`. See the [installation guide](INSTALL.md) for setup,
-updates and documentation matching a published binary.
+operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
+and the [installation guide](INSTALL.md) for setup, updates and documentation
+matching a published binary.
 
 For a first run without preparing source PDFs, use
 [the generated-only example](#examples). The following plan illustrates a fuller
@@ -237,6 +238,12 @@ fitted pages preserve their immediate post-fit state outside the overlay.
 
 ## Generated pages and layering
 
+Each `page` item declares a blank or a page with one styled text block; `count`
+repeats that page. Use these pages for covers, separators and explanatory inserts,
+or build a plan containing only generated pages. Text wraps inside its block;
+overflow follows `text.overflow` and never creates another page. Declare separate
+page items to continue text manually. Linked contents uses its own pagination.
+
 Each setting comes from item `page`, then root `page_defaults`, then built-ins. Text
 members merge individually. `font` is atomic: a file object replaces the whole
 choice; `default` explicitly selects the embedded font. `background: none` clears
@@ -290,11 +297,11 @@ can overflow even when its text looks short; give an appropriate width.
 ```json
 {
   "version": 4,
-  "output": "column.pdf",
+  "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
     "text": {
-      "value": "Right-hand column that wraps",
+      "value": "A narrow text block that wraps",
       "anchor": "top-right", "x": "-20mm", "y": "-20mm",
       "width": "60mm", "align": "left"
     }

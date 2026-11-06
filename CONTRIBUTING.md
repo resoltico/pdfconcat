@@ -4,6 +4,12 @@ For commands and packet plans, start with the [README](README.md). This guide
 covers development from a source checkout; binary release archives do not contain
 the test sources or corpus.
 
+The README defines the [product scope and boundaries](README.md#scope-and-boundaries).
+Assembly aids and simple styled text pages, including generated-only plans, are
+supported. General document layout, source-content editing and format conversion
+are outside that scope. Scope eligibility does not imply an implemented feature;
+the README comparison identifies missing merge workflows.
+
 - [Build and ordinary tests](#build-and-ordinary-tests)
 - [Install with Go](#install-with-go)
 - [Stock tools](#stock-tools)
@@ -28,7 +34,7 @@ go test -count=1 ./...
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
 `pdffonts`, `pdftohtml`). The minimum qpdf version is declared in
-[`internal/oracle/qpdf.version`](https://github.com/resoltico/pdfconcat/blob/main/internal/oracle/qpdf.version);
+[`internal/oracle/qpdf.version`](internal/oracle/qpdf.version);
 it includes corrected linearization checking required by the frozen corpus.
 Install `qpdf poppler` with Homebrew. On Linux, install `poppler-utils` with apt
 and obtain a supported qpdf from the [official releases](https://github.com/qpdf/qpdf/releases)
@@ -171,7 +177,7 @@ access is needed by tests. A bounded loopback HTTP canary verifies that the CLI
 retains URI annotations without fetching them. This is finite pairwise/higher-order capability coverage,
 not exhaustive arbitrary PDF permutations. Binary archives do not include the
 source-only corpus; these commands and paths refer to a source checkout. See the
-[corpus guide](https://github.com/resoltico/pdfconcat/blob/main/internal/core/testdata/corpus/README.md)
+[corpus guide](internal/core/testdata/corpus/README.md)
 for asset provenance and producer recipes.
 
 ### Retain investigation output

@@ -229,18 +229,27 @@ the frozen corpus; no timing threshold gates builds.
 
 ## Release
 
-Release publication requires maintainer authorization. Review the intended commit, pending changelog outcomes, linked licenses/NOTICE files and installation instructions. The tag's version must have a matching nonempty changelog section. The release workflow runs the reusable CI before publication; keep `Required CI` intact.
+Release publication requires maintainer authorization. Review the intended
+changes, pending changelog outcomes, linked licenses/NOTICE files and installation
+instructions. Prepare the matching dated, nonempty changelog section and merge
+the release changes into `main`. Tag that intended commit as `vX.Y.Z` and push
+the tag. The release workflow runs the reusable CI before publication; keep
+`Required CI` intact. Do not publish a second release by hand while it is running.
 
-Validate GoReleaser at the exact version in `.github/workflows/release.yml`.
+For local packaging investigations, use the exact GoReleaser version in
+`.github/workflows/release.yml`. The release workflow already performs its CI
+gates, snapshot packaging checks and final publication; a routine release does
+not require duplicating those gates locally.
+
 Complete release packaging requires macOS: `.github/scripts/sign-macos.sh`
 applies and verifies an ad hoc signature on each Darwin executable before it is
 archived. This needs no Developer ID credential or notarization service. The
 Darwin linker settings declare macOS 15.0.0 as the minimum; ordinary
 cross-compilation checks alone do not verify that metadata or the signatures.
 
-Run every `goreleaser release --snapshot --clean` in an isolated clone: `--clean`
-deletes its dist directory. Inspect the archives, checksums, native version
-invocations and `pdfconcat licenses`, then run the
+Run a local `goreleaser release --snapshot --clean` only in an isolated clone:
+`--clean` deletes its dist directory. When investigating packaging, inspect the
+archives, checksums, native version invocations and `pdfconcat licenses`, then run the
 [installer harnesses](#installer-verification) against that dist directory.
 Snapshot success is not release publication.
 

@@ -30,11 +30,10 @@ update. The [installation guide](docs/INSTALL.md) covers uninstalling, options,
 manual downloads, verification and troubleshooting. Releases are not notarized
 by Apple or code-signed for Windows; the guide explains what that means.
 
-PDFConcat 0.8.0 uses plan v4 and result/report v6. These are the
-[0.8.0 instructions](https://github.com/resoltico/pdfconcat/tree/v0.8.0).
-`pdfconcat version` identifies the installed program; consult the tag matching
-that version. Matching schema numbers alone do not establish support for every
-documented field.
+Plans use format v4; results and reports use format v6. `pdfconcat version`
+identifies the installed program. These instructions describe the current source;
+for a released binary, use the documentation at its matching release tag.
+Matching schema numbers alone do not establish support for every documented field.
 
 ## First packet
 
@@ -126,7 +125,7 @@ you want to describe a packet's sources, sections and generated pages in one
 plan, check its layout, and retain an assembly report.
 
 The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**.
-The PDFConcat column describes 0.8.0.
+The PDFConcat column describes the current source.
 
 **●** means built-in support for the task as described; **—** means no dedicated
 built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu

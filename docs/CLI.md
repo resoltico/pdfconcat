@@ -81,9 +81,10 @@ stderr is empty unless writing stdout fails. `schema result` covers results,
 reports and JSON version objects. JSON member order is not a consumer contract.
 
 Usage errors print diagnostics and a help hint on stderr, with empty stdout.
-For build, check and version, an exact `--json` before the first `--` delimiter
-selects JSON even when argument parsing fails. The first error and its location
-are retained.
+For build, check and version, an exact `--json` before the option delimiter
+selects JSON even when argument parsing fails. A `--` consumed as an option's
+required value is not that delimiter. The first error and its location are
+retained.
 
 ```json
 {
@@ -165,8 +166,10 @@ use `report_exists`, `report_not_regular`, `report_is_input` or
 Existing inputs and the output are protected by file identity. Missing inputs are protected only by cleaned path spelling; reports are rechecked after PDF publication.
 
 Output/report files use ordinary umask permissions; replacements keep the old
-mode. Publication writes and syncs a sibling temporary file first. Without
-`--overwrite`, it uses a no-replace rename, with a link fallback when necessary.
+mode. Publication writes and syncs a sibling temporary file first. Its bounded
+name is independent of the destination basename, so staging does not reduce the
+destination's filesystem filename limit. Without `--overwrite`, it uses a
+no-replace rename, with a link fallback when necessary.
 With `--overwrite`, it uses a replacing rename, except that a report whose plan
 inputs are unknown still uses no-replace. On Unix it then syncs the containing
 directory. A trailing sync or temp-cleanup failure

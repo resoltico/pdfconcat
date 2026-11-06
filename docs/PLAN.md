@@ -3,8 +3,8 @@
 A plan is one UTF-8 JSON object with `version: 4`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
-operands and `--blank`. See the [installation guidance](../README.md#install)
-for documentation matching a source build or published binary.
+operands and `--blank`. See the [installation guide](INSTALL.md) for setup,
+updates and documentation matching a published binary.
 
 For a first run without preparing source PDFs, use
 [the generated-only example](#examples). The following plan illustrates a fuller

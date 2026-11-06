@@ -64,19 +64,19 @@ Supported systems: Windows 10 and 11 on x64 or Arm64.
 ## Update
 
 Run the installation command again. Without a version override it downloads the
-latest release, checks it
-and only then replaces the installed program, so a failed download leaves your
-working copy in place. It reports the installed version and selected path.
+latest release, checks it and only then replaces the installed program, so a
+failed download leaves your working copy in place. It reports the installed
+version and selected path.
 A running `pdfconcat` process continues using the executable it started with.
 
 To install a specific release instead of the latest, pass its version:
 
 ```sh
-curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh -s -- --version 0.8.0
+curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh -s -- --version 0.9.0
 ```
 
 ```powershell
-$env:PDFCONCAT_VERSION = '0.8.0'; irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex
+$env:PDFCONCAT_VERSION = '0.9.0'; irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex
 ```
 
 An environment-variable version pin applies to subsequent installer commands in

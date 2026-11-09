@@ -1,469 +1,512 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-#
-# Installs, updates or uninstalls PDFConcat for the current user on macOS and
-# Linux. No administrator access is needed. See docs/INSTALL.md.
-#
-#   curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh
-#   curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh -s -- --uninstall
+# Self-contained user installer. Shared engine; only this literal block differs.
+# BEGIN PRODUCT SETTINGS
+product_name='PDFConcat'
+command_name='pdfconcat'
+repo_url='https://github.com/resoltico/pdfconcat'
+env_prefix='PDFCONCAT'
+archive_prefix='pdfconcat_'
+archive_separator='_'
+archive_versioned=0
+macos_token='darwin'
+x64_token='amd64'
+arm64_token='arm64'
+checksum_name='checksums.txt'
+minimum_macos=15
+legal_files=''
+# END PRODUCT SETTINGS
 
 set -eu
+umask 077
+docs_url=${repo_url}/blob/main/docs/INSTALL.md
+marker="# added by the ${product_name} installer"
+tmp='' stage='' locked=0 transition=0 binary_switched=0 state_moved=0 state_switched=0 path_locked=0
 
-repo_url=https://github.com/resoltico/pdfconcat
-docs_url=$repo_url/blob/main/docs/INSTALL.md
-# Every line the installer adds to a shell startup file ends with this marker;
-# uninstall removes exactly those lines.
-marker='# added by the PDFConcat installer'
-
+# Names here come only from this script and its literal settings, never user data.
+setting() { eval "printf '%s' \"\${${env_prefix}_$1-}\""; }
+shell_quote() { printf "'"; printf '%s' "$1" | sed "s/'/'\\\\''/g"; printf "'"; }
+fish_quote() { printf "'"; printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"; printf "'"; }
+step() { printf '  + %-11s %s\n' "$1" "$2"; }
+note() { printf '  ! %-11s %s\n' "$1" "$2"; }
+die() { printf '\n  Error: %s\n' "$1" >&2; shift; for message in "$@"; do printf '    %s\n' "${message}" >&2; done; printf '    Help: %s\n' "${docs_url}" >&2; exit 1; }
 usage() {
-    cat <<'EOF'
-Install, update or uninstall PDFConcat for the current user.
-
-Usage: install.sh [options]
-
-Options:
-  --version X.Y.Z    Install that release instead of the latest one
-  --install-dir DIR  Install into DIR (default: $XDG_BIN_HOME or ~/.local/bin)
-  --no-modify-path   Do not add the install directory to shell startup files
-  --uninstall        Remove PDFConcat and the PATH lines this installer added
-  -h, --help         Show this help
-
-Environment: PDFCONCAT_VERSION, PDFCONCAT_INSTALL_DIR, PDFCONCAT_NO_MODIFY_PATH=1,
-PDFCONCAT_DOWNLOAD_BASE (a release mirror URL or a local directory of release files).
+    cat <<EOF
+Install, update or uninstall ${product_name} for the current user.
+Usage: install.sh [--version X.Y.Z] [--install-dir DIR] [--no-modify-path] [--uninstall]
+Defaults: \$XDG_BIN_HOME or ~/.local/bin; no administrator access required.
+--no-modify-path leaves shell startup files untouched, including on uninstall.
+Environment: ${env_prefix}_VERSION, ${env_prefix}_INSTALL_DIR,
+${env_prefix}_NO_MODIFY_PATH=1, ${env_prefix}_DOWNLOAD_BASE (HTTPS mirror or local directory).
 EOF
 }
 
-# --- Presentation -----------------------------------------------------------
-
-setup_ui() {
-    bold='' dim='' red='' green='' yellow='' reset=''
-    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
-        esc=$(printf '\033')
-        bold="${esc}[1m" dim="${esc}[2m" red="${esc}[31m" green="${esc}[32m" yellow="${esc}[33m" reset="${esc}[0m"
-    fi
-    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-        *UTF-8* | *utf-8* | *UTF8* | *utf8*) ok='✓' bad='✗' warn_mark='!' ;;
-        *) ok='+' bad='x' warn_mark='!' ;;
-    esac
+stable_version() { printf '%s\n' "$1" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || die "Not a stable release version: $1"; }
+require_line_path() { case "$1" in *'
+'* | *"$(printf '\r')"*) die 'Paths containing newline or carriage return cannot be managed.' ;; *) : ;; esac; }
+validate_settings() {
+    case "${env_prefix}" in '' | *[!A-Z0-9_]* | [0-9]*) die 'Invalid installer environment prefix.' ;; *) : ;; esac
+    case "${command_name}" in '' | *[!A-Za-z0-9_-]*) die 'Invalid installer command name.' ;; *) : ;; esac
+    case "${archive_versioned}" in 0 | 1) : ;; *) die 'Invalid archive naming setting.' ;; esac
+    for token in "${archive_prefix}" "${archive_separator}" "${macos_token}" "${x64_token}" "${arm64_token}" "${checksum_name}"; do
+        case "${token}" in '' | *[!A-Za-z0-9_.-]* | . | ..) die 'Invalid installer archive setting.' ;; *) : ;; esac
+    done
+    for legal in ${legal_files}; do
+        case "${legal}" in *[!A-Za-z0-9_.-]* | . | ..) die 'Legal filenames must be simple basenames.' ;; *) : ;; esac
+    done
 }
-
-title() { printf '\n%s%s%s\n\n' "$bold" "$1" "$reset"; }
-step() { printf '  %s%s%s %s%-11s%s %s\n' "$green" "$ok" "$reset" "$bold" "$1" "$reset" "$2"; }
-note() { printf '  %s%s%s %s%-11s%s %s\n' "$yellow" "$warn_mark" "$reset" "$bold" "$1" "$reset" "$2"; }
-detail() { printf '                %s%s%s\n' "$dim" "$1" "$reset"; }
-command_line() { printf '      %s\n' "$1"; }
-
-die() {
-    printf '\n  %s%s %s%s\n' "$red" "$bad" "$1" "$reset" >&2
-    shift
-    for line in "$@"; do printf '    %s\n' "$line" >&2; done
-    printf '\n    Help: %s\n\n' "$docs_url" >&2
-    exit 1
-}
-
-# Show paths under the home directory with ~ for readability.
-tilde='~'
-pretty_path() {
-    case "$1" in
-        "$HOME") printf '%s' "$tilde" ;;
-        "$HOME"/*) printf '%s/%s' "$tilde" "${1#"$HOME"/}" ;;
-        *) printf '%s' "$1" ;;
-    esac
-}
-
-# --- Arguments --------------------------------------------------------------
-
 parse_args() {
-    version=${PDFCONCAT_VERSION:-}
-    install_dir=${PDFCONCAT_INSTALL_DIR:-}
-    modify_path=1
-    [ "${PDFCONCAT_NO_MODIFY_PATH:-}" != 1 ] || modify_path=0
-    action=install
-    while [ $# -gt 0 ]; do
+    login_shell=${SHELL:-}
+    version=$(setting VERSION); install_dir=$(setting INSTALL_DIR)
+    version_requested=0
+    [ -z "${version}" ] || version_requested=1
+    download_base=$(setting DOWNLOAD_BASE); modify_path=1; action=install
+    no_modify=$(setting NO_MODIFY_PATH)
+    [ "${no_modify}" != 1 ] || modify_path=0
+    while [ "$#" -gt 0 ]; do
         case "$1" in
-            --version)
-                [ $# -ge 2 ] || die '--version needs a value, such as --version 0.7.0.'
-                version=$2; shift ;;
-            --version=*) version=${1#*=} ;;
-            --install-dir)
-                [ $# -ge 2 ] || die '--install-dir needs a directory.'
-                install_dir=$2; shift ;;
-            --install-dir=*) install_dir=${1#*=} ;;
+            --version) [ "$#" -ge 2 ] && [ -n "$2" ] || die '--version needs a nonempty value.'; version=$2; version_requested=1; shift ;;
+            --version=*) version=${1#*=}; [ -n "${version}" ] || die '--version needs a nonempty value.'; version_requested=1 ;;
+            --install-dir) [ "$#" -ge 2 ] && [ -n "$2" ] || die '--install-dir needs a nonempty directory.'; install_dir=$2; shift ;;
+            --install-dir=*) install_dir=${1#*=}; [ -n "${install_dir}" ] || die '--install-dir needs a nonempty directory.' ;;
             --no-modify-path) modify_path=0 ;;
             --uninstall) action=uninstall ;;
             -h | --help) usage; exit 0 ;;
-            *) die "Unknown option: $1" 'Run with --help to see the available options.' ;;
+            *) die "Unknown option: $1" 'Run with --help for options.' ;;
         esac
         shift
     done
     version=${version#v}
-    if [ -n "$version" ] && ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
-        die "Not a release version: $version" 'Use a stable version such as 0.7.0.'
-    fi
-    [ -n "${HOME:-}" ] || die 'HOME is not set, so the default install directory is unknown.' 'Set HOME or use --install-dir.'
-    if [ -z "$install_dir" ]; then
-        install_dir=${XDG_BIN_HOME:-$HOME/.local/bin}
-    fi
-    case "$install_dir" in
-        /*) ;;
-        *) die "The install directory must be an absolute path: $install_dir" ;;
-    esac
-    install_dir=${install_dir%/}
-    [ -n "$install_dir" ] || install_dir=/
-    binary=$install_dir/pdfconcat
-}
-
-# --- Platform ---------------------------------------------------------------
-
-detect_platform() {
-    kernel=$(uname -s)
-    machine=$(uname -m)
-    case "$kernel" in
-        Darwin)
-            os=darwin
-            macos_version=$(sw_vers -productVersion 2>/dev/null || printf unknown)
-            case "${macos_version%%.*}" in
-                '' | *[!0-9]*) die "Could not read the macOS version ($macos_version)." ;;
-            esac
-            [ "${macos_version%%.*}" -ge 15 ] ||
-                die "PDFConcat needs macOS 15 or later; this Mac runs macOS $macos_version."
-            # A Terminal running under Rosetta reports x86_64; install the
-            # native build when the hardware supports arm64.
-            if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
-                machine=arm64
-            fi
-            ;;
-        Linux) os=linux ;;
-        MINGW* | MSYS* | CYGWIN* | Windows_NT)
-            die 'This installer is for macOS and Linux.' \
-                'On Windows, run this in PowerShell instead:' \
-                "powershell -ExecutionPolicy ByPass -c \"irm $repo_url/releases/latest/download/install.ps1 | iex\""
-            ;;
-        *) die "PDFConcat has no release for $kernel." 'Build it from source; see the README.' ;;
-    esac
-    case "$machine" in
-        x86_64 | amd64) arch=amd64 ;;
-        arm64 | aarch64) arch=arm64 ;;
-        *) die "PDFConcat has no $kernel release for the $machine processor." 'Build it from source; see the README.' ;;
-    esac
-    if [ "$os" = darwin ]; then
-        case "$arch" in arm64) chip='Apple silicon' ;; *) chip='Intel' ;; esac
-        system="macOS $macos_version · $chip ($arch)"
-    else
-        system="Linux · $machine ($arch)"
-    fi
-}
-
-# --- Downloads and verification ---------------------------------------------
-
-fetch() {
-    case "$base" in
-        https://*)
-            if command -v curl >/dev/null 2>&1; then
-                curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-                    --retry 3 --connect-timeout 20 --output "$2" "$base/$1"
-            elif command -v wget >/dev/null 2>&1; then
-                wget --https-only --quiet --output-document="$2" "$base/$1"
-            else
-                die 'Neither curl nor wget is available to download PDFConcat.' 'Install curl, then run the installer again.'
-            fi
-            ;;
-        *) cp "$base/$1" "$2" ;;
-    esac
+    if [ "${version_requested}" = 1 ]; then stable_version "${version}"; fi
+    [ -n "${HOME:-}" ] || die 'HOME is not set.'
+    [ -n "${install_dir}" ] || install_dir=${XDG_BIN_HOME:-${HOME}/.local/bin}
+    case "${install_dir}" in /*) ;; *) die 'The install directory must be absolute.' ;; esac
+    require_line_path "${install_dir}"
+    while [ "${install_dir}" != / ] && [ "${install_dir%/}" != "${install_dir}" ]; do install_dir=${install_dir%/}; done
+    binary=${install_dir%/}/${command_name}
+    state=${install_dir%/}/.${command_name}-install
+    lock=${install_dir%/}/.${command_name}-install.lock
 }
 
 sha256_of() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$1" | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        openssl dgst -sha256 "$1" | awk '{print $NF}'
-    else
-        die 'No SHA-256 tool (sha256sum, shasum or openssl) is available to verify the download.'
+    if command -v sha256sum >/dev/null 2>&1; then digest_output=$(sha256sum < "$1") || die 'Could not read or hash the selected file.'
+    elif command -v shasum >/dev/null 2>&1; then digest_output=$(shasum -a 256 < "$1") || die 'Could not read or hash the selected file.'
+    elif command -v openssl >/dev/null 2>&1; then digest_output=$(openssl dgst -sha256 < "$1") || die 'Could not read or hash the selected file.'
+    else die 'A SHA-256 tool (sha256sum, shasum or openssl) is required.'; fi
+    printf '%s\n' "${digest_output}" | awk '{ if (length($1)==64) print tolower($1); else print tolower($NF) }'
+}
+require_regular() { [ -f "$1" ] && [ ! -h "$1" ] || owned_error; }
+owned_error() { die "Existing files in ${install_dir} have missing, changed or invalid installer ownership; nothing was replaced or removed." 'Review and remove the old/manual installation yourself, or use a new directory.'; }
+
+# Receipt files are data, never shell code. Its manifest covers every owned file.
+state_files() {
+    printf '%s\n' format owner location binary.sha256 version created-dir path-count
+    for legal in ${legal_files}; do printf 'legal/%s\n' "${legal}"; done
+    record_index=0
+    while [ "${record_index}" -lt "${record_count}" ]; do
+        printf 'paths/%s.file\npaths/%s.line\npaths/%s.created\n' "${record_index}" "${record_index}" "${record_index}"
+        record_index=$((record_index + 1))
+    done
+}
+manifest_for() {
+    state_files > "${tmp}/state-files"
+    while IFS= read -r member; do
+        digest=$(sha256_of "$1/${member}")
+        printf '%s  %s\n' "${digest}" "${member}"
+    done < "${tmp}/state-files"
+}
+seal_state() {
+    manifest_for "$1" > "${tmp}/state-manifest"
+    cp "${tmp}/state-manifest" "$1/state.sha256"
+}
+validate_state() {
+    [ -d "${state}" ] && [ ! -h "${state}" ] || owned_error
+    for member in format owner location binary.sha256 version created-dir path-count state.sha256; do require_regular "${state}/${member}"; done
+    format=$(cat "${state}/format"); owner=$(cat "${state}/owner"); location=$(cat "${state}/location")
+    [ "${format}" = 1 ] && [ "${owner}" = "${command_name}" ] && [ "${location}" = "${install_dir}" ] || owned_error
+    created_dir=$(cat "${state}/created-dir"); case "${created_dir}" in 0 | 1) ;; *) owned_error ;; esac
+    record_count=$(cat "${state}/path-count")
+    printf '%s\n' "${record_count}" | grep -Eq '^(0|[1-9][0-9]*)$' || owned_error
+    [ "${record_count}" -le 100 ] || owned_error
+    state_files > "${tmp}/expected-files"
+    printf '%s\n' state.sha256 >> "${tmp}/expected-files"
+    LC_ALL=C sort "${tmp}/expected-files" > "${tmp}/expected-sorted"
+    (cd "${state}" && find . -type f | sed 's|^./||' | LC_ALL=C sort) > "${tmp}/actual-files"
+    cmp -s "${tmp}/expected-sorted" "${tmp}/actual-files" || owned_error
+    # No links, devices or additional (even empty) user directories may be erased.
+    (cd "${state}" && find . ! -type f ! -type d) > "${tmp}/nonregular"
+    [ ! -s "${tmp}/nonregular" ] || owned_error
+    (cd "${state}" && find . -type d | LC_ALL=C sort) > "${tmp}/actual-dirs"
+    printf '%s\n' . ./legal ./paths > "${tmp}/expected-dirs"
+    cmp -s "${tmp}/expected-dirs" "${tmp}/actual-dirs" || owned_error
+    manifest_for "${state}" > "${tmp}/computed-manifest"
+    cmp -s "${state}/state.sha256" "${tmp}/computed-manifest" || owned_error
+    record_index=0
+    while [ "${record_index}" -lt "${record_count}" ]; do
+        path_created=$(cat "${state}/paths/${record_index}.created")
+        case "${path_created}" in 0 | 1) : ;; *) owned_error ;; esac
+        record_index=$((record_index + 1))
+    done
+    require_regular "${binary}"
+    expected_binary=$(cat "${state}/binary.sha256")
+    actual_binary=$(sha256_of "${binary}")
+    [ "${actual_binary}" = "${expected_binary}" ] || owned_error
+    old_version=$(cat "${state}/version")
+}
+
+rollback() {
+    rollback_failed=0
+    if [ "${state_switched}" = 1 ] && [ -d "${state}" ]; then mv "${state}" "${stage}/failed-state" || rollback_failed=1; fi
+    if [ "${binary_switched}" = 1 ]; then
+        if [ "${managed}" = 1 ]; then mv -f "${stage}/previous-binary" "${binary}" || rollback_failed=1
+        else rm -f "${binary}" || rollback_failed=1; fi
+    fi
+    if [ "${state_moved}" = 1 ]; then mv "${stage}/previous-state" "${state}" || rollback_failed=1; fi
+    transition=0
+    if [ "${rollback_failed}" = 1 ]; then
+        printf 'Recovery files remain at %s; restoration was incomplete.\n' "${stage}" >&2
+        stage=''
+    fi
+}
+cleanup() {
+    [ "${transition}" = 0 ] || rollback
+    [ -z "${stage}" ] || rm -rf "${stage}"
+    if [ "${path_locked}" = 1 ]; then rmdir "${path_lock}" || printf 'Could not remove PATH lock: %s\n' "${path_lock}" >&2; fi
+    if [ "${locked}" = 1 ]; then rmdir "${lock}" || printf 'Could not remove installer lock: %s\n' "${lock}" >&2; fi
+    [ -z "${tmp}" ] || rm -rf "${tmp}"
+    if [ "${remove_created_dir:-0}" = 1 ] && [ "${install_dir}" != / ]; then rmdir "${install_dir}" 2>/dev/null || :; fi
+}
+acquire() {
+    created_dir=0
+    if [ ! -d "${install_dir}" ]; then
+        [ "${action}" = install ] || return
+        mkdir -p "${install_dir}" || die 'Could not create the install directory.'
+        created_dir=1
+    fi
+    mkdir "${lock}" 2>/dev/null || die "Installation is already locked, or the lock path exists: ${lock}" 'No retries are performed; inspect any stale lock before removing it manually.'
+    locked=1
+    [ "${created_dir}" = 0 ] || remove_created_dir=1
+    managed=0; old_version=''; record_count=0
+    if [ -e "${binary}" ] || [ -h "${binary}" ] || [ -e "${state}" ] || [ -h "${state}" ]; then
+        validate_state
+        managed=1
     fi
 }
 
-file_size() {
-    wc -c < "$1" | awk '{ if ($1 >= 1048576) printf "%.1f MB", $1 / 1048576; else printf "%d KB", $1 / 1024 }'
+acquire_path_lock() {
+    [ "${modify_path}" = 1 ] || return 0
+    path_lock=${HOME}/.cli-installer-path.lock
+    mkdir "${path_lock}" 2>/dev/null || die "Another installer is editing PATH, or this lock path exists: ${path_lock}" 'No retries are performed; inspect stale locks before removing them manually.'
+    path_locked=1
 }
 
-# Prints "pdfconcat X.Y.Z" for a working PDFConcat executable, or fails.
+detect_platform() {
+    kernel=$(uname -s); machine=$(uname -m)
+    case "${kernel}" in
+        Darwin)
+            os=${macos_token}; macos_version=$(sw_vers -productVersion)
+            case "${macos_version%%.*}" in '' | *[!0-9]*) die 'Could not read the macOS version.' ;; *) : ;; esac
+            [ "${macos_version%%.*}" -ge "${minimum_macos}" ] || die "${product_name} requires macOS ${minimum_macos} or later."
+            arm_hardware=$(sysctl -in hw.optional.arm64)
+            [ "${arm_hardware}" != 1 ] || machine=arm64
+            system="macOS ${macos_version} · ${machine}"
+            ;;
+        Linux) os=linux; system="Linux · ${machine}" ;;
+        MINGW* | MSYS* | CYGWIN* | Windows_NT) die 'Use install.ps1 from PowerShell on Windows.' ;;
+        *) die "${product_name} has no release for ${kernel}." ;;
+    esac
+    case "${machine}" in x86_64 | amd64) arch=${x64_token} ;; arm64 | aarch64) arch=${arm64_token} ;; *) die "Unsupported processor: ${machine}" ;; esac
+}
+resolve_latest() {
+    if command -v curl >/dev/null 2>&1; then
+        effective=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --connect-timeout 20 --output /dev/null --write-out '%{url_effective}' "${repo_url}/releases/latest") || die 'Could not resolve the latest stable release.'
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --timeout=20 --quiet --server-response --output-document=/dev/null "${repo_url}/releases/latest" 2> "${tmp}/redirects" || { cat "${tmp}/redirects" >&2; die 'Could not resolve the latest stable release.'; }
+        effective=$(awk 'tolower($1)=="location:" { location=$2 } END {print location}' "${tmp}/redirects")
+        case "${effective}" in /*) effective=https://github.com${effective} ;; *) : ;; esac
+    else die 'Install curl or wget to download releases.'; fi
+    case "${effective}" in "${repo_url}"/releases/tag/v*) version=${effective#"${repo_url}/releases/tag/v"} ;; *) die "Unexpected latest-release destination: ${effective}" ;; esac
+    stable_version "${version}"
+}
+fetch() {
+    case "${base}" in
+        https://*)
+            if command -v curl >/dev/null 2>&1; then curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --connect-timeout 20 --output "$2" "${base}/$1" || die "Could not download $1."
+            elif command -v wget >/dev/null 2>&1; then wget --https-only --timeout=20 --quiet --output-document="$2" "${base}/$1" || die "Could not download $1."
+            else die 'Install curl or wget to download releases.'; fi
+            ;;
+        /*) cp "${base}/$1" "$2" || die "Could not download $1." ;;
+        *) die 'The release mirror must be HTTPS or an absolute local directory.' ;;
+    esac
+}
 reported_version() {
-    out=$("$1" version 2>/dev/null) || return 1
-    out=$(printf '%s\n' "$out" | head -n 1)
-    case "$out" in
-        'pdfconcat '*) printf '%s\n' "$out" | awk '{print $2}' ;;
-        *) return 1 ;;
-    esac
-}
-
-download_and_verify() {
-    asset="pdfconcat_${os}_${arch}.tar.gz"
-    if [ -n "${PDFCONCAT_DOWNLOAD_BASE:-}" ]; then
-        base=${PDFCONCAT_DOWNLOAD_BASE%/}
-        case "$base" in
-            https://* | /*) ;;
-            *) die 'PDFCONCAT_DOWNLOAD_BASE must be an https:// URL or an absolute directory.' ;;
-        esac
-        source_label=$(pretty_path "$base")
-    elif [ -n "$version" ]; then
-        base=$repo_url/releases/download/v$version
-        source_label="the v$version release"
+    if "$1" --version > "${tmp}/version.out" 2> "${tmp}/version.err"; then :
     else
-        base=$repo_url/releases/latest/download
-        source_label='the latest release'
+        if [ -s "${tmp}/version.err" ]; then
+            printf 'Program diagnostic:\n' >&2
+            head -c 4096 "${tmp}/version.err" >&2
+            printf '\n' >&2
+        fi
+        die 'The verified program could not run. Nothing was installed.'
     fi
-
-    fetch "$asset" "$tmp/$asset" ||
-        die "Could not download $asset from $source_label." \
-            'Check your internet connection and that the release exists:' "$repo_url/releases"
-    fetch checksums.txt "$tmp/checksums.txt" ||
-        die "Could not download checksums.txt from $source_label."
-    step Downloaded "$asset · $(file_size "$tmp/$asset")"
-    detail "from $source_label"
-
-    expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$tmp/checksums.txt")
-    [ "$(printf '%s\n' "$expected" | grep -c .)" = 1 ] ||
-        die "checksums.txt has no unique entry for $asset." 'Nothing was installed.'
-    actual=$(sha256_of "$tmp/$asset")
-    [ "$actual" = "$expected" ] ||
-        die "The download does not match its published SHA-256 checksum." \
-            'Nothing was installed. Try again; if this persists, please report it:' "$repo_url/issues"
-    step Verified 'SHA-256 matches the release checksums'
-
-    # Extract only the executable; other archive members are never written.
-    mkdir "$tmp/extract"
-    tar -xzf "$tmp/$asset" -C "$tmp/extract" pdfconcat 2>/dev/null ||
-        die "$asset does not contain the pdfconcat executable."
-    candidate=$tmp/extract/pdfconcat
-    if [ ! -f "$candidate" ] || [ -h "$candidate" ]; then
-        die "$asset does not contain a regular pdfconcat file."
-    fi
-    chmod 755 "$candidate"
-
-    new_version=$(reported_version "$candidate") ||
-        die 'The downloaded program does not run on this system.' 'Nothing was installed.' \
-            "Running it directly shows the reason: $candidate version"
-    if [ -n "$version" ] && [ "$new_version" != "$version" ]; then
-        die "The downloaded program reports version $new_version, not $version." 'Nothing was installed.'
-    fi
-    step Tested "pdfconcat $new_version runs on this system"
+    identity_lines=$(awk 'END {print NR}' "${tmp}/version.out")
+    [ "${identity_lines}" = 1 ] || die 'The program returned an invalid version identity.'
+    identity=$(cat "${tmp}/version.out")
+    carriage_return=$(printf '\r')
+    case "${identity}" in *"${carriage_return}"*) die 'The program returned an invalid version identity.' ;; *) : ;; esac
+    numeric='(0|[1-9][0-9]*)'; pre='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+    semver="${numeric}\.${numeric}\.${numeric}(-${pre}(\.${pre})*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
+    printf '%s\n' "${identity}" | grep -Eq "^${command_name} ${semver}( \([^()]+\))?$" || die 'The program returned an invalid version identity.'
+    identity=${identity#"${command_name} "}; printf '%s\n' "${identity%% *}"
 }
-
-# --- Installation -----------------------------------------------------------
-
-install_binary() {
-    if [ -h "$binary" ] || { [ -e "$binary" ] && [ ! -f "$binary" ]; }; then
-        die "$(pretty_path "$binary") exists and is not a regular file, so it was left alone." \
-            'Remove it yourself, or choose another location with --install-dir.'
+download_and_verify() {
+    if [ -n "${download_base}" ]; then
+        base=${download_base%/}
+        case "${base}" in
+            https://*)
+                authority=${base#https://}; authority=${authority%%/*}
+                case "${authority}" in *@*) die 'HTTPS mirror bases must not contain credentials.' ;; *) : ;; esac
+                case "${base}" in *'?'* | *'#'*) die 'HTTPS mirror bases must not contain queries or fragments.' ;; *) : ;; esac
+                ;;
+            /*) : ;;
+            *) die 'The release mirror must be HTTPS or an absolute local directory.' ;;
+        esac
+        if [ "${archive_versioned}" = 1 ] && [ -z "${version}" ]; then die 'Versioned mirror archives require --version X.Y.Z.'; fi
+    else
+        [ -n "${version}" ] || resolve_latest
+        base=${repo_url}/releases/download/v${version}
     fi
-    old_version=''
-    if [ -f "$binary" ]; then
-        old_version=$(reported_version "$binary" || printf 'an unknown version')
-    fi
-    mkdir -p "$install_dir" || die "Could not create $(pretty_path "$install_dir")."
-    # Copy beside the destination, then rename: the switch is atomic and a
-    # running pdfconcat keeps its old file until it exits.
-    staged="$install_dir/.pdfconcat.$$"
-    if ! { cp "$candidate" "$staged" && chmod 755 "$staged" && mv -f "$staged" "$binary"; }; then
-        rm -f "$staged"
-        die "Could not write $(pretty_path "$binary")." 'Check that you can write to that directory.'
-    fi
-    case "$old_version" in
-        '') step Installed "$(pretty_path "$binary")" ;;
-        "$new_version") step Installed "$(pretty_path "$binary") (reinstalled $new_version)" ;;
-        *) step Installed "$(pretty_path "$binary") (updated from $old_version)" ;;
-    esac
-}
-
-# The PATH expression written to startup files, preferring $HOME over a
-# hard-coded home directory.
-path_expression() {
-    case "$install_dir" in
-        "$HOME"/*) printf '$HOME/%s' "${install_dir#"$HOME"/}" ;;
-        *) printf '%s' "$install_dir" ;;
-    esac
+    asset=${archive_prefix}
+    [ "${archive_versioned}" = 0 ] || asset=${asset}${version}${archive_separator}
+    asset=${asset}${os}${archive_separator}${arch}.tar.gz
+    fetch "${checksum_name}" "${tmp}/checksums"
+    fetch "${asset}" "${tmp}/archive.tar.gz"
+    expected=$(awk -v name="${asset}" '$2==name || $2=="*"name { if (NF!=2 || length($1)!=64 || $1 !~ /^[0-9a-fA-F]+$/) bad=1; count++; hash=tolower($1) } END { if (count!=1 || bad) exit 1; print hash }' "${tmp}/checksums") || die "The checksum file has no unique valid SHA-256 entry for ${asset}."
+    actual=$(sha256_of "${tmp}/archive.tar.gz")
+    [ "${actual}" = "${expected}" ] || die 'The download does not match its published SHA-256 checksum.' 'Nothing was installed.'
+    step Downloaded "${asset}"; step Verified 'SHA-256 matches the release checksums'
+    mkdir "${tmp}/extract"
+    tar -tzf "${tmp}/archive.tar.gz" > "${tmp}/archive-list" || die 'The archive cannot be read.'
+    for member in "${command_name}" ${legal_files}; do
+        count=$(grep -Fxc -- "${member}" "${tmp}/archive-list" || :)
+        [ "${count}" = 1 ] || die "The archive must contain exactly one ${member}."
+        tar -tvzf "${tmp}/archive.tar.gz" "${member}" > "${tmp}/member-type" || die "Could not inspect ${member}."
+        metadata_lines=$(awk 'END {print NR}' "${tmp}/member-type")
+        [ "${metadata_lines}" = 1 ] || die "Ambiguous archive member: ${member}"
+        first=$(cut -c 1 "${tmp}/member-type")
+        [ "${first}" = - ] || die "Archive member is not a regular file: ${member}"
+        # -O streams only this regular member; archive paths/links are never written.
+        tar -xOzf "${tmp}/archive.tar.gz" "${member}" > "${tmp}/extract/${member}" || die "Could not extract ${member}."
+        if [ "${member}" != "${command_name}" ] && [ ! -s "${tmp}/extract/${member}" ]; then die "Required legal material is empty: ${member}"; fi
+    done
+    candidate=${tmp}/extract/${command_name}; chmod 755 "${candidate}"
+    new_version=$(reported_version "${candidate}")
+    if [ -n "${version}" ] && [ "${new_version}" != "${version}" ]; then die "The downloaded program reports version ${new_version}, not ${version}."; fi
+    step Tested "${command_name} ${new_version} runs on this system"
 }
 
 posix_line() {
-    dir=$(path_expression)
-    printf 'case ":${PATH}:" in *:"%s":*) ;; *) export PATH="%s:$PATH" ;; esac %s' "$dir" "$dir" "$marker"
+    quoted=$(shell_quote "${install_dir}")
+    dollar='$'
+    printf 'case ":%s{PATH}:" in *:%s:*) ;; *) export PATH=%s:"%sPATH" ;; esac %s' "${dollar}" "${quoted}" "${quoted}" "${dollar}" "${marker}"
 }
-
-fish_file() { printf '%s/fish/conf.d/pdfconcat.fish' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
-
-# Startup files for the user's login shell. Bash reads one login file and,
-# for interactive non-login shells, ~/.bashrc; both get the guarded line.
+fish_line() {
+    quoted=$(fish_quote "${install_dir}")
+    dollar='$'
+    printf 'if not contains -- %s %sPATH; set -gx PATH %s %sPATH; end %s' "${quoted}" "${dollar}" "${quoted}" "${dollar}" "${marker}"
+}
 startup_files() {
-    case "${SHELL:-}" in
-        */zsh) printf '%s\n' "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    case "${login_shell}" in
+        */zsh) printf '%s\n' "${ZDOTDIR:-${HOME}}/.zshrc" ;;
         */bash)
-            printf '%s\n' "$HOME/.bashrc"
-            for login in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-                if [ -e "$login" ]; then printf '%s\n' "$login"; return; fi
-            done
-            printf '%s\n' "$HOME/.profile"
-            ;;
+            printf '%s\n' "${HOME}/.bashrc"
+            for login in "${HOME}/.bash_profile" "${HOME}/.bash_login" "${HOME}/.profile"; do if [ -e "${login}" ]; then printf '%s\n' "${login}"; return; fi; done
+            printf '%s\n' "${HOME}/.profile" ;;
         */fish) ;;
-        *) printf '%s\n' "$HOME/.profile" ;;
+        *) printf '%s\n' "${HOME}/.profile" ;;
     esac
 }
-
-append_line() {
-    file=$1 line=$2
-    if [ -f "$file" ] && grep -Fxq -- "$line" "$file"; then
-        return 1
+plan_path() {
+    path_ready=0; : > "${stage}/path-actions"
+    case "${install_dir}" in *:*) note PATH 'A colon cannot be represented in PATH; startup files left unchanged.'; modify_path=0 ;; *) : ;; esac
+    case ":${PATH}:" in *":${install_dir}:"*) path_ready=1 ;; *) : ;; esac
+    if [ "${modify_path}" = 0 ]; then return; fi
+    if [ "${path_ready}" = 1 ]; then step PATH "already includes ${install_dir}"; return; fi
+    startup_files > "${tmp}/startup-files"
+    fish=${XDG_CONFIG_HOME:-${HOME}/.config}/fish/conf.d/${command_name}.fish
+    if [ "${login_shell}" != "${login_shell%/fish}" ] || [ -d "${fish%/conf.d/*}" ]; then
+        mkdir -p "${fish%/*}" || die 'Could not create the fish configuration directory.'
+        printf '%s\n' "${fish}" >> "${tmp}/startup-files"
     fi
-    # Keep the user's last line intact when it lacks a trailing newline.
-    if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l | tr -d ' ')" = 0 ]; then
-        printf '\n' >> "$file"
-    fi
-    printf '%s\n' "$line" >> "$file"
-}
-
-configure_path() {
-    on_path=0
-    case ":$PATH:" in *":$install_dir:"*) on_path=1 ;; esac
-    added=''
-    if [ "$on_path" = 1 ]; then
-        step PATH "already includes $(pretty_path "$install_dir")"
-        return
-    fi
-    if [ "$modify_path" = 0 ]; then
-        note PATH "$(pretty_path "$install_dir") is not on your PATH (left unchanged)"
-        return
-    fi
-    case "$install_dir" in
-        *[\"\\\$\`]*)
-            note PATH "$(pretty_path "$install_dir") contains characters that are unsafe in startup files"
-            modify_path=0
-            return
-            ;;
-    esac
-    line=$(posix_line)
-    startup_files > "$tmp/startup-files"
     while IFS= read -r file; do
-        if append_line "$file" "$line"; then added="$added $(pretty_path "$file")"; fi
-    done < "$tmp/startup-files"
-    fish=$(fish_file)
-    if [ "${SHELL:-}" != "${SHELL%/fish}" ] || [ -d "${fish%/conf.d/*}" ]; then
-        if [ ! -f "$fish" ]; then
-            mkdir -p "${fish%/*}"
-            dir=$(path_expression)
-            printf '%s\nif not contains -- "%s" $PATH\n    set -gx PATH "%s" $PATH\nend\n' "$marker" "$dir" "$dir" > "$fish"
-            added="$added $(pretty_path "$fish")"
+        require_line_path "${file}"
+        case "${file}" in /*) ;; *) die 'Startup paths must be absolute; use --no-modify-path.' ;; esac
+        path_created=1; match_status=1
+        if [ -e "${file}" ] || [ -h "${file}" ]; then
+            [ -f "${file}" ] || die "Startup path is not a regular file: ${file}"
+            [ -r "${file}" ] && [ -w "${file}" ] || die "Startup file is not readable and writable: ${file}"
+            path_created=0
+        else [ -d "${file%/*}" ] && [ -w "${file%/*}" ] || die "Startup directory is not writable: ${file%/*}"; fi
+        case "${file}" in "${fish}") line=$(fish_line) ;; *) line=$(posix_line) ;; esac
+        if [ "${path_created}" = 0 ]; then
+            match_status=0; grep -Fxq -- "${line}" "${file}" || match_status=$?
+            case "${match_status}" in 0 | 1) : ;; *) die "Could not read startup file: ${file}" ;; esac
         fi
-    fi
-    if [ -n "$added" ]; then
-        step PATH "added $(pretty_path "$install_dir") via${added}"
-    else
-        step PATH "$(pretty_path "$install_dir") is already set up in your shell startup files"
-    fi
+        known=0; record_index=0
+        while [ "${record_index}" -lt "${record_count}" ]; do
+            previous_file=$(cat "${new_state}/paths/${record_index}.file")
+            previous_line=$(cat "${new_state}/paths/${record_index}.line")
+            if [ "${previous_file}" = "${file}" ] && [ "${previous_line}" = "${line}" ]; then known=1; fi
+            record_index=$((record_index + 1))
+        done
+        if [ "${known}" = 1 ]; then
+            if [ "${match_status}" = 0 ]; then path_ready=1
+            else note PATH "Recorded startup entry was edited or removed; left alone: ${file}"; fi
+        elif [ "${match_status}" = 0 ]; then
+            path_ready=1
+        else
+            [ "${record_count}" -lt 100 ] || die 'Too many recorded startup paths; use --no-modify-path.'
+            printf '%s\n' "${file}" > "${new_state}/paths/${record_count}.file"
+            printf '%s\n' "${line}" > "${new_state}/paths/${record_count}.line"
+            printf '%s\n' "${path_created}" > "${new_state}/paths/${record_count}.created"
+            printf '%s\n' "${record_count}" >> "${stage}/path-actions"
+            record_count=$((record_count + 1))
+        fi
+    done < "${tmp}/startup-files"
 }
-
-warn_if_shadowed() {
-    found=$(command -v pdfconcat 2>/dev/null || true)
-    if [ "$on_path" = 1 ] && [ -n "$found" ] && [ "$found" != "$binary" ]; then
-        printf '\n'
-        note Note "your PATH finds another pdfconcat first: $(pretty_path "$found")"
-        detail "Remove that copy, or run this one as $(pretty_path "$binary")."
-    fi
+append_owned_paths() {
+    while IFS= read -r record_index; do
+        file=$(cat "${state}/paths/${record_index}.file"); line=$(cat "${state}/paths/${record_index}.line")
+        path_created=$(cat "${state}/paths/${record_index}.created")
+        if [ "${path_created}" = 1 ]; then
+            # Exclusive creation makes the receipt's creation claim true at
+            # the write boundary, rather than adopting a file created later.
+            (set -C; printf '%s\n' "${line}" > "${file}") || die "Program installed, but startup creation failed: ${file}"
+            path_ready=1; step PATH "created an owned startup entry in ${file}"
+            continue
+        fi
+        last_byte_lines=1
+        if [ -s "${file}" ]; then last_byte_lines=$(tail -c 1 "${file}" | wc -l | tr -d ' '); fi
+        if [ "${last_byte_lines}" = 0 ]; then
+            printf '\n' >> "${file}" || die "Program installed, but could not update PATH in ${file}."
+        fi
+        printf '%s\n' "${line}" >> "${file}" || die "Program installed, but could not update PATH in ${file}."
+        path_ready=1; step PATH "added an owned startup entry in ${file}"
+    done < "${stage}/path-actions"
 }
-
-finish_install() {
-    printf '\n  %sPDFConcat %s is installed.%s\n\n' "$bold" "$new_version" "$reset"
-    if [ "$on_path" = 1 ]; then
-        printf '  Get started:\n'
-    elif [ "$modify_path" = 1 ]; then
-        printf '  Open a new terminal, or run this to use it now:\n'
-        command_line "export PATH=\"$(path_expression):\$PATH\""
-        printf '\n  Then get started:\n'
-    else
-        printf '  Run it by its full path, or add %s to your PATH:\n' "$(pretty_path "$install_dir")"
-        command_line "$binary --help"
-        printf '\n  Get started:\n'
+install() {
+    acquire
+    acquire_path_lock
+    stage=$(mktemp -d "${install_dir%/}/.${command_name}-stage.XXXXXX") || die 'Could not create private staging beside the destination.'
+    new_state=${stage}/new-state; mkdir -p "${new_state}/legal" "${new_state}/paths"
+    if [ "${managed}" = 1 ]; then
+        cp -p "${binary}" "${stage}/previous-binary"
+        record_index=0
+        while [ "${record_index}" -lt "${record_count}" ]; do
+            cp "${state}/paths/${record_index}.file" "${new_state}/paths/${record_index}.file"
+            cp "${state}/paths/${record_index}.line" "${new_state}/paths/${record_index}.line"
+            cp "${state}/paths/${record_index}.created" "${new_state}/paths/${record_index}.created"
+            record_index=$((record_index + 1))
+        done
     fi
-    command_line 'pdfconcat --help'
-    command_line 'pdfconcat build -o blank.pdf --blank --fit-to A4'
-    printf '\n  %sGuide:     %s%s\n' "$dim" "$docs_url" "$reset"
-    uninstall_args='--uninstall'
-    [ "$install_dir" = "${XDG_BIN_HOME:-$HOME/.local/bin}" ] || uninstall_args="$uninstall_args --install-dir '$install_dir'"
-    printf '  %sUninstall: curl -fsSL %s/releases/latest/download/install.sh | sh -s -- %s%s\n\n' "$dim" "$repo_url" "$uninstall_args" "$reset"
+    cp "${candidate}" "${stage}/new-binary"; chmod 755 "${stage}/new-binary"
+    for legal in ${legal_files}; do cp "${tmp}/extract/${legal}" "${new_state}/legal/${legal}"; done
+    printf '1\n' > "${new_state}/format"; printf '%s\n' "${command_name}" > "${new_state}/owner"
+    printf '%s\n' "${install_dir}" > "${new_state}/location"; printf '%s\n' "${new_version}" > "${new_state}/version"
+    sha256_of "${stage}/new-binary" > "${new_state}/binary.sha256"
+    printf '%s\n' "${created_dir}" > "${new_state}/created-dir"
+    plan_path
+    printf '%s\n' "${record_count}" > "${new_state}/path-count"; seal_state "${new_state}"
+    transition=1
+    if [ "${managed}" = 1 ]; then state_moved=1; mv "${state}" "${stage}/previous-state" || die 'Could not stage the previous installer state.'; fi
+    binary_switched=1; mv -f "${stage}/new-binary" "${binary}" || die 'Could not activate the program.'
+    state_switched=1; mv "${new_state}" "${state}" || die 'Could not activate installer ownership.'
+    transition=0
+    remove_created_dir=0
+    append_owned_paths
+    if [ -n "${old_version}" ] && [ "${old_version}" = "${new_version}" ]; then step Installed "${binary} (reinstalled ${new_version})"
+    elif [ -n "${old_version}" ]; then step Installed "${binary} (updated from ${old_version})"
+    else step Installed "${binary}"; fi
+    if [ "${modify_path}" = 0 ]; then note PATH 'persistent and current-session PATH left unchanged'
+    elif [ "${path_ready}" = 0 ]; then note PATH 'No startup entry was added; use the full path or configure PATH manually.'; fi
+    printf '\n%s %s is installed.\n' "${product_name}" "${new_version}"
+    found=$(command -v "${command_name}" 2>/dev/null || true)
+    if [ -n "${found}" ] && [ "${found}" != "${binary}" ]; then note PATH "The current terminal finds another ${command_name}: ${found}"; fi
+    case "${login_shell}" in
+        */fish) quoted_binary=$(fish_quote "${binary}"); quoted_install=$(fish_quote "${install_dir}") ;;
+        *) quoted_binary=$(shell_quote "${binary}"); quoted_install=$(shell_quote "${install_dir}") ;;
+    esac
+    printf 'Open a new terminal after a PATH change. Run: %s --help\n' "${quoted_binary}"
+    printf 'To uninstall, save/reuse this reviewed installer as install.sh, then run:\n'
+    printf 'sh install.sh --uninstall --install-dir %s\n' "${quoted_install}"
+    printf 'Guide: %s\n' "${docs_url}"
 }
-
-# --- Uninstall --------------------------------------------------------------
-
-remove_marked_lines() {
-    file=$1
-    [ -f "$file" ] && grep -Fq -- "$marker" "$file" || return 1
-    filtered="$tmp/startup"
-    grep -vF -- "$marker" "$file" > "$filtered" || true
-    # Rewrite in place so a symlinked startup file stays a symlink.
-    cat "$filtered" > "$file"
-}
-
-uninstall() {
-    title 'PDFConcat uninstaller'
-    removed=0
-    if [ -h "$binary" ] || { [ -e "$binary" ] && [ ! -f "$binary" ]; }; then
-        die "$(pretty_path "$binary") is not a regular file, so it was left alone." \
-            'This installer only removes the file it installs.'
-    fi
-    if [ -f "$binary" ]; then
-        old_version=$(reported_version "$binary" || printf 'unknown version')
-        rm -f "$binary"
-        step Removed "$(pretty_path "$binary") ($old_version)"
-        removed=1
-    fi
-    cleaned=''
-    for file in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-        if remove_marked_lines "$file"; then cleaned="$cleaned $(pretty_path "$file")"; fi
+remove_owned_paths() {
+    : > "${tmp}/path-removals"
+    record_index=0
+    # Prepare all reads first. An unreadable later startup file must not turn
+    # into partial PATH cleanup followed by a falsely successful uninstall.
+    while [ "${record_index}" -lt "${record_count}" ]; do
+        file=$(cat "${state}/paths/${record_index}.file"); line=$(cat "${state}/paths/${record_index}.line")
+        if [ -e "${file}" ] || [ -h "${file}" ]; then
+            [ -f "${file}" ] && [ -r "${file}" ] || die "Could not read startup file: ${file}"
+            cat "${file}" > "${tmp}/path-original.${record_index}" || die "Could not read startup file: ${file}"
+            match_status=0; grep -Fxq -- "${line}" "${tmp}/path-original.${record_index}" || match_status=$?
+            case "${match_status}" in
+                0)
+                    filter_status=0; grep -vFx -- "${line}" "${tmp}/path-original.${record_index}" > "${tmp}/path-filtered.${record_index}" || filter_status=$?
+                    [ "${filter_status}" -le 1 ] || die "Could not read startup file: ${file}"
+                    printf '%s\n' "${record_index}" >> "${tmp}/path-removals"
+                    ;;
+                1) : ;;
+                *) die "Could not read startup file: ${file}" ;;
+            esac
+        fi
+        record_index=$((record_index + 1))
     done
-    fish=$(fish_file)
-    if [ -f "$fish" ] && [ "$(head -n 1 "$fish")" = "$marker" ]; then
-        rm -f "$fish"
-        cleaned="$cleaned $(pretty_path "$fish")"
-    fi
-    if [ -n "$cleaned" ]; then
-        step PATH "removed the installer's lines from${cleaned}"
-        removed=1
-    fi
-    if [ "$removed" = 0 ]; then
-        printf '  PDFConcat is not installed in %s. Nothing was changed.\n\n' "$(pretty_path "$install_dir")"
-        return
-    fi
-    printf '\n  %sPDFConcat has been uninstalled.%s\n' "$bold" "$reset"
-    printf '  Your PDFs, plans and reports were not touched.\n'
-    found=$(command -v pdfconcat 2>/dev/null || true)
-    if [ -n "$found" ] && [ "$found" != "$binary" ]; then
-        printf '\n'
-        note Note "another pdfconcat remains at $(pretty_path "$found"); it was not installed by this script."
-    fi
-    printf '\n'
+    while IFS= read -r record_index; do
+        file=$(cat "${state}/paths/${record_index}.file")
+        path_created=$(cat "${state}/paths/${record_index}.created")
+        cmp -s "${file}" "${tmp}/path-original.${record_index}" || die "Startup file changed or became unreadable: ${file}"
+        cat "${tmp}/path-filtered.${record_index}" > "${file}" || die "Could not remove owned PATH entry: ${file}"
+        case "${file}" in
+            */fish/conf.d/"${command_name}".fish)
+                if [ "${path_created}" = 1 ] && [ -f "${file}" ] && [ ! -h "${file}" ] && [ ! -s "${file}" ]; then rm -f "${file}"; fi
+                ;;
+            *) : ;;
+        esac
+        step PATH "removed this installation's exact entry from ${file}"
+    done < "${tmp}/path-removals"
 }
-
-# --- Main -------------------------------------------------------------------
+uninstall() {
+    if [ ! -d "${install_dir}" ]; then printf '%s is not installed in %s. Nothing was changed.\n' "${product_name}" "${install_dir}"; return; fi
+    acquire
+    acquire_path_lock
+    if [ "${managed}" = 0 ]; then printf '%s is not installed in %s. Nothing was changed.\n' "${product_name}" "${install_dir}"; return; fi
+    shared=0
+    for entry in "${install_dir}"/* "${install_dir}"/.[!.]* "${install_dir}"/..?*; do
+        [ -e "${entry}" ] || [ -h "${entry}" ] || continue
+        case "${entry}" in "${binary}" | "${state}" | "${lock}") ;; *) shared=1 ;; esac
+    done
+    if [ "${modify_path}" = 0 ]; then note PATH 'left unchanged by --no-modify-path; remove owned startup entries manually if needed'
+    elif [ "${shared}" = 1 ]; then note PATH 'left unchanged because other files share this directory'
+    else remove_owned_paths; fi
+    rm -f "${binary}"; rm -rf "${state}"
+    remove_created_dir=${created_dir}
+    printf '%s has been uninstalled. Your documents and unrelated files were not touched.\n' "${product_name}"
+}
 
 main() {
-    setup_ui
+    validate_settings
     parse_args "$@"
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/pdfconcat-install.XXXXXX") || die 'Could not create a temporary directory.'
-    trap 'rm -rf "$tmp"' EXIT
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/${command_name}-install.XXXXXX") || die 'Could not create a temporary directory.'
+    trap cleanup EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
-    if [ "$action" = uninstall ]; then
-        uninstall
-        return
-    fi
-    title 'PDFConcat installer'
-    detect_platform
-    step System "$system"
+    if [ "${action}" = uninstall ]; then uninstall; return; fi
+    printf '\n%s installer\n\n' "${product_name}"
+    detect_platform; step System "${system}"
     download_and_verify
-    install_binary
-    configure_path
-    warn_if_shadowed
-    finish_install
+    install
 }
-
 main "$@"

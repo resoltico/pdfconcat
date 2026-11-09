@@ -137,25 +137,56 @@ The user contract is in [the installation guide](docs/INSTALL.md).
 it with dash. `install/install.ps1` serves Windows and must run under both
 Windows PowerShell 5.1 and PowerShell 7; keep it ASCII, and never use `exit`
 outside the final handler, because `irm | iex` runs it in the caller's session.
-Both are published as release assets beside the archives they install, so the
-documented `releases/latest/download/` URLs always pair an installer with its
-release.
+Both are published as standalone release assets beside the archives they install.
+Latest is resolved once to a stable tag before downloading archive/checksum data;
+version and archive identity must agree. Keep network and mirror paths subject
+to the same checksum, regular-file and ownership checks. Explicit release pins
+are stable versions; local snapshot fixtures may report canonical SemVer suffixes.
+
+PDFConcat owns the common engine bodies shared with EML Attachment Remover.
+Keep only literal product differences between `BEGIN PRODUCT SETTINGS` and
+`END PRODUCT SETTINGS`; change common behavior in both repositories together.
+The copies are self-contained and have no runtime cross-repository dependency.
+EML pins a reviewed PDFConcat commit for its development/CI parity check. Commit
+the canonical PDF engine change first, preserve EML's product settings when
+copying the scripts, then update EML's `install/engine-source.txt` to that full
+PDF commit. From the EML checkout run:
+
+```sh
+python3 install/check-sync.py /absolute/path/to/PDFConcat
+```
+
+The offline check reads the pinned Git object, not uncommitted files. Without a
+checkout argument the checker fetches the pinned files over HTTPS for development
+or CI; this is not an installation-time dependency. PDF CI checks its canonical
+behavior without depending on EML's default branch.
 
 The test harnesses install, update and uninstall real archives from a
 GoReleaser dist directory. They use a temporary `HOME` or install folder; the
 Unix harness never reads or edits your own startup files:
 
 ```sh
+cp install/install.sh install/install.ps1 dist/
 bash install/install_test.sh "$PWD/dist"
 ```
 
 ```powershell
+Copy-Item install/install.sh, install/install.ps1 dist/
 ./install/install_test.ps1 -Dist "$PWD\dist"
 ```
 
+The harnesses execute the staged `dist/install.sh` / `dist/install.ps1`, not a
+source fallback, and check them against the primary manifest before the cases.
+Stage the unchanged source files after a local GoReleaser build; their hashes
+already belong to its checksum manifest.
+
 The PowerShell harness runs each case under `powershell` and `pwsh` when both
 exist. Its user PATH case edits and then restores `HKCU\Environment`, so it runs
-only when `CI` is set. Lint both installers with the commands in the Lint job:
+only when `CI` is set. Restore raw PATH text, value kind and original absence,
+including on failures. Test owned/unowned targets, tampered receipts/binaries,
+locked operations, exact PATH ownership, unsafe archives, checksum/version
+failures and activation rollback. Never run these tests against a developer's
+actual startup files or user registry. Lint both installers with the commands in the Lint job:
 `shellcheck` (exceptions in `.shellcheckrc`) and PSScriptAnalyzer (exceptions in
 `install/PSScriptAnalyzerSettings.psd1`).
 
@@ -243,8 +274,8 @@ the tag. The release workflow runs the reusable CI before publication; keep
 `Required CI` intact. Do not publish a second release by hand while it is running.
 
 For local packaging investigations, use the exact GoReleaser version in
-`.github/workflows/release.yml`. The release workflow already performs its CI
-gates, snapshot packaging checks and final publication; a routine release does
+`.github/workflows/ci.yml`. The release workflow already performs its CI
+gates, exact tag-version packaging checks and final publication; a routine release does
 not require duplicating those gates locally.
 
 Complete release packaging requires macOS: `.github/scripts/sign-macos.sh`
@@ -257,7 +288,9 @@ Run a local `goreleaser release --snapshot --clean` only in an isolated clone:
 `--clean` deletes its dist directory. When investigating packaging, inspect the
 archives, checksums, native version invocations and `pdfconcat licenses`, then run the
 [installer harnesses](#installer-verification) against that dist directory.
-Snapshot success is not release publication.
+Copy the unchanged `install/install.sh` and `install/install.ps1` into `dist/`
+before running the harnesses. Snapshot success is not release publication.
+GoReleaser publication is disabled in configuration; it is a producer only.
 
 Archives contain only the program, `LICENSE`, the third-party notices and their
 license texts; the notices live in `internal/legal/` so that the executable
@@ -282,17 +315,20 @@ module list embedded in it, without serial numbers or timestamps. Detecting the
 main module's license downloads the tagged release through the Go proxy, so
 snapshot SBOMs omit that one license with a warning.
 
-Archive names carry no version (`pdfconcat_linux_amd64.tar.gz`), which the
-installers and the guide's `latest/download` links rely on. The CI packaging job
-builds a snapshot of the current checkout the same way, checks checksums,
-exact archive contents, SBOM platforms, Darwin signatures and minimum OS, scans
-the Darwin executables with `govulncheck -mode=binary`, and hands the files to
-the install matrix.
+Archive names carry no version (`pdfconcat_linux_amd64.tar.gz`). The CI producer
+uses `release --snapshot --clean` for non-tag builds and stable/prerelease tag
+metadata with `release --clean --skip=publish` for `v*` tags. Both modes stage
+six archives, six SBOMs, both standalone installers and `checksums.txt` flat in
+one artifact. CI verifies hashes, archive contents, SBOM platforms, ad hoc Darwin
+signatures and minimum OS, scans Darwin binaries with `govulncheck -mode=binary`,
+and runs the seven native installer jobs against those exact staged files.
 
-A `v*` tag runs the reusable CI, extracts the matching nonempty changelog section,
-builds the configured targets with GoReleaser and publishes the archives,
-installers and checksums with provenance. macOS executables use ad hoc signing
-only. Checksums and attestations must describe the final published artifacts
-after signing; they do not substitute for a native installation test or
-establish notarization.
+A `v*` tag's publisher waits for that reusable CI, downloads the qualified artifact
+and verifies the complete filename set and hashes again. It extracts exactly one
+nonempty, dated matching changelog section, attests the qualified bytes, then
+publishes them with `gh release create --verify-tag --notes-file`; there is no
+second build or signing pass. Prerelease tags remain prereleases. The workflow
+does not create tags or overwrite an existing release. macOS signing stays ad hoc;
+checksums and attestations do not establish notarization. Expired/missing qualified
+artifacts fail publishing instead of causing an untested rebuild.
 Do not create tags, releases or upstream issues without maintainer authorization.

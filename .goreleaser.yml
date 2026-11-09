@@ -100,10 +100,11 @@ checksum:
     - glob: ./install/install.sh
     - glob: ./install/install.ps1
 
-# Keep notes loading enabled; the workflow supplies --release-notes from CHANGELOG.md.
+# Tagged CHANGELOG.md is the sole source of published notes.
+changelog:
+  disable: true
+
+# The qualified-artifact workflow owns publication after all native tests.
+# GoReleaser only produces archives/SBOMs/checksums; it must never publish them.
 release:
-  prerelease: auto
-  # The installers are published beside the archives they install.
-  extra_files:
-    - glob: ./install/install.sh
-    - glob: ./install/install.ps1
+  disable: true

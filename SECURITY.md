@@ -14,16 +14,33 @@ PDFs out of public issues and pull requests.
 
 ## Installation and release trust
 
-The [installers](docs/INSTALL.md) download a release archive and its
-`checksums.txt` from this project's GitHub releases over HTTPS, check the
-archive's SHA-256 checksum, and run the downloaded program once as the current
-user before installing it. They need no administrator access and write only the
-program and, unless disabled, marked shell startup entries or a user PATH entry.
+The [installers](docs/INSTALL.md) resolve latest once to a stable release tag,
+download that release's archive and `checksums.txt` over HTTPS, verify one exact
+SHA-256 entry, and test-run the program as the current user before installation.
+Redirects must stay HTTPS. They need no administrator access. They write the
+program, a sibling private ownership directory and, unless disabled, exact owned
+shell startup or user PATH entries. Published v0.9.0 predates the receipt protocol;
+use the matching release's documentation when inspecting an older installer.
+
+A receipt records managed file hashes and PATH ownership. Install/update/removal
+refuses unowned or changed managed files; no version-string or marker-based
+adoption occurs. A per-directory lock serializes cooperating installers. Private
+staging and rollback handling reduce accidental damage but do not promise crash
+recovery or protection against a hostile process with the same account's rights.
+User edits and unrelated files remain outside installer ownership. `NoModifyPath`
+also suppresses uninstall PATH cleanup; shared Windows directories may retain an
+entry rather than breaking other programs.
 Because the checksums come from the same release as the archive, a match detects
 a damaged download, not a compromised release or repository. Release archives,
 `checksums.txt` and both installers carry GitHub build-provenance attestations
 from the release workflow; `gh attestation verify` checks them. Per-executable
 CycloneDX SBOMs list the linked modules for dependency and license audits.
+
+Tag builds stage the final signed archives, installers, SBOMs and checksums once.
+All seven native installer jobs qualify that set before the publisher can run.
+The publisher checks the same downloaded bytes and manifest, attests them, then
+creates the release without rebuilding or re-signing. Branch CI uses snapshot
+versions; it does not publish. GoReleaser's direct publisher is disabled.
 
 macOS executables have an [ad hoc signature](https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc),
 which does not identify the publisher. PDFConcat has no Apple Developer ID

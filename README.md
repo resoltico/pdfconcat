@@ -60,6 +60,11 @@ the current input, fidelity and publication constraints.
 
 ## Install
 
+The installer described by this checkout records ownership before managing files.
+Published v0.9.0 predates those receipts; these rules begin with the release
+containing this change. Use documentation at the matching release tag for an
+already published version.
+
 On macOS 15+ or Linux:
 
 ```sh
@@ -72,8 +77,8 @@ On Windows 10 or 11, in PowerShell:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
 ```
 
-The installer puts one self-contained program in your user account without an
-administrator password and configures PATH when needed. On macOS/Linux, follow
+The installer puts one self-contained program and its ownership receipt in your
+user account without an administrator password, and configures PATH when needed. On macOS/Linux, follow
 any PATH command it prints for the current terminal. On Windows, open a new
 terminal window. Then verify the installation:
 
@@ -81,7 +86,9 @@ terminal window. Then verify the installation:
 pdfconcat version
 ```
 
-Run the same installation command again to update. The
+Run the same installation command again to update an unchanged owned install.
+Old or manual installs without a receipt must be removed manually or installed
+into a fresh directory. The
 [installation guide](docs/INSTALL.md) covers supported architectures, uninstalling,
 custom paths, manual downloads, verification and troubleshooting. Releases are not
 notarized by Apple or code-signed for Windows; the guide explains what that means.

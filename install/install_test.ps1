@@ -1,149 +1,330 @@
 # SPDX-License-Identifier: MPL-2.0
-#
-# Exercises install.ps1 against release files from a GoReleaser dist directory,
-# under both Windows PowerShell 5.1 and PowerShell 7 when available.
-#
-#   pwsh -File install/install_test.ps1 C:\path\to\dist
-#
-# Install folders are temporary. The user PATH case changes HKCU\Environment
-# and restores it afterwards; it runs only when CI is set.
-
+# Native exact-release installer checks. All installs use temporary directories.
+# Registry cases run only in CI and restore raw value, kind and absence exactly.
 param([Parameter(Mandatory = $true)][string]$Dist)
-
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3
-$installer = Join-Path $PSScriptRoot 'install.ps1'
-$work = Join-Path ([IO.Path]::GetTempPath()) ("pdfconcat-install-test-" + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $work | Out-Null
+$Dist = [IO.Path]::GetFullPath($Dist)
+$installer = Join-Path $Dist 'install.ps1'
+$work = Join-Path ([IO.Path]::GetTempPath()) ('cli-install-test-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($work)
 $script:failures = 0
+$command = 'pdfconcat'
+$prefix = 'PDFCONCAT'
+$checksumName = 'checksums.txt'
 
 function Check([string]$Why, [bool]$Condition) {
-    if (-not $Condition) {
-        Write-Host "    FAIL: $Why" -ForegroundColor Red
+    if ($Condition) { Write-Host "    ok: $Why" }
+    else {
+        Write-Host "    FAIL: $Why"
         $script:failures++
         $out = Join-Path $work 'out.txt'
-        if (Test-Path $out) { Get-Content $out | ForEach-Object { Write-Host "      | $_" } }
+        if (Test-Path -LiteralPath $out) { Write-Host ([IO.File]::ReadAllText($out)) }
     }
 }
-
-# Runs the installer as a file in a fresh process and returns its exit code;
-# output goes to $work\out.txt.
+function Get-Output { return [IO.File]::ReadAllText((Join-Path $work 'out.txt')) }
 function Invoke-Installer([string]$Shell, [string[]]$Arguments, [string]$Base = $Dist) {
-    $env:PDFCONCAT_DOWNLOAD_BASE = $Base
+    $saved = @{}
+    foreach ($suffix in @('VERSION', 'INSTALL_DIR', 'NO_MODIFY_PATH', 'UNINSTALL', 'DOWNLOAD_BASE')) {
+        $name = $prefix + '_' + $suffix
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+        [Environment]::SetEnvironmentVariable($name, $null)
+    }
     try {
+        [Environment]::SetEnvironmentVariable(($prefix + '_DOWNLOAD_BASE'), $Base)
         & $Shell -NoProfile -ExecutionPolicy Bypass -File $installer @Arguments *> (Join-Path $work 'out.txt')
         return $LASTEXITCODE
-    } finally {
-        Remove-Item Env:\PDFCONCAT_DOWNLOAD_BASE -ErrorAction SilentlyContinue
-    }
+    } finally { foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) } }
 }
-function Get-Output { Get-Content -Raw (Join-Path $work 'out.txt') }
-function Get-UserPathRaw {
+function Get-RegistryPath {
     $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
-    try { return [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames') } finally { $key.Close() }
+    try {
+        if (-not $key -or $key.GetValueNames() -notcontains 'Path') { return @{ Exists = $false; Value = ''; Kind = [Microsoft.Win32.RegistryValueKind]::ExpandString } }
+        return @{ Exists = $true; Value = $key.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); Kind = $key.GetValueKind('Path') }
+    } finally { if ($key) { $key.Close() } }
+}
+function Save-RegistryPath([hashtable]$Record) {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        if ($Record.Exists) { $key.SetValue('Path', $Record.Value, $Record.Kind) }
+        else { $key.DeleteValue('Path', $false) }
+    } finally { $key.Close() }
+}
+function Save-Manifest([string]$Directory) {
+    $lines = @()
+    foreach ($file in Get-ChildItem -LiteralPath $Directory -Filter '*.zip') { $lines += (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $file.Name }
+    [IO.File]::WriteAllLines((Join-Path $Directory $checksumName), $lines, [Text.UTF8Encoding]::new($false))
 }
 
-$shells = @('powershell', 'pwsh') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue }
 try {
+    # Bootstrap qualification uses the staged published script, never a checkout fallback.
+    if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Stage the published install.ps1 beside its archives and $checksumName before running this harness." }
+    $selected = @([IO.File]::ReadAllLines((Join-Path $Dist $checksumName)) | Where-Object { $_ -cmatch '(?:^|\s)\*?install\.ps1\z' })
+    if ($selected.Count -ne 1 -or $selected[0] -cnotmatch '\A([0-9a-fA-F]{64}) [ *]install\.ps1\z') { throw 'No unique valid installer checksum.' }
+    if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Matches[1].ToLowerInvariant()) { throw 'Staged installer bytes differ from the release manifest.' }
+    $tokens = $null; $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($installer, [ref]$tokens, [ref]$errors)
+    Check 'published script parses' ($errors.Count -eq 0)
+    $currentShell = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    Check 'unknown arguments fail before platform or filesystem work' ((Invoke-Installer $currentShell @('-Unexpected', '-Help')) -ne 0)
+    Check 'positional arguments fail before platform or filesystem work' ((Invoke-Installer $currentShell @('unexpected', '-Help')) -ne 0)
+    Check 'help remains available' ((Invoke-Installer $currentShell @('-Help')) -eq 0)
+    $reviewedBlock = "& ([scriptblock]::Create([IO.File]::ReadAllText('" + $installer.Replace("'", "''") + "')))"
+    foreach ($parameter in @('Version', 'InstallDir')) {
+        & $currentShell -NoProfile -ExecutionPolicy Bypass -Command ($reviewedBlock + " -$parameter '' -Help") *> (Join-Path $work 'out.txt')
+        Check ("explicit empty $parameter refuses before defaults") ($LASTEXITCODE -ne 0)
+    }
+    if ($errors.Count) { throw ($errors | Out-String) }
+    # Exercise the actual version/quoting helpers without running installation
+    # or touching any user settings. Only trusted staged definitions are loaded.
+    foreach ($name in @('Product', 'stable', 'identifier', 'semver')) {
+        $node = $ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -ceq ('$' + $name) }, $true)[0]
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    foreach ($name in @('Exit-Installer', 'Get-ProgramVersion', 'ConvertTo-QuotedCommand', 'Get-AbsoluteDirectory')) {
+        $node = $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name }, $true)[0]
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    function Invoke-VersionFixture {
+        $global:LASTEXITCODE = $script:fixtureExit
+        if ($script:fixtureError) { Write-Error $script:fixtureError -ErrorAction Continue }
+        return $script:fixtureOutput
+    }
+    foreach ($case in @(
+        @{ Text = @('pdfconcat 1.2.3 (abc, Go, windows/amd64)'); Code = 0; Version = '1.2.3' },
+        @{ Text = @('pdfconcat 1.2.3-SNAPSHOT-a1+build.2'); Code = 0; Version = '1.2.3-SNAPSHOT-a1+build.2' },
+        @{ Text = @('pdfconcat not-a-version'); Code = 0; Version = $null },
+        @{ Text = @('pdfconcat 1.2.3 extra'); Code = 0; Version = $null },
+        @{ Text = @('pdfconcat 01.2.3'); Code = 0; Version = $null },
+        @{ Text = @('pdfconcat 1.2.3-01'); Code = 0; Version = $null },
+        @{ Text = @('pdfconcat 1.2.3', 'extra line'); Code = 0; Version = $null },
+        @{ Text = @('another 1.2.3'); Code = 0; Version = $null },
+        @{ Text = @('pdfconcat 1.2.3'); Code = 17; Version = $null }
+    )) {
+        $script:fixtureExit = $case.Code; $script:fixtureOutput = $case.Text; $script:fixtureError = if ($case.Code) { 'native version failure detail' } else { '' }
+        $result = $null; $failure = ''
+        try { $result = Get-ProgramVersion 'Invoke-VersionFixture' (Join-Path $work 'version-error.txt') }
+        catch { $failure = $_.Exception.Message }
+        if ($null -eq $case.Version) {
+            Check ('version rejects ' + ($case.Text -join ' / ')) ($failure.Length -gt 0)
+            if ($case.Code) { Check 'native failure detail is retained' ($failure.Contains('native version failure detail')) }
+        } else { Check ('version accepts ' + $case.Version) ($failure -eq '' -and $result -ceq $case.Version) }
+    }
+    $root = [IO.Path]::GetPathRoot($work)
+    Check 'filesystem root remains a root' ((Get-AbsoluteDirectory $root) -ceq ([IO.Path]::GetFullPath($root)))
+    foreach ($relative in @('C:relative', '\relative')) {
+        $refused = $false
+        try { [void](Get-AbsoluteDirectory $relative) } catch { $refused = $true }
+        Check ('non-absolute directory refused: ' + $relative) $refused
+    }
+    Check 'PowerShell command quoting preserves apostrophes' ((ConvertTo-QuotedCommand "C:\user's tools\program.exe") -ceq "'C:\user''s tools\program.exe'")
+    if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
+        Write-Host 'Native Windows integration not run on this host; published script helper checks completed.'
+        if ($script:failures -gt 0) { throw "$($script:failures) helper checks failed." }
+        return
+    }
+    $shells = @('powershell', 'pwsh') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue }
+    Check 'a native PowerShell is available' (@($shells).Count -gt 0)
     foreach ($shell in $shells) {
         Write-Host "=== $shell"
-        $dir = Join-Path $work "$shell-app"
-        $exe = Join-Path $dir 'pdfconcat.exe'
-
-        Write-Host '--- fresh install, reinstall and uninstall'
-        Check 'install succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
-        Check 'exe installed' (Test-Path $exe)
-        if (-not (Test-Path $exe)) { continue }
-        Check 'installed exe runs' ((& $exe version) -match '^pdfconcat ')
-        $info = (Get-Item $exe).VersionInfo
-        Check 'exe has Windows version information' ($info.ProductName -eq 'PDFConcat' -and $info.LegalCopyright -match 'MPL-2.0' -and $info.FileVersion)
+        Check 'NoModifyPath typo is rejected' ((Invoke-Installer $shell @('-NoModifyPah', '-Help')) -ne 0)
+        Check 'unexpected positional argument is rejected' ((Invoke-Installer $shell @('unexpected', '-Help')) -ne 0)
+        $dir = Join-Path $work ("$shell-app's folder")
+        $exe = Join-Path $dir ($command + '.exe')
+        $state = Join-Path $dir ('.' + $command + '-install')
+        $receiptFile = Join-Path $state 'receipt.json'
+        $receiptSeal = Join-Path $state 'receipt.sha256'
+        Check 'fresh install succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
+        Check 'executable installed' (Test-Path -LiteralPath $exe)
+        if (-not (Test-Path -LiteralPath $exe)) { continue }
+        Check 'receipt installed' (Test-Path -LiteralPath $receiptFile)
+        Check 'receipt integrity seal installed' (Test-Path -LiteralPath $receiptSeal)
+        Check 'installed executable runs' ((& $exe --version) -match '^pdfconcat ')
+        # Preserve product-specific native smoke: Windows resources and an actual PDF.
+        $info = (Get-Item -LiteralPath $exe).VersionInfo
+        Check 'Windows version resources exist' ($info.ProductName -eq 'PDFConcat' -and $info.LegalCopyright -match 'MPL-2.0' -and [bool]$info.FileVersion)
         $pdf = Join-Path $work "$shell-blank.pdf"
         & $exe build -o $pdf --blank --fit-to A4 | Out-Null
-        Check 'installed exe builds a PDF' ($LASTEXITCODE -eq 0 -and (Test-Path $pdf))
-        Check 'install reported' ((Get-Output) -match 'is installed')
+        Check 'installed executable builds a PDF' ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $pdf))
+        Check 'installation reported' ((Get-Output) -match 'is installed')
+        Check 'custom uninstall path is quoted' ((Get-Output).Contains("-InstallDir '" + $dir.Replace("'", "''") + "'"))
         Check 'reinstall succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
         Check 'reinstall reported' ((Get-Output) -match 'reinstalled')
-        Check 'no retired copy left' (-not (Test-Path "$exe.old"))
+        $moved = Join-Path $work "$shell-copied-install"
+        [void][IO.Directory]::CreateDirectory($moved)
+        [IO.File]::Copy($exe, (Join-Path $moved ($command + '.exe')))
+        Copy-Item -LiteralPath $state -Destination $moved -Recurse
+        Check 'copied receipt cannot claim another directory' ((Invoke-Installer $shell @('-InstallDir', $moved, '-Uninstall', '-NoModifyPath')) -ne 0)
+        Check 'copied installation and unowned directory remain' ((Test-Path -LiteralPath (Join-Path $moved ($command + '.exe'))) -and (Test-Path -LiteralPath $moved))
 
-        Write-Host '--- update while pdfconcat is running'
-        # A pdfconcat waiting on its plan from stdin keeps the exe in use.
+        Check 'same named .old is preserved' (-not (Test-Path -LiteralPath "$exe.old"))
+
+        Write-Host '--- update a running executable'
         $start = [Diagnostics.ProcessStartInfo]::new($exe, 'check --plan -')
         $start.UseShellExecute = $false
-        $start.RedirectStandardInput = $true
-        $start.RedirectStandardOutput = $true
-        $start.RedirectStandardError = $true
+        $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
         $running = [Diagnostics.Process]::Start($start)
         try {
-            Check 'install over a running exe succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
-            Check 'updated exe runs' ((& $exe version) -match '^pdfconcat ')
-        } finally {
-            $running.StandardInput.Close()
-            $running.WaitForExit()
-        }
-        Remove-Item -LiteralPath "$exe.old" -Force -ErrorAction SilentlyContinue
+            Check 'update while running succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
+            Check 'new executable runs' ((& $exe --version) -match '^pdfconcat ')
+            $owned = [IO.File]::ReadAllText($receiptFile) | ConvertFrom-Json
+            Check 'one retired path is explicitly owned' ($null -ne $owned.Retired -and $owned.Retired.Name -match ('^\.' + $command + '-retired-[0-9a-f]{32}\.exe$'))
+            $retiredPath = Join-Path $dir $owned.Retired.Name
+            if (Test-Path -LiteralPath $retiredPath) {
+                $before = (Get-FileHash -LiteralPath $exe).Hash
+                Check 'another update refuses a still-running retired image' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -ne 0)
+                Check 'current executable is unchanged' ((Get-FileHash -LiteralPath $exe).Hash -eq $before)
+            }
+        } finally { $running.StandardInput.Close(); [void]$running.WaitForExit() }
+        Check 'owned retired image is cleaned on next install' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
 
-        Write-Host '--- checksum mismatch leaves the installation untouched'
-        $before = (Get-FileHash $exe).Hash
+        Write-Host '--- validation failures preserve the installation'
+        $before = (Get-FileHash -LiteralPath $exe).Hash
+        $beforeReceipt = [IO.File]::ReadAllText($receiptFile)
+        $beforeSeal = [IO.File]::ReadAllText($receiptSeal)
         $tampered = Join-Path $work "$shell-tampered"
-        New-Item -ItemType Directory -Path $tampered | Out-Null
-        Copy-Item (Join-Path $Dist 'pdfconcat_windows_*.zip') $tampered
-        Get-Content (Join-Path $Dist 'checksums.txt') | ForEach-Object { ('0' * 64) + '  ' + ($_ -split '\s+')[1] } | Set-Content (Join-Path $tampered 'checksums.txt')
-        Check 'tampered install fails' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath') $tampered) -ne 0)
-        Check 'mismatch reported' ((Get-Output) -match 'does not match its published SHA-256')
-        Check 'exe unchanged' ((Get-FileHash $exe).Hash -eq $before)
-
-        Write-Host '--- version mismatch and missing files fail cleanly'
+        [void][IO.Directory]::CreateDirectory($tampered)
+        foreach ($file in Get-ChildItem -LiteralPath $Dist -Filter '*.zip') { [IO.File]::Copy($file.FullName, (Join-Path $tampered $file.Name)) }
+        $lines = @([IO.File]::ReadAllLines((Join-Path $Dist $checksumName)) | ForEach-Object { ('0' * 64) + '  ' + ($_ -split '\s+')[1] })
+        [IO.File]::WriteAllLines((Join-Path $tampered $checksumName), $lines)
+        Check 'bad checksum fails' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath') $tampered) -ne 0)
+        Check 'checksum cause is shown' ((Get-Output) -match 'does not match its published SHA-256')
+        Check 'binary and receipt unchanged' ((Get-FileHash -LiteralPath $exe).Hash -eq $before -and [IO.File]::ReadAllText($receiptFile) -ceq $beforeReceipt -and [IO.File]::ReadAllText($receiptSeal) -ceq $beforeSeal)
         Check 'version mismatch fails' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath', '-Version', '999.0.0')) -ne 0)
         Check 'version mismatch reported' ((Get-Output) -match 'not 999.0.0')
-        $empty = Join-Path $work "$shell-empty"
-        New-Item -ItemType Directory -Path $empty | Out-Null
-        Check 'empty release fails' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath') $empty) -ne 0)
-
-        Write-Host '--- uninstall'
-        Check 'uninstall succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0)
-        Check 'install folder removed' (-not (Test-Path $dir))
-        Check 'second uninstall succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0)
-        Check 'no-op reported' ((Get-Output) -match 'Nothing was changed')
-
-        Write-Host '--- piped "irm | iex" form with environment options'
-        $env:PDFCONCAT_DOWNLOAD_BASE = $Dist
-        $env:PDFCONCAT_INSTALL_DIR = $dir
-        $env:PDFCONCAT_NO_MODIFY_PATH = '1'
-        try {
-            & $shell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Raw '$installer' | Invoke-Expression" *> (Join-Path $work 'out.txt')
-            Check 'iex install succeeds' ($LASTEXITCODE -eq 0 -and (Test-Path $exe))
-            $env:PDFCONCAT_UNINSTALL = '1'
-            & $shell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Raw '$installer' | Invoke-Expression" *> (Join-Path $work 'out.txt')
-            Check 'iex uninstall succeeds' ($LASTEXITCODE -eq 0 -and -not (Test-Path $exe))
-            Remove-Item Env:\PDFCONCAT_UNINSTALL
-            & $shell -NoProfile -ExecutionPolicy Bypass -Command "`$env:PDFCONCAT_VERSION='999.0.0'; Get-Content -Raw '$installer' | Invoke-Expression" *> (Join-Path $work 'out.txt')
-            Check 'iex failure exits nonzero' ($LASTEXITCODE -ne 0)
-        } finally {
-            'PDFCONCAT_DOWNLOAD_BASE', 'PDFCONCAT_INSTALL_DIR', 'PDFCONCAT_NO_MODIFY_PATH', 'PDFCONCAT_UNINSTALL' | ForEach-Object { Remove-Item "Env:\$_" -ErrorAction SilentlyContinue }
+        Write-Host '--- malformed and ambiguous release data'
+        $duplicate = Join-Path $work "$shell-duplicate-checksum"
+        [void][IO.Directory]::CreateDirectory($duplicate)
+        foreach ($file in Get-ChildItem -LiteralPath $Dist -Filter '*.zip') { [IO.File]::Copy($file.FullName, (Join-Path $duplicate $file.Name)) }
+        $manifest = [IO.File]::ReadAllText((Join-Path $Dist $checksumName))
+        [IO.File]::WriteAllText((Join-Path $duplicate $checksumName), $manifest + "`n" + $manifest)
+        Check 'duplicate checksums fail without replacement' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath') $duplicate) -ne 0 -and (Get-FileHash -LiteralPath $exe).Hash -eq $before)
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        foreach ($kind in @('duplicate', 'reparse')) {
+            $badZip = Join-Path $work ("$shell-$kind-zip")
+            [void][IO.Directory]::CreateDirectory($badZip)
+            foreach ($file in Get-ChildItem -LiteralPath $Dist -Filter '*.zip') {
+                $path = Join-Path $badZip $file.Name
+                [IO.File]::Copy($file.FullName, $path)
+                $zip = [IO.Compression.ZipFile]::Open($path, [IO.Compression.ZipArchiveMode]::Update)
+                try {
+                    if ($kind -eq 'duplicate') { [void]$zip.CreateEntry($command + '.exe') }
+                    else { $zip.GetEntry($command + '.exe').ExternalAttributes = 0x400 }
+                } finally { $zip.Dispose() }
+            }
+            Save-Manifest $badZip
+            Check ("$kind archive member rejected") ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath') $badZip) -ne 0 -and (Get-FileHash -LiteralPath $exe).Hash -eq $before)
         }
+        $empty = Join-Path $work "$shell-empty"
+        [void][IO.Directory]::CreateDirectory($empty)
+        Check 'missing download fails' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath') $empty) -ne 0)
+        $lockPath = Join-Path $dir ('.' + $command + '-install.lock')
+        $held = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        try { Check 'cooperating lock refuses promptly' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -ne 0) }
+        finally { $held.Dispose(); Remove-Item -LiteralPath $lockPath }
+        [IO.File]::WriteAllText("$exe.old", 'unrelated backup')
+        Check 'unrelated .old does not block or disappear on reinstall' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0 -and [IO.File]::ReadAllText("$exe.old") -ceq 'unrelated backup')
+        Remove-Item -LiteralPath "$exe.old"
+        # Positive reinstall above changed metadata; save its current matching pair.
+        $beforeReceipt = [IO.File]::ReadAllText($receiptFile)
+        $beforeSeal = [IO.File]::ReadAllText($receiptSeal)
+        $bytes = [IO.File]::ReadAllBytes($exe)
+        [IO.File]::WriteAllBytes($exe, [byte[]]($bytes + 0))
+        Check 'changed managed executable refuses uninstall' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -ne 0)
+        Check 'changed managed executable remains' ((Get-Item -LiteralPath $exe).Length -eq $bytes.Length + 1)
+        [IO.File]::WriteAllBytes($exe, $bytes)
+        [IO.File]::WriteAllText($receiptFile, '{broken')
+        Check 'corrupt receipt refuses update' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -ne 0)
+        Check 'corrupt state did not delete executable' (Test-Path -LiteralPath $exe)
+        [IO.File]::WriteAllText($receiptFile, $beforeReceipt)
+        [IO.File]::WriteAllText($receiptSeal, $beforeSeal)
+        Check 'uninstall succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -eq 0)
+        Check 'installer-created folder removed' (-not (Test-Path -LiteralPath $dir))
+        Check 'second uninstall is a no-op' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -eq 0 -and (Get-Output) -match 'Nothing was changed')
+
+        Write-Host '--- empty explicit uninstall cannot select a different default installation'
+        $savedLocalAppData = $env:LOCALAPPDATA
+        $env:LOCALAPPDATA = Join-Path $work "$shell-isolated-localappdata"
+        try {
+            Check 'isolated default installation succeeds' ((Invoke-Installer $shell @('-NoModifyPath')) -eq 0)
+            $defaultExe = Join-Path $env:LOCALAPPDATA ('Programs\' + $Product.WindowsFolder + '\' + $command + '.exe')
+            Check 'isolated default executable exists' (Test-Path -LiteralPath $defaultExe)
+            $defaultHash = (Get-FileHash -LiteralPath $defaultExe).Hash
+            & $shell -NoProfile -ExecutionPolicy Bypass -Command ($reviewedBlock + " -Uninstall -InstallDir '' -NoModifyPath") *> (Join-Path $work 'out.txt')
+            Check 'empty explicit uninstall fails and default stays untouched' ($LASTEXITCODE -ne 0 -and (Test-Path -LiteralPath $defaultExe) -and (Get-FileHash -LiteralPath $defaultExe).Hash -ceq $defaultHash)
+            Check 'normal isolated default uninstall succeeds' ((Invoke-Installer $shell @('-Uninstall', '-NoModifyPath')) -eq 0)
+        } finally { $env:LOCALAPPDATA = $savedLocalAppData }
+
+        Write-Host '--- unowned targets stay untouched'
+        [void][IO.Directory]::CreateDirectory($dir)
+        [IO.File]::WriteAllText($exe, 'unrelated executable')
+        [IO.File]::WriteAllText("$exe.old", 'unrelated backup')
+        Check 'unmanaged executable refuses install' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -ne 0)
+        Check 'unmanaged executable refuses uninstall' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -ne 0)
+        Check 'unrelated files and directory remain' ([IO.File]::ReadAllText($exe) -ceq 'unrelated executable' -and [IO.File]::ReadAllText("$exe.old") -ceq 'unrelated backup')
+        Remove-Item -LiteralPath $exe, "$exe.old"
+        Check 'preexisting empty directory can be used' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
+        $preexistingReceipt = [IO.File]::ReadAllText($receiptFile)
+        $preexistingSeal = [IO.File]::ReadAllText($receiptSeal)
+        $edited = $preexistingReceipt | ConvertFrom-Json
+        Check 'receipt records that directory was preexisting' (-not $edited.DirectoryCreated)
+        $edited.DirectoryCreated = $true
+        $editedText = $edited | ConvertTo-Json -Depth 8
+        [IO.File]::WriteAllText($receiptFile, $editedText)
+        Check 'valid JSON ownership flag edit refuses uninstall' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -ne 0)
+        Check 'edited receipt, binary and preexisting directory remain' ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $dir) -and [IO.File]::ReadAllText($receiptFile) -ceq $editedText)
+        [IO.File]::WriteAllText($receiptFile, $preexistingReceipt)
+        [IO.File]::WriteAllText($receiptSeal, $preexistingSeal)
+        Check 'preexisting empty directory survives uninstall' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -eq 0 -and (Test-Path -LiteralPath $dir))
+
+        Write-Host '--- piped Invoke-Expression contract'
+        $saved = @{}
+        foreach ($suffix in @('VERSION','INSTALL_DIR','NO_MODIFY_PATH','UNINSTALL','DOWNLOAD_BASE')) { $name = $prefix + '_' + $suffix; $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+        try {
+            [Environment]::SetEnvironmentVariable(($prefix + '_VERSION'), $null)
+            [Environment]::SetEnvironmentVariable(($prefix + '_INSTALL_DIR'), $dir)
+            [Environment]::SetEnvironmentVariable(($prefix + '_NO_MODIFY_PATH'), '1')
+            [Environment]::SetEnvironmentVariable(($prefix + '_DOWNLOAD_BASE'), $Dist)
+            & $shell -NoProfile -ExecutionPolicy Bypass -Command ("Get-Content -Raw '" + $installer.Replace("'", "''") + "' | Invoke-Expression") *> (Join-Path $work 'out.txt')
+            Check 'iex install succeeds' ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $exe))
+            [Environment]::SetEnvironmentVariable(($prefix + '_UNINSTALL'), '1')
+            & $shell -NoProfile -ExecutionPolicy Bypass -Command ("Get-Content -Raw '" + $installer.Replace("'", "''") + "' | Invoke-Expression") *> (Join-Path $work 'out.txt')
+            Check 'iex uninstall succeeds' ($LASTEXITCODE -eq 0 -and -not (Test-Path -LiteralPath $exe))
+            [Environment]::SetEnvironmentVariable(($prefix + '_UNINSTALL'), $null)
+            [Environment]::SetEnvironmentVariable(($prefix + '_VERSION'), '999.0.0')
+            & $shell -NoProfile -ExecutionPolicy Bypass -Command ("Get-Content -Raw '" + $installer.Replace("'", "''") + "' | Invoke-Expression") *> (Join-Path $work 'out.txt')
+            Check 'iex failure is nonzero' ($LASTEXITCODE -ne 0)
+        } finally { foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) } }
 
         if ($env:CI) {
-            Write-Host '--- user PATH is added and removed'
-            $saved = Get-UserPathRaw
+            Write-Host '--- user PATH ownership and exact registry restoration'
+            $original = Get-RegistryPath
             try {
-                Check 'install with PATH succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0)
-                $entries = (Get-UserPathRaw) -split ';'
-                Check 'PATH entry added first' ($entries[0] -eq $dir)
-                $savedEntries = @($saved -split ';' | Where-Object { $_ })
-                Check 'existing entries kept' ((@($entries | Select-Object -Skip 1) -join ';') -eq ($savedEntries -join ';'))
-                Check 'reinstall keeps one entry' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0 -and @((Get-UserPathRaw) -split ';' | Where-Object { $_ -eq $dir }).Count -eq 1)
-                Check 'uninstall succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0)
-                Check 'PATH restored' ((@((Get-UserPathRaw) -split ';' | Where-Object { $_ }) -join ';') -eq ($savedEntries -join ';'))
-            } finally {
-                $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
-                try { $key.SetValue('Path', $saved, [Microsoft.Win32.RegistryValueKind]::ExpandString) } finally { $key.Close() }
-            }
+                foreach ($kind in @([Microsoft.Win32.RegistryValueKind]::String, [Microsoft.Win32.RegistryValueKind]::ExpandString)) {
+                    $raw = '%USERPROFILE%\custom;;C:\Keep;'
+                    Save-RegistryPath @{ Exists = $true; Value = $raw; Kind = $kind }
+                    Check 'PATH install succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0)
+                    $current = Get-RegistryPath
+                    Check 'raw PATH and registry kind preserved' ($current.Value -ceq ($dir + ';' + $raw) -and $current.Kind -eq $kind)
+                    Check 'reinstall does not duplicate PATH' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0 -and (Get-RegistryPath).Value -ceq ($dir + ';' + $raw))
+                    Check 'owned PATH removed exactly' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0 -and (Get-RegistryPath).Value -ceq $raw -and (Get-RegistryPath).Kind -eq $kind)
+                    Save-RegistryPath @{ Exists = $true; Value = $dir + ';' + $raw; Kind = $kind }
+                    Check 'preexisting PATH install succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0)
+                    Check 'preexisting PATH survives uninstall' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0 -and (Get-RegistryPath).Value -ceq ($dir + ';' + $raw))
+                }
+                Save-RegistryPath @{ Exists = $false; Value = ''; Kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+                Check 'absent PATH install succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0)
+                Check 'absent PATH restored as absent' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0 -and -not (Get-RegistryPath).Exists)
+                Save-RegistryPath @{ Exists = $true; Value = 'C:\Keep;;'; Kind = [Microsoft.Win32.RegistryValueKind]::String }
+                Check 'NoModifyPath install leaves raw PATH' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0 -and (Get-RegistryPath).Value -ceq 'C:\Keep;;')
+                Check 'NoModifyPath uninstall leaves raw PATH' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall', '-NoModifyPath')) -eq 0 -and (Get-RegistryPath).Value -ceq 'C:\Keep;;')
+                Check 'shared folder installation succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir)) -eq 0)
+                [IO.File]::WriteAllText((Join-Path $dir 'other-program.txt'), 'user file')
+                Check 'shared folder PATH is conservatively retained' ((Invoke-Installer $shell @('-InstallDir', $dir, '-Uninstall')) -eq 0 -and (Get-RegistryPath).Value.StartsWith($dir + ';') -and (Test-Path -LiteralPath (Join-Path $dir 'other-program.txt')))
+                Remove-Item -LiteralPath (Join-Path $dir 'other-program.txt')
+            } finally { Save-RegistryPath $original }
         }
     }
-} finally {
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-Write-Host ''
-if ($script:failures -gt 0) { Write-Host "$($script:failures) check(s) failed." -ForegroundColor Red; exit 1 }
+} finally { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+if ($script:failures -gt 0) { throw "$($script:failures) installer checks failed." }
 Write-Host 'All installer checks passed.'

@@ -1,315 +1,452 @@
 # SPDX-License-Identifier: MPL-2.0
-#
-# Installs, updates or uninstalls PDFConcat for the current Windows user.
-# No administrator access is needed. See docs/INSTALL.md.
-#
-#   powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
-#
-# Options can be passed through a script block, for example:
-#   & ([scriptblock]::Create((irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1))) -Uninstall
-#
-# Keep this file ASCII: Windows PowerShell 5.1 misreads other characters.
+# Self-contained user-scope CLI release installer. Keep this file ASCII for PS 5.1.
+[CmdletBinding(PositionalBinding = $false)]
+param([string]$Version, [string]$InstallDir, [switch]$NoModifyPath, [switch]$Uninstall, [switch]$Help)
 
-param(
-    [string]$Version = $env:PDFCONCAT_VERSION,
-    [string]$InstallDir = $env:PDFCONCAT_INSTALL_DIR,
-    [switch]$NoModifyPath,
-    [switch]$Uninstall,
-    [switch]$Help
-)
+# BEGIN PRODUCT SETTINGS
+$Product = @{
+    Name = 'PDFConcat'
+    Command = 'pdfconcat'
+    Repository = 'https://github.com/resoltico/pdfconcat'
+    Environment = 'PDFCONCAT'
+    ArchivePrefix = 'pdfconcat_'
+    Separator = '_'
+    VersionedArchive = $false
+    MacOS = 'darwin'
+    X64 = 'amd64'
+    Arm64 = 'arm64'
+    Checksums = 'checksums.txt'
+    WindowsFolder = 'PDFConcat'
+    MinimumMacOS = 15
+    LegalFiles = @()
+}
+# END PRODUCT SETTINGS
 
-function Invoke-PDFConcatInstaller {
-    param([string]$Version, [string]$InstallDir, [bool]$ModifyPath, [bool]$Uninstall)
-
+function Invoke-CliInstaller {
+    param([string]$Version, [string]$InstallDir, [bool]$ModifyPath, [bool]$Uninstall, [hashtable]$Product)
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
     Set-StrictMode -Version 3
-
-    $repoUrl = 'https://github.com/resoltico/pdfconcat'
-    $docsUrl = "$repoUrl/blob/main/docs/INSTALL.md"
-    $useColor = -not $env:NO_COLOR
-    $fancy = [bool]($env:WT_SESSION -or $env:TERM_PROGRAM)
-    $ok = if ($fancy) { [string][char]0x2713 } else { '+' }
-
-    function Write-Step([string]$Label, [string]$Value, [string]$Mark = $ok, [string]$Color = 'Green') {
-        Write-Host '  ' -NoNewline
-        if ($useColor) { Write-Host $Mark -ForegroundColor $Color -NoNewline } else { Write-Host $Mark -NoNewline }
-        Write-Host (' {0,-11} {1}' -f $Label, $Value)
+    $stable = '(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
+    $identifier = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+    $semver = $stable + '(?:-' + $identifier + '(?:\.' + $identifier + ')*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    function Exit-Installer([string]$Text) { throw [InvalidOperationException]::new($Text) }
+    function Write-Step([string]$Label, [string]$Text) { Write-Host ('  {0,-11} {1}' -f $Label, $Text) }
+    function ConvertTo-QuotedCommand([string]$Text) { return "'" + $Text.Replace("'", "''") + "'" }
+    function Get-Digest([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+    function Get-ItemOrNull([string]$Path) {
+        try { return Get-Item -LiteralPath $Path -Force }
+        catch [Management.Automation.ItemNotFoundException] { return $null }
     }
-    function Write-Note([string]$Label, [string]$Value) { Write-Step $Label $Value '!' 'Yellow' }
-    function Write-Detail([string]$Value) { Write-Host ('                {0}' -f $Value) -ForegroundColor DarkGray }
-    function Write-Title([string]$Text) { Write-Host ''; Write-Host $Text; Write-Host '' }
-    function Exit-Installer([string]$Message, [string[]]$Details = @()) {
-        $text = (@($Message) + ($Details | ForEach-Object { "  $_" })) -join "`n    "
-        throw [System.InvalidOperationException]::new($text)
-    }
-    function Get-PrettyPath([string]$Path) {
-        $userHome = [Environment]::GetFolderPath('UserProfile')
-        if ($Path.StartsWith($userHome + '\', [StringComparison]::OrdinalIgnoreCase)) { return '~' + $Path.Substring($userHome.Length) }
-        return $Path
-    }
-    function Get-ReportedVersion([string]$Exe) {
-        try {
-            # Collect all output first: in PowerShell 7, Select-Object -First
-            # can stop the program early and turn its exit status into a failure.
-            $out = @(& $Exe version 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $out.Count -gt 0 -and $out[0] -match '^pdfconcat (\S+)') { return $Matches[1] }
-            return $null
-        } catch {
-            return $null
-        }
+    function Assert-Regular([string]$Path, [bool]$Missing = $false) {
+        $item = Get-ItemOrNull $Path
+        if (-not $item) { if ($Missing) { return $false }; Exit-Installer "Required managed file is missing: $Path" }
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Exit-Installer "Not a regular managed file; left untouched: $Path" }
+        return $true
     }
     function Test-SamePath([string]$A, [string]$B) {
-        $a2 = [Environment]::ExpandEnvironmentVariables($A).TrimEnd('\')
-        $b2 = [Environment]::ExpandEnvironmentVariables($B).TrimEnd('\')
+        $a2 = [Environment]::ExpandEnvironmentVariables($A).TrimEnd('\', '/')
+        $b2 = [Environment]::ExpandEnvironmentVariables($B).TrimEnd('\', '/')
         return [string]::Equals($a2, $b2, [StringComparison]::OrdinalIgnoreCase)
     }
-    # The user PATH is read and written raw so %VARIABLE% entries and the
-    # registry value type survive. SetEnvironmentVariable would expand them.
+    function Enter-PathLock {
+        # A named mutex coordinates both products across sessions of this user.
+        # Windows requires no administrator privilege for a global mutex.
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $mutex = [Threading.Mutex]::new($false, ('Global\CliReleaseInstaller.Path.' + $sid))
+        try {
+            try { $held = $mutex.WaitOne(0) }
+            catch [Threading.AbandonedMutexException] { $held = $true }
+            if (-not $held) { Exit-Installer 'Another installer is changing user PATH. Nothing was changed; run this command after it finishes.' }
+            return $mutex
+        } catch { $mutex.Dispose(); throw }
+    }
+    function Get-AbsoluteDirectory([string]$Directory) {
+        $root = [IO.Path]::GetPathRoot($Directory)
+        if (-not $root -or $root -eq '\' -or $root -match '\A[A-Za-z]:\z') { Exit-Installer 'A fully qualified absolute directory is required.' }
+        $full = [IO.Path]::GetFullPath($Directory)
+        if ($full.Length -gt ([IO.Path]::GetPathRoot($full)).Length) { $full = $full.TrimEnd('\', '/') }
+        return $full
+    }
     function Get-UserPath {
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
-        try { $raw = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames') } finally { $key.Close() }
-        return @($raw -split ';' | Where-Object { $_ })
-    }
-    function Save-UserPath([string[]]$Entries) {
-        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
         try {
-            $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
-            if ($key.GetValueNames() -contains 'Path') { $kind = $key.GetValueKind('Path') }
-            $key.SetValue('Path', ($Entries -join ';'), $kind)
+            if (-not $key -or $key.GetValueNames() -notcontains 'Path') { return @{ Exists = $false; Value = ''; Kind = [Microsoft.Win32.RegistryValueKind]::ExpandString } }
+            $kind = $key.GetValueKind('Path')
+            if ($kind -ne [Microsoft.Win32.RegistryValueKind]::String -and $kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { Exit-Installer 'User PATH is not a string value; it was left untouched.' }
+            return @{ Exists = $true; Value = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); Kind = $kind }
+        } finally { if ($key) { $key.Close() } }
+    }
+    function Save-UserPath([hashtable]$Record) {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+        try {
+            if ($Record.Exists) { $key.SetValue('Path', $Record.Value, $Record.Kind) }
+            else { $key.DeleteValue('Path', $false) }
         } finally { $key.Close() }
-        # Setting and clearing a user variable broadcasts WM_SETTINGCHANGE, so
-        # new terminals opened from Explorer see the updated PATH.
-        [Environment]::SetEnvironmentVariable('PDFCONCAT_INSTALLER', '1', 'User')
-        [Environment]::SetEnvironmentVariable('PDFCONCAT_INSTALLER', $null, 'User')
+        # Notify Explorer directly; do not create/delete an unrelated user variable.
+        try {
+            if (-not ('CliInstaller.EnvironmentNotice' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace CliInstaller {
+    public static class EnvironmentNotice {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, UIntPtr w, string l, uint f, uint t, out UIntPtr r);
     }
-
-    if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
-        Exit-Installer 'This installer is for Windows.' @('On macOS and Linux, run:', "curl -fsSL $repoUrl/releases/latest/download/install.sh | sh")
+}
+'@
+        }
+        $result = [UIntPtr]::Zero
+        $sent = [CliInstaller.EnvironmentNotice]::SendMessageTimeout([IntPtr]0xffff, 0x001a, [UIntPtr]::Zero, 'Environment', 2, 1000, [ref]$result)
+        if ($sent -eq [IntPtr]::Zero) { Write-Step 'Note' 'PATH was saved; Explorer notification did not complete. Open a new terminal.' }
+        } catch { Write-Step 'Note' ("PATH was saved, but Explorer notification failed: " + $_.Exception.Message) }
     }
-    if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\PDFConcat' }
-    if (-not [IO.Path]::IsPathRooted($InstallDir)) { Exit-Installer "The install directory must be an absolute path: $InstallDir" }
-    $InstallDir = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
-    $exe = Join-Path $InstallDir 'pdfconcat.exe'
-    $retired = "$exe.old"
-
-    if ($Uninstall) {
-        Write-Title 'PDFConcat uninstaller'
-        $changed = $false
-        if (Test-Path -LiteralPath $exe -PathType Container) { Exit-Installer "$(Get-PrettyPath $exe) is a folder, so it was left alone." }
-        if (Test-Path -LiteralPath $exe) {
-            $old = Get-ReportedVersion $exe
-            if (-not $old) { $old = 'unknown version' }
-            try { Remove-Item -LiteralPath $exe -Force }
-            catch { Exit-Installer "Could not remove $(Get-PrettyPath $exe)." @('Close any running pdfconcat, then try again.') }
-            Write-Step 'Removed' "$(Get-PrettyPath $exe) ($old)"
-            $changed = $true
+    function Test-PathEntry([hashtable]$Record) {
+        foreach ($entry in $Record.Value.Split([char]';')) { if ($entry -and (Test-SamePath $entry $InstallDir)) { return $true } }
+        return $false
+    }
+    function Invoke-OwnedPathRemoval([string]$Entry, [bool]$WasAbsent) {
+        $record = Get-UserPath
+        $parts = [Collections.Generic.List[string]]::new()
+        foreach ($part in $record.Value.Split([char]';')) { $parts.Add($part) }
+        $index = $parts.IndexOf($Entry)
+        if ($index -lt 0) { return }
+        $parts.RemoveAt($index)
+        $record.Value = [string]::Join(';', $parts.ToArray())
+        if ($parts.Count -eq 0 -and $WasAbsent) { $record.Exists = $false }
+        Save-UserPath $record
+    }
+    function Get-RemoteFile([uri]$Uri, [string]$Destination) {
+        Add-Type -AssemblyName System.Net.Http
+        $previousTLS = [Net.ServicePointManager]::SecurityProtocol
+        $handler = [Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $client = [Net.Http.HttpClient]::new($handler)
+        $client.DefaultRequestHeaders.UserAgent.ParseAdd('cli-release-installer')
+        $timeout = [Threading.CancellationTokenSource]::new()
+        $timeout.CancelAfter(100000)
+        try {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 }
+            for ($hop = 0; $hop -le 10; $hop++) {
+                if ($Uri.Scheme -ne 'https' -or $Uri.UserInfo) { Exit-Installer 'Downloads and every redirect must use HTTPS without embedded credentials.' }
+                $response = $client.GetAsync($Uri, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $timeout.Token).GetAwaiter().GetResult()
+                try {
+                    if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
+                        if (-not $response.Headers.Location) { Exit-Installer 'Download redirect has no Location.' }
+                        $Uri = [uri]::new($Uri, $response.Headers.Location)
+                        continue
+                    }
+                    if (-not $response.IsSuccessStatusCode) { Exit-Installer "Download failed: HTTP $([int]$response.StatusCode)." }
+                    $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+                    $outputStream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                    try { [void]$inputStream.CopyToAsync($outputStream, 81920, $timeout.Token).GetAwaiter().GetResult() } finally { $outputStream.Dispose(); $inputStream.Dispose() }
+                    return
+                } finally { $response.Dispose() }
+            }
+            Exit-Installer 'Too many download redirects.'
+        } finally { $client.Dispose(); $timeout.Dispose(); [Net.ServicePointManager]::SecurityProtocol = $previousTLS }
+    }
+    function Get-ReleaseFile([string]$Name, [string]$Destination) {
+        if ($base.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) { Get-RemoteFile ([uri]("$base/$Name")) $Destination }
+        else { [IO.File]::Copy((Join-Path $base $Name), $Destination, $false) }
+    }
+    function Get-ProgramVersion([string]$Program, [string]$Diagnostics) {
+        $output = @()
+        $failure = $null
+        try { $output = @(& $Program --version 2>$Diagnostics); $code = $LASTEXITCODE }
+        catch { $code = -1; $failure = $_.Exception.Message }
+        $detail = if (Test-Path -LiteralPath $Diagnostics) { [IO.File]::ReadAllText($Diagnostics) } else { '' }
+        $pattern = '\A' + [regex]::Escape($Product.Command) + ' (' + $semver + ')(?: \([^()\r\n]+\))?\z'
+        if ($code -ne 0 -or $output.Count -ne 1 -or [string]$output[0] -cnotmatch $pattern) {
+            Exit-Installer ("The downloaded program did not report a valid version (exit $code).`n$failure`n$detail`n" + ($output -join "`n"))
         }
-        Remove-Item -LiteralPath $retired -Force -ErrorAction SilentlyContinue
-        if ((Test-Path -LiteralPath $InstallDir) -and -not (Get-ChildItem -LiteralPath $InstallDir -Force)) {
-            Remove-Item -LiteralPath $InstallDir -Force
+        return $Matches[1]
+    }
+    function Write-Receipt([string]$Directory, [hashtable]$Receipt) {
+        $receiptPath = Join-Path $Directory 'receipt.json'
+        [IO.File]::WriteAllText($receiptPath, ($Receipt | ConvertTo-Json -Depth 8), $utf8)
+        [IO.File]::WriteAllText((Join-Path $Directory 'receipt.sha256'), ((Get-Digest $receiptPath) + "`n"), $utf8)
+    }
+    function Read-Receipt([bool]$AllowMissing) {
+        $bin = Get-ItemOrNull $exe
+        $state = Get-ItemOrNull $stateDir
+        if (-not $state) {
+            if ($bin) { Exit-Installer "Existing $exe is not managed by this installer. Remove it manually or choose a new install directory." }
+            return $null
         }
-        # Remove the PATH entry only once the folder is gone, so a shared
-        # folder holding other programs keeps working.
-        if (-not (Test-Path -LiteralPath $InstallDir)) {
-            $entries = @(Get-UserPath)
-            $kept = @($entries | Where-Object { -not (Test-SamePath $_ $InstallDir) })
-            if ($kept.Count -ne $entries.Count) {
-                Save-UserPath $kept
-                Write-Step 'PATH' "removed $(Get-PrettyPath $InstallDir) from your user PATH"
-                $changed = $true
+        if (-not $state.PSIsContainer -or ($state.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Exit-Installer "Unmanaged installer state; left untouched: $stateDir" }
+        try {
+            $receiptPath = Join-Path $stateDir 'receipt.json'
+            $sealPath = Join-Path $stateDir 'receipt.sha256'
+            [void](Assert-Regular $receiptPath)
+            [void](Assert-Regular $sealPath)
+            $seal = [IO.File]::ReadAllText($sealPath)
+            if ($seal -cnotmatch '\A[0-9a-f]{64}(?:\r?\n)?\z' -or (Get-Digest $receiptPath) -cne $seal.TrimEnd("`r", "`n")) { throw 'installer receipt changed or its seal is invalid' }
+            $r = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
+            if ($r.Directory -isnot [string] -or -not [string]::Equals($r.Directory, $InstallDir, [StringComparison]::OrdinalIgnoreCase)) { throw 'receipt belongs to another install directory' }
+            if ($r.Schema -ne 1 -or $r.Command -cne $Product.Command -or $r.DirectoryCreated -isnot [bool] -or $r.PathWasAbsent -isnot [bool]) { throw 'invalid receipt identity or flags' }
+            if ([string]$r.Version -cnotmatch ('\A' + $semver + '\z')) { throw 'invalid receipt version' }
+            if ($null -ne $r.PathEntry -and ($r.PathEntry -isnot [string] -or -not (Test-SamePath $r.PathEntry $InstallDir))) { throw 'invalid owned PATH entry' }
+            $expected = @($Product.LegalFiles)
+            if (@($r.Legal).Count -ne $expected.Count) { throw 'invalid legal-file list' }
+            if ([string]$r.BinaryHash -notmatch '\A[0-9a-f]{64}\z') { throw 'invalid binary digest' }
+            $known = @('receipt.json', 'receipt.sha256')
+            for ($i = 0; $i -lt $expected.Count; $i++) {
+                if ($r.Legal[$i].Name -cne $expected[$i] -or [string]$r.Legal[$i].Hash -notmatch '\A[0-9a-f]{64}\z') { throw 'invalid legal digest' }
+                $known += 'legal\' + $expected[$i]
+            }
+            foreach ($item in Get-ChildItem -LiteralPath $stateDir -Recurse -Force) {
+                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'reparse point in installer state' }
+                $relative = $item.FullName.Substring($stateDir.Length + 1)
+                if ($item.PSIsContainer) { if ($expected.Count -eq 0 -or $relative -cne 'legal') { throw 'unowned state directory' } }
+                elseif ($known -cnotcontains $relative) { throw 'unowned file in installer state' }
+            }
+            if (Assert-Regular $exe $AllowMissing) { if ((Get-Digest $exe) -cne $r.BinaryHash) { throw 'managed executable has changed' } }
+            foreach ($legal in @($r.Legal)) {
+                $path = Join-Path (Join-Path $stateDir 'legal') $legal.Name
+                if (Assert-Regular $path $AllowMissing) { if ((Get-Digest $path) -cne $legal.Hash) { throw 'managed legal file has changed' } }
+            }
+            if ($null -ne $r.Retired) {
+                if ([string]$r.Retired.Name -cnotmatch ('\A\.' + [regex]::Escape($Product.Command) + '-retired-[0-9a-f]{32}\.exe\z') -or [string]$r.Retired.Hash -notmatch '\A[0-9a-f]{64}\z') { throw 'invalid retired-file ownership' }
+                $path = Join-Path $InstallDir $r.Retired.Name
+                if (Assert-Regular $path $true) { if ((Get-Digest $path) -cne $r.Retired.Hash) { throw 'retired executable has changed' } }
+            }
+            return @{ Schema = 1; Directory = $r.Directory; Command = $r.Command; Version = $r.Version; BinaryHash = $r.BinaryHash; Legal = @($r.Legal); DirectoryCreated = $r.DirectoryCreated; PathEntry = $r.PathEntry; PathWasAbsent = $r.PathWasAbsent; Retired = $r.Retired }
+        } catch { Exit-Installer "Installer ownership could not be verified; nothing was replaced or removed: $($_.Exception.Message). Use manual cleanup or a new install directory." }
+    }
+    function Invoke-StateRemoval([string]$Directory, [object[]]$Legal) {
+        foreach ($file in $Legal) {
+            $path = Join-Path (Join-Path $Directory 'legal') $file.Name
+            if (Assert-Regular $path $true) {
+                if ((Get-Digest $path) -cne $file.Hash) { Exit-Installer "Managed legal file changed; it was left untouched: $path" }
+                Remove-Item -LiteralPath $path -Force
             }
         }
-        if (-not $changed) {
-            Write-Host "  PDFConcat is not installed in $(Get-PrettyPath $InstallDir). Nothing was changed."
-            Write-Host ''
+        $legalDir = Join-Path $Directory 'legal'
+        if (Test-Path -LiteralPath $legalDir) { Remove-Item -LiteralPath $legalDir -Force }
+        Remove-Item -LiteralPath (Join-Path $Directory 'receipt.json') -Force
+        Remove-Item -LiteralPath (Join-Path $Directory 'receipt.sha256') -Force
+        Remove-Item -LiteralPath $Directory -Force
+    }
+    function Invoke-RetiredRemoval([hashtable]$Receipt) {
+        if ($Receipt -and $null -ne $Receipt.Retired) {
+            $path = Join-Path $InstallDir $Receipt.Retired.Name
+            if (Assert-Regular $path $true) {
+                if ((Get-Digest $path) -cne $Receipt.Retired.Hash) { Exit-Installer "Retired executable changed; it was left untouched: $path" }
+                Remove-Item -LiteralPath $path -Force
+            }
+        }
+    }
+
+    if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) { Exit-Installer 'This installer is for Windows; use install.sh on macOS or Linux.' }
+    if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA ('Programs\' + $Product.WindowsFolder) }
+    $InstallDir = Get-AbsoluteDirectory $InstallDir
+    $pathRoot = [IO.Path]::GetPathRoot($InstallDir)
+    if ($InstallDir.Contains(';') -and $ModifyPath) { Write-Step 'Note' 'PATH cannot represent a semicolon in this directory; PATH will be left unchanged.'; $ModifyPath = $false }
+    $exe = Join-Path $InstallDir ($Product.Command + '.exe')
+    $stateDir = Join-Path $InstallDir ('.' + $Product.Command + '-install')
+    $lockPath = Join-Path $InstallDir ('.' + $Product.Command + '-install.lock')
+    $existingDir = Get-ItemOrNull $InstallDir
+    if ($existingDir -and (-not $existingDir.PSIsContainer -or ($existingDir.Attributes -band [IO.FileAttributes]::ReparsePoint))) { Exit-Installer "The install directory is not an ordinary directory: $InstallDir" }
+    if ($Uninstall -and -not $existingDir) { Write-Host "$($Product.Name) is not installed there. Nothing was changed."; return }
+    $created = -not $existingDir
+    if ($created) { [void][IO.Directory]::CreateDirectory($InstallDir) }
+    $lock = $null
+    $tmp = $null
+    $stage = $null
+    $backupState = $null
+    $pathMutex = $null
+    try {
+        try { $lock = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+        catch { Exit-Installer "Another installer may be using $InstallDir, or its lock remains after interruption. Nothing was changed. Close it or inspect $lockPath before retrying." }
+        $receipt = Read-Receipt $Uninstall
+        if ($Uninstall) {
+            if (-not $receipt) { Write-Host "$($Product.Name) is not managed here. Nothing was changed."; return }
+            if ($ModifyPath -and $receipt.PathEntry) { $pathMutex = Enter-PathLock }
+            Invoke-RetiredRemoval $receipt
+            if (Test-Path -LiteralPath $exe) { Remove-Item -LiteralPath $exe -Force }
+            Invoke-StateRemoval $stateDir $receipt.Legal
+            $others = @(Get-ChildItem -LiteralPath $InstallDir -Force | Where-Object { $_.FullName -cne $lockPath })
+            if ($receipt.PathEntry) {
+                if (-not $ModifyPath -or $others.Count -gt 0) { Write-Step 'Note' 'Owned PATH entry was retained (NoModifyPath or a shared folder); remove it manually when no longer needed.' }
+                else {
+                    Invoke-OwnedPathRemoval $receipt.PathEntry $receipt.PathWasAbsent
+                    $parts = [Collections.Generic.List[string]]::new()
+                    foreach ($part in $env:Path.Split([char]';')) { $parts.Add($part) }
+                    $index = $parts.IndexOf($receipt.PathEntry)
+                    if ($index -ge 0) { $parts.RemoveAt($index); $env:Path = [string]::Join(';', $parts.ToArray()) }
+                }
+            }
+            $created = $receipt.DirectoryCreated
+            Write-Host "$($Product.Name) has been uninstalled. Your documents and unrelated files were not touched."
             return
         }
-        Write-Host ''
-        Write-Host '  PDFConcat has been uninstalled.'
-        Write-Host '  Your PDFs, plans and reports were not touched.'
-        Write-Host ''
-        return
-    }
-
-    $Version = "$Version".TrimStart('v')
-    if ($Version -and $Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-        Exit-Installer "Not a release version: $Version" @('Use a stable version such as 0.7.0.')
-    }
-
-    Write-Title 'PDFConcat installer'
-
-    # The registry reports the native processor even when this PowerShell runs
-    # under x64 emulation on an Arm device.
-    $native = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE
-    $arch = switch ($native) { 'AMD64' { 'amd64' } 'ARM64' { 'arm64' } default { $null } }
-    if (-not $arch) { Exit-Installer "PDFConcat has no Windows release for the $native processor." @('Build it from source; see the README.') }
-    $osVersion = [Environment]::OSVersion.Version
-    Write-Step 'System' "Windows $($osVersion.Major).$($osVersion.Minor) build $($osVersion.Build) - $arch"
-
-    $asset = "pdfconcat_windows_$arch.zip"
-    if ($env:PDFCONCAT_DOWNLOAD_BASE) {
-        $base = $env:PDFCONCAT_DOWNLOAD_BASE.TrimEnd('/', '\')
-        if (-not ($base.StartsWith('https://') -or [IO.Path]::IsPathRooted($base))) {
-            Exit-Installer 'PDFCONCAT_DOWNLOAD_BASE must be an https:// URL or an absolute directory.'
-        }
-        $sourceLabel = $base
-    } elseif ($Version) {
-        $base = "$repoUrl/releases/download/v$Version"
-        $sourceLabel = "the v$Version release"
-    } else {
-        $base = "$repoUrl/releases/latest/download"
-        $sourceLabel = 'the latest release'
-    }
-
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("pdfconcat-install-" + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $tmp | Out-Null
-    try {
-        if ($base.StartsWith('https://')) {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        }
-        foreach ($name in @($asset, 'checksums.txt')) {
-            try {
-                if ($base.StartsWith('https://')) {
-                    Invoke-WebRequest -Uri "$base/$name" -OutFile (Join-Path $tmp $name) -UseBasicParsing
-                } else {
-                    Copy-Item -LiteralPath (Join-Path $base $name) -Destination (Join-Path $tmp $name)
-                }
-            } catch {
-                Exit-Installer "Could not download $name from $sourceLabel." @('Check your internet connection and that the release exists:', "$repoUrl/releases")
+        if ($Version.StartsWith('v')) { $Version = $Version.Substring(1) }
+        if ($Version -and $Version -cnotmatch ('\A' + $stable + '\z')) { Exit-Installer "Not a stable release version: $Version" }
+        $native = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE
+        $arch = switch ($native) { 'AMD64' { $Product.X64 } 'ARM64' { $Product.Arm64 } default { $null } }
+        if (-not $arch) { Exit-Installer "No Windows release for the $native processor." }
+        Write-Step 'System' "Windows - $native"
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ('cli-install-' + [guid]::NewGuid().ToString('N'))
+        [void][IO.Directory]::CreateDirectory($tmp)
+        $mirror = [Environment]::GetEnvironmentVariable($Product.Environment + '_DOWNLOAD_BASE')
+        if ($mirror) {
+            if ($mirror.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+                try { $mirrorUri = [uri]$mirror } catch { Exit-Installer 'DOWNLOAD_BASE is not a valid HTTPS directory URL.' }
+                if ($mirrorUri.UserInfo -or $mirrorUri.Query -or $mirrorUri.Fragment) { Exit-Installer 'DOWNLOAD_BASE cannot contain credentials, a query or a fragment.' }
+                $base = $mirrorUri.AbsoluteUri.TrimEnd('/')
+            } else { $base = Get-AbsoluteDirectory $mirror }
+            if ($Product.VersionedArchive -and -not $Version) { Exit-Installer 'A versioned release mirror requires -Version X.Y.Z.' }
+        } else {
+            if (-not $Version) {
+                $repoPath = ([uri]$Product.Repository).AbsolutePath.Trim('/')
+                $latest = Join-Path $tmp 'latest.json'
+                Get-RemoteFile ([uri]("https://api.github.com/repos/$repoPath/releases/latest")) $latest
+                $tag = ([IO.File]::ReadAllText($latest) | ConvertFrom-Json).tag_name
+                if ([string]$tag -cnotmatch ('\Av(' + $stable + ')\z')) { Exit-Installer 'Latest release has no stable vX.Y.Z tag.' }
+                $Version = $Matches[1]
             }
+            $base = "$($Product.Repository)/releases/download/v$Version"
         }
+        $asset = $Product.ArchivePrefix
+        if ($Product.VersionedArchive) { $asset += $Version + $Product.Separator }
+        $asset += 'windows' + $Product.Separator + $arch + '.zip'
         $archive = Join-Path $tmp $asset
-        $size = (Get-Item -LiteralPath $archive).Length
-        Write-Step 'Downloaded' ('{0} - {1:N1} MB' -f $asset, ($size / 1MB))
-        Write-Detail "from $sourceLabel"
-
-        $expected = @(Get-Content -LiteralPath (Join-Path $tmp 'checksums.txt') | ForEach-Object {
-            $fields = $_ -split '\s+'
-            if ($fields.Count -ge 2 -and ($fields[1] -eq $asset -or $fields[1] -eq "*$asset")) { $fields[0].ToLowerInvariant() }
-        })
-        if ($expected.Count -ne 1) { Exit-Installer "checksums.txt has no unique entry for $asset." @('Nothing was installed.') }
-        $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actual -ne $expected[0]) {
-            Exit-Installer 'The download does not match its published SHA-256 checksum.' @('Nothing was installed. Try again; if this persists, please report it:', "$repoUrl/issues")
+        $checksums = Join-Path $tmp $Product.Checksums
+        Get-ReleaseFile $asset $archive
+        Get-ReleaseFile $Product.Checksums $checksums
+        Write-Step 'Downloaded' $asset
+        $selected = @()
+        foreach ($line in [IO.File]::ReadAllLines($checksums, $utf8)) {
+            if ($line -cmatch ('(?:^|\s)\*?' + [regex]::Escape($asset) + '\z')) { $selected += $line }
         }
-        Write-Step 'Verified' 'SHA-256 matches the release checksums'
-
-        # Extract only the executable; other archive members are never written.
+        if ($selected.Count -ne 1 -or $selected[0] -cnotmatch ('\A([0-9a-fA-F]{64}) [ *]' + [regex]::Escape($asset) + '\z')) { Exit-Installer "No unique valid checksum for $asset." }
+        $expected = $Matches[1].ToLowerInvariant()
+        if ((Get-Digest $archive) -cne $expected) { Exit-Installer 'The download does not match its published SHA-256 checksum. Nothing was installed.' }
+        Write-Step 'Verified' 'SHA-256 matches the selected immutable release'
+        $stage = Join-Path $InstallDir ('.' + $Product.Command + '-stage-' + [guid]::NewGuid().ToString('N'))
+        [void][IO.Directory]::CreateDirectory($stage)
+        $nextState = Join-Path $stage 'state'
+        [void][IO.Directory]::CreateDirectory($nextState)
+        if ($Product.LegalFiles.Count -gt 0) { [void][IO.Directory]::CreateDirectory((Join-Path $nextState 'legal')) }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $candidate = Join-Path $tmp 'pdfconcat.exe'
         $zip = [IO.Compression.ZipFile]::OpenRead($archive)
         try {
-            $entry = $zip.GetEntry('pdfconcat.exe')
-            if (-not $entry) { Exit-Installer "$asset does not contain pdfconcat.exe." }
-            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $candidate)
+            foreach ($name in @($Product.Command + '.exe') + @($Product.LegalFiles)) {
+                $entries = @($zip.Entries | Where-Object { $_.FullName -ceq $name })
+                if ($entries.Count -ne 1) { Exit-Installer "Archive has no unique regular $name." }
+                $kind = ($entries[0].ExternalAttributes -shr 16) -band 0xf000
+                if (($kind -ne 0 -and $kind -ne 0x8000) -or ($entries[0].ExternalAttributes -band 0x410)) { Exit-Installer "Archive member is not regular: $name" }
+                $destination = if ($name -ceq ($Product.Command + '.exe')) { Join-Path $stage $name } else { Join-Path (Join-Path $nextState 'legal') $name }
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $destination)
+            }
         } finally { $zip.Dispose() }
-
-        $newVersion = Get-ReportedVersion $candidate
-        if (-not $newVersion) {
-            Exit-Installer 'The downloaded program does not run on this system.' @('Nothing was installed.', "Running it directly shows the reason: & '$candidate' version")
+        $candidate = Join-Path $stage ($Product.Command + '.exe')
+        $newVersion = Get-ProgramVersion $candidate (Join-Path $tmp 'version-error.txt')
+        if ($Version -and $newVersion -cne $Version) { Exit-Installer "The downloaded program reports version $newVersion, not $Version. Nothing was installed." }
+        Write-Step 'Tested' "$($Product.Command) $newVersion runs on this system"
+        # Downloads/probing can take time; validate the state used for mutation.
+        $receipt = Read-Receipt $false
+        Invoke-RetiredRemoval $receipt
+        $newReceipt = @{ Schema = 1; Directory = $InstallDir; Command = $Product.Command; Version = $newVersion; BinaryHash = Get-Digest $candidate; Legal = @(); DirectoryCreated = $created; PathEntry = $null; PathWasAbsent = $false; Retired = $null }
+        if ($receipt) { $newReceipt.DirectoryCreated = $receipt.DirectoryCreated; $newReceipt.PathEntry = $receipt.PathEntry; $newReceipt.PathWasAbsent = $receipt.PathWasAbsent }
+        foreach ($name in @($Product.LegalFiles)) { $newReceipt.Legal += @{ Name = $name; Hash = Get-Digest (Join-Path (Join-Path $nextState 'legal') $name) } }
+        $addedPath = $false
+        $retired = $null
+        if ($receipt) {
+            $retired = Join-Path $InstallDir ('.' + $Product.Command + '-retired-' + [guid]::NewGuid().ToString('N') + '.exe')
+            # Record ownership before activating. If deletion later fails, the
+            # running old image is already owned; no in-place receipt rewrite.
+            $newReceipt.Retired = @{ Name = [IO.Path]::GetFileName($retired); Hash = $receipt.BinaryHash }
         }
-        if ($Version -and $newVersion -ne $Version) {
-            Exit-Installer "The downloaded program reports version $newVersion, not $Version." @('Nothing was installed.')
-        }
-        Write-Step 'Tested' "pdfconcat $newVersion runs on this system"
-
-        if (Test-Path -LiteralPath $exe -PathType Container) {
-            Exit-Installer "$(Get-PrettyPath $exe) is a folder, so it was left alone." @('Remove it yourself, or choose another location with -InstallDir.')
-        }
-        $oldVersion = $null
-        if (Test-Path -LiteralPath $exe) {
-            $oldVersion = Get-ReportedVersion $exe
-            if (-not $oldVersion) { $oldVersion = 'an unknown version' }
-        }
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-        # Windows cannot overwrite a running program but can rename it, so the
-        # old file is moved aside first and deleted when it is no longer in use.
-        Remove-Item -LiteralPath $retired -Force -ErrorAction SilentlyContinue
+        $movedOldBinary = $false
+        $movedOldState = $false
+        $newStateActive = $false
+        $newBinaryActive = $false
         try {
-            if (Test-Path -LiteralPath $exe) { Move-Item -LiteralPath $exe -Destination $retired -Force }
-            Move-Item -LiteralPath $candidate -Destination $exe
+            if ($ModifyPath) {
+                $pathMutex = Enter-PathLock
+                $pathRecord = Get-UserPath
+                if (-not (Test-PathEntry $pathRecord)) {
+                    $newReceipt.PathEntry = $InstallDir
+                    $newReceipt.PathWasAbsent = -not $pathRecord.Exists
+                    $pathRecord.Value = if ($pathRecord.Exists) { $InstallDir + ';' + $pathRecord.Value } else { $InstallDir }
+                    $pathRecord.Exists = $true
+                    Save-UserPath $pathRecord
+                    $addedPath = $true
+                }
+            }
+            Write-Receipt $nextState $newReceipt
+            if ($receipt) {
+                [IO.File]::Move($exe, $retired)
+                $movedOldBinary = $true
+                $previousState = Join-Path $stage 'previous-state'
+                [IO.Directory]::Move($stateDir, $previousState)
+                $backupState = $previousState
+                $movedOldState = $true
+            }
+            [IO.Directory]::Move($nextState, $stateDir)
+            $newStateActive = $true
+            [IO.File]::Move($candidate, $exe)
+            $newBinaryActive = $true
         } catch {
-            if ((Test-Path -LiteralPath $retired) -and -not (Test-Path -LiteralPath $exe)) { Move-Item -LiteralPath $retired -Destination $exe }
-            Exit-Installer "Could not write $(Get-PrettyPath $exe)." @('Close any running pdfconcat and check that you can write to that folder.')
+            $primary = $_.Exception.Message
+            try {
+                if ($newBinaryActive) { Remove-Item -LiteralPath $exe -Force }
+                if ($newStateActive) { Invoke-StateRemoval $stateDir $newReceipt.Legal }
+                if ($movedOldState) { [IO.Directory]::Move($backupState, $stateDir); $backupState = $null }
+                if ($movedOldBinary) { [IO.File]::Move($retired, $exe) }
+                if ($addedPath) { Invoke-OwnedPathRemoval $InstallDir $newReceipt.PathWasAbsent }
+            } catch { Exit-Installer "Activation failed: $primary. Rollback also failed: $($_.Exception.Message). Inspect $InstallDir before retrying." }
+            Exit-Installer "Activation failed; the prior installation was restored: $primary"
         }
-        Remove-Item -LiteralPath $retired -Force -ErrorAction SilentlyContinue
-        if (-not $oldVersion) { Write-Step 'Installed' (Get-PrettyPath $exe) }
-        elseif ($oldVersion -eq $newVersion) { Write-Step 'Installed' "$(Get-PrettyPath $exe) (reinstalled $newVersion)" }
-        else { Write-Step 'Installed' "$(Get-PrettyPath $exe) (updated from $oldVersion)" }
+        if ($retired) {
+            try { Invoke-RetiredRemoval $newReceipt }
+            catch { Write-Step 'Note' ("The prior executable remains recorded because cleanup failed: " + $_.Exception.Message) }
+        }
+        if ($backupState) {
+            try { Invoke-StateRemoval $backupState $receipt.Legal; $backupState = $null }
+            catch { Exit-Installer "The new version is active, but previous installer state could not be removed at $backupState`: $($_.Exception.Message)" }
+        }
+        if ($ModifyPath) {
+            $onSessionPath = @($env:Path.Split([char]';') | Where-Object { $_ -and (Test-SamePath $_ $InstallDir) }).Count -gt 0
+            if (-not $onSessionPath) { $env:Path = $InstallDir + ';' + $env:Path }
+            Write-Step 'PATH' 'Available in this session; open a new terminal for the saved user PATH.'
+        } else { Write-Step 'PATH' 'Left unchanged.' }
+        $verb = if (-not $receipt) { 'installed' } elseif ($receipt.Version -ceq $newVersion) { 'reinstalled' } else { 'updated from ' + $receipt.Version }
+        Write-Host "$($Product.Name) $newVersion is $verb in $InstallDir."
+        Write-Host ('  Get started: & ' + (ConvertTo-QuotedCommand $exe) + ' --help')
+        Write-Host '  Save this reviewed installer as install.ps1 and reuse it to uninstall:'
+        Write-Host ('      & .\install.ps1 -Uninstall -InstallDir ' + (ConvertTo-QuotedCommand $InstallDir))
     } finally {
-        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        if ($pathMutex) { $pathMutex.ReleaseMutex(); $pathMutex.Dispose() }
+        if ($backupState) { Write-Step 'Note' "Previous state remains at $backupState; it was not discarded."; $stage = $null }
+        if ($stage -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage -Recurse -Force }
+        if ($tmp -and (Test-Path -LiteralPath $tmp)) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+        if ($lock) { $lock.Dispose(); Remove-Item -LiteralPath $lockPath -Force }
+        if ($created -and $InstallDir -cne $pathRoot -and (Test-Path -LiteralPath $InstallDir) -and @(Get-ChildItem -LiteralPath $InstallDir -Force).Count -eq 0) { Remove-Item -LiteralPath $InstallDir -Force }
     }
-
-    $onUserPath = [bool](@(Get-UserPath) | Where-Object { Test-SamePath $_ $InstallDir })
-    $onSessionPath = [bool]($env:Path -split ';' | Where-Object { $_ -and (Test-SamePath $_ $InstallDir) })
-    if ($onUserPath) {
-        Write-Step 'PATH' "already includes $(Get-PrettyPath $InstallDir)"
-    } elseif (-not $ModifyPath) {
-        Write-Note 'PATH' "$(Get-PrettyPath $InstallDir) is not on your PATH (left unchanged)"
-    } else {
-        Save-UserPath (@($InstallDir) + @(Get-UserPath))
-        Write-Step 'PATH' "added $(Get-PrettyPath $InstallDir) to your user PATH"
-    }
-    # When run through iex this is the caller's own session, so the command
-    # works immediately; in a child powershell it only affects that process.
-    if (($onUserPath -or $ModifyPath) -and -not $onSessionPath) { $env:Path = "$InstallDir;$env:Path" }
-
-    $found = Get-Command pdfconcat -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($found -and -not (Test-SamePath $found.Source $exe) -and $onUserPath) {
-        Write-Host ''
-        Write-Note 'Note' "your PATH finds another pdfconcat first: $(Get-PrettyPath $found.Source)"
-        Write-Detail "Remove that copy, or run this one as $exe."
-    }
-
-    Write-Host ''
-    Write-Host "  PDFConcat $newVersion is installed."
-    Write-Host ''
-    if ($onUserPath -or $ModifyPath) {
-        if (-not $onUserPath) { Write-Host '  Open a new terminal window if pdfconcat is not found in this one.' ; Write-Host '' }
-        Write-Host '  Get started:'
-        Write-Host '      pdfconcat --help'
-    } else {
-        Write-Host "  Run it by its full path, or add $(Get-PrettyPath $InstallDir) to your PATH:"
-        Write-Host "      & '$exe' --help"
-    }
-    Write-Host '      pdfconcat build -o blank.pdf --blank --fit-to A4'
-    Write-Host ''
-    Write-Host "  Guide:     $docsUrl" -ForegroundColor DarkGray
-    Write-Host ('  Uninstall: & ([scriptblock]::Create((irm {0}/releases/latest/download/install.ps1))) -Uninstall' -f $repoUrl) -ForegroundColor DarkGray
-    Write-Host ''
 }
 
+# Validate bound empty values before resolving environment/default locations.
+if ($PSBoundParameters.ContainsKey('Version') -and [string]::IsNullOrEmpty($Version)) { throw [ArgumentException]::new('-Version requires a nonempty release version.') }
+if ($PSBoundParameters.ContainsKey('InstallDir') -and [string]::IsNullOrEmpty($InstallDir)) { throw [ArgumentException]::new('-InstallDir requires a nonempty absolute directory.') }
+if (-not $PSBoundParameters.ContainsKey('Version')) { $Version = [Environment]::GetEnvironmentVariable($Product.Environment + '_VERSION') }
+if (-not $PSBoundParameters.ContainsKey('InstallDir')) { $InstallDir = [Environment]::GetEnvironmentVariable($Product.Environment + '_INSTALL_DIR') }
 if ($Help) {
-    Write-Host @'
-Install, update or uninstall PDFConcat for the current Windows user.
-
-Options:
-  -Version X.Y.Z     Install that release instead of the latest one
-  -InstallDir DIR    Install into DIR (default: %LOCALAPPDATA%\Programs\PDFConcat)
-  -NoModifyPath      Do not add the install folder to the user PATH
-  -Uninstall         Remove PDFConcat and the PATH entry this installer added
-  -Help              Show this help
-
-Environment: PDFCONCAT_VERSION, PDFCONCAT_INSTALL_DIR, PDFCONCAT_NO_MODIFY_PATH=1,
-PDFCONCAT_DOWNLOAD_BASE (a release mirror URL or a local folder of release files).
-'@
+    Write-Host "Install, update or uninstall $($Product.Name) for the current Windows user."
+    Write-Host '-Version X.Y.Z  -InstallDir DIR  -NoModifyPath  -Uninstall  -Help'
+    $names = @('VERSION', 'INSTALL_DIR', 'NO_MODIFY_PATH=1', 'UNINSTALL=1', 'DOWNLOAD_BASE') | ForEach-Object { $Product.Environment + '_' + $_ }
+    Write-Host ('Environment: ' + ($names -join ', '))
     return
 }
-
 try {
-    Invoke-PDFConcatInstaller -Version $Version -InstallDir $InstallDir `
-        -ModifyPath (-not ($NoModifyPath -or $env:PDFCONCAT_NO_MODIFY_PATH -eq '1')) `
-        -Uninstall ($Uninstall -or $env:PDFCONCAT_UNINSTALL -eq '1')
+    Invoke-CliInstaller -Version $Version -InstallDir $InstallDir -Product $Product -ModifyPath (-not ($NoModifyPath -or [Environment]::GetEnvironmentVariable($Product.Environment + '_NO_MODIFY_PATH') -eq '1')) -Uninstall ($Uninstall -or [Environment]::GetEnvironmentVariable($Product.Environment + '_UNINSTALL') -eq '1')
 } catch {
-    $mark = if ($env:WT_SESSION -or $env:TERM_PROGRAM) { [string][char]0x2717 } else { 'x' }
-    Write-Host ''
-    Write-Host "  $mark $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host ''
-    Write-Host '    Help: https://github.com/resoltico/pdfconcat/blob/main/docs/INSTALL.md'
-    Write-Host ''
-    # Under "irm | iex", exit would close the caller's PowerShell window, so
-    # fail with an error instead; scripts still see a nonzero exit status.
+    Write-Host ("Installer failed: " + $_.Exception.Message)
+    Write-Host "Help: $($Product.Repository)/blob/main/docs/INSTALL.md"
     if ($MyInvocation.MyCommand.Path) { exit 1 }
-    throw 'PDFConcat setup did not complete.'
+    throw 'CLI installation did not complete.'
 }

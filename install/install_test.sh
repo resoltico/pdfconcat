@@ -160,6 +160,21 @@ assert 'startup symlink preserved' test -L "${fixture_home}/.bashrc"
 assert 'user alias preserved' grep -qx 'alias keep=true' "${fixture_home}/dotfiles/bashrc"
 count=$(marker_count "${fixture_home}/.profile"); assert 'login PATH removed' test "${count}" = 0
 
+begin 'two shell startup aliases of one file uninstall without stale snapshots'
+mkdir -p "${fixture_home}/dotfiles"
+printf 'alias keep=true\n' > "${fixture_home}/dotfiles/shared"
+ln -s dotfiles/shared "${fixture_home}/.bashrc"
+ln -s dotfiles/shared "${fixture_home}/.bash_profile"
+shared_before=$(hash_file "${fixture_home}/dotfiles/shared")
+run_installer /bin/bash; expect_exit 0 'aliased startup install'
+run_installer /bin/bash --uninstall; expect_exit 0 'aliased startup uninstall'
+shared_after=$(hash_file "${fixture_home}/dotfiles/shared")
+assert 'shared user bytes restored exactly' test "${shared_before}" = "${shared_after}"
+assert 'first startup alias preserved' test -L "${fixture_home}/.bashrc"
+assert 'second startup alias preserved' test -L "${fixture_home}/.bash_profile"
+assert 'aliased uninstall removes program' test ! -e "${fixture_home}/.local/bin/${command_name}"
+assert 'aliased uninstall removes state' test ! -e "${fixture_home}/.local/bin/.${command_name}-install"
+
 begin 'fish: quoted custom directory and unrelated user content preserved'
 fish_install=${fixture_home}/"fish tools'\\bin"
 mkdir -p "${fixture_home}/.config/fish/conf.d"

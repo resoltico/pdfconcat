@@ -466,9 +466,19 @@ remove_owned_paths() {
     done
     while IFS= read -r record_index; do
         file=$(cat "${state}/paths/${record_index}.file")
+        line=$(cat "${state}/paths/${record_index}.line")
         path_created=$(cat "${state}/paths/${record_index}.created")
-        cmp -s "${file}" "${tmp}/path-original.${record_index}" || die "Startup file changed or became unreadable: ${file}"
-        cat "${tmp}/path-filtered.${record_index}" > "${file}" || die "Could not remove owned PATH entry: ${file}"
+        # Earlier entries can alias this same physical file. Read current bytes
+        # rather than restoring a stale prepared image or reintroducing lines.
+        if [ ! -e "${file}" ] && [ ! -h "${file}" ]; then continue; fi
+        [ -f "${file}" ] && [ -r "${file}" ] || die "Could not read startup file: ${file}"
+        cat "${file}" > "${tmp}/path-current.${record_index}" || die "Could not read startup file: ${file}"
+        match_status=0; grep -Fxq -- "${line}" "${tmp}/path-current.${record_index}" || match_status=$?
+        case "${match_status}" in 0) : ;; 1) continue ;; *) die "Could not read startup file: ${file}" ;; esac
+        filter_status=0; grep -vFx -- "${line}" "${tmp}/path-current.${record_index}" > "${tmp}/path-updated.${record_index}" || filter_status=$?
+        [ "${filter_status}" -le 1 ] || die "Could not read startup file: ${file}"
+        cmp -s "${file}" "${tmp}/path-current.${record_index}" || die "Startup file changed or became unreadable: ${file}"
+        cat "${tmp}/path-updated.${record_index}" > "${file}" || die "Could not remove owned PATH entry: ${file}"
         case "${file}" in
             */fish/conf.d/"${command_name}".fish)
                 if [ "${path_created}" = 1 ] && [ -f "${file}" ] && [ ! -h "${file}" ] && [ ! -s "${file}" ]; then rm -f "${file}"; fi

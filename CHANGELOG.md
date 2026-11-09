@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Installers refuse unowned or modified targets; remove older/manual installs yourself or select a fresh directory. Receiptless installations are not adopted.
+- Mirror bases must be HTTPS directory URLs without credentials, queries or fragments; use a local release directory when downloads need separate authentication.
+- Installer downloads stay on one stable release and HTTPS redirects, verify exact checksums and test the program before activating a private staged update.
+- Receipts track exact file/PATH ownership; uninstall preserves user edits and pre-existing directories. NoModifyPath suppresses all PATH changes.
+- Windows updates track one uniquely named running executable; close it before another update if cleanup is refused. Arbitrary .old files are never overwritten.
+- Installer engines match EML Attachment Remover apart from literal product settings, with a pinned parity check for synchronized maintenance.
+- Tag releases publish the same signed archives, installers and SBOMs qualified by all native installer jobs; hashes and notes are checked before attestation and publication.
+
 ## [0.9.0] - 2026-11-06
 
 - Every source page, including omitted pages, must have finite positive physical dimensions; empty effective frames are refused with page/object diagnostics.

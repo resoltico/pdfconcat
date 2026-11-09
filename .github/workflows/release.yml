@@ -12,47 +12,82 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   release:
-    name: Publish release
+    name: Publish the qualified artifacts
     needs: ci
-    # Apple codesign applies the ad hoc signature before archives and checksums.
-    runs-on: macos-15
-    timeout-minutes: 30
+    # Signing, packaging and all seven native installer jobs ran in reusable CI.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: write      # create the GitHub release
+      contents: write      # create the GitHub release; never create its tag
       id-token: write      # artifact attestation
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@7d2730e317c8366225b42fced34583b26440a9cc # upstream cache 6.3.0 fix (actions/setup-go#794)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          go-version-file: go.mod
-      - name: Release notes from CHANGELOG.md
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '
-            index($0, "## [" v "]") == 1 { on = 1; next }
-            on && /^## \[/ { exit }
-            on { print }
-          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
-          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-notes.md"; then
-            echo "CHANGELOG.md has no section for $version"
-            exit 1
-          fi
-      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
-        with:
-          version: "v2.20.0"
-          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
+          name: release-files
+          path: release
+      - name: Release notes from the tagged CHANGELOG.md
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          git show HEAD:CHANGELOG.md | awk -v version="$version" '
+            BEGIN { heading = "## [" version "]" }
+            /^##([[:space:]]|$)/ {
+              inside = ($0 == heading || index($0, heading " ") == 1)
+              if (inside) {
+                matches++
+                date = substr($0, length(heading) + 1)
+                if (date !~ /^ - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) invalid = 1
+              }
+              next
+            }
+            inside {
+              notes = notes $0 "\n"
+              if ($0 ~ /[^[:space:]]/) content = 1
+            }
+            END {
+              if (matches != 1 || invalid || !content) {
+                print "Expected one nonempty dated CHANGELOG.md entry for " version > "/dev/stderr"
+                exit 1
+              }
+              printf "%s", notes
+            }
+          ' > "$RUNNER_TEMP/release-notes.md"
+      - name: Verify the complete qualified asset set
+        run: |
+          set -euo pipefail
+          cd release
+          assets=( pdfconcat_*.tar.gz pdfconcat_*.zip pdfconcat_*.cdx.json install.sh install.ps1 )
+          # Six archives, six executable SBOMs and two standalone installers.
+          [[ "${#assets[@]}" -eq 14 ]] || { echo "Expected fourteen qualified assets" >&2; exit 1; }
+          printf '%s\n' "${assets[@]}" | LC_ALL=C sort > "$RUNNER_TEMP/qualified-asset-names"
+          awk '{print $2}' checksums.txt | sed 's/^\*//' | LC_ALL=C sort > "$RUNNER_TEMP/manifest-asset-names"
+          cmp "$RUNNER_TEMP/qualified-asset-names" "$RUNNER_TEMP/manifest-asset-names"
+          sha256sum --check --strict checksums.txt
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/checksums.txt
-            dist/*.cdx.json
-            install/install.sh
-            install/install.ps1
+            release/*.tar.gz
+            release/*.zip
+            release/checksums.txt
+            release/*.cdx.json
+            release/install.sh
+            release/install.ps1
+      - name: Publish without rebuilding or modifying the qualified files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Prerelease tags stay prereleases; build metadata may contain hyphens.
+          version="${TAG#v}"
+          base_version="${version%%+*}"
+          options=()
+          case "$base_version" in *-*) options+=(--prerelease) ;; esac
+          gh release create "$TAG" --verify-tag --notes-file "$RUNNER_TEMP/release-notes.md" "${options[@]}" \
+            release/*.tar.gz release/*.zip release/*.cdx.json release/install.sh release/install.ps1 release/checksums.txt

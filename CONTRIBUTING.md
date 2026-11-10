@@ -143,14 +143,16 @@ version and archive identity must agree. Keep network and mirror paths subject
 to the same checksum, regular-file and ownership checks. Explicit release pins
 are stable versions; local snapshot fixtures may report canonical SemVer suffixes.
 
-PDFConcat owns the common engine bodies shared with EML Attachment Remover.
+PDFConcat owns the common engine bodies shared with EML Attachment Remover and
+Auditory Lab.
 Keep only literal product differences between `BEGIN PRODUCT SETTINGS` and
-`END PRODUCT SETTINGS`; change common behavior in both repositories together.
+`END PRODUCT SETTINGS`; change common behavior in all three repositories together.
 The copies are self-contained and have no runtime cross-repository dependency.
-EML pins a reviewed PDFConcat commit for its development/CI parity check. Commit
-the canonical PDF engine change first, preserve EML's product settings when
-copying the scripts, then update EML's `install/engine-source.txt` to that full
-PDF commit. From the EML checkout run:
+Both consumers pin a reviewed PDFConcat commit for development/CI parity checks.
+Commit
+the canonical PDF engine change first, preserve each consumer's product settings when
+copying the scripts, then update both `install/engine-source.txt` files to that
+full PDF commit. From either consumer checkout run:
 
 ```sh
 python3 install/check-sync.py /absolute/path/to/PDFConcat
@@ -159,7 +161,7 @@ python3 install/check-sync.py /absolute/path/to/PDFConcat
 The offline check reads the pinned Git object, not uncommitted files. Without a
 checkout argument the checker fetches the pinned files over HTTPS for development
 or CI; this is not an installation-time dependency. PDF CI checks its canonical
-behavior without depending on EML's default branch.
+behavior without depending on either consumer's default branch.
 
 The test harnesses install, update and uninstall real archives from a
 GoReleaser dist directory. They use a temporary `HOME` or install folder; the

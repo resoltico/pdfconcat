@@ -31,7 +31,7 @@ Assembly aids belong in PDFConcat when they organize the material, help readers
 navigate it or prepare its presentation:
 
 - Blanks and odd-page starts separate material and control physical page order.
-- Sections, bookmarks, title dividers, linked contents and physical page numbers
+- Sections, bookmarks, title dividers, linked contents, selective page numbering and authored metadata
   identify material and help readers navigate the combined document.
 - Fitting gives the assembled pages a common sheet size. It transforms source
   presentation and has additional [compatibility limits](docs/PDF-POLICY.md#fitting).
@@ -149,7 +149,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "output": "review-packet.pdf",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
   "page_numbers": {},
@@ -181,7 +181,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -221,7 +221,7 @@ It records input SHA-256 hashes, page mappings and uncapped diagnostics. PDF and
 inspect the final result before retrying after a failure. See
 [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v4; results and reports use format v6. Print their schemas with:
+Plans use format v5; results and reports use format v7. Print their schemas with:
 
 ```sh
 pdfconcat schema plan
@@ -335,11 +335,13 @@ pages may describe a later version.
 
 ## Limits
 
+Tagged source semantics are preserved by default and generated text is tagged. Untagged inputs remain usable with coverage warnings; this does not certify PDF/UA. See [structure policy](docs/PLAN.md#document-identity-time-and-structure).
+
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).
 - Forms and numeric internal destinations restrict fitting. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
-- Footer numbers may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#physical-footer-numbers).
+- Page-number overlays may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#page-numbering).
 - PDF and report publication are separate operations, and a late failure can occur after a file becomes visible. Inspect [publication facts](docs/CLI.md#reports-and-committed-state) before retrying.
 
 ## Build from source

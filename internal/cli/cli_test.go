@@ -131,3 +131,12 @@ func TestUsageJSONSelectionAndFirstFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestHelpAcceptsItsOwnHelpFlags(t *testing.T) {
+	for _, args := range [][]string{{"help", "--help"}, {"help", "-h"}} {
+		command, failure := cli.Parse(args)
+		if failure != nil || !command.Help || command.Name != "" {
+			t.Fatalf("%v: %+v %+v", args, command, failure)
+		}
+	}
+}

@@ -44,7 +44,7 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			_, ds = c.Finish(layout)
+			finished, ds := c.Finish(layout)
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -61,11 +61,11 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 				} else if math.Abs(heights[i]-row.bounds.Height) > 1e-9 {
 					t.Fatal("actual target digits reflowed rows")
 				}
-				if c.pages[row.page].Links[i].TargetPage != layout.Sections[i].Target {
+				if finished[row.page].Links[i].TargetPage != layout.Sections[i].Target {
 					t.Fatal("contents target differs from section")
 				}
 			}
-			page := c.pages[0]
+			page := finished[0]
 			found := false
 			for _, block := range page.Blocks {
 				for _, line := range block.Text.Lines {
@@ -146,7 +146,7 @@ func itemAs[T packet.Item](t testing.TB, item packet.Item) T {
 	return value
 }
 
-func testFooter(t *testing.T, p packet.Plan) *Footer {
+func testFooter(t *testing.T, p packet.Plan) *PageNumberLayout {
 	t.Helper()
 	if p.PageNumbers == nil {
 		return nil
@@ -155,7 +155,7 @@ func testFooter(t *testing.T, p packet.Plan) *Footer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	footer, err := NewFooter(font, *p.PageNumbers)
+	footer, err := NewPageNumberLayout(font, *p.PageNumbers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,4 +168,33 @@ func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts, contents 
 		shapes[i] = facts[item.Ref]
 	}
 	return packet.Resolve(p, shapes, contents)
+}
+
+func TestContentsLinkBlocksFollowPhysicalReadingOrder(t *testing.T) {
+	j, fonts := contentsRecipe(t, 1, 3, packet.Size{Width: 595, Height: 842})
+	j = packet.NewPlan(j.Output, j.FitTo, j.PageNumbers, j.PageDefaults, j.Items)
+	c, ds := PrepareContents(t.Context(), j, nil, fonts, nil)
+	if len(ds) > 0 {
+		t.Fatal(ds)
+	}
+	layout, ds := resolvePacket(j, nil, c.Pages())
+	if len(ds) > 0 {
+		t.Fatal(ds)
+	}
+	for range 2 {
+		pages, ds := c.Finish(layout)
+		if len(ds) > 0 {
+			t.Fatal(ds)
+		}
+		if len(pages) != 1 || len(pages[0].Blocks) != 7 {
+			t.Fatalf("unexpected rows/blocks: %v", pages)
+		}
+		blocks := pages[0].Blocks
+		for i := range 3 {
+			title, number := blocks[1+2*i], blocks[2+2*i]
+			if title.Link == nil || number.Link == nil || *title.Link != i || *number.Link != i {
+				t.Fatalf("row %d not contiguous in content stream", i)
+			}
+		}
+	}
 }

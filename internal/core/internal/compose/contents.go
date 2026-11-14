@@ -14,6 +14,8 @@ import (
 )
 
 type contentsRow struct {
+	label           string
+	titleBlock      int
 	section         string
 	page            int
 	baseline, right float64
@@ -26,15 +28,17 @@ type Contents struct {
 	pages   []Page
 	rows    []contentsRow
 	digits  *typeset.Digits
+	dash    *typeset.Placed
 }
 
 // PrepareContents wraps titles with a conservative fixed digit column, before
 // any parity or section target is known. There is no pagination fixed point.
-func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFacts, fonts map[packet.Font]*typeset.Font, footer *Footer) (*Contents, []diag.Diagnostic) {
+func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFacts, fonts map[packet.Font]*typeset.Font, numberLayout *PageNumberLayout) (*Contents, []diag.Diagnostic) {
 	leaves, sections := j.Leaves(), j.Sections()
 	var contents *packet.ContentsItem
 	pointer := ""
 	bound := int64(0)
+	anyEligible := false
 	addBound := func(n int64) {
 		if n > packet.MaxPageIndex-bound {
 			bound = packet.MaxPageIndex
@@ -43,6 +47,9 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 	}
 	for _, leaf := range leaves {
+		if j.PageNumbers != nil && j.PageNumbers.Eligible(leaf.Kind, leaf.NumberingEnabled) {
+			anyEligible = true
+		}
 		switch leaf.Kind {
 		case packet.PartSource:
 			if leaf.Index < len(facts) {
@@ -60,6 +67,9 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	}
 	addBound(int64(len(sections)))
 	addBound(int64(j.OddStarts()))
+	if j.PageNumbers != nil {
+		addBound(j.PageNumbers.First() - 1)
+	}
 	fail := func(message string, item string) (*Contents, []diag.Diagnostic) {
 		return nil, []diag.Diagnostic{diag.New(diag.TextOverflow, message, pointer, item)}
 	}
@@ -79,16 +89,20 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
 	}
 	numberWidth := float64(len(strconv.FormatInt(max(bound, 1), 10))) * digits.CellWidth
-	bottom := 36.0
-
-	if footer != nil {
-		protectedTop := footer.ExclusionTop() + 6
-		scale, offset := 1.0, 0.0
-		if j.FitTo != nil {
-			scale = math.Min(j.FitTo.Width/size.Width, j.FitTo.Height/size.Height)
-			offset = (j.FitTo.Height - size.Height*scale) / 2
+	if j.PageNumbers != nil && !anyEligible {
+		numberWidth = 0
+	}
+	bottom, top := 36.0, size.Height-36
+	eligible := false
+	for _, leaf := range leaves {
+		if leaf.Kind == packet.PartContents && j.PageNumbers != nil {
+			eligible = j.PageNumbers.Eligible(leaf.Kind, leaf.NumberingEnabled)
 		}
-		bottom = math.Max(bottom, (protectedTop-offset)/scale)
+	}
+	if numberLayout != nil && eligible {
+		lo, hi := numberLayout.Available(size, j.FitTo)
+		bottom = math.Max(bottom, lo)
+		top = math.Min(top, hi)
 	}
 
 	layout := &Contents{pointer: pointer, digits: digits}
@@ -99,6 +113,12 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	if size.Width-72 <= 0 {
 		return fail("Contents margins leave no usable heading width; choose a larger canvas.", pointer)
 	}
+	dash, err := shape("—", 12, 0)
+	if err != nil {
+		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
+	}
+	layout.dash = dash
+	numberWidth = math.Max(numberWidth, paintedBounds(dash).Width)
 	heading, err := shape(contents.Title, 18, size.Width-72)
 	if err != nil {
 		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
@@ -114,16 +134,16 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	if headingCheck.InkBounds != nil && headingCheck.InkBounds.X+headingCheck.InkBounds.Width > size.Width-36+1e-6 {
 		return fail("Contents heading ink crosses its right margin; shorten it or choose a larger canvas.", pointer)
 	}
-	headingTop := size.Height - 36
+	headingTop := top
 	headingBottom := headingTop - headingHeight
 	firstRowTop := headingBottom - 12
 	if firstRowTop <= bottom {
-		return fail("Contents heading and footer exclusion leave no room for entries; use a larger canvas or reduce page-number size/margin.", pointer)
+		return fail("Contents heading and page-number exclusion leave no room for entries; use a larger canvas or reduce page-number size/margin.", pointer)
 	}
 	addPage := func() {
 		h := clonePlaced(heading)
 		movePlaced(h, 36, headingTop)
-		layout.pages = append(layout.pages, Page{Width: size.Width, Height: size.Height, Blocks: []TextBlock{{Text: h}}})
+		layout.pages = append(layout.pages, Page{Width: size.Width, Height: size.Height, Blocks: []TextBlock{{Role: RoleHeading, Text: h}}})
 	}
 	addPage()
 	cursor := firstRowTop
@@ -151,7 +171,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 		height := paintedBounds(title).Height
 		if height > firstRowTop-bottom+1e-6 {
-			return fail("A whole contents row cannot fit beneath the heading and above the footer; shorten the title, use a larger canvas or reduce page-number size/margin.", section.Item)
+			return fail("A whole contents row cannot fit beneath the heading and above the page-number exclusion; shorten the title, use a larger canvas or reduce page-number size/margin.", section.Item)
 		}
 		if cursor-height < bottom-1e-6 {
 			addPage()
@@ -166,14 +186,14 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 		title.Findings = nil
 		page := len(layout.pages) - 1
-		layout.pages[page].Blocks = append(layout.pages[page].Blocks, TextBlock{Text: title})
+		layout.pages[page].Blocks = append(layout.pages[page].Blocks, TextBlock{Role: RoleContents, Text: title})
 		baseline := title.Lines[0].Baseline
 		rowBottom := math.Min(cursor-height, baseline+digits.Bottom)
 		rowTop := math.Max(cursor, baseline+digits.Top)
 		if rowBottom < bottom-1e-6 || rowTop > firstRowTop+1e-6 {
 			return fail("Contents title and number bounds cannot fit in the available row; use a larger canvas or reduce page-number size/margin.", section.Item)
 		}
-		layout.rows = append(layout.rows, contentsRow{section: section.Item, page: page, baseline: baseline, right: right, bounds: typeset.Rect{X: left, Y: rowBottom, Width: right - left, Height: rowTop - rowBottom}})
+		layout.rows = append(layout.rows, contentsRow{label: section.Title, titleBlock: len(layout.pages[page].Blocks) - 1, section: section.Item, page: page, baseline: baseline, right: right, bounds: typeset.Rect{X: left, Y: rowBottom, Width: right - left, Height: rowTop - rowBottom}})
 		cursor = rowBottom - 6
 	}
 	return layout, nil
@@ -185,18 +205,37 @@ func (contents *Contents) Finish(layout packet.Layout) ([]Page, []diag.Diagnosti
 	for _, section := range layout.Sections {
 		targets[section.Item] = section.Target
 	}
+	pages := make([]Page, len(contents.pages))
+	for i, page := range contents.pages {
+		pages[i] = page
+		pages[i].Blocks = append([]TextBlock(nil), page.Blocks[:1]...)
+		pages[i].Links = nil
+	}
 	for _, row := range contents.rows {
 		target := targets[row.section]
-		number, err := contents.digits.Place(strconv.FormatInt(target, 10), row.right, row.baseline)
+		label := layout.LabelAt(target)
+		var number *typeset.Placed
+		var err error
+		if label == "—" {
+			number = clonePlaced(contents.dash)
+			b := paintedBounds(number)
+			movePlaced(number, row.right-b.Width, row.baseline-number.Lines[0].Baseline+b.Y+b.Height)
+		} else {
+			number, err = contents.digits.Place(label, row.right, row.baseline)
+		}
 		if err != nil {
 			return nil, []diag.Diagnostic{Diagnostic(err, contents.pointer)}
 		}
-		contents.pages[row.page].Blocks = append(contents.pages[row.page].Blocks, TextBlock{Text: number})
-		contents.pages[row.page].Links = append(contents.pages[row.page].Links, Link{Rect: row.bounds, TargetPage: target})
+		link := len(pages[row.page].Links)
+		title := contents.pages[row.page].Blocks[row.titleBlock]
+		title.Link = &link
+		// Keep each link's marked content contiguous as well as logically grouped.
+		pages[row.page].Blocks = append(pages[row.page].Blocks, title, TextBlock{Role: RoleContents, Link: &link, Text: number})
+		pages[row.page].Links = append(pages[row.page].Links, Link{Label: row.label, Rect: row.bounds, TargetPage: target})
 	}
 	for _, part := range layout.Parts {
 		if part.Kind == packet.PartContents && part.Ref == contents.pointer {
-			return contents.pages, nil
+			return pages, nil
 		}
 	}
 	return nil, []diag.Diagnostic{diag.New(diag.AssemblyFailed, "Resolved contents item is missing.", contents.pointer)}
@@ -237,4 +276,17 @@ func clonePlaced(p *typeset.Placed) *typeset.Placed {
 		cloned.InkBounds = &b
 	}
 	return &cloned
+}
+
+func shiftPlaced(p *typeset.Placed, dx, dy float64) {
+	p.Bounds.X += dx
+	p.Bounds.Y += dy
+	if p.InkBounds != nil {
+		p.InkBounds.X += dx
+		p.InkBounds.Y += dy
+	}
+	for i := range p.Lines {
+		p.Lines[i].X += dx
+		p.Lines[i].Baseline += dy
+	}
 }

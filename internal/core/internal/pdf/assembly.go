@@ -26,11 +26,16 @@ type Part struct {
 
 // Assembly is the complete ordered packet and its shared resources.
 type Assembly struct {
-	Parts    []Part
-	Sections []packet.Section
-	FitTo    *packet.Size
-	Footer   *compose.Footer
-	Fonts    map[typeset.Digest]typeset.EmbeddedFont
+	Coverage     string
+	Numbering    []packet.NumberSpan
+	Metadata     *packet.Metadata
+	Timestamp    *int64
+	Structure    packet.StructurePolicy
+	Parts        []Part
+	Sections     []packet.Section
+	FitTo        *packet.Size
+	NumberLayout *compose.PageNumberLayout
+	Fonts        map[typeset.Digest]typeset.EmbeddedFont
 }
 
 // Assembled records actual renames by part index and assembly diagnostics.

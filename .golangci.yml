@@ -75,6 +75,9 @@ linters:
   exclusions:
     # Central exception registry. Each entry: what, why, and when it can be removed.
     rules:
+      # A nil semantic child means successful omission of selected-out or empty content.
+      - path: internal/core/internal/pdf/structure.go
+        linters: [nilnil]
       # generatedContext validates len(pages) == count unless repeating one page; range count is in bounds.
       - path: internal/core/internal/pdf/genpage.go
         text: "G602: slice index out of range"

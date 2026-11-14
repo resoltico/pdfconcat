@@ -10,6 +10,7 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
 // readOutput checks serialized output without source normalization. Catalog
@@ -34,6 +35,12 @@ func readOutput(c context.Context, data []byte) (*model.Context, error) {
 	for key := range cat {
 		if !catalogKeys[key] {
 			return nil, errors.New("unexpected output catalog key: " + key)
+		}
+	}
+	if cat["ViewerPreferences"] != nil {
+		prefs, e := s.DereferenceDict(cat["ViewerPreferences"])
+		if e != nil || len(prefs) != 1 || prefs["DisplayDocTitle"] != types.Boolean(true) {
+			return nil, errors.New("unexpected output viewer preferences")
 		}
 	}
 	names, err := s.DereferenceDict(cat["Names"])
@@ -67,6 +74,9 @@ func readOutput(c context.Context, data []byte) (*model.Context, error) {
 		return nil, err
 	}
 	if err := validateOutputFormEncoding(c, s); err != nil {
+		return nil, err
+	}
+	if err = validateStructure(c, s); err != nil {
 		return nil, err
 	}
 	return s, nil

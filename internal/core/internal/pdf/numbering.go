@@ -38,12 +38,12 @@ func physicalPageViewport(g pageGeometry) physicalViewport {
 
 // applyPageNumbers adds fresh page-local wrappers and font dictionaries after
 // fitting. Original streams, annotation coordinates and page geometry stay intact.
-func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string, footer *compose.Footer) error {
+func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepared map[typeset.Digest]typeset.EmbeddedFont, names map[typeset.Digest]string, numberLayout *compose.PageNumberLayout, numbering []packet.NumberSpan) error {
 
-	if footer == nil {
+	if numberLayout == nil {
 		return nil
 	}
-	face := footer.Font()
+	face := numberLayout.Font()
 	font, ok := prepared[face.Identity()]
 	if !ok {
 		return ErrInvalidPage
@@ -72,13 +72,15 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 			return ErrInvalidPage
 		}
 		part := parts[spanIndex]
-		if part.Kind == packet.PartPadding {
+		label, eligible := packet.NumberAt(numbering, int64(page))
+
+		if !eligible || part.Kind == packet.PartPadding {
 			continue
 		}
 		geometry := geometries[page-1]
 		d, viewport := geometry.dict, physicalPageViewport(geometry)
 
-		placed, e := footer.Place(viewport.size, int64(page))
+		placed, e := numberLayout.Place(viewport.size, label)
 		if e != nil {
 			diagnostic := compose.Diagnostic(e, "")
 			diagnostic.File, diagnostic.Items = part.Source, []string{part.Ref, "/page_numbers"}
@@ -121,9 +123,10 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 		doc := &document{fonts: &fontSet{index: map[typeset.Digest]int{face.Identity(): 0}, list: []*typeset.Font{face}, used: make([][glyphSetWords]uint64, 1)}, fontKeys: []string{key}, content: []byte("Q\nq\n")}
 		m := viewport.matrix
 		doc.content = fmt.Appendf(doc.content, "%s %s %s %s %s %s cm\n", number(m[0]), number(m[1]), number(m[2]), number(m[3]), number(m[4]), number(m[5]))
+		doc.content = append(doc.content, "/Artifact BMC\n"...)
 		doc.appendColor(packet.Color{})
 		doc.appendText(placed, 0)
-		doc.content = append(doc.content, "Q\n"...)
+		doc.content = append(doc.content, "EMC\nQ\n"...)
 		overlay, e := addStream(s, doc.content, nil)
 		if e != nil {
 			return e

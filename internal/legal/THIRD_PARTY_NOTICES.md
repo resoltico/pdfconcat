@@ -9,8 +9,8 @@ versions linked into an executable.
 
 | Module | License | Purpose | License copy |
 | --- | --- | --- | --- |
-| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT | PDF reading, validation, merging, fitting and writing | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
-| `github.com/go-text/typesetting` | Unlicense OR BSD-3-Clause (used under BSD-3-Clause); its `harfbuzz` package MIT | TrueType parsing and text shaping | [go-text](licenses/go-text-typesetting-LICENSE.txt), [HarfBuzz port](licenses/go-text-harfbuzz-MIT.txt) |
+| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT | PDF reading, validation, merging, fitting and object types | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
+| `github.com/go-text/typesetting` | Unlicense OR BSD-3-Clause (used under BSD-3-Clause); its `harfbuzz` package MIT | OpenType parsing and text shaping | [go-text](licenses/go-text-typesetting-LICENSE.txt), [HarfBuzz port](licenses/go-text-harfbuzz-MIT.txt) |
 | `github.com/clipperhouse/uax29/v2` | MIT | Unicode segmentation | [uax29](licenses/clipperhouse-uax29-MIT.txt) |
 | `github.com/hhrutter/tiff` | BSD-3-Clause | PDF image decoding | [tiff](licenses/hhrutter-tiff-BSD-3-Clause.txt) |
 | `github.com/mattn/go-runewidth` | MIT | Unicode display-width support | [go-runewidth](licenses/mattn-go-runewidth-MIT.txt) |
@@ -20,6 +20,12 @@ versions linked into an executable.
 | `golang.org/x/image` | BSD-3-Clause | Font fixed-point arithmetic and image support | [Go Authors](licenses/go-and-x-BSD-3-Clause.txt) |
 | `golang.org/x/sys` | BSD-3-Clause | Native no-replace publication calls | [Go Authors](licenses/go-and-x-BSD-3-Clause.txt) |
 | `golang.org/x/text` | BSD-3-Clause | Unicode direction and encoding support | [Go Authors](licenses/go-and-x-BSD-3-Clause.txt) |
+
+| `seehuhn.de/go/sfnt` | BSD-3-Clause | Static CFF parsing and identity-CID conversion | [sfnt](licenses/seehuhn-sfnt-BSD-3-Clause.txt) |
+| `seehuhn.de/go/postscript` | BSD-3-Clause | CFF dictionaries and glyph names | [postscript](licenses/seehuhn-postscript-BSD-3-Clause.txt) |
+| `seehuhn.de/go/geom` | BSD-3-Clause | CFF geometry | [geom](licenses/seehuhn-geom-BSD-3-Clause.txt) |
+| `seehuhn.de/go/membudget` | BSD-3-Clause | Bounded CFF parsing allocations | [membudget](licenses/seehuhn-membudget-BSD-3-Clause.txt) |
+| `seehuhn.de/go/dag` | BSD-3-Clause | CFF dependency ordering | [dag](licenses/seehuhn-dag-BSD-3-Clause.txt) |
 
 Go standard-library/runtime code uses the same [Go Authors BSD-3-Clause
 text](licenses/go-and-x-BSD-3-Clause.txt), as do the LZW packages inside
@@ -31,6 +37,11 @@ pdfcpu's `pkcs7` package carries its own MIT license, and go-text's `harfbuzz`
 package, a port of HarfBuzz, carries the MIT license of its authors and of
 HarfBuzz. pdfcpu also contains font metrics generated from Adobe's Core 14 AFM
 files; the AFM files themselves are not included, and their notice is retained.
+
+go-postscript embeds `agl-aglfn/aglfn.txt`, `agl-aglfn/glyphlist.txt` and
+`agl-aglfn/zapfdingbats.txt` from Adobe's glyph lists, under the retained
+[Adobe license](licenses/Adobe-Glyph-List-BSD-3-Clause.txt). Its
+[third-party inventory](licenses/seehuhn-postscript-third-party.txt) is retained.
 
 ## Embedded fonts
 
@@ -51,6 +62,7 @@ Source PDFs and user-supplied font files can independently contain Roboto.
 Source checkouts include Go Italic and Go Mono fonts, plus frozen PDFs with
 embedded Noto Sans and Libertinus Serif font programs. Their credits, licenses
 and authoring details are recorded in the [corpus notices](https://github.com/resoltico/pdfconcat/blob/main/internal/core/testdata/corpus/NOTICE.txt).
+Adobe Source Serif 4 static CFF is also included under its accompanying SIL Open Font License in `internal/core/testdata/fonts/source-serif`.
 These test assets are not included in the executable or binary release archives.
 
 ## Development tools

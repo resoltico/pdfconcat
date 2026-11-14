@@ -8,6 +8,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
@@ -102,6 +103,25 @@ func admit(ctx context.Context, req Request) *admission {
 		return a
 	}
 	a.plan = &declared
+	if declared.Structure == "" {
+		declared.Structure = packet.StructurePreserve
+	}
+	if declared.Metadata == nil {
+		declared.Metadata = &packet.Metadata{}
+	}
+	if declared.Timestamp == nil && req.SourceDateEpoch != nil {
+		value := *req.SourceDateEpoch
+		n, e := strconv.ParseInt(value, 10, 64)
+		digits := value != ""
+		for _, r := range value {
+			digits = digits && r >= '0' && r <= '9'
+		}
+		if e != nil || !digits || n < 0 || n > packet.MaxTimestamp {
+			a.diagnostics = append(a.diagnostics, diag.New(diag.PlanValue, "Effective SOURCE_DATE_EPOCH must be Unix seconds from 0 through 253402300799."))
+		} else {
+			declared.Timestamp = &n
+		}
+	}
 	a.roles.InputsKnown = true
 	a.roles.Inputs = append(a.roles.Inputs, inputPaths(declared)...)
 	if req.Output != "" {

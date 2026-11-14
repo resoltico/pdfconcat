@@ -22,6 +22,9 @@ func resolvePolicies(a pdf.Assembly, predict bool) []diag.Diagnostic {
 			d.File = p.Source
 			ds = append(ds, d)
 		}
+		if a.Structure != packet.StructureDiscard && p.Occurrence.Facts.HasUncoveredContent {
+			add(diag.SourceStructurePartial, "Retained source content has incomplete structural coverage; preservation does not invent missing semantics.")
+		}
 		if f.HasFields {
 			if predict && i > 0 {
 				add(diag.FormFieldsRenamed, "Predicted: pdfcpu may namespace this later form, including distinct names; build records actual mappings.")

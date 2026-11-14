@@ -6,14 +6,21 @@ package packet
 // PageRange selects an inclusive range in original source order.
 type PageRange struct{ First, Last int }
 
-// PageNumbers configures physical Arabic footer numbers.
+// PageNumbers configures label eligibility, counting and physical overlay placement.
 type PageNumbers struct {
-	Size   float64 `json:"size"`
-	Margin float64 `json:"margin"`
+	Mode     NumberingMode  `json:"mode"`
+	Start    int64          `json:"start"`
+	Kinds    []PartKind     `json:"kinds"`
+	Position NumberPosition `json:"position"`
+	Size     float64        `json:"size"`
+	Margin   float64        `json:"margin"`
 }
 
 // Plan is an ordered declaration with a single derived traversal.
 type Plan struct {
+	Metadata     *Metadata
+	Timestamp    *int64
+	Structure    StructurePolicy
 	Output       string
 	FitTo        *Size
 	PageNumbers  *PageNumbers
@@ -27,15 +34,16 @@ type Plan struct {
 
 // Leaf is one derived source, page, divider or contents item.
 type Leaf struct {
-	Index     int
-	Ref       Ref
-	Kind      PartKind
-	Owner     Ref
-	Source    string
-	Selection []PageRange
-	Page      *PageStyle
-	Count     int
-	Contents  *ContentsItem
+	NumberingEnabled bool
+	Index            int
+	Ref              Ref
+	Kind             PartKind
+	Owner            Ref
+	Source           string
+	Selection        []PageRange
+	Page             *PageStyle
+	Count            int
+	Contents         *ContentsItem
 }
 
 type event struct {
@@ -48,22 +56,53 @@ type event struct {
 
 // NewPlan derives item order and section ancestry once.
 func NewPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle, items []Item) Plan {
+	if numbers != nil {
+		normalized := *numbers
+		if normalized.Mode == "" {
+			normalized.Mode = "physical"
+		}
+		if normalized.Start == 0 {
+			normalized.Start = 1
+		}
+		if normalized.Position == "" {
+			normalized.Position = "bottom-center"
+		}
+		if normalized.Kinds == nil {
+			normalized.Kinds = []PartKind{PartSource, PartPage, PartDivider, PartContents}
+		}
+		numbers = &normalized
+	}
 	p := Plan{Output: output, FitTo: fit, PageNumbers: numbers, PageDefaults: defaults, Items: items}
 	add := func(l Leaf) {
 		l.Index = len(p.leaves)
 		p.leaves = append(p.leaves, l)
 		p.events = append(p.events, event{leaf: l.Index})
 	}
-	var walk func([]Item, Ref, int)
-	walk = func(items []Item, owner Ref, depth int) {
+	var walk func([]Item, Ref, int, bool)
+	walk = func(items []Item, owner Ref, depth int, enabled bool) {
 		for _, item := range items {
+			choice := enabled
+			var override *bool
 			switch i := item.(type) {
 			case *SourceItem:
-				add(Leaf{Ref: i.Ref, Kind: PartSource, Owner: owner, Source: i.Path, Selection: i.Selection})
+				override = i.Numbering
 			case *PageItem:
-				add(Leaf{Ref: i.Ref, Kind: PartPage, Owner: owner, Page: &i.Style, Count: i.Count})
+				override = i.Numbering
 			case *ContentsItem:
-				add(Leaf{Ref: i.Ref, Kind: PartContents, Owner: owner, Contents: i})
+				override = i.Numbering
+			case *GroupItem:
+				override = i.Numbering
+			}
+			if override != nil {
+				choice = *override
+			}
+			switch i := item.(type) {
+			case *SourceItem:
+				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartSource, Owner: owner, Source: i.Path, Selection: i.Selection})
+			case *PageItem:
+				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartPage, Owner: owner, Page: &i.Style, Count: i.Count})
+			case *ContentsItem:
+				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartContents, Owner: owner, Contents: i})
 			case *GroupItem:
 				section := -1
 				if i.StartOn == StartOdd {
@@ -80,15 +119,15 @@ func NewPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle,
 					if i.Divider != nil {
 						style := *i.Divider
 						style.Text.Value = Setting[string]{Value: i.Title, From: i.Ref + "/title"}
-						add(Leaf{Ref: i.Ref + "/divider", Kind: PartDivider, Owner: i.Ref, Page: &style, Count: 1})
+						add(Leaf{NumberingEnabled: choice, Ref: i.Ref + "/divider", Kind: PartDivider, Owner: i.Ref, Page: &style, Count: 1})
 					}
 				}
-				walk(i.Items, childOwner, childDepth)
+				walk(i.Items, childOwner, childDepth, choice)
 				p.events = append(p.events, event{leaf: -1, group: i, section: section, end: true})
 			}
 		}
 	}
-	walk(items, "", 0)
+	walk(items, "", 0, true)
 	return p
 }
 
@@ -136,6 +175,8 @@ type Section struct {
 
 // Layout is the authoritative sequence, section hierarchy and totals.
 type Layout struct {
+	FitTo                                   *Size
+	Numbering                               []NumberSpan
 	Parts                                   []Part
 	Sections                                []Section
 	PageNumbers                             *PageNumbers

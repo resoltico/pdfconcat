@@ -72,7 +72,6 @@ func TestInspectionPolicy(t *testing.T) {
 		{"private hash crop", func() *pdffixture.Doc {
 			return insertEntry(pdffixture.Plain("visible"), 3, "/Cr#236fpBox [20 20 80 80]")
 		}, diag.SourceUnsupported},
-		{"tagged", func() *pdffixture.Doc { return pdffixture.Tagged("tag") }, diag.SourceStructureRemoved},
 		{"attachment", func() *pdffixture.Doc { return pdffixture.Attachment("file") }, diag.SourceAttachmentsRemoved},
 		{"page labels", func() *pdffixture.Doc {
 			return insertEntry(pdffixture.Plain("labels"), 1, "/PageLabels << /Nums [0 << /S /D >>] >>")
@@ -175,7 +174,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 		t.Fatal(closeErr)
 	}
 	if err = pdf.Verify(t.Context(), path, layout.TotalPages); err != nil {
-		t.Fatalf("verify: %v", err)
+		t.Fatalf("verify: %+v", pdf.Diagnostic(err))
 	}
 	tools := oracle.RequireTools(t)
 	if err = tools.CheckLinks(path); err != nil {
@@ -264,7 +263,7 @@ func TestSerializedCatalogAndVersions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Contains(raw, []byte(`"/EmbeddedFiles"`)) || bytes.Contains(raw, []byte(`"/StructTreeRoot"`)) {
+		if bytes.Contains(raw, []byte(`"/EmbeddedFiles"`)) {
 			t.Fatal("forbidden catalog structure survived serialization")
 		}
 		if slices.ContainsFunc(docs, func(d *pdffixture.Doc) bool { return d.Version == "2.0" }) && !bytes.Contains(raw, []byte(`"pdfversion": "2.0"`)) {
@@ -336,6 +335,13 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	_, err := pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != diag.SourceChanged {
 		t.Fatalf("change detection %v", err)
+	}
+	if err = os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	_, err = pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), &bytes.Buffer{})
+	if err == nil || pdf.Diagnostic(err).Code != diag.SourceChanged || pdf.Diagnostic(err).Detail == "" {
+		t.Fatalf("post-inspection disappearance lost execution-time classification/native detail: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

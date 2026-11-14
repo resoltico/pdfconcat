@@ -216,3 +216,25 @@ func validateOutputFormEncoding(c context.Context, s *model.Context) error {
 	}
 	return c.Err()
 }
+
+// joinedPageContent preserves content-array token boundaries and the shared
+// graphics/marked-content state. pdfcpu.PageContent concatenates without a
+// separator, which can join an operator at one stream's end with the next one.
+func joinedPageContent(c context.Context, s *model.Context, page pageContent, number int) ([]byte, error) {
+	var data []byte
+	for _, stream := range page.streams {
+		if err := c.Err(); err != nil {
+			return nil, err
+		}
+		part, err := s.PageContent(types.Dict{"Contents": stream.ref}, number)
+		if err != nil && !errors.Is(err, model.ErrNoContent) {
+			return nil, err
+		}
+		if err = checkContentLength(int64(len(data))+int64(len(part))+1, s.DecodeLimit()); err != nil {
+			return nil, err
+		}
+		data = append(data, part...)
+		data = append(data, '\n')
+	}
+	return data, nil
+}

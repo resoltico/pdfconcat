@@ -23,7 +23,7 @@ func TestPlanBytesLabelIsNotAPhysicalInput(t *testing.T) {
 	label := filepath.Join(dir, "virtual.json")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	r := core.Execute(ctx, core.Request{Operation: core.Check, Input: core.PlanBytes{Data: []byte(`{"version":4,"items":[{"source":"missing.pdf"}]}`), Label: label}, WorkingDir: dir, Report: label})
+	r := core.Execute(ctx, core.Request{Operation: core.Check, Input: core.PlanBytes{Data: []byte(`{"version":5,"items":[{"source":"missing.pdf"}]}`), Label: label}, WorkingDir: dir, Report: label})
 	if r.Status != "interrupted" || !r.Report.Written || code(r, "report_is_input") {
 		t.Fatal(r)
 	}
@@ -70,7 +70,7 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 					t.Fatal("late report failure or target context was hidden", r)
 				}
 				for _, d := range r.Diagnostics[1:] {
-					if d.Code.String() != "source_invalid" {
+					if d.Code.String() != "source_not_pdf" {
 						t.Fatal("invalid-source peers changed", r)
 					}
 				}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package plan decodes strict, located version 4 assembly plans.
+// Package plan decodes strict, located version 5 assembly plans.
 package plan
 
 import (
@@ -25,12 +25,13 @@ import (
 // MaxBytes bounds the original UTF-8 plan, including an optional BOM.
 const MaxBytes = 64 << 20
 
-// Schema is the editor-facing plan v4 JSON Schema.
+// Schema is the editor-facing plan v5 JSON Schema.
 //
 //go:embed plan.schema.json
 var Schema []byte
 
 type node struct {
+	Numbering   *bool
 	Ref         packet.Ref
 	Source, Dir string
 	Selection   []packet.PageRange
@@ -216,13 +217,54 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 				case token.Kind() == 'n':
 					err = &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: "/version", offset: start}
 				case token.Kind() == '0':
-					if token.String() != "4" {
-						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 4.", pointer: "/version", offset: start}
+					if token.String() != "5" {
+						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 5.", pointer: "/version", offset: start}
 					}
 				default:
-					err = p.fail(diag.PlanType, "version must be the JSON integer 4.")
+					err = p.fail(diag.PlanType, "version must be the JSON integer 5.")
 				}
 			}
+		case "metadata":
+			var m packet.Metadata
+			err = p.object(func(key string) error {
+				var target **string
+				switch key {
+				case "title":
+					target = &m.Title
+				case "author":
+					target = &m.Author
+				case "subject":
+					target = &m.Subject
+				case "language":
+					target = &m.Language
+				default:
+					return p.unknown(key)
+				}
+				value, e := p.text()
+				if e != nil {
+					return e
+				}
+				*target = &value
+				if e = packet.ValidateMetadata(m); e != nil {
+					return p.fail(diag.PlanValue, e.Error())
+				}
+				return nil
+			})
+			result.Metadata = &m
+		case "timestamp":
+			var n int64
+			err = p.scalar(&n)
+			if err == nil && (n < 0 || n > packet.MaxTimestamp) {
+				err = p.fail(diag.PlanValue, "timestamp must be Unix seconds from 0 through 253402300799.")
+			}
+			result.Timestamp = &n
+		case "structure":
+			var value string
+			value, err = p.text()
+			if err == nil && value != "preserve" && value != "discard" {
+				err = p.fail(diag.PlanValue, "structure must be preserve or discard.")
+			}
+			result.Structure = packet.StructurePolicy(value)
 		case "output":
 			result.Output, err = p.path()
 		case "dir":
@@ -249,7 +291,7 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 		return result, err
 	}
 	if !seenVersion {
-		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 4.")
+		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 5.")
 	}
 	if !seenItems {
 		return result, p.fail(diag.PlanType, "Required member items is missing.")
@@ -265,7 +307,12 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 	if dir != "" {
 		scope, _ = packet.Path(base, dir)
 	}
+	metadata, timestamp, structure := result.Metadata, result.Timestamp, result.Structure
 	result = packet.NewPlan(result.Output, result.FitTo, result.PageNumbers, defaults, p.resolveItems(nodes, scope, defaults))
+	result.Metadata, result.Timestamp, result.Structure = metadata, timestamp, structure
+	if result.Structure == "" {
+		result.Structure = packet.StructurePreserve
+	}
 	if p.contents > 0 {
 		sections := result.Sections()
 		if len(sections) == 0 {
@@ -312,6 +359,10 @@ func (p *decoder) item(depth int) (node, error) {
 		seen[name] = true
 		var err error
 		switch name {
+		case "numbering":
+			var value bool
+			err = p.scalar(&value)
+			n.Numbering = &value
 		case "source":
 			n.Source, err = p.path()
 		case "pages":
@@ -354,10 +405,12 @@ func (p *decoder) item(depth int) (node, error) {
 	if err != nil {
 		return n, err
 	}
+	numberingOverride := seen["numbering"]
+	delete(seen, "numbering")
 	source := seen["source"] && len(seen) == 1 || seen["source"] && seen["pages"] && len(seen) == 2
 	page := seen["page"] && (len(seen) == 1 || seen["count"] && len(seen) == 2)
 	contents := seen["contents"] && len(seen) == 1
-	group := seen["items"] && (seen["dir"] || seen["title"] || seen["start_on"]) && (!seen["divider"] || seen["title"])
+	group := seen["items"] && (numberingOverride || seen["dir"] || seen["title"] || seen["start_on"]) && (!seen["divider"] || seen["title"])
 	for _, key := range []string{"source", "pages", "page", "count", "contents"} {
 		group = group && !seen[key]
 	}
@@ -416,10 +469,53 @@ func (p *decoder) contentsStyle() (*packet.ContentsItem, error) {
 }
 
 func (p *decoder) pageNumbers() (*packet.PageNumbers, error) {
-	numbers := &packet.PageNumbers{Size: 9, Margin: 8 * 72 / 25.4}
+	numbers := &packet.PageNumbers{Mode: "physical", Start: 1, Position: "bottom-center", Size: 9, Margin: 8 * 72 / 25.4}
 	err := p.object(func(name string) error {
 		var err error
 		switch name {
+		case "mode":
+			err = p.enumeration(&numbers.Mode)
+			if err == nil && numbers.Mode != "physical" && numbers.Mode != "consecutive" {
+				err = p.fail(diag.PlanValue, "mode must be physical or consecutive.")
+			}
+		case "start":
+			err = p.scalar(&numbers.Start)
+			if err == nil && (numbers.Start < 1 || numbers.Start > packet.MaxPageIndex) {
+				err = p.fail(diag.PlanValue, "start must fit the positive page-index range.")
+			}
+		case "position":
+			err = p.enumeration(&numbers.Position)
+			if err == nil {
+				switch numbers.Position {
+				case "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right":
+				default:
+					err = p.fail(diag.PlanValue, "Unknown page-number position.")
+				}
+			}
+		case "kinds":
+			err = p.expect('[')
+			numbers.Kinds = []packet.PartKind{}
+			for err == nil && p.d.PeekKind() != ']' {
+				var kind string
+				kind, err = p.text()
+				if err != nil {
+					break
+				}
+				switch kind {
+				case "source", "page", "divider", "contents":
+				default:
+					err = p.fail(diag.PlanValue, "kinds must select source, page, divider or contents.")
+				}
+				for _, old := range numbers.Kinds {
+					if string(old) == kind {
+						err = p.fail(diag.PlanValue, "Duplicate page-number kind.")
+					}
+				}
+				numbers.Kinds = append(numbers.Kinds, packet.PartKind(kind))
+			}
+			if err == nil {
+				_, err = p.d.ReadToken()
+			}
 		case "size":
 			numbers.Size, err = p.length(true)
 		case "margin":
@@ -545,19 +641,20 @@ func (p *decoder) resolveItems(nodes []node, base string, defaults packet.PageSt
 		switch {
 		case n.Source != "":
 			path, _ := packet.Path(base, n.Source)
-			items = append(items, &packet.SourceItem{Ref: n.Ref, Path: path, Selection: n.Selection})
+			items = append(items, &packet.SourceItem{Numbering: n.Numbering, Ref: n.Ref, Path: path, Selection: n.Selection})
 		case n.Page != nil:
-			items = append(items, &packet.PageItem{Ref: n.Ref, Style: style(n.Page), Count: n.Count})
+			items = append(items, &packet.PageItem{Numbering: n.Numbering, Ref: n.Ref, Style: style(n.Page), Count: n.Count})
 		case n.Contents != nil:
 			item := *n.Contents
 			item.Ref = n.Ref
+			item.Numbering = n.Numbering
 			items = append(items, &item)
 		case n.Items != nil:
 			scope := base
 			if n.Dir != "" {
 				scope, _ = packet.Path(base, n.Dir)
 			}
-			group := &packet.GroupItem{Ref: n.Ref, Title: n.Title, StartOn: n.StartOn, Items: p.resolveItems(n.Items, scope, defaults)}
+			group := &packet.GroupItem{Numbering: n.Numbering, Ref: n.Ref, Title: n.Title, StartOn: n.StartOn, Items: p.resolveItems(n.Items, scope, defaults)}
 			if n.Divider != nil {
 				divider := style(n.Divider)
 				group.Divider = &divider

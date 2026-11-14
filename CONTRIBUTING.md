@@ -33,7 +33,7 @@ go test -count=1 ./...
 ```
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
-`pdffonts`, `pdftohtml`). The minimum qpdf version is declared in
+`pdffonts`, `pdftohtml`). Tagged-output machine tests also use veraPDF at the version in `internal/oracle/verapdf.version`; Linux CI verifies its installer checksum and installs only its CLI using `.github/scripts/verapdf-install.xml`. Java 17 or later is required for that test tool, not for PDFConcat. The minimum qpdf version is declared in
 [`internal/oracle/qpdf.version`](internal/oracle/qpdf.version);
 it includes corrected linearization checking required by the frozen corpus.
 Install `qpdf poppler` with Homebrew. On Linux, install `poppler-utils` with apt
@@ -45,7 +45,7 @@ Missing or unsupported tools skip their tests locally; set
 `PDFCONCAT_REQUIRE_ORACLE=1` to require them. Linux CI does that.
 
 ```sh
-PDFCONCAT_REQUIRE_ORACLE=1 go test -race -count=1 ./...
+PDFCONCAT_REQUIRE_VERAPDF=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -race -count=1 ./...
 ```
 
 Race tests run on Linux/macOS; Windows runs ordinary tests. CI gates lint,
@@ -334,3 +334,9 @@ does not create tags or overwrite an existing release. macOS signing stays ad ho
 checksums and attestations do not establish notarization. Expired/missing qualified
 artifacts fail publishing instead of causing an untested rebuild.
 Do not create tags, releases or upstream issues without maintainer authorization.
+
+Run `PDFCONCAT_REQUIRE_VERAPDF=1 go test ./internal/core/internal/pdf -run TestPDFUAMachineFixture`
+with the pinned `verapdf` on PATH to require the authored PDF/UA fixture and its
+removed-structure negative control. Machine reports are retained as test
+artifacts. Passing these tests does not replace human reading-order or
+screen-reader review of actual packets.

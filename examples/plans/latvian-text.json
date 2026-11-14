@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "output": "Pielikums.pdf",
   "page_defaults": {
     "background": "#F4EFE6",

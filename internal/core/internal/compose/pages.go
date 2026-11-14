@@ -12,10 +12,12 @@ import (
 )
 
 type pageKey struct {
-	size       packet.Size
-	text       packet.TextStyle
-	background packet.Color
-	filled     bool
+	bottom, top float64
+	kind        packet.PartKind
+	size        packet.Size
+	text        packet.TextStyle
+	background  packet.Color
+	filled      bool
 }
 
 // LayOut prepares page-item text and retains its measured facts.
@@ -42,13 +44,32 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			break
 		}
 		style := p.Page
-		key := pageKey{size: p.Size, text: style.Text, filled: style.Background.Value != nil}
+		bottom, top := 0.0, p.Size.Height
+		if layout.PageNumbers != nil {
+			if _, eligible := packet.NumberAt(layout.Numbering, p.FirstPage); eligible {
+				numberLayout, err := NewPageNumberLayout(fonts[packet.Font{}], *layout.PageNumbers)
+				if err != nil {
+					ds = append(ds, Diagnostic(err, p.Ref))
+					continue
+				}
+				bottom, top = numberLayout.Available(p.Size, layout.FitTo)
+			}
+		}
+		if top-bottom < 1 {
+			ds = append(ds, diag.New(diag.TextOverflow, "Page-number exclusion leaves no usable text height.", p.Ref))
+			continue
+		}
+		key := pageKey{bottom: bottom, top: top, kind: p.Kind, size: p.Size, text: style.Text, filled: style.Background.Value != nil}
 		if style.Background.Value != nil {
 			key.background = *style.Background.Value
 		}
 		value, ok := cache[key]
 		if !ok {
-			value.page = Page{Width: p.Size.Width, Height: p.Size.Height, Blocks: []TextBlock{{Color: packet.Color{R: style.Text.Color.Value.R, G: style.Text.Color.Value.G, B: style.Text.Color.Value.B}}}}
+			role := RoleParagraph
+			if p.Kind == packet.PartDivider {
+				role = RoleHeading
+			}
+			value.page = Page{Width: p.Size.Width, Height: p.Size.Height, Blocks: []TextBlock{{Role: role, Color: packet.Color{R: style.Text.Color.Value.R, G: style.Text.Color.Value.G, B: style.Text.Color.Value.B}}}}
 			if style.Background.Value != nil {
 				value.page.Background = &packet.Color{R: style.Background.Value.R, G: style.Background.Value.G, B: style.Background.Value.B}
 			}
@@ -61,7 +82,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 					ds = append(ds, diag.New(diag.TextOverflow, "Default margins leave no usable text width; give an explicit width of at least 1 point or a wider page.", p.Ref))
 					continue
 				}
-				params := typeset.Params{Text: style.Text.Value.Value, Size: style.Text.Size.Value, PageWidth: p.Size.Width, PageHeight: p.Size.Height, OffsetX: style.Text.X.Value, OffsetY: style.Text.Y.Value, WrapWidth: width, LineSpacing: style.Text.Leading.Value, Anchor: anchor(style.Text.Anchor.Value), Align: alignment(style.Text.Align.Value)}
+				params := typeset.Params{Text: style.Text.Value.Value, Size: style.Text.Size.Value, PageWidth: p.Size.Width, PageHeight: top - bottom, OffsetX: style.Text.X.Value, OffsetY: style.Text.Y.Value, WrapWidth: width, LineSpacing: style.Text.Leading.Value, Anchor: anchor(style.Text.Anchor.Value), Align: alignment(style.Text.Align.Value)}
 				if style.Text.Overflow.Value == packet.OverflowAllow {
 					params.Overflow = typeset.OverflowAllow
 				}
@@ -69,6 +90,9 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 					params.Wrap = typeset.WrapEmergency
 				}
 				value.page.Blocks[0].Text, value.err = shaper.Place(fonts[style.Text.Font.Value], params)
+				if value.page.Blocks[0].Text != nil {
+					shiftPlaced(value.page.Blocks[0].Text, 0, bottom)
+				}
 			}
 			cache[key] = value
 		}

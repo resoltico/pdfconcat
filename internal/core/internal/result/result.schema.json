@@ -24,11 +24,15 @@
         "diagnostics",
         "diagnostics_omitted",
         "report",
-        "page_numbers"
+        "page_numbers",
+        "metadata",
+        "timestamp",
+        "structure",
+        "numbering"
       ],
       "properties": {
         "format_version": {
-          "const": 6
+          "const": 7
         },
         "command": {
           "enum": [
@@ -116,6 +120,129 @@
           "items": {
             "$ref": "#/$defs/section"
           }
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 10000,
+                  "pattern": "^[^\u0000]*$"
+                },
+                "author": {
+                  "type": "string",
+                  "maxLength": 10000,
+                  "pattern": "^[^\u0000]*$"
+                },
+                "subject": {
+                  "type": "string",
+                  "maxLength": 10000,
+                  "pattern": "^[^\u0000]*$"
+                },
+                "language": {
+                  "type": "string",
+                  "maxLength": 10000,
+                  "pattern": "^[^\u0000]*$",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 253402300799
+            }
+          ]
+        },
+        "structure": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "policy",
+                "coverage"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "policy": {
+                  "enum": [
+                    "preserve",
+                    "discard"
+                  ]
+                },
+                "coverage": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "enum": [
+                        "none",
+                        "partial",
+                        "complete"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "numbering": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "output",
+                  "start"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "output": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "start": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
         }
       },
       "allOf": [
@@ -190,7 +317,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 6
+          "const": 7
         },
         "command": {
           "const": "version"
@@ -643,20 +770,76 @@
     "page_numbers": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "size",
-        "margin"
-      ],
       "properties": {
         "size": {
           "type": "number",
-          "exclusiveMinimum": 0
+          "minimum": 1,
+          "maximum": 14400
         },
         "margin": {
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 14400
+        },
+        "mode": {
+          "enum": [
+            "physical",
+            "consecutive"
+          ],
+          "default": "physical"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807,
+          "default": 1
+        },
+        "kinds": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "source",
+                  "page",
+                  "divider",
+                  "contents"
+                ]
+              },
+              "default": [
+                "source",
+                "page",
+                "divider",
+                "contents"
+              ]
+            }
+          ]
+        },
+        "position": {
+          "enum": [
+            "top-left",
+            "top-center",
+            "top-right",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right"
+          ],
+          "default": "bottom-center"
         }
-      }
+      },
+      "description": "Authored numbering policy; padding is never numbered. Source content may overlap the overlay.",
+      "required": [
+        "size",
+        "margin",
+        "mode",
+        "start",
+        "kinds",
+        "position"
+      ]
     },
     "section": {
       "type": "object",

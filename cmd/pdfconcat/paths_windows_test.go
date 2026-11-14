@@ -34,8 +34,8 @@ func TestWindowsCLIPathRefusals(t *testing.T) {
 					case "source":
 						args = append(args, path)
 					}
-					r, exit, _ := invokeJSON(t, args, `{"version":4,"items":[{"page":{}}]}`)
-					if exit != 2 || r.Status != "invalid" || !hasDiagnostic(r, "path_invalid") || hasDiagnostic(r, "plan_unreadable") {
+					r, exit, _ := invokeJSON(t, args, `{"version":5,"items":[{"page":{}}]}`)
+					if exit != 2 || r.Status != "invalid" || !hasDiagnostic(r, "path_invalid") || hasDiagnostic(r, "plan_input_invalid") {
 						t.Fatalf("path refusal: exit=%d result=%+v", exit, r)
 					}
 					if existing {
@@ -62,7 +62,7 @@ func TestWindowsUnreadablePlanRemainsFailed(t *testing.T) {
 		}
 		report := filepath.Join(t.TempDir(), "report.json")
 		r, exit, _ := invokeJSON(t, []string{"check", "--plan", planPath, "--report", report}, "")
-		if exit != 1 || r.Status != "failed" || !hasDiagnostic(r, "plan_unreadable") || hasDiagnostic(r, "path_invalid") || r.Report == nil || !r.Report.Written {
+		if exit != 2 || r.Status != "invalid" || !hasDiagnostic(r, "plan_input_invalid") || hasDiagnostic(r, "path_invalid") || r.Report == nil || !r.Report.Written {
 			t.Fatalf("read failure: exit=%d result=%+v", exit, r)
 		}
 	}

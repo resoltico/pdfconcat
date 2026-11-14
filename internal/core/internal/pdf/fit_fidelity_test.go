@@ -83,28 +83,48 @@ func TestFitPatternDefaultSpacesAndSharedOccurrences(t *testing.T) {
 						height = 200
 					}
 					scale := math.Min(target.Width/width, target.Height/height)
-					expected := fitRaster(t, source, sourcePage, 72*scale)
-					actual := fitRaster(t, output, page, 72)
-					left, top := int(math.Round((target.Width-width*scale)/2)), int(math.Round((target.Height-height*scale)/2))
-					mismatches, total := 0, 0
-					for y := 2; y < expected.Bounds().Dy()-2; y++ {
-						for x := 2; x < expected.Bounds().Dx()-2; x++ {
-							ar, ag, ab, _ := actual.At(x+left, y+top).RGBA()
-							er, eg, eb, _ := expected.At(x, y).RGBA()
-							if math.Abs(float64(ar)-float64(er)) > 24*257 || math.Abs(float64(ag)-float64(eg)) > 24*257 || math.Abs(float64(ab)-float64(eb)) > 24*257 {
-								mismatches++
-							}
-							total++
-						}
-					}
+					// A higher-resolution grid bounds device-pixel quantization
+					// at tiling boundaries without relaxing physical fidelity.
+					const rasterScale = 3.0
+					expected := fitRaster(t, source, sourcePage, 72*scale*rasterScale)
+					actual := fitRaster(t, output, page, 72*rasterScale)
+					left, top := int(math.Round((target.Width-width*scale)/2*rasterScale)), int(math.Round((target.Height-height*scale)/2*rasterScale))
+					mismatches, total := patternPixelDifference(expected, actual, left, top)
 					// Allow antialiasing differences at pattern and Form edges.
 					if float64(mismatches)/float64(total) > .02 {
 						t.Fatalf("page %d pattern scale/phase/orientation: %d/%d different", page, mismatches, total)
 					}
+					if !shading && target.Width == 300 && page == 1 {
+						shifted := pdffixture.FitPatterns(false)
+						// The fit scale is 3: changing pattern y translation by
+						// 1/3 source unit introduces a real one-point phase error.
+						shifted.Objs[5] = bytes.Replace(shifted.Objs[5], []byte("0 1 -1 0 7 3"), []byte("0 1 -1 0 7 3.3333333333333335"), 1)
+						wrong := fitOutput(t, shifted, target, 2)
+						bad := fitRaster(t, wrong, 1, 72*rasterScale)
+						different, count := patternPixelDifference(expected, bad, left, top)
+						if float64(different)/float64(count) <= .02 {
+							t.Fatalf("oracle accepted a one-point pattern phase error: %d/%d", different, count)
+						}
+					}
+
 				}
 			})
 		}
 	}
+}
+
+func patternPixelDifference(expected, actual image.Image, left, top int) (mismatches, total int) {
+	for y := 2; y < expected.Bounds().Dy()-2; y++ {
+		for x := 2; x < expected.Bounds().Dx()-2; x++ {
+			ar, ag, ab, _ := actual.At(x+left, y+top).RGBA()
+			er, eg, eb, _ := expected.At(x, y).RGBA()
+			if math.Abs(float64(ar)-float64(er)) > 24*257 || math.Abs(float64(ag)-float64(eg)) > 24*257 || math.Abs(float64(ab)-float64(eb)) > 24*257 {
+				mismatches++
+			}
+			total++
+		}
+	}
+	return mismatches, total
 }
 
 func fitAnnotationObjects(t *testing.T, path string) []map[string]any {

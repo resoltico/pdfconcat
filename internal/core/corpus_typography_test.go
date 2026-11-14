@@ -285,7 +285,7 @@ func TestCorpusTypography(t *testing.T) {
 				if tc.allow {
 					text["overflow"] = "allow"
 				}
-				plan := map[string]any{"version": 4, "output": "packet.pdf", "items": []any{corpusStyledPage(tc.value, tc.size, text)}}
+				plan := map[string]any{"version": 5, "output": "packet.pdf", "items": []any{corpusStyledPage(tc.value, tc.size, text)}}
 				if tc.fit {
 					plan["fit_to"] = "A4"
 				}

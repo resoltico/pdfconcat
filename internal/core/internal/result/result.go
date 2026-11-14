@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v6 and its complete factual outcomes.
+// Package result defines result v7 and its complete factual outcomes.
 package result
 
 import (
@@ -12,13 +12,13 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 )
 
-// Schema covers result v6, full reports and version objects.
+// Schema covers result v7, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 6
+const WireVersion = 7
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -87,18 +87,28 @@ type Part struct {
 
 // Result is the complete run outcome before stdout caps.
 type Result struct {
-	FormatVersion      int                 `json:"format_version"`
-	Command            string              `json:"command"`
-	Status             diag.Status         `json:"status"`
-	Output             *Output             `json:"output"`
-	Pages              *Pages              `json:"pages"`
-	FitTo              *packet.Size        `json:"fit_to"`
-	PageNumbers        *packet.PageNumbers `json:"page_numbers"`
-	Diagnostics        []diag.Diagnostic   `json:"diagnostics"`
-	DiagnosticsOmitted int                 `json:"diagnostics_omitted"`
-	Report             *Report             `json:"report"`
-	Parts              []Part              `json:"parts,omitzero"`
-	Sections           []Section           `json:"sections,omitzero"`
+	Metadata           *packet.Metadata     `json:"metadata"`
+	Timestamp          *int64               `json:"timestamp"`
+	Structure          *Structure           `json:"structure"`
+	Numbering          *[]packet.NumberSpan `json:"numbering"`
+	FormatVersion      int                  `json:"format_version"`
+	Command            string               `json:"command"`
+	Status             diag.Status          `json:"status"`
+	Output             *Output              `json:"output"`
+	Pages              *Pages               `json:"pages"`
+	FitTo              *packet.Size         `json:"fit_to"`
+	PageNumbers        *packet.PageNumbers  `json:"page_numbers"`
+	Diagnostics        []diag.Diagnostic    `json:"diagnostics"`
+	DiagnosticsOmitted int                  `json:"diagnostics_omitted"`
+	Report             *Report              `json:"report"`
+	Parts              []Part               `json:"parts,omitzero"`
+	Sections           []Section            `json:"sections,omitzero"`
+}
+
+// Structure records policy and semantic coverage, not PDF/UA certification.
+type Structure struct {
+	Policy   packet.StructurePolicy `json:"policy"`
+	Coverage *string                `json:"coverage"`
 }
 
 // Version identifies the executable and its build environment.

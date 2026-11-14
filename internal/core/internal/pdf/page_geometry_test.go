@@ -67,7 +67,7 @@ func TestEverySourcePageRequiresPositivePhysicalFrame(t *testing.T) {
 							if tc.bad == 0 {
 								good = 2
 							}
-							plan := map[string]any{"version": 4, "items": []any{map[string]any{"source": source, "pages": [][2]int{{good, good}}}}}
+							plan := map[string]any{"version": 5, "items": []any{map[string]any{"source": source, "pages": [][2]int{{good, good}}}}}
 							data, err := json.Marshal(plan)
 							if err != nil {
 								t.Fatal(err)

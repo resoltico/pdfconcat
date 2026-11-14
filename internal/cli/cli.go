@@ -29,7 +29,7 @@ type option struct{ name, alias, value, description string }
 
 var options = []option{
 	{"--blank", "", "", "Insert one generated page with default style; size comes from a source or --fit-to SIZE."},
-	{"--plan", "", "FILE|-", "Read a plan v4 JSON file or standard input."},
+	{"--plan", "", "FILE|-", "Read a plan v5 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
 	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; annotation, widget and destination limits apply."},
@@ -75,6 +75,10 @@ func Parse(args []string) (Command, *core.Result) {
 		}
 		if len(args) == 2 {
 			c.Name = args[1]
+			if c.Name == "--help" || c.Name == "-h" {
+				c.Name = ""
+				return c, nil
+			}
 			if !knownCommand(c.Name) {
 				unknown := c.Name
 				c.Name = ""
@@ -285,7 +289,8 @@ func Help(command string) string {
 		fmt.Fprintf(&b, "  %-28s %s\n", names, o.description)
 	}
 	if command == "build" || command == "check" {
-		b.WriteString("\nFitting refuses widgets and numeric internal destination coordinates.\n")
+		b.WriteString("\nPlan contents use resolved labels, or an em dash (—) for unnumbered targets; links retain physical targets.\n")
+		b.WriteString("Fitting refuses widgets and numeric internal destination coordinates.\n")
 		b.WriteString("FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances.\n")
 		b.WriteString("Link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.\n")
 		b.WriteString("See https://github.com/resoltico/pdfconcat/blob/main/docs/PDF-POLICY.md#fitting\n")

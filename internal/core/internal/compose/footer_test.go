@@ -22,7 +22,7 @@ func footerDigits(config packet.PageNumbers) (*typeset.Digits, error) {
 	return typeset.NewDigits(font, config.Size)
 }
 func checkNumberPlacement(digits *typeset.Digits, size packet.Size, number int64, margin float64) error {
-	_, err := footerPlacement(digits, size, number, margin)
+	_, err := bottomNumberPlacement(digits, size, number, margin)
 	return err
 }
 func TestFooterInkBottomMatchesMarginForEveryDigit(t *testing.T) {
@@ -31,7 +31,7 @@ func TestFooterInkBottomMatchesMarginForEveryDigit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for number := int64(1); number <= 20; number++ {
-		placed, err := footerPlacement(digits, packet.Size{Width: 300, Height: 200}, number, 24)
+		placed, err := bottomNumberPlacement(digits, packet.Size{Width: 300, Height: 200}, number, 24)
 		if err != nil {
 			t.Fatal(err)
 		}

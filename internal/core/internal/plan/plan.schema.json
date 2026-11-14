@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/core/internal/plan/plan.schema.json",
   "title": "PDFConcat plan",
-  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 4). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
+  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 5). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
   "type": "object",
   "required": [
     "version",
@@ -15,7 +15,7 @@
       "description": "Ignored by PDFConcat; for editors."
     },
     "version": {
-      "const": 4,
+      "const": 5,
       "description": "Plan format version."
     },
     "output": {
@@ -51,10 +51,91 @@
         "margin": {
           "$ref": "#/$defs/nonnegativeLength",
           "default": "8mm",
-          "description": "Distance from the page bottom to the footer's bottom ink edge, 0 to 14400 points after unit conversion; the complete footer must also fit the page."
+          "description": "Distance from ink to the nearest selected page edges. Complete logical and ink bounds must fit."
+        },
+        "mode": {
+          "enum": [
+            "physical",
+            "consecutive"
+          ],
+          "default": "physical"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807,
+          "default": 1
+        },
+        "kinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "source",
+              "page",
+              "divider",
+              "contents"
+            ]
+          },
+          "default": [
+            "source",
+            "page",
+            "divider",
+            "contents"
+          ]
+        },
+        "position": {
+          "enum": [
+            "top-left",
+            "top-center",
+            "top-right",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right"
+          ],
+          "default": "bottom-center"
         }
       },
-      "description": "Presence paints physical Arabic page numbers on all non-padding pages. The overlay may cover source content."
+      "description": "Authored numbering policy; padding is never numbered. Source content may overlap the overlay."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 10000,
+          "pattern": "^[^\u0000]*$"
+        },
+        "author": {
+          "type": "string",
+          "maxLength": 10000,
+          "pattern": "^[^\u0000]*$"
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 10000,
+          "pattern": "^[^\u0000]*$"
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 10000,
+          "pattern": "^[^\u0000]*$",
+          "minLength": 1
+        }
+      }
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799
+    },
+    "structure": {
+      "enum": [
+        "preserve",
+        "discard"
+      ],
+      "default": "preserve"
     }
   },
   "$defs": {
@@ -95,6 +176,10 @@
                   "items": false
                 },
                 "description": "Ascending disjoint inclusive original page ranges; adjacency is normalized. Decoder checks ordering, aggregate pair count and source bounds."
+              },
+              "numbering": {
+                "type": "boolean",
+                "description": "Inherited eligibility override; the most specific item wins, then kinds applies."
               }
             }
           },
@@ -114,6 +199,10 @@
                 "maximum": 100000,
                 "default": 1,
                 "description": "Number of consecutive identical generated pages."
+              },
+              "numbering": {
+                "type": "boolean",
+                "description": "Inherited eligibility override; the most specific item wins, then kinds applies."
               }
             }
           },
@@ -137,6 +226,10 @@
                     "description": "Defaults to fit_to, otherwise A4; explicit size is authored before fitting."
                   }
                 }
+              },
+              "numbering": {
+                "type": "boolean",
+                "description": "Inherited eligibility override; the most specific item wins, then kinds applies."
               }
             }
           },
@@ -159,6 +252,11 @@
               {
                 "required": [
                   "start_on"
+                ]
+              },
+              {
+                "required": [
+                  "numbering"
                 ]
               }
             ],
@@ -189,6 +287,10 @@
               },
               "items": {
                 "$ref": "#/$defs/items"
+              },
+              "numbering": {
+                "type": "boolean",
+                "description": "Inherited eligibility override; the most specific item wins, then kinds applies."
               }
             }
           }

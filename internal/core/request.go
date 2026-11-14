@@ -33,6 +33,7 @@ type Request struct {
 	WorkingDir, Output, Report string
 	FitTo                      *Sheet
 	Overwrite                  bool
+	SourceDateEpoch            *string
 }
 
 // Input is a closed plan-file, plan-bytes or direct-item declaration.
@@ -80,16 +81,16 @@ func ParseSheet(text string) (Sheet, error) {
 func (s Sheet) valid() bool {
 	return !math.IsNaN(s.size.Width) && !math.IsNaN(s.size.Height) && s.size.Width >= 1 && s.size.Width <= packet.MaxSide && s.size.Height >= 1 && s.size.Height <= packet.MaxSide
 }
-func metadata(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
+func validHostText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 func (r Request) valid() bool {
-	if r.Operation != Check && r.Operation != Build || !filepath.IsAbs(r.WorkingDir) || !metadata(r.WorkingDir) || packet.ValidatePath(r.WorkingDir) != nil || !metadata(r.Output) || !metadata(r.Report) || r.FitTo != nil && !r.FitTo.valid() {
+	if r.Operation != Check && r.Operation != Build || !filepath.IsAbs(r.WorkingDir) || !validHostText(r.WorkingDir) || packet.ValidatePath(r.WorkingDir) != nil || !validHostText(r.Output) || !validHostText(r.Report) || r.FitTo != nil && !r.FitTo.valid() {
 		return false
 	}
 	switch input := r.Input.(type) {
 	case PlanFile:
-		return input.Path != "" && metadata(input.Path)
+		return input.Path != "" && validHostText(input.Path)
 	case PlanBytes:
-		return metadata(input.Label) && metadata(input.BaseDir)
+		return validHostText(input.Label) && validHostText(input.BaseDir)
 	case Items:
 		if len(input) == 0 {
 			return false
@@ -100,7 +101,7 @@ func (r Request) valid() bool {
 			switch value := item.(type) {
 			case SourceItem:
 				ref = value.Ref
-				if !metadata(value.Path) {
+				if !validHostText(value.Path) {
 					return false
 				}
 			case BlankItem:
@@ -108,7 +109,7 @@ func (r Request) valid() bool {
 			default:
 				return false
 			}
-			if ref == "" || !metadata(ref) || refs[ref] {
+			if ref == "" || !validHostText(ref) || refs[ref] {
 				return false
 			}
 			refs[ref] = true

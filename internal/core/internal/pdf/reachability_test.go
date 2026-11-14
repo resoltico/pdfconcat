@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
-	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -137,11 +136,9 @@ func TestReachabilityKeepsIndirectObjectChainsFromReadContext(t *testing.T) {
 			t.Fatalf("reachable indirect chain object %d was freed", number)
 		}
 	}
-	// The source reader admits this graph, but the pinned native writer cannot
-	// serialize an indirect reference used as an object body. Cleanup must keep
-	// the graph intact and preserve the backend's failed outcome.
+	// Canonical graph serialization now preserves this legal indirect chain.
 	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "source", Path: "source"}}, nil)
-	if len(ds) != 1 || ds[0].Code != diag.AssemblyFailed {
-		t.Fatalf("backend graph failure changed classification: %+v", ds)
+	if len(ds) != 0 {
+		t.Fatalf("indirect chain serialization failed: %+v", ds)
 	}
 }

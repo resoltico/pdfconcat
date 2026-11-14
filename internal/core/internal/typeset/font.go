@@ -18,12 +18,14 @@ type (
 	// Digest is a font's identity: the SHA-256 of its file bytes.
 	Digest [sha256.Size]byte
 
-	// Font is a validated, immutable static TrueType font.
+	// Font is a validated, immutable static OpenType font.
 	Font struct {
 		textOf   map[gtfont.GID]rune
 		face     *gtfont.Face
 		name     string
 		data     []byte
+		program  []byte
+		outline  OutlineKind
 		advances []int
 		ink      []Rect
 		digest   Digest
@@ -106,10 +108,10 @@ func (e *EmbeddingError) Error() string {
 }
 
 func requiredTables() []string {
-	return []string{"head", "hhea", "hmtx", "maxp", "cmap", "glyf", "loca", "OS/2", "post"}
+	return []string{"head", "hhea", "hmtx", "maxp", "cmap", "OS/2", "post"}
 }
 
-// LoadFont validates data as an embeddable static TrueType font. It retains data, which the caller
+// LoadFont validates data as an embeddable static OpenType font. It retains data, which the caller
 // must not modify afterwards. It never panics on malformed input; every defect is an error.
 func LoadFont(data []byte) (*Font, error) {
 	var font *Font
@@ -185,12 +187,10 @@ func checkSignature(data []byte) error {
 	}
 
 	switch magic := binary.BigEndian.Uint32(data); magic {
-	case sfntTrueType, sfntTrueTypeTag:
+	case sfntTrueType, sfntTrueTypeTag, sfntOpenTypeCFF:
 		return nil
-	case sfntOpenTypeCFF:
-		return fmt.Errorf("%w: OpenType CFF; only TrueType glyf outlines are supported", ErrUnsupportedFont)
 	case sfntCollection:
-		return fmt.Errorf("%w: TrueType collection; supply a single-face .ttf", ErrUnsupportedFont)
+		return fmt.Errorf("%w: font collection; supply a single-face static OpenType font", ErrUnsupportedFont)
 	default:
 		return fmt.Errorf("%w: unknown sfnt signature 0x%08x", ErrUnsupportedFont, magic)
 	}
@@ -212,7 +212,7 @@ func readTableRecord(data []byte, index int) (string, []byte, error) {
 	return tag, data[offset : offset+length], nil
 }
 
-// checkTablePresence requires the tables the writer and layout use and rejects variable and CFF fonts.
+// checkTablePresence requires shared metrics and rejects variable font programs.
 func checkTablePresence(tables map[string][]byte) error {
 	for _, tag := range requiredTables() {
 		_, ok := tables[tag]
@@ -221,10 +221,10 @@ func checkTablePresence(tables map[string][]byte) error {
 		}
 	}
 
-	for _, tag := range []string{"fvar", "CFF ", "CFF2"} {
+	for _, tag := range []string{"fvar", "CFF2"} {
 		_, ok := tables[tag]
 		if ok {
-			return fmt.Errorf("%w: table %q present (only static TrueType glyf fonts are supported)", ErrUnsupportedFont, tag)
+			return fmt.Errorf("%w: table %q present (only static TrueType and CFF1 fonts are supported)", ErrUnsupportedFont, tag)
 		}
 	}
 
@@ -256,6 +256,12 @@ func checkGlyphLocations(tables map[string][]byte, glyphs int, format uint16) er
 	}
 
 	loca, glyf := tables["loca"], tables["glyf"]
+	if glyf == nil {
+		return fmt.Errorf("%w: missing required table %q", ErrMalformedFont, "glyf")
+	}
+	if loca == nil {
+		return fmt.Errorf("%w: missing required table %q", ErrMalformedFont, "loca")
+	}
 	if len(loca) < (glyphs+1)*entry {
 		return fmt.Errorf("%w: loca table shorter than glyph count", ErrMalformedFont)
 	}
@@ -399,7 +405,20 @@ func (f *Font) readTables(tables map[string][]byte) error {
 		return fmt.Errorf("%w: no glyphs", ErrMalformedFont)
 	}
 
-	err = checkGlyphLocations(tables, f.glyphs, u16(head, headLocaFormat))
+	if err = f.readEmbeddingPermission(os2); err != nil {
+		return err
+	}
+	f.name = postScriptName(tables["name"])
+	cffProgram := tables["CFF "]
+	if (binary.BigEndian.Uint32(f.data) == sfntOpenTypeCFF) != (cffProgram != nil) {
+		return fmt.Errorf("%w: sfnt flavor and outline program disagree", ErrMalformedFont)
+	}
+	if cff, ok := tables["CFF "]; ok {
+		f.outline = OutlineCFF
+		f.program, err = cidProgram(cff, f.glyphs, f.name)
+	} else {
+		err = checkGlyphLocations(tables, f.glyphs, u16(head, headLocaFormat))
+	}
 	if err != nil {
 		return err
 	}
@@ -413,12 +432,6 @@ func (f *Font) readTables(tables map[string][]byte) error {
 	if err != nil {
 		return err
 	}
-	err = f.readEmbeddingPermission(os2)
-	if err != nil {
-		return err
-	}
-
-	f.name = postScriptName(tables["name"])
 
 	return nil
 }

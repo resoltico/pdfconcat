@@ -82,7 +82,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 		t.Fatal(err)
 	}
 	if err := Verify(t.Context(), target, layout.TotalPages); err != nil {
-		t.Fatal(err)
+		t.Fatalf("verify: %+v", Diagnostic(err))
 	}
 	return target, nil
 }
@@ -367,7 +367,7 @@ func TestComposedOutlineHierarchyUsesBackendBoundary(t *testing.T) {
 
 func TestGroupedFooterMeasurementsUseOnlyRequestedOriginalPages(t *testing.T) {
 	doc := pdffixture.WithBoxes("footer geometry", pdffixture.PageBoxes{Media: "[0 0 400 600]"}, pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 200 300]"}, pdffixture.PageBoxes{Rotate: "90", UserUnit: "2"})
-	facts, views := inspectSelection(t, doc, []SelectionRequest{{Item: "one", Pages: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}, MeasureFooter: true}, {Item: "two", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "repeat", Pages: []packet.PageRange{{First: 3, Last: 3}}, MeasureFooter: true}})
+	facts, views := inspectSelection(t, doc, []SelectionRequest{{Item: "one", Pages: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}, MeasureNumbers: true}, {Item: "two", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "repeat", Pages: []packet.PageRange{{First: 3, Last: 3}}, MeasureNumbers: true}})
 	if len(facts.PageSizes) != 2 || facts.PageSizes[1] != views["one"].FirstSize || facts.PageSizes[3] != views["repeat"].FirstSize {
 		t.Fatalf("shared source geometry: %+v views %+v", facts.PageSizes, views)
 	}
@@ -378,7 +378,7 @@ func TestGroupedFooterMeasurementsUseOnlyRequestedOriginalPages(t *testing.T) {
 	if ordinary.PageSizes != nil {
 		t.Fatal("ordinary inspection allocated footer geometry")
 	}
-	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureFooter: true}})
+	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureNumbers: true}})
 	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || invalid.PageSizes != nil || (len(occurrences) != 1 || occurrences[0] != nil) {
 		t.Fatalf("invalid selection invented geometry: %+v %+v %+v", invalid.PageSizes, occurrences, ds)
 	}
@@ -688,7 +688,7 @@ func TestOnPagePopupRetainsSoleParentActionsAcrossOccurrences(t *testing.T) {
 }
 
 func testAssembly(layout packet.Layout, files map[string]SourceFacts, views map[string]OccurrenceFacts, fit *packet.Size) Assembly {
-	a := Assembly{Parts: make([]Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: nil, Footer: nil}
+	a := Assembly{Parts: make([]Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: nil, NumberLayout: nil}
 	facts := map[string]*SourceFacts{}
 	for path, file := range files {
 		facts[path] = &file

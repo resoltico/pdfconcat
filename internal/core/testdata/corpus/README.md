@@ -31,8 +31,9 @@ Noto Sans from the source checkout; no system installation of that font is neede
 
 ### Business report and form base
 
-[generate_business_sources.py](sources/generate_business_sources.py) requires
-ReportLab 4.4.9 and creates `business-report.pdf` and `approval-form-base.pdf`:
+[generate_business_sources.py](sources/generate_business_sources.py) uses ReportLab
+to create `business-report.pdf` and `approval-form-base.pdf`. Use the authoring
+version recorded in [provenance](provenance.json):
 
 ```sh
 python3 sources/generate_business_sources.py --output-dir /absolute/fresh/business
@@ -40,7 +41,7 @@ python3 sources/generate_business_sources.py --output-dir /absolute/fresh/busine
 
 [make_classic_incremental.py](sources/make_classic_incremental.py) accepts
 `BASE OUTPUT` and adds a supporting-page revision to the form base. It requires
-qpdf on `PATH` to inspect the base; the recorded authoring version is 12.4.2:
+qpdf on `PATH` to inspect the base; use its version recorded in provenance:
 
 ```sh
 python3 sources/make_classic_incremental.py /absolute/fresh/business/approval-form-base.pdf /absolute/fresh/approval-form.pdf
@@ -51,8 +52,9 @@ revisions and refresh the recorded base-prefix facts when replacing this asset.
 
 ### Scanner-like artwork
 
-[create_scan_sources.py](sources/create_scan_sources.py) requires ReportLab 4.4.9
-and Pillow 12.3.0. It creates the source images and `scan-invoice.pdf`:
+[create_scan_sources.py](sources/create_scan_sources.py) uses ReportLab and Pillow
+at the versions recorded in provenance. It creates the source images and
+`scan-invoice.pdf`:
 
 ```sh
 python3 sources/create_scan_sources.py --output-dir /absolute/fresh/scans
@@ -76,4 +78,5 @@ typst compile --ignore-system-fonts --creation-timestamp 0 sources/technical-not
 When changing a frozen asset, update its hash, byte count and independently
 reviewed facts in `provenance.json`, retaining the required font notices. When
 only an authoring script or recipe changes, update its `AuthoredSourcesSHA256`
-entry; the reviewed frozen PDFs need not be regenerated for a path correction.
+entry. Regenerate frozen PDFs only when their reviewed contents are intended to
+change.

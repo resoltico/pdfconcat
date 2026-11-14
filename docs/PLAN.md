@@ -88,10 +88,11 @@ Each item is exactly one of:
 - A source object with required `source` and optional `pages` selection.
 - A generated item with `page` and optional `count` (default 1).
 - A contents item with `contents`.
-- A group with nonempty `items` and at least one declared `dir`, `title` or
-  `start_on`; `divider` is allowed only with `title`.
+- A group with nonempty `items` and at least one declared `dir`, `title`,
+  `start_on` or `numbering`; `divider` is allowed only with `title`.
 
-Every item may also declare boolean `numbering`; groups pass this eligibility choice to descendants, and the most specific declaration wins. A group containing only `items` and `numbering` is useful and valid.
+Every item may declare boolean `numbering`. Groups pass this eligibility choice
+to descendants, and the most specific declaration wins.
 
 Unknown members are errors. Wrong combinations of known members are
 `plan_item_shape`; encountered unknown members retain first-fault precedence.
@@ -178,9 +179,9 @@ A section without `divider` adds no title page.
 immediately before the group when its next physical page would otherwise be
 even. Nested starts naturally share the same odd page. The padding uses
 the preceding physical sheet's displayed size, or the global fit target. It has
-no background, text or footer. If that size cannot form a supported generated
-canvas, fit the packet or omit odd alignment. This describes physical PDF page
-positions; it does not configure a printer or impose sheets.
+no background, text or page-number overlay. If that size cannot form a supported
+generated canvas, fit the packet or omit odd alignment. This describes physical
+PDF page positions; it does not configure a printer or impose sheets.
 
 All pages count from 1: covers, contents, dividers, authored blanks and automatic
 padding. A section targets its first non-padding page, including its divider.
@@ -188,7 +189,8 @@ Its inclusive range excludes its own entry padding but includes child padding.
 For example, after cover page 1, an unaligned parent whose first odd-start child
 inserts padding page 2 and content page 3 has range `[2,3]`, target 3; the child
 has range `[3,3]`, target 3. A section's range start and navigation target can
-differ. Reports and navigation retain these physical indexes; authored labels are resolved separately below.
+differ. Reports and navigation retain these physical indexes; authored labels are
+resolved separately below.
 
 ## Linked contents
 
@@ -199,10 +201,11 @@ size is authored before fitting. Without a contents item, no contents pages are
 created, and ordinary plans need no sections.
 
 Contents lists all authored sections once in preorder, including its containing
-section, with wrapped titles, resolved target labels and clickable
-whole-page links. It does not list itself or imported source bookmarks. It uses
-the root `page_defaults.text.font` (bundled Noto Sans when unspecified), black text, an 18pt repeated heading, 12pt entries, 36pt
-margins, 12pt indentation per section depth, 6pt row gaps and leading 1.2.
+section, with wrapped titles and resolved target labels. Each clickable row
+targets the whole destination page. It does not list itself or imported source
+bookmarks. It uses the root `page_defaults.text.font` (bundled Noto Sans when
+unspecified), black text, an 18pt repeated heading, 12pt entries, 36pt margins,
+12pt indentation per section depth, 6pt row gaps and leading 1.2.
 The inherited font applies to headings, entry titles, numeric labels and em dashes;
 it must support those characters, including all decimal digits and the em dash used
 for layout measurement. Its file path retains the root base-directory scope even
@@ -214,7 +217,10 @@ final numbers do not reflow titles or change the measured contents page count.
 Overwide indentation, unsupported text or a row too tall for a page is refused;
 titles are not split across pages, truncated or shrunk.
 
-Eligible generated pages reserve the selected overlay edge plus 6pt clearance before pagination/placement. Fitting inverse-transforms the physical exclusion into the authored canvas. Suppressed overlays reserve no space. Large margins can reduce usable height or cause a refusal.
+Eligible generated pages reserve the selected overlay edge plus 6pt clearance
+before pagination/placement. Fitting inverse-transforms the physical exclusion
+into the authored canvas. Suppressed overlays reserve no space. Large margins
+can reduce usable height or cause a refusal.
 
 ## Page numbering
 
@@ -253,9 +259,11 @@ Unfitted source content and geometry remain intact outside the overlay.
 `metadata` accepts optional strings `title`, `author`, `subject` and `language`.
 Values retain authored Unicode, with at most 10,000 characters each. NUL and
 characters forbidden in XML 1.0 are refused. `language` uses BCP 47 syntax,
-including private-use and unknown well-formed subtags; repeated variants, extension singletons, scripts and other malformed sequences are refused. No language is inferred. Author is one string,
-including any punctuation. Missing fields stay absent; an empty/whitespace title
-does not enable DisplayDocTitle.
+including private-use and unknown well-formed subtags. Repeated variants or
+extension singletons, repeated or misplaced script subtags, and other malformed
+sequences are refused. No language is inferred. Author is one string, including
+any punctuation. Missing fields stay absent; an empty/whitespace title does not
+enable DisplayDocTitle.
 
 XMP is canonical output metadata. PDF 1.7 also has synchronized Info fields;
 PDF 2.0 uses XMP without compatibility Info. The catalog language is the authored
@@ -279,13 +287,13 @@ order, language, attributes, IDs and annotation relationships are retained per
 occurrence, pruned for selection and remapped for fitting. Malformed or
 unsupported declared hierarchies are refused, including corruption on omitted pages;
 use explicit discard or a reviewed source rather than silently losing semantics.
-A source with no effective structure tree is untagged: orphan ownership/claims are
-removed with a located warning, while page/Form streams remain unchanged. Numeric
-MCIDs alone supply no semantic hierarchy. A stale whole ParentTree scalar entry
-can be omitted only after validating all forward ownership and confirming no
-source object claims its key; a completely absent IDTree can be derived from
-unique validated forward IDs. These derived-index corrections warn. Conflicting
-indexes, live unused slots, duplicate IDs/owners and damaged trees remain errors.
+A source with no effective structure tree is untagged: orphan ownership/claims
+are removed with a located warning, while page/Form streams remain unchanged.
+Numeric MCIDs alone supply no semantic hierarchy. Limited derived-index
+corrections can warn without changing retained semantics; conflicting indexes,
+duplicate IDs/owners and damaged trees remain errors. See
+[structure ownership](PDF-POLICY.md#structure-ownership) for the admission and
+normalization rules.
 Generated meaningful text is tagged; backgrounds, padding and overlay numbers
 are artifacts. `structure: "discard"` explicitly removes structure claims and
 ownership before tag validation, with source-loss warnings. This permits unusable
@@ -293,14 +301,18 @@ tags without relaxing syntax, page/content, encoding, security, signature,
 encryption, form or publication safeguards. Inspection and build re-admission
 apply the same effective policy to the actual source bytes.
 
-A preserved table selection must retain every referenced header element. Otherwise check and build refuse it before staging; include the header pages, select the whole source, or explicitly use `structure: "discard"`.
+A preserved table selection must retain every referenced header element.
+Otherwise check and build refuse it before staging; include the header pages,
+select the whole source, or explicitly use `structure: "discard"`.
 
 Result `structure.coverage` is `none` when no semantic content is retained or
 structure is discarded, `partial` when retained content lacks semantic coverage,
 and `complete` when all retained meaningful content is structurally accounted
 for. Known coverage survives later failures; unresolved coverage is null.
-Sources with actual uncovered content are usable with partial-coverage warnings. Blank and artifact-only sources are neutral when combined with covered content. This does not invent
-semantics, certify PDF/UA, or replace human reading-order/accessibility review.
+Sources with actual uncovered content are usable with partial-coverage warnings.
+Blank and artifact-only sources are neutral when combined with covered content.
+This does not invent semantics, certify PDF/UA, or replace human
+reading-order/accessibility review.
 Source PDF/UA identifiers are never copied to the output.
 
 ## Generated pages and layering
@@ -397,7 +409,7 @@ caller's authoritative metadata.
 
 Generated pages and title dividers inherit the policy from `page_defaults`; an
 explicit `wrap: "word"` overrides it with ordinary wrapping. It does not change
-contents or footer layout. For example, a generated page can declare:
+contents or page-number overlay layout. For example, a generated page can declare:
 
 ```json
 {
@@ -433,12 +445,17 @@ width or a wider page. Explicit authored sizes are laid out before fitting.
 ## Fonts
 
 `default` is embedded Noto Sans Regular, with mark shaping and ToUnicode/ActualText
-extraction. A file choice may be static TrueType (`glyf`) or OpenType CFF1, including Adobe Source Serif 4 static OTF. Collections, variable fonts/CFF2, damaged fonts, restricted embedding and bitmap-only embedding permissions are refused. No system-font lookup is performed.
+extraction. A file choice may be static TrueType (`glyf`) or OpenType CFF1,
+including Adobe Source Serif 4 static OTF. Collections, variable fonts/CFF2,
+damaged fonts, restricted embedding and bitmap-only embedding permissions are
+refused. No system-font lookup is performed.
 
-Text drawn with the same font shares its embedded program. Unused glyph
+Text drawn with the same font shares its embedded program. Unused TrueType glyph
 outlines are removed when the font's permissions allow subsetting; otherwise the
-full program is retained. CFF1 is fully embedded as an identity-CID CFF program, with explicit name-keyed/CID-keyed conversion and no subset prefix. To discard an unusable inherited font when clearing
-text, also set `font` to `default`.
+original TrueType program is embedded in full. CFF1 fonts always retain every
+glyph and are converted to an identity-CID CFF program without an added subset
+prefix. To discard an unusable inherited font when clearing text, also set
+`font` to `default`.
 
 A font's PostScript name must meet the PDF name-safety policy: a literal hash
 followed by two hexadecimal digits is refused by `check` and `build` as

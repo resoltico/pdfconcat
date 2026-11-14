@@ -20,11 +20,13 @@ system, service or item of business data. Read the license for the actual condit
 
 ## Source for this build
 
-Qualified binary releases include `SOURCE.tar.gz` beside the executable archives at
-<https://github.com/resoltico/pdfconcat/releases>. It contains the tracked working source
-captured for the build, including local modifications, build/install scripts and vendored
-module source. Build from stable inputs, add new source files to Git's index before packaging,
-and retain the source archive with the binaries. Setup and packaging commands are in
+Release packaging produces `SOURCE.tar.gz` alongside the executable archives. Obtain the
+source archive for the same build as the binaries, from its qualified artifact set or
+[release assets](https://github.com/resoltico/pdfconcat/releases). The source-archive hook
+captures tracked working files, including edits and build/install scripts, plus the root
+module's dependencies selected by `go mod vendor`. It refuses untracked files; add intended new
+source files to Git's index and keep inputs stable before packaging. Retain the matching
+source archive with the binaries. Setup and packaging commands are in
 [CONTRIBUTING.md](CONTRIBUTING.md). The Go toolchain and unmodified general-purpose development
 tools are not included. Inspect the complete Corresponding Source requirements for your work.
 
@@ -36,7 +38,7 @@ credentials, customer records or database backups in source publications. The ar
 is a delivery aid, not a determination that every deployment meets every license obligation.
 
 Upstream: https://github.com/resoltico/pdfconcat.
-For the pending separate commercial route, see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+For the separate commercial licensing status, see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
 
 ## Contribution terms
 

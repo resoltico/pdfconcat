@@ -125,7 +125,7 @@ func TestTaggedSelectionRepetitionAndFittedClasses(t *testing.T) {
 	// A malformed parent tree on omitted page 2 is still refused before selection.
 	bad := taggedSelectionFixture()
 	bad.Objs[10] = bytes.Replace(bad.Objs[10], []byte("1 [13 0 R]"), []byte("1 [12 0 R]"), 1)
-	_, _, findings := Inspect(t.Context(), bad.Bytes(), []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
+	_, _, findings := Inspect(t.Context(), bad.Bytes(), "", []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 	status, _ := diag.Outcome(findings)
 	if status != "invalid" {
 		t.Fatalf("omitted-page structure corruption escaped: %+v", findings)
@@ -156,7 +156,7 @@ func TestPDF20NamespaceRolesKeepTheirScope(t *testing.T) {
 		t.Fatalf("namespace roles lost source scope: %s", raw)
 	}
 	source.Objs[8] = bytes.Replace(source.Objs[8], []byte("/Local 10 0 R"), []byte("/Local [/Local 9 0 R]"), 1)
-	_, _, findings := Inspect(t.Context(), source.Bytes(), nil)
+	_, _, findings := Inspect(t.Context(), source.Bytes(), "", nil)
 	if status, _ := diag.Outcome(findings); status != "invalid" {
 		t.Fatalf("namespace cycle escaped: %+v", findings)
 	}
@@ -166,7 +166,7 @@ func TestTaggedSourceDoesNotClaimCoverageForUnownedAnnotation(t *testing.T) {
 	source := pdffixture.Tagged("paragraph")
 	source.Objs[2] = bytes.Replace(source.Objs[2], []byte("/StructParents 0"), []byte("/StructParents 0 /Annots [9 0 R]"), 1)
 	source.Objs = append(source.Objs, []byte("<< /Type /Annot /Subtype /Link /Rect [10 10 20 20] /P 3 0 R /Dest [3 0 R /Fit] >>"))
-	facts, _, ds := Inspect(t.Context(), source.Bytes(), nil)
+	facts, _, ds := Inspect(t.Context(), source.Bytes(), "", nil)
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
@@ -181,7 +181,7 @@ func TestObjectReferenceMustBelongToItsDeclaredPage(t *testing.T) {
 	source.Objs[11] = bytes.Replace(source.Objs[11], []byte("/K 0"), []byte("/K [0 << /Type /OBJR /Pg 4 0 R /Obj 19 0 R >>]"), 1)
 	source.Objs[10] = bytes.Replace(source.Objs[10], []byte("2 [14 0 R]"), []byte("2 [14 0 R] 3 12 0 R"), 1)
 	source.Objs = append(source.Objs, []byte("<< /Type /Annot /Subtype /Link /Rect [10 10 20 20] /P 6 0 R /Dest [4 0 R /Fit] /StructParent 3 >>"))
-	_, _, ds := Inspect(t.Context(), source.Bytes(), nil)
+	_, _, ds := Inspect(t.Context(), source.Bytes(), "", nil)
 	if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || !strings.Contains(ds[0].Detail, "declared page") {
 		t.Fatalf("annotation page mismatch not detected: %+v", ds)
 	}

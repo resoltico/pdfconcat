@@ -31,7 +31,7 @@ func TestSourceViewerSettingsAreOmittedBeforeValidation(t *testing.T) {
 			doc.Objs = append(doc.Objs, []byte("<< /HideToolbar true >>"))
 			data := doc.Bytes()
 			original := bytes.Clone(data)
-			facts, _, ds := pdf.Inspect(t.Context(), data, nil)
+			facts, _, ds := pdf.Inspect(t.Context(), data, "", nil)
 			if status, _ := diag.Outcome(ds); status != "ok" || facts.Pages != 1 || len(ds) != 1 || ds[0].Code != diag.SourceViewerSettingsRemoved {
 				t.Fatalf("facts %+v diagnostics %+v", facts, ds)
 			}
@@ -45,7 +45,7 @@ func TestSourceViewerSettingsAreOmittedBeforeValidation(t *testing.T) {
 	}
 	// PDF null is equivalent to an absent dictionary entry; it requires no repair.
 	for _, key := range []string{"PageLayout", "PageMode", "ViewerPreferences"} {
-		_, _, ds := pdf.Inspect(t.Context(), insertEntry(pdffixture.Plain("null"), 1, "/"+key+" null").Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), insertEntry(pdffixture.Plain("null"), 1, "/"+key+" null").Bytes(), "", nil)
 		if status, _ := diag.Outcome(ds); status != "ok" {
 			t.Fatal(ds)
 		}
@@ -66,7 +66,7 @@ func TestViewerSettingsDoNotHideWholeSourceRefusals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			insertEntry(tc.doc, 1, "/PageLayout /PDLayoutDontCare")
-			_, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), nil)
+			_, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), "", nil)
 			if !codePresent(ds, tc.code) {
 				t.Fatalf("expected %s: %+v", tc.code, ds)
 			}
@@ -160,7 +160,7 @@ func TestEncryptedViewerSettingsRemainRefused(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, ds := pdf.Inspect(t.Context(), data, nil)
+		_, _, ds := pdf.Inspect(t.Context(), data, "", nil)
 		if len(ds) != 1 || ds[0].Code != diag.SourceEncrypted {
 			t.Fatal(fmt.Sprint(ds))
 		}

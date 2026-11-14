@@ -120,7 +120,7 @@ func TestPDFUAMachineFixture(t *testing.T) {
 	}
 	// Preserve two occurrences of this independently machine-checked source,
 	// including fitting. Output must omit the source conformance declaration.
-	facts, _, findings := Inspect(t.Context(), out.Bytes(), nil)
+	facts, _, findings := Inspect(t.Context(), out.Bytes(), "", nil)
 	if status, _ := diag.Outcome(findings); status != "ok" {
 		t.Fatal(findings)
 	}

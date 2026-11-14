@@ -277,10 +277,21 @@ and cross-toolchain/platform equality are outside this byte guarantee.
 `structure: "preserve"` is the default. Supported source structure, reading
 order, language, attributes, IDs and annotation relationships are retained per
 occurrence, pruned for selection and remapped for fitting. Malformed or
-unsupported structures are refused, including corruption on omitted pages.
+unsupported declared hierarchies are refused, including corruption on omitted pages;
+use explicit discard or a reviewed source rather than silently losing semantics.
+A source with no effective structure tree is untagged: orphan ownership/claims are
+removed with a located warning, while page/Form streams remain unchanged. Numeric
+MCIDs alone supply no semantic hierarchy. A stale whole ParentTree scalar entry
+can be omitted only after validating all forward ownership and confirming no
+source object claims its key; a completely absent IDTree can be derived from
+unique validated forward IDs. These derived-index corrections warn. Conflicting
+indexes, live unused slots, duplicate IDs/owners and damaged trees remain errors.
 Generated meaningful text is tagged; backgrounds, padding and overlay numbers
 are artifacts. `structure: "discard"` explicitly removes structure claims and
-ownership, with source-loss warnings.
+ownership before tag validation, with source-loss warnings. This permits unusable
+tags without relaxing syntax, page/content, encoding, security, signature,
+encryption, form or publication safeguards. Inspection and build re-admission
+apply the same effective policy to the actual source bytes.
 
 A preserved table selection must retain every referenced header element. Otherwise check and build refuse it before staging; include the header pages, select the whole source, or explicitly use `structure: "discard"`.
 

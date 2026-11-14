@@ -436,7 +436,9 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 | `destinations_renamed` | warning | — | colliding named destinations were renamed for later occurrences |
 | `destinations_dropped` | warning | — | named destinations whose target is not a page of the same document were omitted |
 | `source_xfa_removed` | warning | — | XFA removed; the static AcroForm remains |
-| `source_structure_removed` | warning | — | tagged-PDF structure removed by explicit discard policy |
+| `source_structure_orphaned` | warning | — | tree-less source semantic remnants ignored and ownership removed |
+| `source_structure_index_normalized` | warning | — | derived structure indexes normalized without changing retained semantics |
+| `source_structure_removed` | warning | — | source structure claims or ownership discarded by explicit policy |
 | `source_page_labels_removed` | warning | — | page labels removed |
 | `source_output_intents_removed` | warning | — | output intents removed; output makes no PDF/A or PDF/X claim |
 | `source_document_actions_removed` | warning | — | `/OpenAction`, catalog `/AA` or document JavaScript removed |

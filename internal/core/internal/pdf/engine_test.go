@@ -86,7 +86,7 @@ func TestInspectionPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, ds := pdf.Inspect(t.Context(), tc.doc().Bytes(), nil)
+			_, _, ds := pdf.Inspect(t.Context(), tc.doc().Bytes(), "", nil)
 			if !codePresent(ds, tc.code) {
 				t.Fatalf("want %s, got %+v", tc.code, ds)
 			}
@@ -99,7 +99,7 @@ func TestInspectionPolicy(t *testing.T) {
 		"absolute URI":          pdffixture.URILink("uri", "https://example.invalid/x", "https://example.invalid/base/", false),
 	} {
 		t.Run(name, func(t *testing.T) {
-			facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
+			facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
 			status, _ := diag.Outcome(ds)
 			if status != "ok" || facts.Pages != 1 || codePresent(ds, diag.SourceURIBaseRemoved) {
 				t.Fatalf("facts %+v diagnostics %+v", facts, ds)
@@ -110,7 +110,7 @@ func TestInspectionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ds := pdf.Inspect(t.Context(), hostile, nil); !codePresent(ds, diag.SourceInvalid) {
+	if _, _, ds := pdf.Inspect(t.Context(), hostile, "", nil); !codePresent(ds, diag.SourceInvalid) {
 		t.Fatalf("strict parsing did not refuse the hostile input: %+v", ds)
 	}
 }
@@ -129,7 +129,7 @@ func TestEncryptedSources(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, ds := pdf.Inspect(t.Context(), data, nil); !codePresent(ds, diag.SourceEncrypted) {
+		if _, _, ds := pdf.Inspect(t.Context(), data, "", nil); !codePresent(ds, diag.SourceEncrypted) {
 			t.Fatalf("password %q: %+v", password, ds)
 		}
 	}
@@ -147,7 +147,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 		if err := d.WriteFile(path); err != nil {
 			t.Fatal(err)
 		}
-		f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if status, _ := diag.Outcome(ds); status != "ok" {
 			t.Fatalf("inspect %d: %+v", i, ds)
 		}
@@ -324,7 +324,7 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if err := doc.WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
+	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -397,7 +397,7 @@ func TestNarrowFormDefaultsDigest(t *testing.T) {
 func TestMalformedWidgetRectangleIsRefused(t *testing.T) {
 	d := defaultForm("bad", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0)
 	d.Objs[5] = bytes.ReplaceAll(d.Objs[5], []byte("[50 50 250 90]"), []byte("[50 50 250]"))
-	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 	if !codePresent(ds, diag.SourceInvalid) {
 		t.Fatalf("malformed widget was not refused: %+v", ds)
 	}
@@ -473,7 +473,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 	if err := doc.WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
+	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -804,7 +804,7 @@ func FuzzInspect(f *testing.F) {
 		if len(data) > 1<<20 {
 			t.Skip("small parser seeds only")
 		}
-		_, _, _ = pdf.Inspect(t.Context(), data, nil)
+		_, _, _ = pdf.Inspect(t.Context(), data, "", nil)
 	})
 }
 
@@ -813,7 +813,7 @@ func TestResourceDictionarySharedWithAnnotationIsRefused(t *testing.T) {
 	d.Objs = append(d.Objs, []byte("<< /Type /Annot /Subtype /Link /Font << /F1 5 0 R >> /Rect [10 10 90 90] /Border [0 0 0] /A << /S /URI /URI (https://example.invalid/) >> >>"))
 	d.Objs[2] = bytes.ReplaceAll(d.Objs[2], []byte("/Resources << /Font << /F1 5 0 R >> >>"), []byte("/Resources 6 0 R"))
 	insertEntry(d, 3, "/Annots [6 0 R]")
-	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 	if !codePresent(ds, diag.SourceUnsupported) {
 		t.Fatalf("shared dictionary role was not refused: %+v", ds)
 	}
@@ -839,7 +839,7 @@ func TestHexFormValuesAndCommentSeparatedReferences(t *testing.T) {
 	for _, ref := range []string{"4%first\n0 R", "4 0%second\nR"} {
 		d := pdffixture.Plain("comment-reference")
 		d.Objs[2] = bytes.ReplaceAll(d.Objs[2], []byte("/Contents 4 0 R"), []byte("/Contents "+ref))
-		f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if status, _ := diag.Outcome(ds); status != "ok" {
 			if !codePresent(ds, diag.SourceInvalid) {
 				t.Fatalf("valid comment reference produced unexpected refusal: %+v", ds)
@@ -935,7 +935,7 @@ func TestUnsignedSignatureNullValuesAndIndirectRenderingFlag(t *testing.T) {
 			value = fmt.Sprintf("%d 0 R", len(d.Objs))
 		}
 		insertEntry(d, 6, "/V "+value)
-		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if status, _ := diag.Outcome(ds); status != "ok" {
 			t.Errorf("unsigned null signature indirect=%v: %+v", indirect, ds)
 		}
@@ -943,7 +943,7 @@ func TestUnsignedSignatureNullValuesAndIndirectRenderingFlag(t *testing.T) {
 	d := pdffixture.Plain("indirect-needs-rendering")
 	d.Objs = append(d.Objs, []byte("true"))
 	insertEntry(d, 1, "/NeedsRendering 6 0 R")
-	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+	_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 	if !codePresent(ds, diag.SourceDynamicForm) {
 		t.Errorf("indirect NeedsRendering true was not refused: %+v", ds)
 	}
@@ -954,7 +954,7 @@ func TestIndirectPolicyAndActionValues(t *testing.T) {
 		d := pdffixture.SignatureValue("indirect-signature")
 		d.Objs[5] = bytes.ReplaceAll(bytes.ReplaceAll(d.Objs[5], []byte("/FT /Sig"), []byte("/FT 7 0 R")), []byte("/Type /Sig"), nil)
 		d.Objs = append(d.Objs, []byte("/Sig"))
-		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if !codePresent(ds, diag.SourceSigned) {
 			t.Fatalf("indirect field type: %+v", ds)
 		}
@@ -963,7 +963,7 @@ func TestIndirectPolicyAndActionValues(t *testing.T) {
 		d := defaultForm("widget", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0)
 		d.Objs[5] = bytes.ReplaceAll(d.Objs[5], []byte("/Subtype /Widget"), []byte("/Subtype 7 0 R"))
 		d.Objs = append(d.Objs, []byte("/Widget"))
-		f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if status, _ := diag.Outcome(ds); status != "ok" || !f.HasWidgets {
 			t.Fatalf("indirect widget: %+v %+v", f, ds)
 		}
@@ -972,7 +972,7 @@ func TestIndirectPolicyAndActionValues(t *testing.T) {
 		d := defaultForm("appearance", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0)
 		d.Objs[0] = bytes.ReplaceAll(d.Objs[0], []byte("/NeedAppearances true"), []byte("/NeedAppearances 7 0 R"))
 		d.Objs = append(d.Objs, []byte("true"))
-		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if !codePresent(ds, diag.FormAppearanceRegenerationRequested) {
 			t.Fatalf("indirect appearance flag: %+v", ds)
 		}
@@ -981,7 +981,7 @@ func TestIndirectPolicyAndActionValues(t *testing.T) {
 		d := pdffixture.URILink("indirect-uri", "relative/path", "https://example.invalid/", false)
 		d.Objs[5] = bytes.ReplaceAll(bytes.ReplaceAll(d.Objs[5], []byte("/S /URI"), []byte("/S 7 0 R")), []byte("/URI (relative/path)"), []byte("/URI 8 0 R"))
 		d.Objs = append(d.Objs, []byte("/URI"), []byte("(relative/path)"))
-		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if !codePresent(ds, diag.SourceURIBaseRemoved) {
 			t.Fatalf("indirect URI: %+v", ds)
 		}
@@ -1018,7 +1018,7 @@ func TestSignatureFieldTypeInheritsThroughIndirectNull(t *testing.T) {
 		d.Objs[5] = bytes.ReplaceAll(bytes.ReplaceAll(d.Objs[5], []byte("/FT /Sig"), []byte("/FT 8 0 R")), []byte("/Type /Sig"), nil)
 		insertEntry(d, 6, "/Parent 7 0 R")
 		d.Objs = append(d.Objs, []byte("<< /FT /Sig /T (group) /Kids [6 0 R] >>"), []byte("null"))
-		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if signed {
 			if !codePresent(ds, diag.SourceSigned) {
 				t.Fatalf("inherited signature type missed: %+v", ds)
@@ -1065,7 +1065,7 @@ func TestConflictingDestinationNamespacesAreRefused(t *testing.T) {
 			target = 3
 		}
 		insertEntry(d, 1, fmt.Sprintf("/Dests << /chap1 [%d 0 R /Fit] >>", target))
-		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), nil)
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
 		if same {
 			if status, _ := diag.Outcome(ds); status != "ok" {
 				t.Fatalf("equivalent namespaces refused: %+v", ds)

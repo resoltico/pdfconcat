@@ -130,7 +130,7 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 		if err = source.WriteFile(path); err != nil {
 			t.Fatal(err)
 		}
-		facts, _, ds := pdf.Inspect(t.Context(), source.Bytes(), nil)
+		facts, _, ds := pdf.Inspect(t.Context(), source.Bytes(), "", nil)
 		if status, _ := diag.Outcome(ds); status != "ok" {
 			t.Fatal(ds)
 		}

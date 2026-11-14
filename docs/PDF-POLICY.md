@@ -379,6 +379,30 @@ unchanged.
 
 ### Structure ownership
 
+Original page/content references and all-live-object signature evidence are checked
+before structure policy is applied. Explicit discard detaches structure/MarkInfo,
+ownership keys and cached tagging state before backend semantic validation.
+Only tag-exclusive objects unreachable from retained catalog/Info/page/resource/
+Form/annotation graphs are freed, using the backend's free-list API. Shared
+artwork, text streams, navigation and form protections remain intact.
+
+With no effective StructTreeRoot, orphan MarkInfo/StructParent(s) and unbound
+MCIDs do not supply preserved semantics. Located warnings explain their removal
+or non-use. Untagged meaningful paint and annotations remain uncovered; blanks
+and valid artifact-only content remain neutral. Form MCIDs always belong to the
+Form's namespace, never the invoking page's; an enclosing semantic scope can
+still cover the Form's artwork as a whole. This remains true when an untagged
+source is combined with generated/tagged content and the output has a root.
+
+A preserved declared hierarchy is validated before selection. Whole stale scalar
+ParentTree keys may be removed only when no source object claims them and their
+targets are valid retained elements, after all live forward/reverse ownership,
+IDs, references and header bindings pass. An absent IDTree may be rebuilt from
+unique validated forward IDs. Both corrections carry typed object/path warnings.
+Live-key unused slots, duplicate claims/IDs, dangling/cyclic/conflicting indexes
+and missing owners are not repaired. Reopened output uses strict integrity
+checks without this source normalization; indexes are rebuilt for the output.
+
 The adapter validates source parent/child links, ParentTree ownership, IDs,
 role-map cycles and marked-content references before selection. Content-array
 streams keep separate token boundaries and shared marked-content state. Repeated

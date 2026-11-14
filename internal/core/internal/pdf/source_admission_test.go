@@ -31,7 +31,7 @@ func TestSourceAdmissionRefusesMissingAndWrongGenerationContent(t *testing.T) {
 				t.Fatal("fixture no longer contains the intended reference")
 			}
 			doc.Objs[tc.object-1] = bytes.Replace(doc.Objs[tc.object-1], []byte(tc.original), []byte(tc.replacement), 1)
-			_, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
+			_, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
 			if !codePresent(ds, diag.SourceDamaged) {
 				t.Fatalf("content/page damage was not refused: %+v", ds)
 			}
@@ -41,7 +41,7 @@ func TestSourceAdmissionRefusesMissingAndWrongGenerationContent(t *testing.T) {
 
 func TestSourceAdmissionRetainsActiveContentAndReportsItsNotice(t *testing.T) {
 	doc := insertEntry(pdffixture.Plain("active"), 3, "/AA << /O << /S /JavaScript /JS (void 0;) >> >>")
-	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
+	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
 	if status, _ := diag.Outcome(ds); status != "ok" || facts.Pages != 1 || !codePresent(ds, diag.SourceValidationNotice) || codePresent(ds, diag.SourceDamaged) {
 		t.Fatalf("retained active content misclassified: %+v", ds)
 	}
@@ -72,7 +72,7 @@ func TestWholeSourceRefusalsExplainSeparateOriginalDelivery(t *testing.T) {
 		{"dynamic", insertEntry(pdffixture.Plain("dynamic"), 1, "/NeedsRendering true"), diag.SourceDynamicForm, "dynamic rendering"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), nil)
+			_, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), "", nil)
 			if len(ds) != 1 || ds[0].Code != tc.code || !strings.Contains(ds[0].Message, tc.reason) || !strings.Contains(ds[0].Message, "composition") || !strings.Contains(ds[0].Message, "original separately") {
 				t.Fatalf("refusal lost reason or safe next step: %+v", ds)
 			}

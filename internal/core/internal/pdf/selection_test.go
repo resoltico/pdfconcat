@@ -25,7 +25,7 @@ import (
 
 func inspectSelection(t *testing.T, doc *pdffixture.Doc, requests []SelectionRequest) (SourceFacts, map[string]OccurrenceFacts) {
 	t.Helper()
-	source, slots, ds := Inspect(t.Context(), doc.Bytes(), requests)
+	source, slots, ds := Inspect(t.Context(), doc.Bytes(), "", requests)
 	occurrences := map[string]OccurrenceFacts{}
 	if len(slots) != len(requests) {
 		t.Fatalf("inspection returned %d slots for %d requests", len(slots), len(requests))
@@ -140,7 +140,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 		doc  *pdffixture.Doc
 		code diag.Code
 	}{{pdffixture.Form("form"), diag.SourceSelectionFormUnsupported}, {signed, diag.SourceSigned}} {
-		facts, _, ds := Inspect(t.Context(), tc.doc.Bytes(), []SelectionRequest{{Item: "part", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
+		facts, _, ds := Inspect(t.Context(), tc.doc.Bytes(), "", []SelectionRequest{{Item: "part", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 		found := false
 		for _, d := range ds {
 			found = found || d.Code == tc.code
@@ -214,7 +214,7 @@ func TestNativeSourceOutlinesRemainStyledAndNested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, _, err := readSource(t.Context(), data)
+	s, _, err := readSource(t.Context(), data, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestSelectedOutlinesKeepNativeClosedContainerAndActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, _, err := readSource(t.Context(), data)
+	s, _, err := readSource(t.Context(), data, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestGroupedFooterMeasurementsUseOnlyRequestedOriginalPages(t *testing.T) {
 	if ordinary.PageSizes != nil {
 		t.Fatal("ordinary inspection allocated footer geometry")
 	}
-	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureNumbers: true}})
+	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureNumbers: true}})
 	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || invalid.PageSizes != nil || (len(occurrences) != 1 || occurrences[0] != nil) {
 		t.Fatalf("invalid selection invented geometry: %+v %+v %+v", invalid.PageSizes, occurrences, ds)
 	}
@@ -592,7 +592,7 @@ func TestRepeatedWholeFormRetainsFieldOnlyActions(t *testing.T) {
 	if !reflect.DeepEqual(got, []int{2, 4}) {
 		t.Fatalf("field actions %v want [2 4]", got)
 	}
-	_, _, refused := Inspect(t.Context(), d.Bytes(), []SelectionRequest{{Item: "partial", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
+	_, _, refused := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "partial", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 	found := false
 	for _, d := range refused {
 		if d.Code == diag.SourceSelectionFormUnsupported {

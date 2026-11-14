@@ -58,7 +58,7 @@ func TestPageGeometryInheritanceDoesNotLeakAcrossSiblings(t *testing.T) {
 func TestFitChecksGeometryBeforeMutatingAnyPage(t *testing.T) {
 	for _, unit := range []float64{0, -1, 1e308} {
 		t.Run(number(unit), func(t *testing.T) {
-			s, _, err := readSource(t.Context(), pdffixture.Pages("safe", 3).Bytes())
+			s, _, err := readSource(t.Context(), pdffixture.Pages("safe", 3).Bytes(), "")
 			if err != nil {
 				t.Fatal(err)
 			}

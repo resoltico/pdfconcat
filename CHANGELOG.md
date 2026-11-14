@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Structure discard precedes tag validation in check/build, while retaining page, content, encoding, signature, encryption, form and publication safeguards.
+- Tree-less sources with orphan ownership/MCIDs compose as untagged with located warnings; their streams and meaningful uncovered-content status are retained.
+- Proven unclaimed ParentTree entries and absent IDTree indexes are corrected from validated forward ownership with warnings; conflicting declared hierarchies remain refused.
+- Structure diagnostics identify source objects/paths and source-page coverage witnesses, including after page selection.
+
 - Contents inherits root `page_defaults.text.font` instead of fixed Noto Sans; custom-font plans may reflow or fail glyph validation. Number overlays retain Noto Sans.
 - Emitted plan schemas describe static TrueType and OpenType CFF1 support and exclude variable fonts, CFF2 and collections.
 

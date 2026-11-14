@@ -52,7 +52,7 @@ func TestAssemblyReportsActualWriterFailures(t *testing.T) {
 	if err := doc.WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), nil)
+	facts, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}

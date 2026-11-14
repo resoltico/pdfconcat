@@ -152,27 +152,23 @@ whole source path once and retains its full hash and byte count, original page
 count and version, safety information and conservative font-prefix facts. Each
 occurrence gets an isolated temporary view of its selected pages; only the
 selected geometry, navigation and appearance facts drive composition compatibility.
-Optional footer geometry is measured once for the union of selected original
-pages, rather than reparsing each occurrence. Building independently rereads and
-digest-checks every occurrence.
+Optional page-number overlay geometry is measured once for the union of selected
+original pages, rather than reparsing each occurrence. Building independently
+rereads and digest-checks every occurrence.
 
 ### Assembly details
 
-Projection materializes effective inheritable resources/boxes/rotation and
-places selected original page references in a balanced tree, refreshing page
-caches. Selected objects stay within their occurrence's native context.
-Semantic links/actions/named destinations and native outline dictionaries are
-pruned within the occurrence. Omitted parent outline targets may retain a
-nonclickable container for surviving descendants. Native styles/actions and
-open/closed state survive grafting beneath the nearest authored section; the
-composed hierarchy is checked against the backend's actual outline limit.
+Selected pages retain their effective inherited resources, page boxes and
+rotation. Links, actions, named destinations and outlines are pruned within each
+occurrence. An omitted parent outline target may retain a nonclickable container
+for surviving descendants. Outline styles, actions and open/closed state survive
+grafting beneath the nearest authored section; the composed hierarchy must fit
+the supported outline limit.
 
-Generated pages use a complete native pdfcpu context and the same font/content
-builder for ordinary text, multi-block contents and footers. Generated contexts
-merge directly. Pruning tests serialize the same builder with original and
-pruned font programs. After catalog cleanup, structural reachability
-frees orphan native objects so stale live trailing entries cannot leave an
-incorrect serialized xref Size; this is separate from semantic navigation policy.
+Generated pages and page-number overlays share font resources. Repeated
+generated pages may share content and resources while retaining separate
+semantic identities. See [architecture](ARCHITECTURE.md) for construction and
+resource ownership.
 
 ## Destination byte identity
 
@@ -297,14 +293,18 @@ fitting; inherited canvases use the fit target.
 
 ### Catalog and metadata
 
-Source document identity is replaced by authored XMP, synchronized Info for PDF 1.7, and no Info for PDF 2.0. Dates are absent unless explicitly supplied; [PLAN](PLAN.md#document-identity-time-and-structure) defines the contract. Metadata
+Source document identity is replaced by authored XMP, synchronized Info for PDF
+1.7, and no Info for PDF 2.0. Dates are absent unless explicitly supplied;
+[PLAN](PLAN.md#document-identity-time-and-structure) defines the contract. Metadata
 attached to retained pages or other retained objects may remain. These operations
 do not sanitize the document; see [SECURITY](../SECURITY.md).
 
-The output catalog permits Type, Pages, AcroForm, Dests, Outlines, Version, authored Metadata/Lang/ViewerPreferences/PageLabels, preserved StructTreeRoot/MarkInfo, and Names containing only Dests. XFA is removed. Cleanup covers catalog entries and
-internal caches so writing cannot recreate removed name trees. Effective version
-fields are synchronized before validation and writing: output is at least PDF
-1.7, or PDF 2.0 if any source is 2.0.
+The output catalog permits Type, Pages, AcroForm, Dests, Outlines, Version,
+authored Metadata/Lang/ViewerPreferences/PageLabels, preserved
+StructTreeRoot/MarkInfo, and Names containing only Dests. XFA is removed. Cleanup
+covers catalog entries and internal caches so writing cannot recreate removed
+name trees. Effective version fields are synchronized before validation and
+writing: output is at least PDF 1.7, or PDF 2.0 if any source is 2.0.
 
 ### Output verification
 
@@ -312,8 +312,9 @@ The staged, serialized PDF is reopened with strict validation and without source
 normalization. Its catalog and name-tree policy is checked before semantic
 validation can change the document. Encryption, forbidden catalog entries, XFA,
 broken page trees, reported repairs and changes to page/content identity are
-rejected. Page count
-must match the resolved packet before publication. Reopened metadata, timestamp, viewer preference, numbering spans, structure policy and coverage must also match resolved expectations. This check is independent of
+rejected. Page count must match the resolved packet before publication. Reopened
+metadata, timestamp, viewer preference, numbering spans, structure policy and
+coverage must also match resolved expectations. This check is independent of
 source admission policy, but uses the same PDF engine; the test suite also uses
 qpdf and Poppler for independent structural and rendering evidence. Strict
 validation is not a complete PDF conformance or arbitrary-input fidelity proof.
@@ -326,8 +327,10 @@ and ActualText preserve text extraction for glyph aliases and clusters. See
 
 ### Font requirements
 
-PDFConcat refuses fonts with restricted or bitmap-only embedding flags. Fonts
-with a no-subsetting flag retain all glyphs. TrueType retains its original program; CFF1 is converted with all glyphs to explicit identity CIDs using the maintained go-sfnt CFF implementation. Empty text still
+PDFConcat refuses fonts with restricted or bitmap-only embedding flags. TrueType
+fonts are pruned when their permissions allow subsetting; a no-subsetting flag
+requires embedding the original program in full. CFF1 fonts always retain every
+glyph and are converted to explicit identity CIDs using go-sfnt. Empty text still
 validates its selected font without embedding an unused font.
 
 Fonts selected for generated text must provide the metadata consumed by the
@@ -343,7 +346,7 @@ enforced separately. The signed 16.16 `post` angle and nonzero fixed-pitch value
 are independent of style. Italic style uses `fsSelection` bit 0 or, for `OS/2`
 version 4 or later, oblique bit 9; names, angle and `head` flags are not style
 fallbacks. Original traits feed shared native font descriptors for full/pruned
-programs and body/contents/footer resources.
+programs and body/contents/page-number resources.
 
 ### Glyph pruning
 
@@ -373,9 +376,9 @@ imported-tag collisions; it does not repair naming defects between sources.
 
 Each pruned font uses one `AAAAAA+PostScriptName`-style name throughout the packet;
 its Type0 wrapper, CIDFont and descriptor agree. Full programs receive no added
-prefix and retain their original sanitized PostScript name. Full TrueType programs retain exact bytes,
-including names that already resemble subset names. TrueType name tables remain
-unchanged.
+prefix and retain their original sanitized PostScript name. Full TrueType
+programs retain exact bytes, including names that already resemble subset names.
+TrueType name tables remain unchanged.
 
 ### Structure ownership
 
@@ -383,8 +386,8 @@ Original page/content references and all-live-object signature evidence are chec
 before structure policy is applied. Explicit discard detaches structure/MarkInfo,
 ownership keys and cached tagging state before backend semantic validation.
 Only tag-exclusive objects unreachable from retained catalog/Info/page/resource/
-Form/annotation graphs are freed, using the backend's free-list API. Shared
-artwork, text streams, navigation and form protections remain intact.
+Form/annotation graphs are removed. Shared artwork, text streams, navigation and
+form protections remain intact.
 
 With no effective StructTreeRoot, orphan MarkInfo/StructParent(s) and unbound
 MCIDs do not supply preserved semantics. Located warnings explain their removal
@@ -416,25 +419,39 @@ or repaired by importing omitted content. Selection prunes omitted semantic cont
 
 Fitting moves page-owned MCIDs into the new Form namespace, preserves nested
 Form namespaces and annotation OBJR ownership, and transforms scoped BBox
-attributes, including class attributes. A bounding box without a resolvable page scope is refused for fitting; use original sizes or a reviewed source with explicit page association. Final indexes are rebuilt from retained
-semantic ownership. The writer emits semantic intent supplied by compose;
-meaningful contents links receive Link/OBJR associations; each title/label pair is emitted contiguously in physical and logical reading order. Source languages belong
-on imported subtree boundaries. No PDF/UA identifier is inherited.
+attributes, including class attributes. A bounding box without a resolvable page
+scope is refused for fitting; use original sizes or a reviewed source with
+explicit page association. Final indexes are rebuilt from retained semantic
+ownership. Generated meaningful text is tagged, and contents links receive
+Link/OBJR associations. Each title/label pair is emitted contiguously in physical
+and logical reading order. Source languages belong on imported subtree
+boundaries. No PDF/UA identifier is inherited.
 
 Inline-image payloads remain opaque. Structure inspection accepts a unique
 lexically valid EI boundary, with bounded lookahead, and refuses ambiguous
-boundaries instead of guessing. PDF/UA machine fixtures and negative controls
-complement the independent PDF checks; human accessibility review remains
-separate. See [PLAN](PLAN.md#document-identity-time-and-structure) for coverage.
+boundaries instead of guessing. Structure names, arrays and mapping targets are
+resolved before occurrence remapping; reopened output must retain their
+role/class bindings. Coverage distinguishes uncovered content from absent
+semantic content, so blank and artifact-only inputs do not dilute a covered
+packet or raise loss warnings. See
+[PLAN](PLAN.md#document-identity-time-and-structure) for coverage.
+
+Machine checks, text extraction and a successful build do not certify
+accessibility. Review rendered pages, reading order, meaningful text and link
+descriptions in the intended accessibility consumer. Structure-text extraction
+can omit content in nested ActualText spans; use several observations rather
+than treating one extractor as a complete accessibility oracle. Contributor
+[machine PDF checks](../CONTRIBUTING.md#what-we-test-and-what-we-do-not) complement
+this review; they do not establish spoken output, pronunciation or PDF/UA
+certification.
 
 ### Deterministic serialization
 
-PDFConcat serializes the validated public backend object graph with canonical
-reference traversal, sorted dictionary keys and ordinary cross-reference tables.
-It retains encoded streams, emits only reachable objects, and omits optional
-unencrypted trailer IDs. This avoids pdfcpu writer date/ID mutations without a
-fork, module-cache changes, PDF text patching or a production subprocess. PDF 2.0
-standard-font metrics use the backend's public EnsureCoreFontMetrics API.
+The [plan contract](PLAN.md#document-identity-time-and-structure) defines which
+inputs produce identical PDF bytes. Output contains only reachable objects and
+omits optional unencrypted trailer IDs. Retained encoded streams are preserved;
+fitting and overlays create their own content. See
+[architecture](ARCHITECTURE.md) for object construction and serialization.
 
 ## Parser and resource limits
 
@@ -452,9 +469,9 @@ is not exhaustively validated: a malformed source using an undefined font can be
 accepted and render differently across readers or fitting. Supply a reviewed
 valid source; composition does not reconstruct missing font bindings.
 
-Finite PDF real numbers are serialized by upstream to at most twelve fractional
-digits; bitwise numeric round trips are not promised. Upstream owns content-stream
-parsing and fitting may rewrite those streams. Document-level metadata is
+Finite PDF real numbers are serialized to at most twelve fractional digits;
+bitwise numeric round trips are not promised. PDFConcat inspects content
+operators and may rebuild page streams for fitting. Document-level metadata is
 replaced or removed as described under [catalog and metadata](#catalog-and-metadata);
 this does not cover all metadata attached to retained pages or other objects.
 
@@ -472,19 +489,3 @@ cover memory exhaustion or fatal stack overflow. Use operating-system resource
 limits for unusually large or untrusted inputs. [SECURITY](../SECURITY.md) defines
 the trusted-input boundary; [CONTRIBUTING](../CONTRIBUTING.md#scale) describes
 optional measurements.
-
-
-### Accessibility consumer checks
-
-Structure names, arrays and mapping targets are resolved before occurrence
-remapping; reopened-output checks require surviving role/class bindings.
-Coverage tracks uncovered content separately from absent semantic content, so
-blank/artifact-only inputs neither dilute covered packets nor raise loss warnings.
-
-Poppler 26.11 `pdfinfo -struct-text` can stop at a nested ActualText span: its
-MarkedContentOutputDev ignores the inner begin without MCID but pops the outer
-sequence at the inner end. A hand-authored source reproduces this independently
-of PDFConcat; ordinary pdftotext extraction remains complete. That consumer path
-is not a complete extraction/accessibility oracle. Native Preview checks cover
-visible text, structural navigation and accessible link descriptions, not spoken
-audio/pronunciation or automatic PDF/UA certification.

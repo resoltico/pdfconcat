@@ -19,8 +19,8 @@ download that release's archive and `checksums.txt` over HTTPS, verify one exact
 SHA-256 entry, and test-run the program as the current user before installation.
 Redirects must stay HTTPS. They need no administrator access. They write the
 program, a sibling private ownership directory and, unless disabled, exact owned
-shell startup or user PATH entries. Published v0.9.0 predates the receipt protocol;
-use the matching release's documentation when inspecting an older installer.
+shell startup or user PATH entries. Use the installer and documentation from the
+same build as the archive.
 
 A receipt records managed file hashes and PATH ownership. Install/update/removal
 refuses unowned or changed managed files; no version-string or marker-based
@@ -36,7 +36,8 @@ a damaged download, not a compromised release or repository. Release archives,
 from the release workflow; `gh attestation verify` checks them. Per-executable
 CycloneDX SBOMs list the linked modules for dependency and license audits.
 
-Tag builds stage the final signed archives, installers, SBOMs and checksums once.
+Tag builds stage the final signed binary archives, source archive, installers,
+SBOMs and checksums once.
 All seven native installer jobs qualify that set before the publisher can run.
 The publisher checks the same downloaded bytes and manifest, attests them, then
 creates the release without rebuilding or re-signing. Branch CI uses snapshot
@@ -45,10 +46,10 @@ versions; it does not publish. GoReleaser's direct publisher is disabled.
 macOS executables have an [ad hoc signature](https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc),
 which does not identify the publisher. PDFConcat has no Apple Developer ID
 signature or notarization, and Windows executables are not code-signed. The
-installers do not disable Gatekeeper, SmartScreen or other protections. Manual
-browser downloads carry the operating system's internet mark; the installation
-guide describes clearing it only after the checksum has been checked. Managed
-devices and features such as Windows Smart App Control may still refuse
+installers do not disable Gatekeeper, SmartScreen or other protections. Browser
+downloads may carry the operating system's internet mark. A matching checksum
+does not override device policy; inspect the installer's candidate diagnostic.
+Managed devices and features such as Windows Smart App Control may still refuse
 execution.
 
 ## Input and PDF behaviour
@@ -68,6 +69,9 @@ unsigned signature fields remain supported. Signatures are not authenticated.
 Viewer directives are removed from imported catalogs after original-file checks;
 this does not sanitize retained content. Serialized output is checked separately
 with strict validation and without source normalization before publication.
+The [structure policy](docs/PDF-POLICY.md#structure-ownership) distinguishes supported
+preserved semantics, untagged content and explicit structure discard. Discard does
+not bypass page, content, encoding, signature, encryption or form safeguards.
 Source parsing is strict and semantic compatibility validation remains relaxed.
 Every original page-content stream must decode before selection, including
 omitted pages. Truncated/corrupt Flate programs are refused using independent
@@ -83,7 +87,7 @@ admission policy. Lower-level reader recovery can still occur; see the
 
 Page selection is visible-page composition, not redaction. It does not promise
 removal of every private object or byte associated with omitted pages. Every
-original source remains subject to whole-file safety checks and hashing. Footer
+original source remains subject to whole-file safety checks and hashing. Page
 numbers are overlays and may cover existing content.
 
 ## Filesystem and saved outputs

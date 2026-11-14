@@ -39,20 +39,37 @@ go test -count=1 ./...
 ```
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
-`pdffonts`, `pdftohtml`). Tagged-output machine tests also use veraPDF at the version in `internal/oracle/verapdf.version`; Linux CI verifies its installer checksum and installs only its CLI using `.github/scripts/verapdf-install.xml`. Java 17 or later is required for that test tool, not for PDFConcat. The minimum qpdf version is declared in
-[`internal/oracle/qpdf.version`](internal/oracle/qpdf.version);
-it includes corrected linearization checking required by the frozen corpus.
-Install `qpdf poppler` with Homebrew. On Linux, install `poppler-utils` with apt
-and obtain a supported qpdf from the [official releases](https://github.com/qpdf/qpdf/releases)
-if the distribution package is older. CI downloads that declared version's official
-Linux binary with a pinned checksum in `.github/workflows/ci.yml`; updating the pin
-requires updating its checksum too. These are test tools, not runtime dependencies.
-Missing or unsupported tools skip their tests locally; set
-`PDFCONCAT_REQUIRE_ORACLE=1` to require them. Linux CI does that.
+`pdffonts`, `pdftohtml`). The minimum qpdf version for the corpus checks is declared
+in [`internal/oracle/qpdf.version`](internal/oracle/qpdf.version). Install
+`qpdf poppler` with Homebrew. On Linux, install `poppler-utils` with apt and obtain
+a supported qpdf from the [official releases](https://github.com/qpdf/qpdf/releases)
+if the distribution package is older.
+
+Tagged-output machine tests also use veraPDF at the version declared in
+[`internal/oracle/verapdf.version`](internal/oracle/verapdf.version), with Java 17
+or later. [Linux CI](.github/workflows/ci.yml) downloads qpdf and veraPDF with
+pinned checksums and installs the veraPDF CLI using
+[its unattended configuration](.github/scripts/verapdf-install.xml). Updating a
+downloaded version requires updating its checksum too. These are test tools, not
+PDFConcat runtime dependencies.
+
+Missing or unsupported tools skip their tests locally. The two requirement
+switches are independent: `PDFCONCAT_REQUIRE_ORACLE=1` requires qpdf and Poppler;
+`PDFCONCAT_REQUIRE_VERAPDF=1` requires veraPDF. Linux CI sets both:
 
 ```sh
 PDFCONCAT_REQUIRE_VERAPDF=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -race -count=1 ./...
 ```
+
+To run only the authored PDF/UA machine fixture and its removed-structure
+negative control with the pinned `verapdf` on `PATH`:
+
+```sh
+PDFCONCAT_REQUIRE_VERAPDF=1 go test -count=1 ./internal/core/internal/pdf -run '^TestPDFUAMachineFixture$'
+```
+
+Machine reports are retained as test artifacts. Passing these tests does not
+replace visual, reading-order or screen-reader review of actual packets.
 
 Race tests run on Linux/macOS; Windows runs ordinary tests. CI gates lint,
 tests on those three operating systems, cross-builds, release packaging and
@@ -155,10 +172,9 @@ Keep only literal product differences between `BEGIN PRODUCT SETTINGS` and
 `END PRODUCT SETTINGS`; change common behavior in all three repositories together.
 The copies are self-contained and have no runtime cross-repository dependency.
 Both consumers pin a reviewed PDFConcat commit for development/CI parity checks.
-Commit
-the canonical PDF engine change first, preserve each consumer's product settings when
-copying the scripts, then update both `install/engine-source.txt` files to that
-full PDF commit. From either consumer checkout run:
+Commit the canonical PDF engine change first, preserve each consumer's product
+settings when copying the scripts, then update both `install/engine-source.txt`
+files to that full PDF commit. From either consumer checkout run:
 
 ```sh
 python3 install/check-sync.py /absolute/path/to/PDFConcat
@@ -278,83 +294,90 @@ Release publication requires maintainer authorization. Review the intended
 changes, pending changelog outcomes, linked licenses/NOTICE files and installation
 instructions. Prepare the matching dated, nonempty changelog section and merge
 the release changes into `main`. Tag that intended commit as `vX.Y.Z` and push
-the tag. The release workflow runs the reusable CI before publication; keep
-`Required CI` intact. Do not publish a second release by hand while it is running.
+the tag. The [release workflow](.github/workflows/release.yml) runs reusable CI
+before publication; keep `Required CI` intact. Do not publish a second release by
+hand while it is running. Do not create tags, releases or upstream issues without
+maintainer authorization.
 
-For local packaging investigations, use the exact GoReleaser version in
-`.github/workflows/ci.yml`. The release workflow already performs its CI
-gates, exact tag-version packaging checks and final publication; a routine release does
-not require duplicating those gates locally.
+### Local packaging
 
-Complete release packaging requires macOS and Python 3.8 or later for source capture: `.github/scripts/sign-macos.sh`
-applies and verifies an ad hoc signature on each Darwin executable before it is
-archived. This needs no Developer ID credential or notarization service. The
-Darwin linker settings declare macOS 15.0.0 as the minimum; ordinary
-cross-compilation checks alone do not verify that metadata or the signatures.
+Use the exact GoReleaser version in [CI](.github/workflows/ci.yml). Complete release
+packaging requires macOS and Python 3.8 or later for source capture. The
+[signing hook](.github/scripts/sign-macos.sh) applies and verifies an ad hoc
+signature on each Darwin executable. It needs no Developer ID credential or
+notarization service. Darwin executables declare macOS 15.0.0 as their minimum;
+cross-compilation alone does not verify that metadata or their signatures.
 
-Run a local `goreleaser release --snapshot --clean` only in an isolated clone:
-`--clean` deletes its dist directory. When investigating packaging, inspect the
-archives, checksums, native version invocations and `pdfconcat licenses`, then run the
-[installer harnesses](#installer-verification) against that dist directory.
-Copy the unchanged `install/install.sh`, `install/install.ps1` and generated `.tools/SOURCE.tar.gz` into `dist/`
-before running the harnesses. Snapshot success is not release publication.
-GoReleaser publication is disabled in configuration; it is a producer only.
+Run `goreleaser release --snapshot --clean` only in an isolated clone: `--clean`
+deletes its `dist` directory. Before packaging, stage intended new files in Git
+and keep build inputs stable. The [source capture hook](.github/scripts/source-archive.py)
+refuses untracked files and captures tracked working files, including edits,
+plus `go mod vendor` output in temporary storage. It produces
+`.tools/SOURCE.tar.gz`; see [source obligations](PROJECT-NOTICE.md#source-for-this-build).
 
-Binary archives contain only the program, `LICENSE`, `PROJECT-NOTICE.md`,
-`LICENSE-COMMERCIAL.md`, the third-party notices and their
-license texts; the notices live in `internal/legal/` so that the executable
-embeds them too. `cmd/pdfconcat/notices_test.go` checks that every linked
-module, every license file inside a linked package and every asset a dependency
-embeds is covered. Two snapshot builds of one commit must produce identical
-`checksums.txt`: archive members use fixed owners and commit timestamps.
+After the build, stage the exact standalone files for the installer harnesses:
 
-Release builds pass `-trimpath` and `-ldflags=-w`. They keep the Go symbol
-table, without DWARF data, so that `govulncheck -mode=binary` and similar
-scanners see which packages are linked; stripping it with `-s` makes them
-report every advisory for a linked module. Release and ordinary builds use the
-compiler's default optimization settings.
+```sh
+cp install/install.sh install/install.ps1 .tools/SOURCE.tar.gz dist/
+```
 
-Profile-guided optimization is not enabled for release builds.
+Inspect the archives, checksums, native version invocations and
+`pdfconcat licenses`, then run the [installer harnesses](#installer-verification)
+against that `dist` directory. Snapshot success is not release publication.
+GoReleaser publication is disabled; it produces files for workflow qualification.
 
-GoReleaser's before hooks generate Windows resources with the pinned
-`go-winres` (file properties and an `asInvoker` manifest, as git-ignored
-`cmd/pdfconcat/rsrc_windows_*.syso`) and build the pinned `cyclonedx-gomod`
-into `.tools/bin`. That tool writes one CycloneDX SBOM per executable, from the
-module list embedded in it, without serial numbers or timestamps. Detecting the
-main module's license downloads the tagged release through the Go proxy, so
-snapshot SBOMs omit that one license with a warning.
+### Build and artifact contracts
 
-Before packaging, stage new source files with Git and keep build inputs stable.
-The source-archive hook refuses untracked files and captures tracked working
-files, including edits, plus `go mod vendor` output in temporary storage.
-`SOURCE.tar.gz` carries the matching source, build/install scripts, notices and
-vendored modules; it is checksummed, qualified and published beside the binaries.
-It does not include the Go toolchain or unmodified general-purpose development tools.
-To build its CLI without module downloads, extract it, enter `pdfconcat-source`,
-and run `GOPROXY=off GOSUMDB=off go build -mod=vendor ./cmd/pdfconcat`.
-Retain the source archive with the corresponding binaries and replace it when
-publishing modified code; see [source obligations](PROJECT-NOTICE.md#source-for-this-build).
+[GoReleaser configuration](.goreleaser.yml) is authoritative for target platforms,
+archive contents, build flags and hooks. Binary archives contain the program,
+`LICENSE`, `PROJECT-NOTICE.md`, `LICENSE-COMMERCIAL.md`, third-party notices and
+license texts. The notices in `internal/legal/` are embedded in the executable.
+`cmd/pdfconcat/notices_test.go` checks linked-module licenses and embedded assets.
 
-Archive names carry no version (`pdfconcat_linux_amd64.tar.gz`). The CI producer
-uses `release --snapshot --clean` for non-tag builds and stable/prerelease tag
-metadata with `release --clean --skip=publish` for `v*` tags. Both modes stage
-six binary archives, `SOURCE.tar.gz`, six SBOMs, both standalone installers and `checksums.txt` flat in
-one artifact. CI verifies hashes, archive contents, SBOM platforms, ad hoc Darwin
-signatures and minimum OS, scans Darwin binaries with `govulncheck -mode=binary`,
-and runs the seven native installer jobs against those exact staged files.
+Release builds use `-trimpath` and `-ldflags=-w`, keeping the Go symbol table
+without DWARF data so binary vulnerability scanners can identify linked packages.
+Do not strip the symbol table with `-s`. Release and ordinary builds use the
+compiler's default optimization settings; profile-guided optimization is disabled.
 
-A `v*` tag's publisher waits for that reusable CI, downloads the qualified artifact
-and verifies the complete filename set and hashes again. It extracts exactly one
-nonempty, dated matching changelog section, attests the qualified bytes, then
-publishes them with `gh release create --verify-tag --notes-file`; there is no
-second build or signing pass. Prerelease tags remain prereleases. The workflow
-does not create tags or overwrite an existing release. macOS signing stays ad hoc;
-checksums and attestations do not establish notarization. Expired/missing qualified
-artifacts fail publishing instead of causing an untested rebuild.
-Do not create tags, releases or upstream issues without maintainer authorization.
+Before hooks generate the Windows file properties and `asInvoker` manifest with
+the pinned `go-winres`, writing ignored `cmd/pdfconcat/rsrc_windows_*.syso` files.
+They also build the pinned `cyclonedx-gomod` into `.tools/bin`. It writes a
+CycloneDX SBOM per executable from the embedded module list, without serial
+numbers or timestamps. Main-module license detection downloads the tagged
+release through the Go proxy, so snapshot SBOMs omit that license with a warning.
 
-Run `PDFCONCAT_REQUIRE_VERAPDF=1 go test ./internal/core/internal/pdf -run TestPDFUAMachineFixture`
-with the pinned `verapdf` on PATH to require the authored PDF/UA fixture and its
-removed-structure negative control. Machine reports are retained as test
-artifacts. Passing these tests does not replace human reading-order or
-screen-reader review of actual packets.
+`SOURCE.tar.gz` contains the matching source, build/install scripts, notices and
+vendored modules. It excludes the Go toolchain and unmodified general-purpose
+development tools. To build its CLI without module downloads, extract it, enter
+`pdfconcat-source`, then run:
+
+```sh
+GOPROXY=off GOSUMDB=off go build -mod=vendor ./cmd/pdfconcat
+```
+
+Retain the source archive with its corresponding binaries and replace it when
+publishing modified code. The archive is a delivery aid; review the actual source
+requirements in the [project notice](PROJECT-NOTICE.md#source-for-this-build).
+
+Two snapshot builds of the same commit and stable inputs must produce identical
+`checksums.txt`. Archive members use fixed owners and commit timestamps. Archive
+names carry no version, for example `pdfconcat_linux_amd64.tar.gz`.
+
+### Qualification and publication
+
+The CI producer uses `release --snapshot --clean` for non-tag builds and
+`release --clean --skip=publish` with stable/prerelease metadata for `v*` tags.
+Both modes stage six binary archives, `SOURCE.tar.gz`, six SBOMs, two standalone
+installers and `checksums.txt` flat in one workflow artifact.
+
+CI verifies hashes, archive contents, SBOM platforms, Darwin ad hoc signatures
+and minimum OS; scans Darwin binaries with `govulncheck -mode=binary`; and runs
+all seven native installer jobs against those exact staged files. A tag's
+publisher waits for that reusable CI, downloads the qualified artifact, and
+rechecks the complete filename set and hashes. It extracts one nonempty, dated
+matching changelog section, attests the qualified bytes and creates the release
+with `gh release create --verify-tag --notes-file`. It does not rebuild, re-sign,
+create tags or overwrite an existing release. Prerelease tags remain prereleases.
+Missing or expired qualified artifacts fail publication rather than trigger an
+untested rebuild. Ad hoc signing, checksums and attestations do not establish
+Apple notarization.

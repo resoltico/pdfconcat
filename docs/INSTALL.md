@@ -1,9 +1,11 @@
 # Install, update and uninstall the CLI
 
-This guide describes the installer in this checkout. The published v0.9.0
-installer predates ownership receipts. The latest-download commands below serve
-the currently published installer; the new ownership rules take effect with the
-release containing this change. Use documentation at the matching release tag.
+This guide describes the scripts in [`install/`](../install). To run the behavior
+documented by this checkout, [build from source](../README.md#build-from-source).
+For a published binary, choose a [release](https://github.com/resoltico/pdfconcat/releases)
+and follow the installation instructions at its tag. Use an installer and archive
+from the same qualified build; do not mix downloaded scripts and assets from
+different revisions.
 
 The installer downloads PDFConcat for the current user, verifies the archive's
 SHA-256 checksum and test-runs the program before replacing an owned installation.
@@ -12,21 +14,21 @@ is needed. The CLI's inputs and outputs are outside the installer's scope.
 
 ## Install
 
-On macOS or Linux:
+Save and review the selected build's installer as `install.sh` or `install.ps1`.
+The current scripts accept these invocations. Replace `X.Y.Z` with the selected
+stable release number. On macOS or Linux:
 
 ```sh
-curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh
+sh ./install.sh --version X.Y.Z
 ```
 
-If curl is unavailable, use
-`wget -qO- https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh`.
-The installer itself requires standard shell tools, tar and a SHA-256 tool
-(`sha256sum`, `shasum` or `openssl`).
+HTTPS downloads use curl or wget. The installer also requires standard shell
+tools, tar and a SHA-256 tool (`sha256sum`, `shasum` or `openssl`).
 
 On Windows, use PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -File .\install.ps1 -Version X.Y.Z
 ```
 
 Windows PowerShell 5.1 and PowerShell 7 are supported. `ByPass` applies only to the
@@ -52,7 +54,7 @@ pdfconcat --help
 
 For a quick functional check, run `pdfconcat build -o blank.pdf --blank --fit-to A4`.
 
-The documented Windows command runs in a child process, so its PATH changes do
+The Windows command above runs in a child process, so its PATH changes do
 not reach an already-open parent terminal. Running the script directly in the
 current PowerShell session may also update that session's PATH. On macOS/Linux,
 use the quoted full executable path printed by the installer while this terminal
@@ -61,24 +63,15 @@ and current-session PATH unchanged.
 
 ## Update and choose a release
 
-Run the same install command again. The installer resolves latest once to a stable
+Run the same install command again to update or reinstall the selected release.
+When no version is supplied, the installer resolves latest once to a stable
 `vX.Y.Z` tag, then downloads both archive and `checksums.txt` from that release.
 A failed download, checksum or candidate test happens before replacing the active
 program. An update requires the existing binary, legal files and ownership state
 to match their receipt.
 
-To select a stable release explicitly:
-
-```sh
-curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh -s -- --version X.Y.Z
-```
-
-```powershell
-$env:PDFCONCAT_VERSION = 'X.Y.Z'
-irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex
-```
-
-The environment pin remains set in that session. Clear it to return to latest:
+Alternatively, `PDFCONCAT_VERSION` supplies the release when no version argument
+is given. Clear an environment pin to return to latest:
 
 ```sh
 unset PDFCONCAT_VERSION
@@ -88,9 +81,8 @@ unset PDFCONCAT_VERSION
 Remove-Item Env:PDFCONCAT_VERSION -ErrorAction SilentlyContinue
 ```
 
-Keep a copy of the reviewed installer you used, from the selected release tag or
-reviewed source checkout. The pipe commands do not save one. Do not assume that
-fetching the current latest script later gives the same ownership protocol.
+Keep the reviewed installer with the matching release documentation for later
+update or removal.
 
 The installer stages files privately on the destination filesystem and uses a
 per-product, per-directory exclusive lock. A held lock fails promptly; there are
@@ -103,15 +95,15 @@ On Windows an update can retain one uniquely named, receipt-owned running
 executable. Close processes using it before another update or uninstall if
 cleanup is refused. The installer never adopts or deletes arbitrary `.old` files.
 
-## Ownership and older installations
+## Ownership
 
 The current installer uses `.pdfconcat-install` beside the executable
 for ownership receipts and managed data. It verifies managed file hashes before
 update or removal and refuses existing unowned or changed files. It does not
-adopt older installs from their filename, version output or old PATH marker.
+adopt unowned installs from their filename, version output or PATH settings.
 
-For a previous installer or manual/source installation without a valid receipt,
-remove the old executable yourself or select a fresh directory. Keep any files
+For any installation without a valid receipt,
+remove the existing executable yourself or select a fresh directory. Keep any files
 you need and remove obsolete PATH settings by hand after reviewing them. Do not
 copy a receipt from another directory or edit hashes to bypass a refusal.
 A non-directory target or non-regular managed entry is also left alone.
@@ -122,9 +114,7 @@ merely because they became empty. Unrelated files are preserved.
 ## Uninstall
 
 Use the same reviewed installer, saved as `install.sh` / `install.ps1`, to remove
-an unchanged installation and only the PATH entries it owns. In particular, do not
-fetch the currently published older installer to remove this checkout's new
-receipt-based installation:
+an unchanged installation and only the PATH entries it owns:
 
 ```sh
 sh ./install.sh --uninstall
@@ -155,11 +145,10 @@ files remain in the shared install directory; removing it could break other tool
 `NoModifyPath` also suppresses PATH cleanup during
 uninstall and reports the entry left for manual removal.
 
-Windows uninstall in this checkout removes an owned PATH entry before deleting
+Windows uninstall removes an owned PATH entry before deleting
 the executable or receipt. A failed PATH write leaves those files intact for
 retry. A later file-removal failure can leave partial progress; inspect the
-reported paths before retrying or using the manual cleanup above. Published
-installer scripts receive this fix only in a release containing it.
+reported paths before retrying or using the manual cleanup above.
 
 Your PDFs, plans and reports are not installer-managed files.
 
@@ -173,8 +162,8 @@ Your PDFs, plans and reports are not installer-managed files.
 | `--uninstall` | `-Uninstall` | `PDFCONCAT_UNINSTALL=1` (Windows) | Remove unchanged owned files. |
 | `--help` | `-Help` | | Show usage. |
 
-Pass Unix options after `sh -s --`. In PowerShell use environment variables before
-`irm ... | iex`, or parameters on the saved, reviewed script shown above.
+Pass options to the saved, reviewed script as shown above. The Windows environment
+variables also work when the script runs in the current PowerShell session.
 
 `PDFCONCAT_DOWNLOAD_BASE` selects an HTTPS release mirror or an absolute local
 directory containing the release's archive and `checksums.txt`. HTTPS is required

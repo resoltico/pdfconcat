@@ -20,7 +20,6 @@ versions linked into an executable.
 | `golang.org/x/image` | BSD-3-Clause | Font fixed-point arithmetic and image support | [Go Authors](licenses/go-and-x-BSD-3-Clause.txt) |
 | `golang.org/x/sys` | BSD-3-Clause | Native no-replace publication calls | [Go Authors](licenses/go-and-x-BSD-3-Clause.txt) |
 | `golang.org/x/text` | BSD-3-Clause | Unicode direction and encoding support | [Go Authors](licenses/go-and-x-BSD-3-Clause.txt) |
-
 | `seehuhn.de/go/sfnt` | BSD-3-Clause | Static CFF parsing and identity-CID conversion | [sfnt](licenses/seehuhn-sfnt-BSD-3-Clause.txt) |
 | `seehuhn.de/go/postscript` | BSD-3-Clause | CFF dictionaries and glyph names | [postscript](licenses/seehuhn-postscript-BSD-3-Clause.txt) |
 | `seehuhn.de/go/geom` | BSD-3-Clause | CFF geometry | [geom](licenses/seehuhn-geom-BSD-3-Clause.txt) |

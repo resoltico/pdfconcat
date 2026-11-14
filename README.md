@@ -7,8 +7,9 @@ JSON plan for selections and assembly aids. Check the plan before building and
 save a report with input file hashes and source-to-output page mappings.
 
 Source pages keep their original sizes unless you request fitting. Generated text
-uses bundled Noto Sans for Latin, Greek and Cyrillic; the program needs no external
-PDF tools, font installation or configuration directory at runtime.
+uses bundled Noto Sans or a supplied static TrueType/OpenType CFF1 font for Latin,
+Greek and Cyrillic. The program needs no external PDF tools, font installation or
+configuration directory at runtime.
 
 - [Understand the scope](#scope-and-boundaries)
 - [Install and verify](#install)
@@ -60,38 +61,33 @@ the current input, fidelity and publication constraints.
 
 ## Install
 
-The installer described by this checkout records ownership before managing files.
-Published v0.9.0 predates those receipts; these rules begin with the release
-containing this change. Use documentation at the matching release tag for an
-already published version.
+This README describes the current source. Build the checkout to use the features
+and plan format shown below. For a published binary, choose a
+[release](https://github.com/resoltico/pdfconcat/releases) and follow the
+installation instructions at that release's tag.
 
-On macOS 15+ or Linux:
+### Build from source
+
+Use Go at the version in [go.mod](go.mod). On macOS or Linux:
 
 ```sh
-curl -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh | sh
+git clone https://github.com/resoltico/pdfconcat.git
+cd pdfconcat
+go build -o bin/pdfconcat ./cmd/pdfconcat
+bin/pdfconcat version
 ```
 
-On Windows 10 or 11, in PowerShell:
+On Windows, run the same clone and directory commands, then use PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 | iex"
+go build -o bin/pdfconcat.exe ./cmd/pdfconcat
+.\bin\pdfconcat.exe version
 ```
 
-The installer puts one self-contained program and its ownership receipt in your
-user account without an administrator password, and configures PATH when needed. On macOS/Linux, follow
-any PATH command it prints for the current terminal. On Windows, open a new
-terminal window. Then verify the installation:
-
-```sh
-pdfconcat version
-```
-
-Run the same installation command again to update an unchanged owned install.
-Old or manual installs without a receipt must be removed manually or installed
-into a fresh directory. The
-[installation guide](docs/INSTALL.md) covers supported architectures, uninstalling,
-custom paths, manual downloads, verification and troubleshooting. Releases are not
-notarized by Apple or code-signed for Windows; the guide explains what that means.
+Put the checkout's `bin` directory on PATH or replace `pdfconcat` in the examples
+with the executable's full path. This build does not create installer ownership
+receipts. The [installation guide](docs/INSTALL.md) describes supported systems,
+release installers, custom paths, removal, verification and troubleshooting.
 
 ## Merge PDFs
 
@@ -151,6 +147,7 @@ two source PDFs:
 {
   "version": 5,
   "output": "review-packet.pdf",
+  "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
   "page_numbers": {},
   "items": [
@@ -175,6 +172,12 @@ This adds a linked table of contents and an A4 section title page, starts the
 section on an odd physical page, and adds footer numbers. Section titles also
 create PDF bookmarks. The A4 `page_defaults` style sets the section title page;
 it does not resize source pages. To fit the whole packet, add `"fit_to": "A4"` at the plan's top level.
+
+Page numbering supports physical or consecutive counting, start offsets,
+per-item suppression and six positions. For example,
+`"page_numbers": { "mode": "consecutive", "kinds": ["source"], "position": "top-right" }`
+numbers only source pages. The [plan reference](docs/PLAN.md#page-numbering)
+defines counting, contents labels and placement limits.
 
 For an excerpt, save this complete plan as `excerpt.json`, using an
 `appendix.pdf` with at least seven pages:
@@ -228,11 +231,12 @@ pdfconcat schema plan
 pdfconcat schema result
 ```
 
-These instructions describe the current source. For a released binary, consult
-the documentation at its matching release tag; `pdfconcat version` identifies
-that version. Matching schema numbers alone do not establish support for every
-field. The [CLI reference](docs/CLI.md) covers stdin plans, argument handling,
-exit codes, diagnostics and publication facts.
+The same executable and effective plan, source and font bytes produce identical
+PDF bytes across rebuilds. Output paths and the current clock do not affect
+them. Dates are absent unless supplied by `timestamp` or the effective
+`SOURCE_DATE_EPOCH`; see [document identity and time](docs/PLAN.md#document-identity-time-and-structure).
+The [CLI reference](docs/CLI.md) covers stdin plans, argument handling, exit codes,
+diagnostics and publication facts.
 
 ## PDFConcat or the pdfcpu CLI?
 
@@ -312,8 +316,10 @@ dots do not imply identical defaults or preservation guarantees.
    mode can avoid filesystem configuration for operations that do not need user
    fonts, but does not make that font store available.
 5. **Page numbers.** pdfcpu text stamps support current/total page numbers and an
-   offset. PDFConcat's footer numbers follow physical page positions; automatic
-   padding counts in the sequence but has no printed footer.
+   offset. PDFConcat supports physical or consecutive counting, start offsets,
+   kind filters, inherited item suppression and six positions. Padding is never
+   painted; it occupies a physical position but consumes no consecutive number.
+   Contents labels and PDF PageLabels use the same resolved numbering.
 6. **Plan checks and reports.** pdfcpu validates PDF structures and validates
    JSON during `create`; `info --json` reports document properties. PDFConcat
    provides a separate `check` command for planned layout and generated-text
@@ -335,7 +341,11 @@ pages may describe a later version.
 
 ## Limits
 
-Tagged source semantics are preserved by default and generated text is tagged. Untagged inputs remain usable with coverage warnings; this does not certify PDF/UA. See [structure policy](docs/PLAN.md#document-identity-time-and-structure).
+Supported source structure is preserved by default and meaningful generated text
+is tagged. Untagged inputs remain usable, with honest coverage diagnostics;
+blank and artifact-only pages are neutral. Explicit structure discard produces
+untagged output. This does not certify PDF/UA. See
+[structure policy](docs/PLAN.md#document-identity-time-and-structure).
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
@@ -344,20 +354,10 @@ Tagged source semantics are preserved by default and generated text is tagged. U
 - Page-number overlays may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#page-numbering).
 - PDF and report publication are separate operations, and a late failure can occur after a file becomes visible. Inspect [publication facts](docs/CLI.md#reports-and-committed-state) before retrying.
 
-## Build from source
+## Development and licensing
 
-Use Go at the version in [go.mod](go.mod):
+Contributor prerequisites, checks and release procedures are in
+[CONTRIBUTING](CONTRIBUTING.md). The package map and execution pipeline are in
+[ARCHITECTURE](docs/ARCHITECTURE.md).
 
-```sh
-git clone https://github.com/resoltico/pdfconcat.git
-cd pdfconcat
-go build -o bin/pdfconcat ./cmd/pdfconcat
-bin/pdfconcat version
-```
-
-On Windows, use `go build -o bin/pdfconcat.exe ./cmd/pdfconcat` and run
-`.\bin\pdfconcat.exe version` in PowerShell. Contributor prerequisites, checks
-and release procedures are in [CONTRIBUTING](CONTRIBUTING.md). The package map
-and execution pipeline are in [ARCHITECTURE](docs/ARCHITECTURE.md).
-
-Original code and documentation use [AGPL-3.0-only](LICENSE). See [licensing, source and contribution terms](PROJECT-NOTICE.md) and the [pending commercial route](LICENSE-COMMERCIAL.md). Third-party terms remain separate; `pdfconcat licenses` prints the project license and [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md).
+Original code and documentation use [AGPL-3.0-only](LICENSE). See [licensing, source and contribution terms](PROJECT-NOTICE.md) and [commercial licensing status](LICENSE-COMMERCIAL.md). Third-party terms remain separate; `pdfconcat licenses` prints the project license and [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md).

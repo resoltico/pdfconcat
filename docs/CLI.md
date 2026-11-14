@@ -119,13 +119,14 @@ retained.
   "timestamp": null,
   "structure": {
     "policy": "preserve",
-    "coverage": "partial"
+    "coverage": "complete"
   },
   "numbering": []
 }
 ```
 
-The digest above is illustrative. Real digests are lowercase SHA-256 hex.
+This example assumes fully covered source and generated content. The digest is
+illustrative; real digests are lowercase SHA-256 hex.
 `output` is null until a path is known. `published` records actual namespace
 publication; digest/bytes appear only when true. Page counts are null until
 established by the corresponding completed stages. An error never invents zero
@@ -145,8 +146,9 @@ Stage/first-use order stays stable within each priority group. This keeps bounde
 publication failures and the cause of the overall outcome visible under caps.
 The summary shows at most 20 diagnostics, with
 `diagnostics_omitted` for the rest. Each diagnostic shows at most 20 consumer
-pointers, with `items_omitted`. A full report has no such caps. Omission hints distinguish a saved report from
-an unavailable requested report; they do not recommend reading a failed report.
+pointers, with `items_omitted`. A full report has no such caps. Omission hints
+distinguish a saved report from an unavailable requested report; they do not
+recommend reading a failed report.
 A saved report holds uncapped processing details but cannot predict its own late
 publication/durability error; the final CLI result remains authoritative.
 
@@ -183,7 +185,9 @@ input hidden in a malformed plan. Existing-target and known-collision refusals
 use `report_exists`, `report_not_regular`, `report_is_input` or
 `report_is_output`.
 
-Existing inputs and the output are protected by file identity. Missing inputs are protected only by cleaned path spelling; reports are rechecked after PDF publication.
+Existing inputs and the output are protected by file identity. Missing inputs
+are protected only by cleaned path spelling; reports are rechecked after PDF
+publication.
 
 Output/report files use ordinary umask permissions; replacements keep the old
 mode. Publication writes and syncs a sibling temporary file first. Its bounded
@@ -246,15 +250,17 @@ contents item or padding span:
   "timestamp": null,
   "structure": {
     "policy": "preserve",
-    "coverage": "partial"
+    "coverage": "none"
   },
   "numbering": []
 }
 ```
 
 Source parts include full-input `input_pages`, hash/byte count, emitted `pages`
-and compact `spans` such as `{"source":[2,4],"output":[10,12]}`. Unknown source mappings and non-source parts use `spans: null`; known source mappings are nonempty arrays. Divider parts
-reference their section; padding records `reason: odd_start` and `before_item`.
+and compact `spans` such as `{"source":[2,4],"output":[10,12]}`. Unknown source
+mappings and non-source parts use `spans: null`; known source mappings are
+nonempty arrays. Divider parts reference their section; padding records
+`reason: odd_start` and `before_item`.
 Complete leaf ranges partition physical pages 1..N once. Nested section ranges
 may overlap. Until the physical page sequence has been resolved, emitted
 counts/spans/ranges and section targets stay null, and no padding is predicted.
@@ -306,7 +312,8 @@ filenames on newlines. Plans require valid UTF-8 paths.
 
 Globs plus `jq --args` preserve quotes/newlines as arguments. `LC_ALL=C` fixes byte
 order; bash `nullglob` avoids treating an unmatched pattern as a filename. In
-zsh omit `shopt` (or use its `NULL_GLOB` option). For lists beyond OS argument limits, generate the plan in batches or with a program that preserves filenames.
+zsh omit `shopt` (or use its `NULL_GLOB` option). For lists beyond OS argument
+limits, generate the plan in batches or with a program that preserves filenames.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
@@ -336,6 +343,8 @@ command syntax to text remedies; JSON and reports retain the core explanation.
 `detail`, when present, contains backend evidence rather than a stable product
 message. `pdf_location` can identify a positive `object` number, positive `page`
 number, or dictionary `path`; absent fields mean attribution is unavailable.
+Source-page numbers refer to the original source, including after selection;
+output-page numbers refer to the composed PDF.
 It is separate from `location`, which identifies plan text. Consumers should
 branch on `code`, not backend text or a reported path. `source_validation_notice`
 retains backend compatibility evidence, including phase and disposition in
@@ -354,8 +363,8 @@ status `invalid`; a processing failure selects `failed`.
 
 ## Diagnostic codes
 
-The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning class is empty
-(shown as —); warnings never select an error outcome.
+The [diagnostic registry](../internal/core/internal/diag/codes.go) is authoritative.
+Warning class is empty (shown as —); warnings never select an error outcome.
 
 <!-- codes -->
 

@@ -5,6 +5,7 @@ package pdf
 
 import (
 	"context"
+	"slices"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -33,14 +34,14 @@ func localTarget(s *model.Context, o types.Object, named map[string]destination,
 	return ok && target.page > 0, nil
 }
 
-func pruneNavigation(c context.Context, s *model.Context) (bool, error) {
+func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins) ([]navigationChange, error) {
 	named, err := readDestinations(c, s)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	pages, err := rawPages(c, s)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	selected := map[types.IndirectRef]bool{}
 	for _, p := range pages {
@@ -48,43 +49,80 @@ func pruneNavigation(c context.Context, s *model.Context) (bool, error) {
 	}
 	forest, err := readOutlineForest(c, s)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	removed := false
-	err = walkRetained(c, s, func(types.Dict) error { return nil }, func(d types.Dict, key string) (bool, error) {
-		keep, err := localTarget(s, d[key], named, selected)
-		if !keep && err == nil {
-			removed = true
+	changes := []navigationChange{}
+	for name, d := range named {
+		if original, ok := origins.destinations[name]; ok {
+			d.sites = original.sites
+			named[name] = d
 		}
-		return keep, err
-	}, true)
-	if err != nil {
-		return false, err
 	}
-	for key, d := range named {
+	err = walkRetained(c, s, origins, nil, func(d types.Dict, key string, site, edge sourceSite) (bool, error) {
+		keep, e := localTarget(s, d[key], named, selected)
+		if e != nil {
+			return false, site.wrap(e)
+		}
+		if !keep && e == nil {
+			targetPage := 0
+			value, e := s.Dereference(d[key])
+			if e != nil {
+				return false, e
+			}
+			if array, ok := value.(types.Array); ok && len(array) > 0 {
+				if ref, ok := array[0].(types.IndirectRef); ok {
+					targetPage = origins.pages[ref]
+				}
+			} else if name, e := destinationName(s, value); e == nil {
+				targetPage = origins.destinations[name].page
+			}
+			change := navigationChange{site: site, targetPage: targetPage}
+			if edge.ref.ObjectNumber.Value() > 0 {
+				change.site = edge
+				change.target = site
+				change.action = true
+			}
+			changes = append(changes, change)
+		}
+		return keep, e
+	}, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(named))
+	for key := range named {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		d := named[key]
 		if d.page < 1 {
 			delete(named, key)
-			removed = true
+			original := origins.destinations[key]
+			if original.page > 0 {
+				for _, site := range d.sites {
+					changes = append(changes, navigationChange{site: site, targetPage: original.page, name: key})
+				}
+			}
 		}
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	delete(cat, "Dests")
 	names, err := s.DereferenceDict(cat["Names"])
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	delete(names, "Dests")
 	delete(s.Names, "Dests")
 	if err := rebuildDestinations(c, s, named); err != nil {
-		return false, err
+		return nil, err
 	}
-	forest, pruned := pruneOutlineForest(forest)
-	removed = removed || pruned
+	forest, _ = pruneOutlineForest(forest)
 	if err := installOutlineForest(c, s, forest); err != nil {
-		return false, err
+		return nil, err
 	}
-	return removed, nil
+	return changes, nil
 }

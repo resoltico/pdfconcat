@@ -4,6 +4,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/pdf"
@@ -29,17 +31,20 @@ func resolvePolicies(a pdf.Assembly, predict bool) []diag.Diagnostic {
 		if f.HasFields {
 			if predict && i > 0 {
 				add(diag.FormFieldsRenamed, "Predicted: pdfcpu may namespace this later form, including distinct names; build records actual mappings.")
+				ds[len(ds)-1].PDFLocation = f.FieldCollectionLocation
+				ds[len(ds)-1].Detail = "The original Fields collection is a possible rename scope; no actual new name is predicted."
 			}
 		}
-		collision := false
 		for _, name := range p.Occurrence.Facts.DestNames {
-			if names[name] {
-				collision = true
+			if predict && names[name] {
+				for _, location := range p.Occurrence.Facts.DestinationLocations[name] {
+					add(diag.DestinationsRenamed, "Predicted: colliding destination names will be renamed for affected occurrences.")
+					loc := location
+					ds[len(ds)-1].PDFLocation = &loc
+					ds[len(ds)-1].Detail = fmt.Sprintf("Original destination %q collides; no actual replacement name is predicted.", name)
+				}
 			}
 			names[name] = true
-		}
-		if predict && collision {
-			add(diag.DestinationsRenamed, "Predicted: colliding destination names will be renamed for affected occurrences.")
 		}
 	}
 	return ds

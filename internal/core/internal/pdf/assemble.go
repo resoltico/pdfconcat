@@ -59,17 +59,13 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		return result, &policyError{finding: d, err: errors.New(d.Message)}
 	}
 	needAppearances := false
-	add := func(code diag.Code, message string, index int) {
-		d := diag.New(code, message, a.Parts[index].Ref)
-		d.File = a.Parts[index].Source
-		result.Diagnostics = append(result.Diagnostics, d)
-	}
 	for index, part := range a.Parts {
 		current = &a.Parts[index]
 		if err = c.Err(); err != nil {
 			return result, err
 		}
 		var s *model.Context
+		var origins sourceOrigins
 		if part.Source != "" {
 			data, e := files.Read(c, part.Source, 0)
 			if e != nil {
@@ -81,17 +77,28 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			}
 			// Inspection already reported source findings; re-admission enforces the
 			// same policy against the bytes just checked above.
-			s, _, err = readSource(c, data, a.Structure)
+			s, origins, _, err = readSource(c, data, a.Structure)
 			if err != nil {
 				return result, err
 			}
 			occurrence := part.Occurrence.Facts
-			removed, e := projectSelection(c, s, occurrence.Selection)
+			removed, e := projectSelection(c, s, occurrence.Selection, origins)
 			if e != nil {
 				return result, e
 			}
-			if removed {
-				add(diag.SourceNavigationRemoved, "Navigation targets omitted from this source occurrence were removed.", index)
+			for _, d := range navigationDiagnostics(removed) {
+				d.File = part.Source
+				d.Items = []string{part.Ref}
+				result.Diagnostics = append(result.Diagnostics, d)
+			}
+			uri, e := uriBaseWarnings(c, s, origins)
+			for _, d := range uri {
+				d.File = part.Source
+				d.Items = []string{part.Ref}
+				result.Diagnostics = append(result.Diagnostics, d)
+			}
+			if e != nil {
+				return result, e
 			}
 			needAppearances = needAppearances || inspected.NeedAppearances
 		} else {
@@ -126,15 +133,20 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				return result, err
 			}
 		}
-		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage)
+		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage, origins)
 		if e != nil {
 			return result, e
 		}
 		for name, d := range detached {
 			allDests[name] = d
 		}
-		if renamed {
-			add(diag.DestinationsRenamed, "Colliding destination names were renamed for this occurrence.", index)
+		for _, rename := range renamed {
+			for _, site := range rename.sites {
+				d := sourceWarning(diag.DestinationsRenamed, "Colliding destination names were renamed for this occurrence.", fmt.Sprintf("Original destination %q is now %q.", rename.from, rename.to), site)
+				d.File = part.Source
+				d.Items = []string{part.Ref}
+				result.Diagnostics = append(result.Diagnostics, d)
+			}
 		}
 		if part.Source != "" {
 			root, e := detachOutlineRoot(s, part.Owner)
@@ -172,10 +184,11 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			}
 			if actual != record.name {
 				result.Renames[index] = append(result.Renames[index], packet.FieldRename{From: record.name, To: actual})
+				d := sourceWarning(diag.FormFieldsRenamed, "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", fmt.Sprintf("Original field %q is now %q.", record.name, actual), record.site)
+				d.File = part.Source
+				d.Items = []string{part.Ref}
+				result.Diagnostics = append(result.Diagnostics, d)
 			}
-		}
-		if len(result.Renames[index]) > 0 {
-			add(diag.FormFieldsRenamed, "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", index)
 		}
 	}
 	current = nil

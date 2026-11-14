@@ -111,6 +111,13 @@ contents page count are known. Padding has no declared item index.
 5. Projection creates the result from the facts each stage actually returned.
 6. Report publication rechecks destination roles after any PDF publication.
 
+Private source sites retain full source refs, original page ordinals and paths.
+Admission captures catalogue/navigation sites before backend normalization;
+selection/assembly carry typed change evidence before pruning or renumbering.
+Only the existing PDFLocation projection crosses the diagnostic boundary.
+Distinct findings survive until result coalescing; no producer deduplicates
+solely by warning code/message.
+
 Inspection, composition and build proceed only while preceding processing stages
 have no errors. Build runs only for `Build` requests. After admission, projection
 still runs when processing has failed, and a requested report can still be

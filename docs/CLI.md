@@ -344,12 +344,26 @@ command syntax to text remedies; JSON and reports retain the core explanation.
 message. `pdf_location` can identify a positive `object` number, positive `page`
 number, or dictionary `path`; absent fields mean attribution is unavailable.
 Source-page numbers refer to the original source, including after selection;
-output-page numbers refer to the composed PDF.
+output-page numbers refer to the composed PDF. Source object numbers are captured
+before selection and backend renumbering; they are not output object IDs. Paths
+are anchored to that original object or its enclosing direct container. Document
+collections, outline nodes and destination definitions omit `page` when they have
+no owning page; a removed target's original page may instead appear in `detail`.
 It is separate from `location`, which identifies plan text. Consumers should
 branch on `code`, not backend text or a reported path. `source_validation_notice`
 retains backend compatibility evidence, including phase and disposition in
 `detail`. A skipped validation notice does not mean that content was removed;
 explicitly reported repairs cause a separate `source_unsupported` refusal.
+
+Navigation warnings identify the changed binding: a retained annotation can lose
+`Dest` or an action edge without being removed. Removing an invalid GoTo also
+removes its dependent Next subtree. Distinct catalogue entries and destination
+declarations remain distinct findings, including equal legacy/name-tree sites.
+URI Base warnings require an actually retained relative action and a nonempty
+source Base; orphan, selected-out and absolute actions do not establish impact.
+Check rename warnings identify known source scopes/definitions as predictions;
+only build reports actual old/new mappings. Generated-layout warnings keep plan
+provenance, and backend notices expose only locations the backend supplies.
 
 Warnings merge their consuming `items` only when their code, file, message,
 detail and both locations are equivalent. Different viewer entries therefore

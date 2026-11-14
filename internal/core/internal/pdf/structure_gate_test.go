@@ -19,7 +19,7 @@ func TestStructureFittingGate(t *testing.T) {
 	var dest *model.Context
 	var parts []structurePart
 	for range 2 {
-		s, _, err := readSource(t.Context(), pdffixture.Tagged("retained").Bytes(), "")
+		s, _, _, err := readSource(t.Context(), pdffixture.Tagged("retained").Bytes(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestStructureFittingGate(t *testing.T) {
 	if err := serialize(t.Context(), dest, &out); err != nil {
 		t.Fatal(err)
 	}
-	s, _, err := readSource(t.Context(), out.Bytes(), "")
+	s, _, _, err := readSource(t.Context(), out.Bytes(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestNestedTaggedFormsRetainStreamOwnership(t *testing.T) {
 	source.Objs[6] = bytes.Replace(source.Objs[6], []byte("/K 0"), []byte("/K << /Type /MCR /Pg 3 0 R /Stm 9 0 R /MCID 0 >>"), 1)
 	nested := []byte("/P <</MCID 0>> BDC BT /F1 24 Tf 50 50 Td (nested) Tj ET EMC")
 	source.Objs = append(source.Objs, []byte(fmt.Sprintf("<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /StructParents 0 /Length %d >>\nstream\n%s\nendstream", len(nested), nested)))
-	s, _, err := readSource(t.Context(), source.Bytes(), "")
+	s, _, _, err := readSource(t.Context(), source.Bytes(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestNestedTaggedFormsRetainStreamOwnership(t *testing.T) {
 	if err = serialize(t.Context(), s, &out); err != nil {
 		t.Fatal(err)
 	}
-	reopened, _, err := readSource(t.Context(), out.Bytes(), "")
+	reopened, _, _, err := readSource(t.Context(), out.Bytes(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

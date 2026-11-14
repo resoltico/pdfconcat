@@ -111,7 +111,7 @@ func TestStructureAdmissionDiscardPrecedesSemanticValidation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			after, findings, err := readSource(t.Context(), d.Bytes(), packet.StructureDiscard)
+			after, _, findings, err := readSource(t.Context(), d.Bytes(), packet.StructureDiscard)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -538,7 +538,7 @@ func TestStructureAdmissionDiscardPreservesSharedCatalogAndInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, ds, err := readSource(t.Context(), d.Bytes(), packet.StructureDiscard)
+	after, _, ds, err := readSource(t.Context(), d.Bytes(), packet.StructureDiscard)
 	if err != nil {
 		t.Fatal(err)
 	}

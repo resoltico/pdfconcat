@@ -166,11 +166,11 @@ func TestFitActualAppearanceStatesAndSharedStreams(t *testing.T) {
 				for index, label := range []string{"N/On", "N/Off", "R/On", "R/Off", "D"} {
 					t.Run(fmt.Sprintf("rotate=%d/flags=%d/page=%d/%s", rotation, flags, page, label), func(t *testing.T) {
 						doc := sharedAppearanceDocument(rotation, flags)
-						source, _, err := readSource(t.Context(), doc.Bytes(), "")
+						source, _, _, err := readSource(t.Context(), doc.Bytes(), "")
 						if err != nil {
 							t.Fatal(err)
 						}
-						candidate, _, err := readSource(t.Context(), doc.Bytes(), "")
+						candidate, _, _, err := readSource(t.Context(), doc.Bytes(), "")
 						if err != nil {
 							t.Fatal(err)
 						}

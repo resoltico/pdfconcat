@@ -227,7 +227,7 @@ func TestExistingDecodedCacheCannotHideIncompleteEncoding(t *testing.T) {
 func TestOutputVerifiesFittedFormEncoding(t *testing.T) {
 	for _, damage := range []bool{false, true} {
 		t.Run(fmt.Sprintf("damage=%v", damage), func(t *testing.T) {
-			s, _, err := readSource(t.Context(), pdffixture.FitMarks("").Bytes(), "")
+			s, _, _, err := readSource(t.Context(), pdffixture.FitMarks("").Bytes(), "")
 			if err != nil {
 				t.Fatal(err)
 			}

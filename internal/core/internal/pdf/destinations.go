@@ -20,6 +20,8 @@ type destination struct {
 	page   int
 	tail   types.Array
 	legacy bool
+	target types.IndirectRef
+	sites  []sourceSite
 }
 
 func readDestinations(c context.Context, s *model.Context) (map[string]destination, error) {
@@ -48,6 +50,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 		if ok && len(a) > 0 {
 			if ref, ok := a[0].(types.IndirectRef); ok {
 				dest.page = index[ref]
+				dest.target = ref
 			}
 			for _, entry := range a[1:] {
 				value, err := s.Dereference(entry)
@@ -72,9 +75,12 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 	if err != nil {
 		return nil, err
 	}
+	base := catalogSite(s)
+	namesSite := base.key("Names").anchor(cat["Names"], sourceOrigins{})
 	seen := map[types.IndirectRef]bool{}
-	var walk func(types.Object, int) error
-	walk = func(o types.Object, depth int) error {
+	var walk func(types.Object, sourceSite, int) error
+	walk = func(o types.Object, site sourceSite, depth int) error {
+		site = site.anchor(o, sourceOrigins{})
 		if err := c.Err(); err != nil {
 			return err
 		}
@@ -101,6 +107,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 		if len(a)%2 != 0 {
 			return refuse(diag.SourceInvalid, "Odd destination name array.")
 		}
+		arraySite := site.key("Names").anchor(d["Names"], sourceOrigins{})
 		for i := 0; i < len(a); i += 2 {
 			name, err := destinationName(s, a[i])
 			if err != nil {
@@ -113,43 +120,61 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			if _, exists := result[name]; exists {
 				return refuse(diag.SourceUnsupported, "Duplicate destination byte-string keys are unsupported.")
 			}
+			dest.sites = []sourceSite{arraySite.index(i + 1)}
 			result[name] = dest
 		}
 		kids, err := s.DereferenceArray(d["Kids"])
 		if err != nil {
 			return err
 		}
-		for _, kid := range kids {
-			if err = walk(kid, depth+1); err != nil {
+		kidSite := site.key("Kids").anchor(d["Kids"], sourceOrigins{})
+		for i, kid := range kids {
+			if err = walk(kid, kidSite.index(i), depth+1); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if err = walk(names["Dests"], 0); err != nil {
+	if err = walk(names["Dests"], namesSite.key("Dests"), 0); err != nil {
 		return nil, err
 	}
 	legacy, err := s.DereferenceDict(cat["Dests"])
 	if err != nil {
 		return nil, err
 	}
-	for name, o := range legacy {
+	legacySite := base.key("Dests").anchor(cat["Dests"], sourceOrigins{})
+	legacyNames := make([]string, 0, len(legacy))
+	for name := range legacy {
+		legacyNames = append(legacyNames, name)
+	}
+	slices.Sort(legacyNames)
+	for _, name := range legacyNames {
+		o := legacy[name]
 		dest, e := decode(o, true)
 		if e != nil {
-			return nil, e
+			return nil, legacySite.name(name).wrap(e)
 		}
 		if existing, ok := result[name]; ok && (existing.page != dest.page || !reflect.DeepEqual(existing.tail, dest.tail)) {
 			return nil, refuse(diag.SourceUnsupported, "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
+		}
+		dest.sites = []sourceSite{legacySite.name(name)}
+		if existing, ok := result[name]; ok {
+			dest.sites = append(existing.sites, dest.sites...)
 		}
 		result[name] = dest
 	}
 	return result, nil
 }
 
-func detachDestinations(c context.Context, s *model.Context, used map[string]bool, first int64) (map[string]destination, bool, error) {
+type destinationRename struct {
+	from, to string
+	sites    []sourceSite
+}
+
+func detachDestinations(c context.Context, s *model.Context, used map[string]bool, first int64, original sourceOrigins) (map[string]destination, []destinationRename, error) {
 	originals, err := readDestinations(c, s)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	names := make([]string, 0, len(originals))
 	for name := range originals {
@@ -158,7 +183,7 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	slices.Sort(names)
 	replacements := map[string]string{}
 	result := map[string]destination{}
-	renamed := false
+	renamed := []destinationRename{}
 	// Reserve every original name before choosing suffixes, avoiding future collisions.
 	reserved := map[string]bool{}
 	for name := range originals {
@@ -178,7 +203,11 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 				}
 			}
 			replacements[name] = chosen
-			renamed = true
+			sites := d.sites
+			if source, ok := original.destinations[name]; ok {
+				sites = source.sites
+			}
+			renamed = append(renamed, destinationRename{from: name, to: chosen, sites: sites})
 		}
 		used[chosen] = true
 		d.page += int(first) - 1
@@ -193,13 +222,17 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	}
 	pages, err := rawPages(c, s)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	pageSet := map[types.IndirectRef]bool{}
 	for _, page := range pages {
 		pageSet[page.ref] = true
 	}
-	err = walkRetained(c, s, func(types.Dict) error { return nil }, func(d types.Dict, key string) (bool, error) {
+	origins, e := sourceOriginsFor(c, s)
+	if e != nil {
+		return nil, nil, e
+	}
+	err = walkRetained(c, s, origins, nil, func(d types.Dict, key string, _ sourceSite, _ sourceSite) (bool, error) {
 		keep, err := localTarget(s, d[key], targetNames, pageSet)
 		if err != nil || !keep {
 			return keep, err
@@ -223,18 +256,18 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 			}
 		}
 		return true, nil
-	}, true)
+	}, nil, true)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	delete(cat, "Dests")
 	nameDict, err := s.DereferenceDict(cat["Names"])
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	delete(nameDict, "Dests")
 	delete(s.Names, "Dests")

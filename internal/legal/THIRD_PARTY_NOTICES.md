@@ -1,6 +1,6 @@
 # Third-party notices
 
-PDFConcat application code is licensed under MPL-2.0; its source code is at
+PDFConcat original code is licensed under AGPL-3.0-only; its source code is at
 <https://github.com/resoltico/pdfconcat>, and `pdfconcat version` prints the
 commit an executable was built from. The executable also contains the following
 components under their own licenses. `pdfconcat licenses` prints this inventory

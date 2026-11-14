@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2026 Ervins Strauhmanis
 """Independent-producer, realistic vector/table/form sources for field tests."""
 from pathlib import Path
@@ -12,7 +12,7 @@ root=a.output_dir;root.mkdir(parents=True,exist_ok=True)
 corpus=Path(__file__).resolve().parents[1]
 pdfmetrics.registerFont(TTFont('FieldNoto',str(corpus.parents[1]/'internal/typeset/fontdata/NotoSans-Regular.ttf')))
 c=canvas.Canvas(str(root/'business-report.pdf'),pagesize=A4,pageCompression=1,invariant=1)
-c.setAuthor('PDFConcat fixture authors');c.setSubject('Fictional corpus material; original content MPL-2.0');c.setCreator('PDFConcat corpus sources / ReportLab 4.4.9')
+c.setAuthor('PDFConcat fixture authors');c.setSubject('Fictional corpus material; original content AGPL-3.0-only');c.setCreator('PDFConcat corpus sources / ReportLab 4.4.9')
 c.setTitle('Field packet: project evidence report')
 def heading(title,sub,width,height):
  c.setFillColorRGB(.10,.18,.28);c.rect(0,height-96,width,96,fill=1,stroke=0)
@@ -45,7 +45,7 @@ c.setFont('FieldNoto',12)
 for i in range(18):c.drawString(36,710-i*28,'Note %02d: verify source text, bookmarks and physical footer placement.'%(i+1))
 footer(3);c.save()
 c=canvas.Canvas(str(root/'approval-form-base.pdf'),pagesize=A4,invariant=1)
-c.setAuthor('PDFConcat fixture authors');c.setSubject('Fictional corpus material; original content MPL-2.0');c.setCreator('PDFConcat corpus sources / ReportLab 4.4.9')
+c.setAuthor('PDFConcat fixture authors');c.setSubject('Fictional corpus material; original content AGPL-3.0-only');c.setCreator('PDFConcat corpus sources / ReportLab 4.4.9')
 c.setTitle('Field packet: review form');c.setFont('Helvetica',18);c.drawString(50,770,'Review approval')
 c.setFont('Helvetica',11);c.drawString(50,720,'Reviewer:')
 c.acroForm.textfield(name='reviewer',value='Field tester',x=140,y=705,width=260,height=28,borderWidth=1)

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Breaking:** original project work now uses AGPL-3.0-only; prior MPL grants remain valid. Separate commercial terms are pending; third-party terms are unchanged.
+- Contributions follow standing terms that also permit Ervins Strauhmanis to license them commercially; pull requests explicitly confirm agreement.
+- Binary releases include corresponding source with vendored modules; the standalone executable prints the full project license and notices.
+
 - **Breaking:** plans require version 5; results, reports and JSON version objects use format 7. Update consumers to the [contracts](docs/PLAN.md).
 - **Breaking:** supported tagged source structure is preserved by default; use `structure: "discard"` for explicit untagged output. Generated meaningful text is tagged.
 - Missing, denied or nonregular plan/source/font inputs are invalid (exit 2); unexpected reads and sources changed after inspection remain failures (exit 1).

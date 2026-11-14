@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: AGPL-3.0-only
 # Self-contained user-scope CLI release installer. Keep this file ASCII for PS 5.1.
 [CmdletBinding(PositionalBinding = $false)]
 param([string]$Version, [string]$InstallDir, [switch]$NoModifyPath, [switch]$Uninstall, [switch]$Help)

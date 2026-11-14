@@ -360,5 +360,4 @@ On Windows, use `go build -o bin/pdfconcat.exe ./cmd/pdfconcat` and run
 and release procedures are in [CONTRIBUTING](CONTRIBUTING.md). The package map
 and execution pipeline are in [ARCHITECTURE](docs/ARCHITECTURE.md).
 
-Application code is [MPL-2.0](LICENSE). Bundled dependencies and fonts retain the
-licenses listed in [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md); `pdfconcat licenses` prints them.
+Original code and documentation use [AGPL-3.0-only](LICENSE). See [licensing, source and contribution terms](PROJECT-NOTICE.md) and the [pending commercial route](LICENSE-COMMERCIAL.md). Third-party terms remain separate; `pdfconcat licenses` prints the project license and [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md).

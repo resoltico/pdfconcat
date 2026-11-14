@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2026 Ervins Strauhmanis
 """Original fictional artwork and image-only PDF; no camera/private metadata."""
 import argparse
@@ -21,6 +21,6 @@ for name,mode,size,title in [('invoice-rgb','RGB',(600,800),'SYNTHETIC INVOICE')
  image.save(a.output_dir/(name+'.png'))
  if mode=='RGB':image.save(a.output_dir/(name+'.jpg'),quality=92,subsampling=0);images.append((a.output_dir/(name+'.jpg'),(600,800)))
  else:images.append((a.output_dir/(name+'.png'),(800,600)))
-c=canvas.Canvas(str(a.output_dir/'scan-invoice.pdf'),pagesize=(600,800),pageCompression=1,invariant=1);c.setTitle('Synthetic invoice and receipt');c.setAuthor('PDFConcat fixture authors');c.setSubject('Original fictional raster artwork; MPL-2.0');c.setCreator('PDFConcat corpus sources / Pillow and ReportLab')
+c=canvas.Canvas(str(a.output_dir/'scan-invoice.pdf'),pagesize=(600,800),pageCompression=1,invariant=1);c.setTitle('Synthetic invoice and receipt');c.setAuthor('PDFConcat fixture authors');c.setSubject('Original fictional raster artwork; AGPL-3.0-only');c.setCreator('PDFConcat corpus sources / Pillow and ReportLab')
 for path,size in images:c.setPageSize(size);c.drawImage(ImageReader(str(path)),0,0,width=size[0],height=size[1]);c.showPage()
 c.save()

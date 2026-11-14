@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 // Package cli adapts argument grammar, process input and presentation to core.
@@ -262,7 +262,7 @@ func Help(command string) string {
 	var b strings.Builder
 	switch command {
 	case "":
-		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n")
+		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n\nCopyright (c) 2026 Ervins Strauhmanis. AGPL-3.0-only; no warranty.\nCopy, modify and redistribute under that license; run pdfconcat licenses for terms.\n")
 		return b.String()
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"

@@ -149,12 +149,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Stage the published installer bytes
-        run: cp install/install.sh install/install.ps1 dist/
+        run: cp install/install.sh install/install.ps1 .tools/SOURCE.tar.gz dist/
       - name: Verify checksums, archive contents, macOS signatures and minimum OS
         run: |
           # All published assets are staged flat, including the exact installer bytes.
           (cd dist && /usr/bin/shasum -a 256 --check --strict checksums.txt)
-          test "$(/usr/bin/grep -c -E '  (install\.(sh|ps1)|pdfconcat_[a-z]+_(amd64|arm64)\.(tar\.gz|zip|cdx\.json))$' dist/checksums.txt)" = 14
+          test "$(/usr/bin/grep -c -E '  (SOURCE\.tar\.gz|install\.(sh|ps1)|pdfconcat_[a-z]+_(amd64|arm64)\.(tar\.gz|zip|cdx\.json))$' dist/checksums.txt)" = 15
           # Each SBOM describes its own executable's platform.
           for sbom in dist/pdfconcat_*.cdx.json; do
             platform=${sbom#dist/pdfconcat_}; platform=${platform%.cdx.json}
@@ -162,7 +162,7 @@ jobs:
             test "$(jq -r '[.components[].purl | capture("goarch=(?<a>[^&]+)&goos=(?<o>[^&]+)") | "\(.o)_\(.a)"] | unique | join(",")' "$sbom")" = "${goos}_${goarch}"
           done
           # Archives hold the program and its license notices, nothing else.
-          expected=$( (echo LICENSE; echo THIRD_PARTY_NOTICES.md; cd internal/legal && /bin/ls licenses/*.txt) | LC_ALL=C sort)
+          expected=$( (echo LICENSE; echo PROJECT-NOTICE.md; echo LICENSE-COMMERCIAL.md; echo THIRD_PARTY_NOTICES.md; cd internal/legal && /bin/ls licenses/*.txt) | LC_ALL=C sort)
           for archive in dist/pdfconcat_*.tar.gz dist/pdfconcat_*.zip; do
             case "$archive" in
               *.zip) members=$(/usr/bin/zipinfo -1 "$archive") program=pdfconcat.exe ;;
@@ -170,6 +170,12 @@ jobs:
             esac
             test "$(printf '%s\n' "$members" | LC_ALL=C sort)" = "$(printf '%s\n%s\n' "$expected" "$program" | LC_ALL=C sort)"
           done
+          # The delivered source builds without fetching linked module source.
+          source_dir=$(/usr/bin/mktemp -d "$RUNNER_TEMP/pdfconcat-source.XXXXXX")
+          /usr/bin/tar -xzf dist/SOURCE.tar.gz -C "$source_dir"
+          (cd "$source_dir/pdfconcat-source" && GOPROXY=off GOSUMDB=off go build -mod=vendor -trimpath -o "$RUNNER_TEMP/pdfconcat-from-source" ./cmd/pdfconcat)
+          /usr/bin/cmp LICENSE "$source_dir/pdfconcat-source/LICENSE"
+          /bin/rm -rf "$source_dir"
           go build -modfile=tools/go.mod -o "$RUNNER_TEMP/govulncheck" golang.org/x/vuln/cmd/govulncheck
           cd dist
           for arch in amd64 arm64; do

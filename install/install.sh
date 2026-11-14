@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: AGPL-3.0-only
 # Self-contained user installer. Shared engine; only this literal block differs.
 # BEGIN PRODUCT SETTINGS
 product_name='PDFConcat'

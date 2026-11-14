@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: AGPL-3.0-only
 # Native exact-release installer checks. All installs use temporary directories.
 # Registry cases run only in CI and restore raw value, kind and absence exactly.
 param([Parameter(Mandatory = $true)][string]$Dist, [switch]$RunInCurrentShell)
@@ -379,7 +379,7 @@ try {
         Check 'installed executable runs' ((& $exe --version) -match '^pdfconcat ')
         # Preserve product-specific native smoke: Windows resources and an actual PDF.
         $info = (Get-Item -LiteralPath $exe).VersionInfo
-        Check 'Windows version resources exist' ($info.ProductName -eq 'PDFConcat' -and $info.LegalCopyright -match 'MPL-2.0' -and [bool]$info.FileVersion)
+        Check 'Windows version resources exist' ($info.ProductName -eq 'PDFConcat' -and $info.LegalCopyright -match 'AGPL-3.0-only' -and [bool]$info.FileVersion)
         $pdf = Join-Path $work "$shellName-blank.pdf"
         & $exe build -o $pdf --blank --fit-to A4 | Out-Null
         Check 'installed executable builds a PDF' ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $pdf))

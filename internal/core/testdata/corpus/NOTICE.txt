@@ -1,5 +1,5 @@
 Original fictional document content, artwork and authoring sources:
-Copyright (c) 2026 Ervins Strauhmanis. Mozilla Public License 2.0;
+Copyright (c) 2026 Ervins Strauhmanis. GNU Affero General Public License version 3 only (AGPL-3.0-only);
 see the repository LICENSE. No customer documents or downloaded imagery.
 
 Embedded/generated Noto Sans: Copyright 2022 The Noto Project Authors.

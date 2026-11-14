@@ -62,9 +62,9 @@ jobs:
         run: |
           set -euo pipefail
           cd release
-          assets=( pdfconcat_*.tar.gz pdfconcat_*.zip pdfconcat_*.cdx.json install.sh install.ps1 )
-          # Six archives, six executable SBOMs and two standalone installers.
-          [[ "${#assets[@]}" -eq 14 ]] || { echo "Expected fourteen qualified assets" >&2; exit 1; }
+          assets=( SOURCE.tar.gz pdfconcat_*.tar.gz pdfconcat_*.zip pdfconcat_*.cdx.json install.sh install.ps1 )
+          # Six binary archives, one source archive, six SBOMs and two installers.
+          [[ "${#assets[@]}" -eq 15 ]] || { echo "Expected fifteen qualified assets" >&2; exit 1; }
           printf '%s\n' "${assets[@]}" | LC_ALL=C sort > "$RUNNER_TEMP/qualified-asset-names"
           awk '{print $2}' checksums.txt | sed 's/^\*//' | LC_ALL=C sort > "$RUNNER_TEMP/manifest-asset-names"
           cmp "$RUNNER_TEMP/qualified-asset-names" "$RUNNER_TEMP/manifest-asset-names"

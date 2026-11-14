@@ -104,7 +104,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 				}
 				t.Run(fmt.Sprintf("topOutside%v/rotate%d/fit%v/unit%g", topOutside, rotation, fit, sourceUnit), func(t *testing.T) {
 					fixture := pdffixture.WithBoxes("SOURCE", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[10 20 330 440]", Crop: crop, Rotate: strconv.Itoa(rotation), UserUnit: strconv.FormatFloat(sourceUnit, 'f', -1, 64)})
-					s, _, err := readSource(t.Context(), fixture.Bytes())
+					s, _, err := readSource(t.Context(), fixture.Bytes(), "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -149,7 +149,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 					if err != nil {
 						t.Fatal(err)
 					}
-					s, _, err = readSource(t.Context(), baselineBytes)
+					s, _, err = readSource(t.Context(), baselineBytes, "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -278,7 +278,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 
 func TestFooterCopiesInheritedResourcesAndPreservesSharedContent(t *testing.T) {
 	fixture := pdffixture.Pages("SHARED", 2)
-	s, _, err := readSource(t.Context(), fixture.Bytes())
+	s, _, err := readSource(t.Context(), fixture.Bytes(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 
 func TestFooterOnLargeSourceDoesNotImposeGeneratedCanvasLimit(t *testing.T) {
 	fixture := pdffixture.WithBoxes("LARGE", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 50000 50000]"})
-	s, _, err := readSource(t.Context(), fixture.Bytes())
+	s, _, err := readSource(t.Context(), fixture.Bytes(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 			var err error
 			if tc.kind == "source" {
 				fixture := pdffixture.WithBoxes("VIEW", pdffixture.PageBoxes{Media: "[0 0 612 792]"}, pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[10 20 330 440]", Crop: "[0 30 310 430]", Rotate: "90", UserUnit: "2"})
-				s, _, err = readSource(t.Context(), fixture.Bytes())
+				s, _, err = readSource(t.Context(), fixture.Bytes(), "")
 				if err != nil {
 					t.Fatal(err)
 				}

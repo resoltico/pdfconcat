@@ -7,71 +7,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 )
 
 func numberTree(c context.Context, s *model.Context, o types.Object) (map[int]types.Object, error) {
+	entries, err := readNumberTree(c, s, o, diag.PDFLocation{Object: s.Root.ObjectNumber.Value(), Path: "NumberTree"})
 	out := map[int]types.Object{}
-	seen := map[int]bool{}
-	var walk func(types.Object, int) error
-	walk = func(o types.Object, depth int) error {
-		if err := c.Err(); err != nil {
-			return err
-		}
-		if depth > 256 {
-			return errors.New("number tree nesting exceeds 256")
-		}
-		if ref, ok := o.(types.IndirectRef); ok {
-			n := ref.ObjectNumber.Value()
-			if seen[n] {
-				return errors.New("cyclic number tree")
-			}
-			seen[n] = true
-		}
-		d, err := s.DereferenceDict(o)
-		if err != nil {
-			return err
-		}
-		if d == nil {
-			return nil
-		}
-		nums, err := s.DereferenceArray(d["Nums"])
-		if err != nil {
-			return err
-		}
-		if len(nums)%2 != 0 {
-			return errors.New("odd number tree Nums")
-		}
-		for i := 0; i < len(nums); i += 2 {
-			n, e := s.DereferenceInteger(nums[i])
-			if e != nil || n == nil || n.Value() < 0 {
-				return errors.New("invalid number tree index")
-			}
-			if _, found := out[n.Value()]; found {
-				return errors.New("duplicate number tree index")
-			}
-			out[n.Value()] = nums[i+1]
-		}
-		kids, err := s.DereferenceArray(d["Kids"])
-		if err != nil {
-			return err
-		}
-		for _, kid := range kids {
-			if err = walk(kid, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
+	for key, entry := range entries {
+		out[key] = entry.value
 	}
-	err := walk(o, 0)
 	return out, err
 }
 
 // validateStructure verifies both directions of source semantic ownership before
 // selection or fitting can discard evidence of a malformed original tree.
 func validateStructure(c context.Context, s *model.Context) error {
+	return validateStructureGraph(c, s, nil)
+}
+
+func validateStructureGraph(c context.Context, s *model.Context, normal *structureNormalization) (err error) {
+	loc := diag.PDFLocation{Object: s.Root.ObjectNumber.Value(), Path: "Catalog.StructTreeRoot"}
+	defer func() { err = structureAt(err, loc) }()
 	cat, err := s.Catalog()
 	if err != nil {
 		return err
@@ -89,32 +49,60 @@ func validateStructure(c context.Context, s *model.Context) error {
 			return errors.New("marked source lacks a structure tree")
 		}
 		return walkObjects(c, s, func(d types.Dict) error {
-			if d["StructParent"] != nil || d["StructParents"] != nil {
-				return errors.New("source has semantic ownership without a structure tree")
+			for _, key := range []string{"StructParent", "StructParents"} {
+				value, e := s.Dereference(d[key])
+				if e != nil {
+					return e
+				}
+				if value != nil {
+					return errors.New("source has semantic ownership without a structure tree")
+				}
 			}
 			return nil
 		})
 	}
+	if ref, ok := cat["StructTreeRoot"].(types.IndirectRef); ok {
+		loc.Object = ref.ObjectNumber.Value()
+	}
+	rootObject := loc.Object
+	loc.Path = "StructTreeRoot.Namespaces"
 	if err = validateNamespaces(c, s, root); err != nil {
 		return err
 	}
+	loc.Path = "StructTreeRoot.RoleMap/ClassMap"
 	if err = validateStructureBindings(c, s, root); err != nil {
 		return err
 	}
 	if err = validateRoleMap(s, root); err != nil {
 		return err
 	}
+	loc.Path = "StructTreeRoot.IDTree"
 	idTree, err := structureIDTree(c, s, root["IDTree"])
 	if err != nil {
 		return err
 	}
+	loc.Path = "StructTreeRoot.K/MarkedContent"
 	marked, err := markedContent(c, s)
 	if err != nil {
 		return err
 	}
-	inverse, err := numberTree(c, s, root["ParentTree"])
+	loc.Path = "StructTreeRoot.ParentTree"
+	entries, err := readNumberTree(c, s, root["ParentTree"], loc)
 	if err != nil {
 		return err
+	}
+	inverse := map[int]types.Object{}
+	for key, entry := range entries {
+		inverse[key] = entry.value
+	}
+	claims, err := structureClaims(c, s)
+	if err != nil {
+		return err
+	}
+	for key, claim := range claims {
+		if _, ok := inverse[key]; !ok {
+			return structureAt(errors.New("structure owner key is absent from ParentTree"), claim)
+		}
 	}
 	pages, err := rawPages(c, s)
 	if err != nil {
@@ -163,6 +151,11 @@ func validateStructure(c context.Context, s *model.Context) error {
 		if v == nil {
 			return nil
 		}
+
+		if ref, ok := o.(types.IndirectRef); ok {
+			loc.Object = ref.ObjectNumber.Value()
+		}
+		loc.Path = "StructTreeRoot.K"
 		var d types.Dict
 		var mcid *types.Integer
 		var owner types.Object
@@ -176,6 +169,9 @@ func validateStructure(c context.Context, s *model.Context) error {
 				page = d["Pg"]
 			}
 			if d["S"] != nil {
+				if kind, e := nameValue(s, d["Type"]); e != nil || (kind != "" && kind != "StructElem") {
+					return errors.New("structure element Type must be StructElem")
+				}
 				ref, ok := o.(types.IndirectRef)
 				if !ok {
 					return errors.New("structure element must be indirect")
@@ -254,6 +250,8 @@ func validateStructure(c context.Context, s *model.Context) error {
 		if e != nil || key == nil || key.Value() < 0 {
 			return errors.New("structure owner lacks valid parent-tree key")
 		}
+		loc.Object = ref.ObjectNumber.Value()
+		loc.Path = fmt.Sprintf("Object.%s(key=%d); parent element %s", keyName, key.Value(), parent)
 		entry := inverse[key.Value()]
 		index := -1
 		if mcid != nil {
@@ -285,19 +283,37 @@ func validateStructure(c context.Context, s *model.Context) error {
 	if err = walk(root["K"], cat["StructTreeRoot"], nil, 0); err != nil {
 		return err
 	}
-	for key, value := range inverse {
+	keys := make([]int, 0, len(inverse))
+	for key := range inverse {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		value := inverse[key]
+		loc = entries[key].location
 		v, e := s.Dereference(value)
 		if e != nil {
 			return e
 		}
 		if a, ok := v.(types.Array); ok {
 			for i, parent := range a {
-				if parent != nil && !sameRef(used[key][i], parent) {
+				resolved, e := s.Dereference(parent)
+				if e != nil {
+					return e
+				}
+				if resolved != nil && !sameRef(used[key][i], parent) {
 					return errors.New("parent tree contains unreferenced semantic content")
 				}
 			}
-		} else if value != nil && !sameRef(used[key][-1], value) {
-			return errors.New("parent tree contains unreferenced object ownership")
+		} else if v != nil && !sameRef(used[key][-1], value) {
+			ref, ok := value.(types.IndirectRef)
+			if normal == nil || claims[key].Object != 0 || !ok || !seen[ref.ObjectNumber.Value()] {
+				return errors.New("parent tree contains unreferenced object ownership")
+			}
+			if normal.stale == nil {
+				normal.stale = map[int]numberEntry{}
+			}
+			normal.stale[key] = entries[key]
 		}
 	}
 	if err = structureElements(c, s, root["K"], nil, func(d types.Dict, _ types.Object) error {
@@ -315,6 +331,11 @@ func validateStructure(c context.Context, s *model.Context) error {
 	}, 0); err != nil {
 		return err
 	}
+	loc = diag.PDFLocation{Object: rootObject, Path: "StructTreeRoot.IDTree"}
+	if normal != nil && root["IDTree"] == nil && len(ids) > 0 {
+		normal.ids = ids
+		idTree = ids
+	}
 	if len(ids) != len(idTree) {
 		return errors.New("structure IDs and ID tree differ")
 	}
@@ -323,6 +344,7 @@ func validateStructure(c context.Context, s *model.Context) error {
 			return errors.New("structure ID tree points to the wrong element")
 		}
 	}
+	loc.Path = "StructTreeRoot.K.Headers"
 	return validateTableHeaders(c, s, root)
 }
 

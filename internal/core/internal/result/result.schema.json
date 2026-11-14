@@ -187,6 +187,7 @@
                   ]
                 },
                 "coverage": {
+                  "description": "Observed retained semantic coverage, not PDF/UA certification. Unbound MCIDs without an actual semantic owner do not provide coverage; meaningful untagged content remains uncovered. Null means unresolved.",
                   "anyOf": [
                     {
                       "type": "null"

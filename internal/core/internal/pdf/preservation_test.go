@@ -177,7 +177,7 @@ func TestSourceParsingRejectsDuplicateKeysBeforeCompatibilityValidation(t *testi
 	if err = api.ValidateContext(t.Context(), relaxed); err != nil {
 		t.Fatalf("control did not isolate parsing: %v", err)
 	}
-	_, _, ds := Inspect(t.Context(), data, nil)
+	_, _, ds := Inspect(t.Context(), data, "", nil)
 	if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || ds[0].PDFLocation == nil || ds[0].PDFLocation.Object != 5 {
 		t.Fatalf("strict parsing was bypassed: %+v", ds)
 	}

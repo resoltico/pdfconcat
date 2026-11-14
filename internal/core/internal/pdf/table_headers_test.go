@@ -54,7 +54,7 @@ func TestTableHeaderSelectionsAndSerializedBindings(t *testing.T) {
 					if fit {
 						size = &packet.Size{Width: 300, Height: 400}
 					}
-					_, slots, ds := Inspect(t.Context(), d.Bytes(), []SelectionRequest{{Item: "invalid", Pages: []packet.PageRange{{First: 3, Last: 3}}, FitTo: size}})
+					_, slots, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "invalid", Pages: []packet.PageRange{{First: 3, Last: 3}}, FitTo: size}})
 					status, _ := diag.Outcome(ds)
 					if status != "invalid" || slots[0] != nil {
 						t.Fatalf("dangling selection accepted: %+v", ds)
@@ -205,7 +205,7 @@ func TestMalformedOriginalTableHeadersCannotHideBehindSelection(t *testing.T) {
 				case "cycle":
 					d.Objs[24] = []byte("[25 0 R]")
 				}
-				_, _, ds := Inspect(t.Context(), d.Bytes(), []SelectionRequest{{Item: "unrelated", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
+				_, _, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "unrelated", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
 				status, _ := diag.Outcome(ds)
 				if status != "invalid" {
 					t.Fatalf("malformed original hidden: %+v", ds)

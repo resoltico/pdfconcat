@@ -81,7 +81,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			}
 			// Inspection already reported source findings; re-admission enforces the
 			// same policy against the bytes just checked above.
-			s, _, err = readSource(c, data)
+			s, _, err = readSource(c, data, a.Structure)
 			if err != nil {
 				return result, err
 			}

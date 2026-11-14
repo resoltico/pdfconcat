@@ -24,6 +24,7 @@ func resolvePolicies(a pdf.Assembly, predict bool) []diag.Diagnostic {
 		}
 		if a.Structure != packet.StructureDiscard && p.Occurrence.Facts.HasUncoveredContent {
 			add(diag.SourceStructurePartial, "Retained source content has incomplete structural coverage; preservation does not invent missing semantics.")
+			ds[len(ds)-1].PDFLocation = p.Occurrence.Facts.UncoveredLocation
 		}
 		if f.HasFields {
 			if predict && i > 0 {

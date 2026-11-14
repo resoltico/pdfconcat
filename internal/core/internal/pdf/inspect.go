@@ -31,6 +31,8 @@ type OccurrenceFacts struct {
 	OutlineDepth              int
 	StructureCoverage         string
 	HasUncoveredContent       bool
+	UncoveredLocation         *diag.PDFLocation
+	UnboundMCIDLocation       *diag.PDFLocation
 }
 
 // SourceFacts retains immutable whole-file identity and policy facts.
@@ -89,6 +91,11 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 		d.Message = "The PDF backend failed unexpectedly."
 		d.Detail = strings.ToValidUTF8(err.Error(), "�")
 	}
+	var semantic *structureIntegrityError
+	if d.PDFLocation == nil && errors.As(err, &semantic) {
+		loc := semantic.location
+		d.PDFLocation = &loc
+	}
 	var attributed *model.ValidationError
 	if d.PDFLocation == nil && errors.As(err, &attributed) && attributed.ObjectNumber() > 0 {
 		d.PDFLocation = &diag.PDFLocation{Object: attributed.ObjectNumber()}
@@ -100,7 +107,7 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 	return d
 }
 
-func readSource(c context.Context, data []byte) (s *model.Context, ds []diag.Diagnostic, err error) {
+func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (s *model.Context, ds []diag.Diagnostic, err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.SourceProcessingFailed, "The PDF backend failed unexpectedly.", fmt.Errorf("%v", value))
@@ -123,6 +130,22 @@ func readSource(c context.Context, data []byte) (s *model.Context, ds []diag.Dia
 	}
 	if err != nil {
 		return s, ds, err
+	}
+	pages, e := rawPages(c, s)
+	if e != nil {
+		return s, ds, e
+	}
+	s.PageCount = len(pages)
+	if _, e = capturePageContent(c, s); e != nil {
+		return s, ds, e
+	}
+	if e = originalSignatureChecks(c, s); e != nil {
+		return s, ds, e
+	}
+	findings, e := admitSourceStructure(c, s, policy)
+	ds = append(ds, findings...)
+	if e != nil {
+		return s, ds, pdfFailure(diag.SourceInvalid, "The declared source structure cannot be preserved. Use structure: \"discard\" for untagged output, obtain a reviewed repair, or deliver the original separately.", e)
 	}
 	if err = checkDocument(c, s); err != nil {
 		return s, ds, err
@@ -353,53 +376,7 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 // walkObjects visits direct containers in all materialized indirect objects once.
 // Indirect links are handled by the outer xref loop, avoiding graph recursion.
 func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) error) error {
-	var walk func(types.Object, int) error
-	walk = func(o types.Object, depth int) error {
-		if depth > 128 {
-			return refuse(diag.SourceUnsupported, "Direct object nesting exceeds 128.")
-		}
-		switch v := o.(type) {
-		case types.Dict:
-			if err := visit(v); err != nil {
-				return err
-			}
-			for _, child := range v {
-				if err := walk(child, depth+1); err != nil {
-					return err
-				}
-			}
-		case types.StreamDict:
-			return walk(v.Dict, depth+1)
-		case types.Name:
-			decoded, err := types.DecodeName(string(v))
-			if err == nil && decoded != string(v) {
-				return refuse(diag.SourceUnsupported, "Unsupported literal-hash name identity; upstream may decode it twice.")
-			}
-		case types.Array:
-			for _, child := range v {
-				if err := walk(child, depth+1); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	for n, e := range s.Table {
-		if err := c.Err(); err != nil {
-			return err
-		}
-		if e == nil || e.Free {
-			continue
-		}
-		o, err := s.Dereference(types.IndirectRef{ObjectNumber: types.Integer(n), GenerationNumber: types.Integer(generation(e))})
-		if err != nil {
-			return err
-		}
-		if err = walk(o, 0); err != nil {
-			return err
-		}
-	}
-	return nil
+	return objectLocations(c, s, true, func(d types.Dict, _ diag.PDFLocation) error { return visit(d) })
 }
 
 func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnostic, error) {
@@ -419,6 +396,8 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	}
 	facts.StructureCoverage = marked.coverage()
 	facts.HasUncoveredContent = !marked.complete
+	facts.UncoveredLocation = marked.uncovered
+	facts.UnboundMCIDLocation = marked.unboundMCID
 
 	var ds []diag.Diagnostic
 	add := func(code diag.Code, message string) {

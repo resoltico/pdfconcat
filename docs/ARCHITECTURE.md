@@ -96,7 +96,11 @@ contents page count are known. Padding has no declared item index.
 1. Admission resolves roles and acquires/decodes a plan or direct items.
 2. Inspection loads fonts and checks text, then inspects distinct sources with
    at most `GOMAXPROCS` workers. Inspection findings are merged in first-use order;
-   final results apply the shared [diagnostic priority](CLI.md#output), preserving
+   one global structure policy is passed through grouped inspection and assembly
+   re-admission, rather than stored independently on occurrences. Original source
+   security/page checks precede semantic detachment or narrowly validated index
+   normalization. Owner-sensitive coverage retains an uncovered-content witness.
+   Final results apply the shared [diagnostic priority](CLI.md#output), preserving
    stage/first-use order within peers.
 3. Composition prepares contents, resolves physical layout, checks compatibility
    and footers, and lays out generated text.

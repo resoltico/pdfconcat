@@ -22,9 +22,10 @@ type inspection struct {
 	diagnostics []diag.Diagnostic
 }
 type sourceUse struct {
-	path     string
-	leaves   []int
-	requests []pdf.SelectionRequest
+	structure packet.StructurePolicy
+	path      string
+	leaves    []int
+	requests  []pdf.SelectionRequest
 }
 type sourceInspection struct {
 	file        *pdf.SourceFacts
@@ -93,7 +94,7 @@ func inspectSource(ctx context.Context, use sourceUse) sourceInspection {
 		d.Items = items
 		return sourceInspection{diagnostics: []diag.Diagnostic{d}}
 	}
-	facts, views, ds := pdf.Inspect(ctx, data, use.requests)
+	facts, views, ds := pdf.Inspect(ctx, data, use.structure, use.requests)
 	for i := range ds {
 		ds[i].File = use.path
 		if len(ds[i].Items) == 0 {
@@ -113,10 +114,10 @@ func sourceUses(p packet.Plan) []sourceUse {
 		if !ok {
 			slot = len(uses)
 			index[item.Source] = slot
-			uses = append(uses, sourceUse{path: item.Source})
+			uses = append(uses, sourceUse{path: item.Source, structure: p.Structure})
 		}
 		uses[slot].leaves = append(uses[slot].leaves, leafIndex)
-		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{FitTo: p.FitTo, Structure: p.Structure, Item: item.Ref, Pages: item.Selection, MeasureNumbers: p.PageNumbers != nil && p.FitTo == nil && p.PageNumbers.Eligible(item.Kind, item.NumberingEnabled)})
+		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{FitTo: p.FitTo, Item: item.Ref, Pages: item.Selection, MeasureNumbers: p.PageNumbers != nil && p.FitTo == nil && p.PageNumbers.Eligible(item.Kind, item.NumberingEnabled)})
 	}
 	return uses
 }

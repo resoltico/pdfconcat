@@ -6,16 +6,20 @@ package pdf
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 )
 
 type markedFacts struct {
-	complete bool
-	covered  bool
-	ids      map[int]map[int]bool
+	uncovered   *diag.PDFLocation
+	unboundMCID *diag.PDFLocation
+	complete    bool
+	covered     bool
+	ids         map[int]map[int]bool
 }
 type markedScope struct{ artifact, semantic bool }
 
@@ -37,7 +41,11 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 	if err != nil {
 		return facts, err
 	}
-	objectOwned := func(d types.Dict) (bool, error) {
+	objectOwned := func(d types.Dict, loc diag.PDFLocation) (owned bool, err error) {
+		defer func() { err = structureAt(err, loc) }()
+		if root == nil {
+			return false, nil
+		}
 		key, e := s.DereferenceInteger(d["StructParent"])
 		if e != nil {
 			return false, e
@@ -54,9 +62,40 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 		}
 		return true, nil
 	}
+	currentPage := 0
+	uncovered := func(owner types.IndirectRef, path string) {
+		facts.complete = false
+		if facts.uncovered == nil {
+			facts.uncovered = &diag.PDFLocation{Object: owner.ObjectNumber.Value(), Page: currentPage, Path: path}
+		}
+	}
+	namespace := func(owner types.IndirectRef) (bool, error) {
+		if root == nil {
+			return false, nil
+		}
+		v, e := s.Dereference(owner)
+		if e != nil {
+			return false, e
+		}
+		var d types.Dict
+		switch x := v.(type) {
+		case types.Dict:
+			d = x
+		case types.StreamDict:
+			d = x.Dict
+		}
+		key, e := s.DereferenceInteger(d["StructParents"])
+		return key != nil, e
+	}
 	active := map[int]bool{}
 	var scan func([]byte, types.Dict, types.IndirectRef, markedScope, int) error
-	scan = func(data []byte, resources types.Dict, owner types.IndirectRef, inherited markedScope, depth int) error {
+	scan = func(data []byte, resources types.Dict, owner types.IndirectRef, inherited markedScope, depth int) (err error) {
+		loc := diag.PDFLocation{Object: owner.ObjectNumber.Value(), Page: currentPage, Path: "Content"}
+		defer func() { err = structureAt(err, loc) }()
+		semanticNamespace, err := namespace(owner)
+		if err != nil {
+			return err
+		}
 		if depth > 256 {
 			return errors.New("marked-content Form nesting exceeds 256")
 		}
@@ -103,6 +142,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 			}
 			op := rest[:n]
 			rest = rest[n:]
+			loc.Path = "Content." + op
 			switch op {
 			case "BMC", "BDC":
 				if len(args) < 1 {
@@ -114,7 +154,20 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				}
 				stack = append(stack, scope)
 				scope.artifact = scope.artifact || tag == "Artifact"
-				if op == "BDC" {
+				if op == "BDC" && !semanticNamespace && len(args) == 2 && facts.unboundMCID == nil {
+					property := args[1]
+					if name, ok := property.(types.Name); ok {
+						if props, e := s.DereferenceDict(resources["Properties"]); e == nil {
+							property = props[string(name)]
+						}
+					}
+					if properties, e := s.DereferenceDict(property); e == nil && properties["MCID"] != nil {
+						p := loc
+						p.Path = "Content.BDC.MCID"
+						facts.unboundMCID = &p
+					}
+				}
+				if op == "BDC" && semanticNamespace {
 					if len(args) != 2 {
 						return errors.New("BDC lacks property list")
 					}
@@ -130,6 +183,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 					if e != nil || dict == nil {
 						return errors.New("BDC property list is invalid")
 					}
+					loc.Path = "Content.BDC.MCID"
 					if dict["MCID"] != nil {
 						id, e := s.DereferenceInteger(dict["MCID"])
 						if e != nil || id == nil || id.Value() < 0 || id.Value() > 1_000_000 {
@@ -178,7 +232,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				stack = stack[:len(stack)-1]
 			case "BI":
 				if !scope.artifact && !scope.semantic {
-					facts.complete = false
+					uncovered(owner, "Content."+op)
 				}
 				budget := int64(len(rest))*32 + 1
 				var err error
@@ -214,7 +268,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				if e != nil {
 					return e
 				}
-				owned, e := objectOwned(stream.Dict)
+				owned, e := objectOwned(stream.Dict, diag.PDFLocation{Object: ref.ObjectNumber.Value(), Page: currentPage, Path: "XObject.StructParent"})
 				if e != nil {
 					return e
 				}
@@ -238,10 +292,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 					if e != nil {
 						return e
 					}
-					childOwner := owner
-					if stream.Dict["StructParents"] != nil {
-						childOwner = ref
-					}
+					childOwner := ref
 					childScope := scope
 					childScope.semantic = childScope.semantic || owned
 					if e = scan(content, res, childOwner, childScope, depth+1); e != nil {
@@ -249,11 +300,11 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 					}
 					delete(active, number)
 				} else if !scope.artifact && !scope.semantic && !owned {
-					facts.complete = false
+					uncovered(owner, "Content."+op)
 				}
 			case "Tj", "TJ", "'", "\"", "S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "sh":
 				if !scope.artifact && !scope.semantic {
-					facts.complete = false
+					uncovered(owner, "Content."+op)
 				}
 			}
 			args = args[:0]
@@ -268,6 +319,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 		return facts, err
 	}
 	for i, page := range pages {
+		currentPage = i + 1
 		data, e := joinedPageContent(c, s, contents[i], i+1)
 		if e != nil {
 			return facts, e
@@ -279,7 +331,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 		if e != nil {
 			return facts, e
 		}
-		for _, object := range annotations {
+		for annotationIndex, object := range annotations {
 			annotation, e := s.DereferenceDict(object)
 			if e != nil {
 				return facts, e
@@ -287,7 +339,12 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 			if annotation == nil {
 				continue
 			}
-			owned, e := objectOwned(annotation)
+			loc := diag.PDFLocation{Object: page.ref.ObjectNumber.Value(), Page: currentPage, Path: fmt.Sprintf("Page.Annots[%d].StructParent", annotationIndex)}
+			if ref, ok := object.(types.IndirectRef); ok {
+				loc.Object = ref.ObjectNumber.Value()
+				loc.Path = "Annotation.StructParent"
+			}
+			owned, e := objectOwned(annotation, loc)
 			if e != nil {
 				return facts, e
 			}
@@ -296,7 +353,11 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				if e != nil {
 					return facts, e
 				}
-				owned, e = objectOwned(parent)
+				loc.Path = "Annotation.Parent.StructParent"
+				if ref, ok := annotation["Parent"].(types.IndirectRef); ok {
+					loc.Object = ref.ObjectNumber.Value()
+				}
+				owned, e = objectOwned(parent, loc)
 				if e != nil {
 					return facts, e
 				}
@@ -304,7 +365,11 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 			if owned {
 				facts.covered = true
 			} else {
-				facts.complete = false
+				if ref, ok := object.(types.IndirectRef); ok {
+					uncovered(ref, "Annotation.StructParent")
+				} else {
+					uncovered(page.ref, "Page.Annots")
+				}
 			}
 		}
 	}

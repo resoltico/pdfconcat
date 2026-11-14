@@ -19,13 +19,12 @@ type SelectionRequest struct {
 	Item           string
 	Pages          []packet.PageRange
 	MeasureNumbers bool
-	Structure      packet.StructurePolicy
 	FitTo          *packet.Size
 }
 
 // Inspect reads and validates a whole source once. Each ephemeral view
 // owns its containers; stream bytes stay immutable and shared during inspection.
-func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
+func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
 	occurrences = make([]*OccurrenceFacts, len(requests))
 	defer func() {
 		facts.SHA256 = sha256.Sum256(data)
@@ -36,7 +35,7 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			ds = append(ds, d)
 		}
 	}()
-	s, findings, err := readSource(c, data)
+	s, findings, err := readSource(c, data, policy)
 	ds = append(ds, findings...)
 	if err != nil {
 		if s != nil && s.XRefTable != nil {
@@ -47,19 +46,30 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 		}
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
-	if len(requests) > 0 && requests[0].Structure == packet.StructureDiscard {
-		root, e := structureRoot(s)
-		if e != nil {
-			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
-		}
-		if root != nil {
-			ds = append(ds, diag.New(diag.SourceStructureRemoved, "Source structure is discarded by explicit policy."))
-		}
-	}
 	facts, findings, err = observe(c, s)
 	ds = append(ds, findings...)
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
+	}
+	if facts.UnboundMCIDLocation != nil {
+		reported := false
+		for _, d := range ds {
+			if d.Code == diag.SourceStructureRemoved || d.Code == diag.SourceStructureOrphaned {
+				reported = true
+				break
+			}
+		}
+		if !reported {
+			code := diag.SourceStructureOrphaned
+			message := "Unbound marked-content IDs supply no hierarchy; meaningful source content remains untagged."
+			if policy == packet.StructureDiscard {
+				code = diag.SourceStructureRemoved
+				message = "Unbound source marked-content IDs are ignored by explicit structure discard; streams are unchanged."
+			}
+			d := diag.New(code, message)
+			d.PDFLocation = facts.UnboundMCIDLocation
+			ds = append(ds, d)
+		}
 	}
 	var sourceGeometry []pageGeometry
 	for index, request := range requests {
@@ -95,6 +105,19 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			continue
 		}
 		selected.Selection = ranges
+		if selected.UncoveredLocation != nil && selected.UncoveredLocation.Page > 0 {
+			loc := *selected.UncoveredLocation
+			index := loc.Page
+			for _, span := range ranges {
+				count := span.Last - span.First + 1
+				if index <= count {
+					loc.Page = span.First + index - 1
+					break
+				}
+				index -= count
+			}
+			selected.UncoveredLocation = &loc
+		}
 		selected.OutlineDepth, err = outlineDepth(c, view)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
@@ -119,7 +142,7 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			}
 		}
 
-		if request.Structure != packet.StructureDiscard && !facts.HasWidgets {
+		if policy != packet.StructureDiscard && !facts.HasWidgets {
 			root, e := structureRoot(view)
 			if e == nil && root != nil {
 				e = pruneStructure(c, view)

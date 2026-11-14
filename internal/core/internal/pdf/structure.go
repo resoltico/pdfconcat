@@ -102,7 +102,8 @@ func structureRoot(s *model.Context) (types.Dict, error) {
 }
 
 // pruneStructure removes omitted semantic content before backend graph import.
-func pruneStructure(c context.Context, s *model.Context) error {
+func pruneStructure(c context.Context, s *model.Context) (err error) {
+	defer func() { err = structureOperationError(s, "StructTreeRoot.K/Selection/Headers", err) }()
 	root, err := structureRoot(s)
 	if err != nil || root == nil {
 		return err
@@ -142,7 +143,10 @@ func pruneStructure(c context.Context, s *model.Context) error {
 
 // fitStructure redirects page-owned marked content into the new Form's stream
 // namespace. Existing nested Form ownership remains attached to that Form.
-func fitStructure(c context.Context, s *model.Context, page types.IndirectRef, form types.IndirectRef, m matrix.Matrix) error {
+func fitStructure(c context.Context, s *model.Context, page types.IndirectRef, form types.IndirectRef, m matrix.Matrix) (err error) {
+	defer func() {
+		err = structureOperationError(s, fmt.Sprintf("StructTreeRoot.K/Attributes/MCID(page object %d)", page.ObjectNumber.Value()), err)
+	}()
 	root, err := structureRoot(s)
 	if err != nil || root == nil {
 		return err
@@ -513,6 +517,7 @@ func discardStructure(c context.Context, s *model.Context) error {
 	}
 	delete(cat, "StructTreeRoot")
 	delete(cat, "MarkInfo")
+	s.Tagged = false
 	return walkObjects(c, s, func(d types.Dict) error { delete(d, "StructParents"); delete(d, "StructParent"); return nil })
 }
 

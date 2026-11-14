@@ -50,7 +50,7 @@ func silentLibraryBuild(t *testing.T) error {
 	if err = source.WriteFile(path); err != nil {
 		return err
 	}
-	facts, _, ds := pdf.Inspect(t.Context(), source.Bytes(), nil)
+	facts, _, ds := pdf.Inspect(t.Context(), source.Bytes(), "", nil)
 	if status, _ := diag.Outcome(ds); status != "ok" {
 		return fmt.Errorf("inspection: %+v", ds)
 	}

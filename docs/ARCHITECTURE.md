@@ -80,7 +80,10 @@ Pointer or an `argv:N` operand reference.
 Packet enums define their wire values once. A `Setting[T]` stores a value and
 the ref that declared it, so explicit zero/empty settings survive layering.
 `Font{}` identifies the bundled font. The plan decoder resolves directory scopes
-into absolute paths.
+into absolute paths. Contents uses the root `PageDefaults.Text.Font` setting,
+including its declaration provenance; all its heading, row and label measurements
+use that font. Its other layout rules remain owned by compose, and page-number
+overlays retain the bundled font.
 
 `packet.NewPlan` walks the item tree once, caching item order, section ancestry
 and traversal events. Resolution consumes that traversal after source shapes and

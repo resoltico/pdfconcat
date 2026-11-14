@@ -61,10 +61,13 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 			register(p.Page.Text.Font.Value, p.Page.Text.Value.Value, p.Page.Text.Value.From, p.Page.Text.Font.From, p.Ref)
 		}
 		if p.Contents != nil {
-			register(packet.Font{}, p.Contents.Title, p.Ref)
+			font := j.PageDefaults.Text.Font
+			register(font.Value, p.Contents.Title, p.Ref, font.From)
 			for _, section := range sections {
-				register(packet.Font{}, section.Title, section.Item+"/title", p.Ref)
+				register(font.Value, section.Title, section.Item+"/title", p.Ref, font.From)
 			}
+			// Layout measures all decimal cells and the unnumbered-target label.
+			register(font.Value, "0123456789—", p.Ref, font.From)
 		}
 	}
 	if j.PageNumbers != nil {

@@ -34,7 +34,7 @@
     },
     "page_defaults": {
       "$ref": "#/$defs/page",
-      "description": "Default style for authored page items and section dividers. Contents pages and automatic odd-start padding use their own layout rules. Font files here resolve against the base directory."
+      "description": "Default style for authored page items and section dividers. Contents also inherits text.font, but retains its own size, color, spacing and pagination rules; other text defaults and automatic odd-start padding are independent. Font files here resolve against the base directory."
     },
     "items": {
       "$ref": "#/$defs/items"
@@ -394,7 +394,7 @@
                     "file": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "Static TrueType font; resolves against the directory of the items array this style is written in (base directory for page_defaults)."
+                      "description": "Static TrueType (glyf) or OpenType CFF1 font. Variable fonts, CFF2 and collections are unsupported. Resolves against the directory of the items array this style is written in (base directory for page_defaults)."
                     }
                   }
                 }

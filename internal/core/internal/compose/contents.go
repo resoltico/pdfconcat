@@ -83,7 +83,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 			size = *j.FitTo
 		}
 	}
-	font := fonts[packet.Font{}]
+	font := fonts[j.PageDefaults.Text.Font.Value]
 	digits, err := typeset.NewDigits(font, 12)
 	if err != nil {
 		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}

@@ -60,7 +60,7 @@ the example includes the whole PDF.
 | [generated-only.json](../examples/plans/generated-only.json) | Coloured text pages and repeated blanks | None |
 | [basic.json](../examples/plans/basic.json) | PDFs mixed with text pages whose size comes from neighbouring sources | `cover.pdf`, `sections/01.pdf`, `sections/02.pdf`, `appendix.pdf` |
 | [latvian-text.json](../examples/plans/latvian-text.json) | Latin, Greek and Cyrillic text with the bundled font | `01.pdf`, `02.pdf` |
-| [font-file.json](../examples/plans/font-file.json) | A custom font, then an explicit return to the bundled font | `01.pdf`, `02.pdf`, and a supported static TrueType font at `fonts/Example.ttf` |
+| [font-file.json](../examples/plans/font-file.json) | A custom font, then an explicit return to the bundled font | `01.pdf`, `02.pdf`, and a supported static TrueType or OpenType CFF1 font at `fonts/Example.ttf` |
 | [grouped-directories.json](../examples/plans/grouped-directories.json) | Relative paths in nested directory scopes | `source/cover.pdf`, `source/part-1/01.pdf`, `source/part-1/02.pdf`, `source/part-2/01.pdf`, `source/part-2/02.pdf` |
 | [packet-composition.json](../examples/plans/packet-composition.json) | Selected pages, nested sections, a title divider, linked contents, odd starts and numbering | `inputs/cover.pdf`; `inputs/report.pdf` with at least 8 pages; `inputs/figures/plots.pdf` with at least 8 pages |
 
@@ -201,8 +201,14 @@ created, and ordinary plans need no sections.
 Contents lists all authored sections once in preorder, including its containing
 section, with wrapped titles, resolved target labels and clickable
 whole-page links. It does not list itself or imported source bookmarks. It uses
-bundled Noto Sans, black text, an 18pt repeated heading, 12pt entries, 36pt
+the root `page_defaults.text.font` (bundled Noto Sans when unspecified), black text, an 18pt repeated heading, 12pt entries, 36pt
 margins, 12pt indentation per section depth, 6pt row gaps and leading 1.2.
+The inherited font applies to headings, entry titles, numeric labels and em dashes;
+it must support those characters, including all decimal digits and the em dash used
+for layout measurement. Its file path retains the root base-directory scope even
+when contents is nested under a group's `dir`. Other `page_defaults` text fields
+(value, size, color, positioning and spacing) do not configure contents. Page-number
+overlays keep their separate bundled-font policy.
 A whole row stays on one page. The number column has fixed measured digit cells;
 final numbers do not reflow titles or change the measured contents page count.
 Overwide indentation, unsupported text or a row too tall for a page is refused;

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Navigation and adjacent source warnings retain original object/page/path evidence through selection, fitting and merging; distinct bindings and declaration sites remain separate.
+- URI Base warnings require retained relative-action impact; orphan/omitted actions and empty bases no longer warn. Rename predictions remain separate from located actual mappings.
+
 - Structure discard precedes tag validation in check/build, while retaining page, content, encoding, signature, encryption, form and publication safeguards.
 - Tree-less sources with orphan ownership/MCIDs compose as untagged with located warnings; their streams and meaningful uncovered-content status are retained.
 - Proven unclaimed ParentTree entries and absent IDTree indexes are corrected from validated forward ownership with warnings; conflicting declared hierarchies remain refused.

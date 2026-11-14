@@ -5,6 +5,7 @@ package pdf
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -18,48 +19,59 @@ import (
 // are finite parsed trees, so array wrappers and role transitions need no extra
 // nesting limit. Existing read-time limits remain the source policy.
 func retainedObjects(c context.Context, s *model.Context, annotation func(types.Dict) error, target func(types.Object) (bool, error)) error {
-
-	return walkRetained(c, s, annotation, func(d types.Dict, key string) (bool, error) { return target(d[key]) }, false)
+	origins, e := sourceOriginsFor(c, s)
+	if e != nil {
+		return e
+	}
+	return walkRetained(c, s, origins, func(d types.Dict, _ sourceSite) error { return annotation(d) }, func(d types.Dict, key string, _ sourceSite, _ sourceSite) (bool, error) { return target(d[key]) }, nil, false)
 }
 
-func walkRetained(c context.Context, s *model.Context, annotation func(types.Dict) error, target func(types.Dict, string) (bool, error), prune bool) error {
-
+// The worklist carries original enclosing addresses. Edits are applied after
+// observation, so shared routes see the same input and dependent actions are
+// pruned without obscuring another incoming edge's evidence.
+func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, annotation func(types.Dict, sourceSite) error, target func(types.Dict, string, sourceSite, sourceSite) (bool, error), action func(types.Dict, sourceSite) error, prune bool) error {
 	type visit struct {
-		object  types.Object
-		role    string
-		replace func(types.Object)
+		object     types.Object
+		role       string
+		site, edge sourceSite
+		replace    func(types.Object)
 	}
 	type node struct {
 		ref  types.IndirectRef
 		role string
+		page int
 	}
-	cat, err := s.Catalog()
-	if err != nil {
-		return err
+	cat, e := s.Catalog()
+	if e != nil {
+		return e
 	}
-	form, err := s.DereferenceDict(cat["AcroForm"])
-	if err != nil {
-		return err
+	base := catalogSite(s)
+	form, e := s.DereferenceDict(cat["AcroForm"])
+	if e != nil {
+		return e
 	}
-	outlines, err := s.DereferenceDict(cat["Outlines"])
-	if err != nil {
-		return err
+	formSite := base.key("AcroForm").anchor(cat["AcroForm"], origins)
+	outline, e := s.DereferenceDict(cat["Outlines"])
+	if e != nil {
+		return e
 	}
-	pending := []visit{{object: outlines["First"], role: "outlines"}, {object: form["Fields"], role: "fields"}, {object: cat["Pages"], role: "pages"}}
-	var cleanups []func()
+	outlineSite := base.key("Outlines").anchor(cat["Outlines"], origins)
+	pending := []visit{{object: outline["First"], role: "outlines", site: outlineSite.key("First")}, {object: form["Fields"], role: "fields", site: formSite.key("Fields")}, {object: cat["Pages"], role: "pages", site: base.key("Pages")}}
+	var edits, cleanups []func()
 	seen := map[node]bool{}
 	for len(pending) > 0 {
 		current := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
-		if err := c.Err(); err != nil {
-			return err
+		if e := c.Err(); e != nil {
+			return e
 		}
 		if current.object == nil {
 			continue
 		}
-		value, err := s.Dereference(current.object)
-		if err != nil {
-			return err
+		site := current.site.anchor(current.object, origins)
+		value, e := s.Dereference(current.object)
+		if e != nil {
+			return e
 		}
 		if current.role == "action" {
 			if d, ok := value.(types.Dict); ok {
@@ -68,13 +80,14 @@ func walkRetained(c context.Context, s *model.Context, annotation func(types.Dic
 					return e
 				}
 				if kind == "GoTo" {
-					keep, e := target(d, "D")
+					keep, e := target(d, "D", site.key("D"), current.edge)
 					if e != nil {
 						return e
 					}
 					if !keep {
 						if prune && current.replace != nil {
-							current.replace(nil)
+							replace := current.replace
+							edits = append(edits, func() { replace(nil) })
 						}
 						continue
 					}
@@ -82,22 +95,19 @@ func walkRetained(c context.Context, s *model.Context, annotation func(types.Dic
 			}
 		}
 		if ref, ok := current.object.(types.IndirectRef); ok {
-			key := node{ref, current.role}
+			key := node{ref, current.role, site.page}
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
 		}
-		push := func(object types.Object, role string) {
-			pending = append(pending, visit{object: object, role: role})
-		}
 		if array, ok := value.(types.Array); ok {
 			for i := len(array) - 1; i >= 0; i-- {
-				pending = append(pending, visit{object: array[i], role: current.role, replace: func(o types.Object) { array[i] = o }})
+				childSite := site.index(i)
+				pending = append(pending, visit{object: array[i], role: current.role, site: childSite, edge: childSite, replace: func(o types.Object) { array[i] = o }})
 			}
 			if prune && current.role == "action" && current.replace != nil {
-				replace := current.replace
-				object := current.object
+				replace, object := current.replace, current.object
 				cleanups = append(cleanups, func() {
 					kept := types.Array{}
 					for _, child := range array {
@@ -117,13 +127,13 @@ func walkRetained(c context.Context, s *model.Context, annotation func(types.Dic
 			}
 			continue
 		}
-
 		d, ok := value.(types.Dict)
 		if !ok {
 			continue
 		}
 		follow := func(key, role string) {
-			pending = append(pending, visit{object: d[key], role: role, replace: func(o types.Object) {
+			edge := site.key(key)
+			pending = append(pending, visit{object: d[key], role: role, site: edge, edge: edge, replace: func(o types.Object) {
 				if o == nil {
 					delete(d, key)
 				} else {
@@ -131,15 +141,18 @@ func walkRetained(c context.Context, s *model.Context, annotation func(types.Dic
 				}
 			}})
 		}
-		subtype, err := nameValue(s, d["Subtype"])
-		if err != nil {
-			return err
+		push := func(o types.Object, role string, where sourceSite) {
+			pending = append(pending, visit{object: o, role: role, site: where})
+		}
+		subtype, e := nameValue(s, d["Subtype"])
+		if e != nil {
+			return e
 		}
 		switch current.role {
 		case "pages":
-			kind, err := nameValue(s, d["Type"])
-			if err != nil {
-				return err
+			kind, e := nameValue(s, d["Type"])
+			if e != nil {
+				return e
 			}
 			if kind != "Page" {
 				follow("Kids", "pages")
@@ -150,13 +163,15 @@ func walkRetained(c context.Context, s *model.Context, annotation func(types.Dic
 		case "fields":
 			follow("Kids", "fields")
 			if subtype == "Widget" {
-				push(current.object, "annotation")
+				push(current.object, "annotation", site)
 			} else {
 				follow("AA", "additionalActions")
 			}
 		case "annotation":
-			if err := annotation(d); err != nil {
-				return err
+			if annotation != nil {
+				if e := annotation(d, site); e != nil {
+					return e
+				}
 			}
 			for _, key := range []string{"Popup", "IRT"} {
 				follow(key, "annotation")
@@ -165,36 +180,49 @@ func walkRetained(c context.Context, s *model.Context, annotation func(types.Dic
 				follow("Parent", "annotation")
 			}
 			if subtype == "Link" {
-				if keep, err := target(d, "Dest"); err != nil {
-					return err
-				} else if !keep && prune {
-					delete(d, "Dest")
+				keep, e := target(d, "Dest", site.key("Dest"), sourceSite{})
+				if e != nil {
+					return e
+				}
+				if !keep && prune {
+					edits = append(edits, func() { delete(d, "Dest") })
 				}
 			}
-			// A is defined for Link, Widget and Screen annotations. A key on other
-			// annotation subtypes does not establish a navigation role.
 			if subtype == "Link" || subtype == "Widget" || subtype == "Screen" {
 				follow("A", "action")
 			}
 			follow("AA", "additionalActions")
 		case "outlines":
-			if keep, err := target(d, "Dest"); err != nil {
-				return err
-			} else if !keep && prune {
-				delete(d, "Dest")
+			keep, e := target(d, "Dest", site.key("Dest"), sourceSite{})
+			if e != nil {
+				return e
+			}
+			if !keep && prune {
+				edits = append(edits, func() { delete(d, "Dest") })
 			}
 			follow("A", "action")
-			// Child and sibling edges use the worklist; traversing an accepted
-			// outline adds no independent hierarchy limit.
-			push(d["Next"], "outlines")
+			push(d["Next"], "outlines", site.key("Next"))
 			follow("First", "outlines")
 		case "additionalActions":
+			keys := make([]string, 0, len(d))
 			for key := range d {
-				follow(key, "action")
+				keys = append(keys, key)
+			}
+			slices.Sort(keys)
+			for i := len(keys) - 1; i >= 0; i-- {
+				follow(keys[i], "action")
 			}
 		case "action":
+			if action != nil {
+				if e := action(d, site); e != nil {
+					return e
+				}
+			}
 			follow("Next", "action")
 		}
+	}
+	for _, edit := range edits {
+		edit()
 	}
 	for i := len(cleanups) - 1; i >= 0; i-- {
 		cleanups[i]()

@@ -35,7 +35,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 		}
 	}()
-	s, findings, err := readSource(c, data, policy)
+	s, origins, findings, err := readSource(c, data, policy)
 	ds = append(ds, findings...)
 	if err != nil {
 		if s != nil && s.XRefTable != nil {
@@ -46,7 +46,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		}
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
-	facts, findings, err = observe(c, s)
+	facts, findings, err = observe(c, s, origins)
 	ds = append(ds, findings...)
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
@@ -71,6 +71,13 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 		}
 	}
+	if len(requests) == 0 {
+		uri, e := uriBaseWarnings(c, s, origins)
+		ds = append(ds, uri...)
+		if e != nil {
+			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
+		}
+	}
 	var sourceGeometry []pageGeometry
 	for index, request := range requests {
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
@@ -90,14 +97,29 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 			continue
 		}
-		removed, err := projectSelection(c, view, ranges)
+		removed, err := projectSelection(c, view, ranges, origins)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
 		}
-		selected, _, err := observe(c, view)
+		for _, d := range navigationDiagnostics(removed) {
+			d.Items = []string{request.Item}
+			ds = append(ds, d)
+		}
+		uri, e := uriBaseWarnings(c, view, origins)
+		for _, d := range uri {
+			d.Items = []string{request.Item}
+			ds = append(ds, d)
+		}
+		if e != nil {
+			d := diagnostic(e, diag.SourceInvalid)
+			d.Items = []string{request.Item}
+			ds = append(ds, d)
+			continue
+		}
+		selected, _, err := observe(c, view, origins)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
@@ -173,9 +195,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		}
 		selectedFacts := selected.OccurrenceFacts
 		occurrences[index] = &selectedFacts
-		if removed {
-			ds = append(ds, diag.New(diag.SourceNavigationRemoved, "Navigation targets omitted from this source occurrence were removed.", request.Item))
-		}
+
 	}
 	return facts, occurrences, ds
 }
@@ -239,23 +259,23 @@ func selectionView(c context.Context, s *model.Context) (*model.Context, error) 
 
 // projectSelection keeps original page identities and materializes inherited
 // attributes before replacing their ancestors. It is used on isolated contexts.
-func projectSelection(c context.Context, s *model.Context, ranges []packet.PageRange) (bool, error) {
+func projectSelection(c context.Context, s *model.Context, ranges []packet.PageRange, origins sourceOrigins) ([]navigationChange, error) {
 	ranges, err := selectionRanges(ranges, s.PageCount)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if wholeSelection(ranges, s.PageCount) {
-		return pruneNavigation(c, s)
+		return pruneNavigation(c, s, origins)
 	}
 	geometries, err := pageGeometries(c, s)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	selected := []pageRef{}
 	for _, span := range ranges {
 		for number := span.First; number <= span.Last; number++ {
 			if err := c.Err(); err != nil {
-				return false, err
+				return nil, err
 			}
 			geometry := geometries[number-1]
 			d, attrs := geometry.dict, geometry.attrs
@@ -274,7 +294,7 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	}
 	root, err := s.Pages()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	var makeTree func([]pageRef, types.IndirectRef) (types.Dict, error)
 	makeTree = func(pages []pageRef, parent types.IndirectRef) (types.Dict, error) {
@@ -306,7 +326,7 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	}
 	tree, err := makeTree(selected, *root)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	s.Table[root.ObjectNumber.Value()].Object = tree
 	s.PageCount = len(selected)
@@ -314,9 +334,9 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	s.PageThumbs = map[int]types.IndirectRef{}
 	s.URIs = map[int]map[string]string{}
 	s.Valid = false
-	removed, err := pruneNavigation(c, s)
+	removed, err := pruneNavigation(c, s, origins)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	// Omitted pages remain private objects; selection is composition, not redaction.
 	return removed, nil

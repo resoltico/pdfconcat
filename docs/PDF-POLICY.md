@@ -185,7 +185,12 @@ action also loses its own Next chain; valid siblings in a Next array remain.
 The adapter preserves raw literal/hex bytes, compares and sorts bytewise, and
 emits hex without text transcoding. Before merging, destination structures are
 detached from both catalogs and context caches to prevent upstream name collisions
-or tree loss. One traversal maps the final page references, then balanced name
+or tree loss. Original definition/binding sites are retained separately from mutable
+objects. Equal legacy and name-tree declarations keep both sites. Selection
+records removed bindings before later fitting/validation gates; output object
+renumbering cannot overwrite those source addresses. Warning production follows
+retained routes (including independent Next siblings), without fetching targets.
+One traversal maps the final page references, then balanced name
 trees and the legacy Dests dictionary are rebuilt.
 
 ## Forms, fitting and catalog

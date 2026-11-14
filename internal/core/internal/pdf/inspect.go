@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"slices"
 	"strings"
 
@@ -23,6 +22,7 @@ import (
 
 // OccurrenceFacts describes one retained selection, without duplicating source identity.
 type OccurrenceFacts struct {
+	DestinationLocations map[string][]diag.PDFLocation
 	packet.SourceFacts
 	DestNames                 []string
 	HasCoordinateDestinations bool
@@ -37,6 +37,7 @@ type OccurrenceFacts struct {
 
 // SourceFacts retains immutable whole-file identity and policy facts.
 type SourceFacts struct {
+	FieldCollectionLocation *diag.PDFLocation
 	OccurrenceFacts
 	PageSizes                              map[int]packet.Size
 	SubsetPrefixes                         []string
@@ -107,7 +108,7 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 	return d
 }
 
-func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (s *model.Context, ds []diag.Diagnostic, err error) {
+func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.SourceProcessingFailed, "The PDF backend failed unexpectedly.", fmt.Errorf("%v", value))
@@ -117,42 +118,54 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 	// Recognition is deliberately weaker than parsing: a truncated recognizable
 	// header is malformed PDF, not a different input format.
 	if !bytes.Contains(data, []byte("%PDF-")) {
-		return nil, nil, refuse(diag.SourceNotPDF, "The source is not a PDF: no recognizable PDF header was found.")
+		return nil, origins, nil, refuse(diag.SourceNotPDF, "The source is not a PDF: no recognizable PDF header was found.")
 	}
 	conf, err := configuration()
 	if err != nil {
-		return s, ds, pdfFailure(diag.SourceProcessingFailed, "The PDF backend could not be initialized.", err)
+		return s, origins, ds, pdfFailure(diag.SourceProcessingFailed, "The PDF backend could not be initialized.", err)
 	}
 	conf.ValidationMode = model.ValidationStrict
 	s, err = api.ReadContext(c, bytes.NewReader(data), conf)
 	if errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) || s != nil && s.Encrypt != nil {
-		return s, ds, refuse(diag.SourceEncrypted, "Encrypted sources are unsupported, including PDFs that open without a password. Request an unrestricted, unencrypted assembly copy or deliver the originals separately.")
+		return s, origins, ds, refuse(diag.SourceEncrypted, "Encrypted sources are unsupported, including PDFs that open without a password. Request an unrestricted, unencrypted assembly copy or deliver the originals separately.")
 	}
 	if err != nil {
-		return s, ds, err
+		return s, origins, ds, err
 	}
 	pages, e := rawPages(c, s)
 	if e != nil {
-		return s, ds, e
+		return s, origins, ds, e
 	}
 	s.PageCount = len(pages)
 	if _, e = capturePageContent(c, s); e != nil {
-		return s, ds, e
+		return s, origins, ds, e
 	}
 	if e = originalSignatureChecks(c, s); e != nil {
-		return s, ds, e
+		return s, origins, ds, e
 	}
 	findings, e := admitSourceStructure(c, s, policy)
 	ds = append(ds, findings...)
 	if e != nil {
-		return s, ds, pdfFailure(diag.SourceInvalid, "The declared source structure cannot be preserved. Use structure: \"discard\" for untagged output, obtain a reviewed repair, or deliver the original separately.", e)
+		return s, origins, ds, pdfFailure(diag.SourceInvalid, "The declared source structure cannot be preserved. Use structure: \"discard\" for untagged output, obtain a reviewed repair, or deliver the original separately.", e)
 	}
 	if err = checkDocument(c, s); err != nil {
-		return s, ds, err
+		return s, origins, ds, err
+	}
+	origins, err = sourceOriginsFor(c, s)
+	if err != nil {
+		return s, origins, ds, err
+	}
+	origins.catalog, e = captureCatalogSites(s, origins)
+	if e != nil {
+		return s, origins, ds, e
+	}
+	origins.destinations, err = readDestinations(c, s)
+	if err != nil {
+		return s, origins, ds, err
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return s, ds, err
+		return s, origins, ds, err
 	}
 	// Remove only source viewer directives, after inspecting the original graph.
 	// Other discarded catalog structures still require their own validation.
@@ -177,19 +190,19 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 		if repair != nil {
 			ds = append(ds, diagnostic(repair, diag.SourceUnsupported))
 		}
-		return s, ds, err
+		return s, origins, ds, err
 	}
 	if repair != nil {
-		return s, ds, repair
+		return s, origins, ds, repair
 	}
 	if err = validateStructure(c, s); err != nil {
-		return s, ds, pdfFailure(diag.SourceInvalid, "The source structure is malformed or unsupported.", err)
+		return s, origins, ds, pdfFailure(diag.SourceInvalid, "The source structure is malformed or unsupported.", err)
 	}
 	if err = validateContentEncoding(c, s); err != nil {
-		return s, ds, err
+		return s, origins, ds, err
 	}
 
-	return s, ds, nil
+	return s, origins, ds, nil
 }
 
 // checkDocument enforces structural and fidelity safeguards on original source
@@ -379,7 +392,7 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 	return objectLocations(c, s, true, func(d types.Dict, _ diag.PDFLocation) error { return visit(d) })
 }
 
-func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnostic, error) {
+func observe(c context.Context, s *model.Context, origins sourceOrigins) (SourceFacts, []diag.Diagnostic, error) {
 	facts := SourceFacts{OccurrenceFacts: OccurrenceFacts{SourceFacts: packet.SourceFacts{Pages: s.PageCount}}, Version: s.XRefTable.Version().String()}
 	prefixes, err := importedSubsetPrefixes(c, s)
 	facts.SubsetPrefixes = prefixes
@@ -400,13 +413,9 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	facts.UnboundMCIDLocation = marked.unboundMCID
 
 	var ds []diag.Diagnostic
-	add := func(code diag.Code, message string) {
-		for _, d := range ds {
-			if d.Code == code && d.Message == message {
-				return
-			}
-		}
-		ds = append(ds, diag.New(code, message))
+	base := catalogSite(s)
+	add := func(code diag.Code, message string, site sourceSite) {
+		ds = append(ds, sourceWarning(code, message, "The original source entry is omitted by output policy.", site))
 	}
 
 	for _, entry := range []struct {
@@ -414,7 +423,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		code diag.Code
 	}{{"PageLabels", diag.SourcePageLabelsRemoved}, {"OutputIntents", diag.SourceOutputIntentsRemoved}, {"OpenAction", diag.SourceDocumentActionsRemoved}, {"AA", diag.SourceDocumentActionsRemoved}, {"AF", diag.SourceAttachmentsRemoved}} {
 		if catalog[entry.key] != nil {
-			add(entry.code, entry.key+" will be removed from the output catalog.")
+			add(entry.code, entry.key+" will be removed from the output catalog.", origins.catalogEntry(entry.key, base.key(entry.key)))
 		}
 	}
 	names, err := s.DereferenceDict(catalog["Names"])
@@ -422,17 +431,17 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		return facts, ds, err
 	}
 	if names["JavaScript"] != nil {
-		add(diag.SourceDocumentActionsRemoved, "Document JavaScript will be removed.")
+		add(diag.SourceDocumentActionsRemoved, "Document JavaScript will be removed.", origins.catalogEntry("Names.JavaScript", base.key("Names").anchor(catalog["Names"], origins).key("JavaScript")))
 	}
 	if names["EmbeddedFiles"] != nil {
-		add(diag.SourceAttachmentsRemoved, "Embedded-file indexes will be removed.")
+		add(diag.SourceAttachmentsRemoved, "Embedded-file indexes will be removed.", origins.catalogEntry("Names.EmbeddedFiles", base.key("Names").anchor(catalog["Names"], origins).key("EmbeddedFiles")))
 	}
 	form, err := s.DereferenceDict(catalog["AcroForm"])
 	if err != nil {
 		return facts, ds, err
 	}
 	if form["XFA"] != nil {
-		add(diag.SourceXfaRemoved, "XFA will be removed; static fields remain.")
+		add(diag.SourceXfaRemoved, "XFA will be removed; static fields remain.", origins.catalogEntry("AcroForm.XFA", base.key("AcroForm").anchor(catalog["AcroForm"], origins).key("XFA")))
 	}
 	rendering, err := s.Dereference(form["NeedAppearances"])
 	if err != nil {
@@ -444,8 +453,12 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		return facts, ds, err
 	}
 	facts.HasFields = len(roots) > 0
+	if facts.HasFields {
+		facts.FieldCollectionLocation = origins.catalogEntry("AcroForm.Fields", base.key("AcroForm").anchor(catalog["AcroForm"], origins).key("Fields")).location()
+	}
 	if facts.NeedAppearances && facts.HasFields {
-		add(diag.FormAppearanceRegenerationRequested, "The source requests viewer-regenerated field appearances.")
+		site := origins.catalogEntry("AcroForm.NeedAppearances", base.key("AcroForm").anchor(catalog["AcroForm"], origins).key("NeedAppearances"))
+		ds = append(ds, sourceWarning(diag.FormAppearanceRegenerationRequested, "The source requests viewer-regenerated field appearances.", "The original NeedAppearances request is retained as a viewer request, not regenerated artwork.", site))
 	}
 	if facts.HasFields {
 		signature := types.Dict{"DR": form["DR"], "DA": form["DA"], "Q": form["Q"]}
@@ -453,14 +466,6 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 		if err != nil {
 			return facts, ds, err
 		}
-	}
-	uri, err := s.DereferenceDict(catalog["URI"])
-	if err != nil {
-		return facts, ds, err
-	}
-	uriBase, err := s.Dereference(uri["Base"])
-	if err != nil {
-		return facts, ds, err
 	}
 	err = walkObjects(c, s, func(d types.Dict) error {
 		subtype, e := nameValue(s, d["Subtype"])
@@ -471,20 +476,6 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 			facts.HasWidgets = true
 		}
 
-		action, e := nameValue(s, d["S"])
-		if e != nil {
-			return e
-		}
-		if uriBase != nil && action == types.Name("URI") {
-			target, e := textValue(s, d["URI"])
-			if e != nil {
-				return e
-			}
-			u, e := url.Parse(target)
-			if e == nil && !u.IsAbs() {
-				add(diag.SourceURIBaseRemoved, "Source URI Base is removed; retained relative URI actions may resolve differently.")
-			}
-		}
 		return nil
 	})
 	if err != nil {
@@ -501,10 +492,29 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	if err != nil {
 		return facts, ds, err
 	}
-	for name, d := range destinations {
-		facts.DestNames = append(facts.DestNames, name)
+	destinationNames := make([]string, 0, len(destinations))
+	for name := range destinations {
+		destinationNames = append(destinationNames, name)
+	}
+	slices.Sort(destinationNames)
+	facts.DestinationLocations = map[string][]diag.PDFLocation{}
+	for _, name := range destinationNames {
+		d := destinations[name]
+		sites := d.sites
+		if original, ok := origins.destinations[name]; ok {
+			sites = original.sites
+		}
 		if d.page < 1 {
-			add(diag.DestinationsDropped, "A destination outside its source document will be omitted.")
+			for _, site := range sites {
+				ds = append(ds, sourceWarning(diag.DestinationsDropped, "A destination outside its source document will be omitted.", fmt.Sprintf("Destination definition %q has no page target in the original source.", name), site))
+			}
+			continue
+		}
+		facts.DestNames = append(facts.DestNames, name)
+		for _, site := range sites {
+			if location := site.location(); location != nil {
+				facts.DestinationLocations[name] = append(facts.DestinationLocations[name], *location)
+			}
 		}
 	}
 	facts.HasCoordinateDestinations, err = coordinateDestinations(c, s, destinations)

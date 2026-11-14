@@ -538,6 +538,7 @@
           "type": "string"
         },
         "pdf_location": {
+          "description": "Optional known PDF evidence. For source findings, objects and owning pages refer to the original source before selection/merging. Paths are anchored to the source object/enclosing container; document-level sites need not have an owning page.",
           "$ref": "#/$defs/pdfLocation"
         }
       }

@@ -19,6 +19,7 @@ import (
 )
 
 type fieldRecord struct {
+	site sourceSite
 	name string
 	dict types.Dict
 }
@@ -69,10 +70,16 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 	if err != nil {
 		return nil, err
 	}
+	origins, e := sourceOriginsFor(c, s)
+	if e != nil {
+		return nil, e
+	}
+	base := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], origins).key("Fields").anchor(form["Fields"], origins)
 	var result []fieldRecord
 	seen := map[types.IndirectRef]bool{}
-	var visit func(types.Object, string, types.Object, int) error
-	visit = func(o types.Object, prefix string, ft types.Object, depth int) error {
+	var visit func(types.Object, string, types.Object, sourceSite, int) error
+	visit = func(o types.Object, prefix string, ft types.Object, site sourceSite, depth int) error {
+		site = site.anchor(o, origins)
 		if err := c.Err(); err != nil {
 			return err
 		}
@@ -122,7 +129,8 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			return err
 		}
 		hasFields := false
-		for _, kid := range kids {
+		kidSite := site.key("Kids").anchor(d["Kids"], origins)
+		for i, kid := range kids {
 			child, err := s.DereferenceDict(kid)
 			if err != nil {
 				return err
@@ -134,17 +142,17 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 			if childName != "" {
 				hasFields = true
 			}
-			if err = visit(kid, name, ft, depth+1); err != nil {
+			if err = visit(kid, name, ft, kidSite.index(i), depth+1); err != nil {
 				return err
 			}
 		}
 		if (own != "" || depth == 0 && ft != nil) && !hasFields {
-			result = append(result, fieldRecord{name: name, dict: d})
+			result = append(result, fieldRecord{name: name, dict: d, site: site.key("T")})
 		}
 		return nil
 	}
-	for _, root := range roots {
-		if err = visit(root, "", nil, 0); err != nil {
+	for i, root := range roots {
+		if err = visit(root, "", nil, base.index(i), 0); err != nil {
 			return nil, err
 		}
 	}

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package packet
@@ -193,3 +193,85 @@ func (v *PartKind) UnmarshalText(b []byte) error {
 
 // Values returns the supported wire values.
 func (PartKind) Values() []string { return slices.Clone(partKindValues) }
+
+// NumberingMode selects the page-label counting policy.
+type NumberingMode string
+
+// Supported NumberingMode values.
+const (
+	NumberPhysical    NumberingMode = "physical"
+	NumberConsecutive NumberingMode = "consecutive"
+)
+
+var numberingModeValues = []string{"physical", "consecutive"}
+
+// String returns the wire value.
+func (v NumberingMode) String() string { return string(v) }
+
+// MarshalText encodes a domain value.
+func (v NumberingMode) MarshalText() ([]byte, error) { return []byte(v), nil }
+
+// UnmarshalText rejects unknown values.
+func (v *NumberingMode) UnmarshalText(b []byte) error {
+	if !slices.Contains(numberingModeValues, string(b)) {
+		return fmt.Errorf("unknown NumberingMode: %q", b)
+	}
+	*v = NumberingMode(b)
+	return nil
+}
+
+// Values returns supported wire values.
+func (NumberingMode) Values() []string { return slices.Clone(numberingModeValues) }
+
+// NumberPosition selects the physical page-number placement.
+type NumberPosition string
+
+// Supported NumberPosition values.
+const (
+	NumberTopLeft      NumberPosition = "top-left"
+	NumberTopCenter    NumberPosition = "top-center"
+	NumberTopRight     NumberPosition = "top-right"
+	NumberBottomLeft   NumberPosition = "bottom-left"
+	NumberBottomCenter NumberPosition = "bottom-center"
+	NumberBottomRight  NumberPosition = "bottom-right"
+)
+
+var numberPositionValues = []string{"top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"}
+
+// String returns the wire value.
+func (v NumberPosition) String() string { return string(v) }
+
+// MarshalText encodes a domain value.
+func (v NumberPosition) MarshalText() ([]byte, error) { return []byte(v), nil }
+
+// UnmarshalText rejects unknown values.
+func (v *NumberPosition) UnmarshalText(b []byte) error {
+	if !slices.Contains(numberPositionValues, string(b)) {
+		return fmt.Errorf("unknown NumberPosition: %q", b)
+	}
+	*v = NumberPosition(b)
+	return nil
+}
+
+// Values returns supported wire values.
+func (NumberPosition) Values() []string { return slices.Clone(numberPositionValues) }
+
+var structurePolicyValues = []string{"preserve", "discard"}
+
+// String returns the wire value.
+func (v StructurePolicy) String() string { return string(v) }
+
+// MarshalText encodes a domain value.
+func (v StructurePolicy) MarshalText() ([]byte, error) { return []byte(v), nil }
+
+// UnmarshalText rejects unknown values.
+func (v *StructurePolicy) UnmarshalText(b []byte) error {
+	if !slices.Contains(structurePolicyValues, string(b)) {
+		return fmt.Errorf("unknown StructurePolicy: %q", b)
+	}
+	*v = StructurePolicy(b)
+	return nil
+}
+
+// Values returns supported wire values.
+func (StructurePolicy) Values() []string { return slices.Clone(structurePolicyValues) }

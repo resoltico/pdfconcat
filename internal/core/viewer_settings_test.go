@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core_test
@@ -26,7 +26,7 @@ func TestViewerSettingFindingsSurviveCorePlansBuildsAndReports(t *testing.T) {
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := json.Marshal(map[string]any{"version": 4, "items": []any{map[string]any{"source": source}, map[string]any{"source": source}}})
+	plan, err := json.Marshal(map[string]any{"version": 5, "items": []any{map[string]any{"source": source}, map[string]any{"source": source}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,10 +42,16 @@ func TestViewerSettingFindingsSurviveCorePlansBuildsAndReports(t *testing.T) {
 				report := filepath.Join(t.TempDir(), "report.json")
 				r := core.Execute(t.Context(), core.Request{Operation: operation, Input: input, WorkingDir: dir, Output: output, Report: report})
 				schemaValid(t, r)
-				if r.Status != "ok" || len(r.Diagnostics) != 3 || r.Pages.Total == nil || *r.Pages.Total != 2 || r.Output.Published != (operation == core.Build) || !r.Report.Written {
+				if r.Status != "ok" || len(r.Diagnostics) != 4 || r.Pages.Total == nil || *r.Pages.Total != 2 || r.Output.Published != (operation == core.Build) || !r.Report.Written {
 					t.Fatalf("result: %+v", r)
 				}
 				for i, d := range r.Diagnostics {
+					if d.Code.String() == "source_structure_partial" {
+						if i != 3 {
+							t.Fatal("coverage finding changed source viewer order")
+						}
+						continue
+					}
 					if d.Code.String() != "source_viewer_settings_removed" || d.File != source || d.PDFLocation == nil || !reflect.DeepEqual(d.Items, []string{"/items/0", "/items/1"}) {
 						t.Fatalf("finding %d: %+v", i, d)
 					}

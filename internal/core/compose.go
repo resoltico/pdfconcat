@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -21,16 +21,16 @@ type composition struct {
 
 func composePacket(c context.Context, j packet.Plan, inspected *inspection, operation Operation) *composition {
 	out := &composition{}
-	var footer *compose.Footer
+	var numberLayout *compose.PageNumberLayout
 	if j.PageNumbers != nil {
 		var err error
-		footer, err = compose.NewFooter(inspected.fonts[packet.Font{}], *j.PageNumbers)
+		numberLayout, err = compose.NewPageNumberLayout(inspected.fonts[packet.Font{}], *j.PageNumbers)
 		if err != nil {
 			out.diagnostics = append(out.diagnostics, compose.Diagnostic(err, "/page_numbers"))
 			return out
 		}
 	}
-	contents, ds := compose.PrepareContents(c, j, inspected.shapes, inspected.fonts, footer)
+	contents, ds := compose.PrepareContents(c, j, inspected.shapes, inspected.fonts, numberLayout)
 	out.diagnostics = append(out.diagnostics, ds...)
 	if hasErrors(out.diagnostics) {
 		return out
@@ -44,14 +44,14 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	out.assembly = pdf.Assembly{Parts: assemblyParts(layout, inspected), Sections: layout.Sections, FitTo: j.FitTo, Footer: footer}
+	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata, Timestamp: j.Timestamp, Structure: j.Structure, Parts: assemblyParts(layout, inspected), Sections: layout.Sections, FitTo: j.FitTo, NumberLayout: numberLayout}
 	out.diagnostics = append(out.diagnostics, resolvePolicies(out.assembly, operation == Check)...)
 	if hasErrors(out.diagnostics) {
 		return out
 	}
 	if j.PageNumbers != nil {
 		for _, part := range layout.Parts {
-			if part.Kind == packet.PartPadding {
+			if _, ok := packet.NumberAt(layout.Numbering, part.FirstPage); !ok {
 				continue
 			}
 			var err error
@@ -72,7 +72,7 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 					original := span.SourceFirst + int(number-span.OutputFirst)
 					size = inspected.occurrences[part.Index].File.PageSizes[original]
 				}
-				if err = footer.Check(size, part.FirstPage+int64(offset)); err != nil {
+				if err = numberLayout.Check(size, numberForPage(layout.Numbering, part.FirstPage+int64(offset))); err != nil {
 					break
 				}
 			}
@@ -106,6 +106,9 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	for i, batch := range pages {
 		out.assembly.Parts[i].Generated = batch
 	}
+	if !hasErrors(out.diagnostics) {
+		out.assembly.Coverage = expectedStructureCoverage(out.assembly)
+	}
 	return out
 }
 func assemblyParts(layout packet.Layout, inspected *inspection) []pdf.Part {
@@ -121,4 +124,36 @@ func assemblyParts(layout packet.Layout, inspected *inspection) []pdf.Part {
 		}
 	}
 	return parts
+}
+
+func numberForPage(spans []packet.NumberSpan, page int64) int64 {
+	n, _ := packet.NumberAt(spans, page)
+	return n
+}
+
+func expectedStructureCoverage(a pdf.Assembly) string {
+	if a.Structure == packet.StructureDiscard {
+		return "none"
+	}
+	covered, incomplete := false, false
+	for _, part := range a.Parts {
+		if part.Kind == packet.PartSource {
+			value := part.Occurrence.Facts.StructureCoverage
+			covered = covered || value != "none"
+			incomplete = incomplete || part.Occurrence.Facts.HasUncoveredContent
+		} else {
+			for _, page := range part.Generated {
+				for _, block := range page.Blocks {
+					covered = covered || block.Text != nil && len(block.Text.Lines) > 0
+				}
+			}
+		}
+	}
+	if !covered {
+		return "none"
+	}
+	if incomplete {
+		return "partial"
+	}
+	return "complete"
 }

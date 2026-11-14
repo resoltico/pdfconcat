@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package packet_test
@@ -6,6 +6,7 @@ package packet_test
 import (
 	"math"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -232,7 +233,7 @@ func TestCompactMappingsAndSections(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	if len(layout.Parts) != 4 || layout.GeneratedPages != 100000 || layout.SourcePages != 4 || layout.TotalPages != 100004 || layout.PageNumbers != j.PageNumbers {
+	if len(layout.Parts) != 4 || layout.GeneratedPages != 100000 || layout.SourcePages != 4 || layout.TotalPages != 100004 || !reflect.DeepEqual(layout.PageNumbers, j.PageNumbers) {
 		t.Fatalf("compact layout %+v", layout)
 	}
 	mapping := layout.Parts[1].Mapping

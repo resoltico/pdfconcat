@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core_test
@@ -132,7 +132,7 @@ func profilePlan(p corpusProfile) map[string]any {
 		inner["divider"] = map[string]any{}
 	}
 	items = append(items, outer)
-	plan := map[string]any{"version": 4, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": items}
+	plan := map[string]any{"version": 5, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": items}
 	if p.Factors[3] {
 		plan["fit_to"] = "A5"
 	}

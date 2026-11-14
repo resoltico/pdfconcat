@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 // Package compose lays out generated text, contents and physical page numbers.
@@ -17,14 +17,29 @@ type Page struct {
 	Links         []Link
 }
 
+// SemanticRole is the authored role of generated meaningful text.
+type SemanticRole string
+
+const (
+	// RoleParagraph identifies ordinary generated body text.
+	RoleParagraph SemanticRole = "P"
+	// RoleHeading identifies a generated section or contents heading.
+	RoleHeading SemanticRole = "H1"
+	// RoleContents identifies a linked table-of-contents entry.
+	RoleContents SemanticRole = "TOCI"
+)
+
 // TextBlock is one measured, independently colored block.
 type TextBlock struct {
+	Role  SemanticRole
+	Link  *int
 	Text  *typeset.Placed
 	Color packet.Color
 }
 
 // Link is a measured contents row linked to a physical output page.
 type Link struct {
+	Label      string
 	Rect       typeset.Rect
 	TargetPage int64
 }

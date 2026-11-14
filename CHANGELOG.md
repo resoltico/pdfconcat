@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- **Breaking:** original project work now uses AGPL-3.0-only; prior MPL grants remain valid. Separate commercial terms are pending; third-party terms are unchanged.
+- Contributions follow standing terms that also permit Ervins Strauhmanis to license them commercially; pull requests explicitly confirm agreement.
+- Binary releases include corresponding source with vendored modules; the standalone executable prints the full project license and notices.
+
+- **Breaking:** plans require version 5; results, reports and JSON version objects use format 7. Update consumers to the [contracts](docs/PLAN.md).
+- **Breaking:** supported tagged source structure is preserved by default; use `structure: "discard"` for explicit untagged output. Generated meaningful text is tagged.
+- Missing, denied or nonregular plan/source/font inputs are invalid (exit 2); unexpected reads and sources changed after inspection remain failures (exit 1).
+- Authored title, author, subject and language produce XMP, synchronized PDF 1.7 Info, catalog language and title display. PDF 2.0 uses XMP identity.
+- PDF bytes are reproducible for the same executable and effective inputs. Dates are absent unless supplied by plan timestamp or effective SOURCE_DATE_EPOCH.
+- Numbering supports physical or consecutive labels, start offsets, kind filters, inherited suppression and six placements; contents and PageLabels share resolved labels.
+- Static OpenType CFF1 fonts, including Source Serif 4 OTF, use full identity-CID embedding; TrueType behavior and embedding restrictions remain supported.
+- Blank/artifact-only sources preserve coverage when mixed with tagged or generated text; indirect role/class bindings and contents reading order survive assembly.
+- Table header associations are validated through selection, repetition and fitting; selections omitting referenced headers are refused before staging.
+- Document language tags follow BCP 47 syntax and uniqueness rules, retaining unknown well-formed subtags and private use.
+- Non-PDF inputs receive `source_not_pdf`; `help --help` and `help -h` succeed. Tagged selection, repetition and fitting retain semantic ownership and report coverage.
+- Go is updated to 1.27.4; runtime/tool dependencies and GoReleaser are refreshed, with pinned veraPDF machine checks and expanded bundled notices.
+
 - Windows uninstall preserves the executable and ownership receipt when removing its owned PATH entry fails, so cleanup can be retried.
 
 - Installers refuse unowned or modified targets; remove older/manual installs yourself or select a fresh directory. Receiptless installations are not adopted.

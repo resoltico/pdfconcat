@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },

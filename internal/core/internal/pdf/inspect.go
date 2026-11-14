@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
@@ -29,6 +29,8 @@ type OccurrenceFacts struct {
 	PDF20AppearanceIssue      string
 	AnnotationFittingIssue    string
 	OutlineDepth              int
+	StructureCoverage         string
+	HasUncoveredContent       bool
 }
 
 // SourceFacts retains immutable whole-file identity and policy facts.
@@ -104,6 +106,12 @@ func readSource(c context.Context, data []byte) (s *model.Context, ds []diag.Dia
 			err = pdfFailure(diag.SourceProcessingFailed, "The PDF backend failed unexpectedly.", fmt.Errorf("%v", value))
 		}
 	}()
+	// pdfcpu v0.16.4 scans the whole file, including displaced headers.
+	// Recognition is deliberately weaker than parsing: a truncated recognizable
+	// header is malformed PDF, not a different input format.
+	if !bytes.Contains(data, []byte("%PDF-")) {
+		return nil, nil, refuse(diag.SourceNotPDF, "The source is not a PDF: no recognizable PDF header was found.")
+	}
 	conf, err := configuration()
 	if err != nil {
 		return s, ds, pdfFailure(diag.SourceProcessingFailed, "The PDF backend could not be initialized.", err)
@@ -150,6 +158,9 @@ func readSource(c context.Context, data []byte) (s *model.Context, ds []diag.Dia
 	}
 	if repair != nil {
 		return s, ds, repair
+	}
+	if err = validateStructure(c, s); err != nil {
+		return s, ds, pdfFailure(diag.SourceInvalid, "The source structure is malformed or unsupported.", err)
 	}
 	if err = validateContentEncoding(c, s); err != nil {
 		return s, ds, err
@@ -402,6 +413,13 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	if err != nil {
 		return facts, nil, err
 	}
+	marked, e := markedContent(c, s)
+	if e != nil {
+		return facts, nil, e
+	}
+	facts.StructureCoverage = marked.coverage()
+	facts.HasUncoveredContent = !marked.complete
+
 	var ds []diag.Diagnostic
 	add := func(code diag.Code, message string) {
 		for _, d := range ds {
@@ -415,7 +433,7 @@ func observe(c context.Context, s *model.Context) (SourceFacts, []diag.Diagnosti
 	for _, entry := range []struct {
 		key  string
 		code diag.Code
-	}{{"StructTreeRoot", diag.SourceStructureRemoved}, {"PageLabels", diag.SourcePageLabelsRemoved}, {"OutputIntents", diag.SourceOutputIntentsRemoved}, {"OpenAction", diag.SourceDocumentActionsRemoved}, {"AA", diag.SourceDocumentActionsRemoved}, {"AF", diag.SourceAttachmentsRemoved}} {
+	}{{"PageLabels", diag.SourcePageLabelsRemoved}, {"OutputIntents", diag.SourceOutputIntentsRemoved}, {"OpenAction", diag.SourceDocumentActionsRemoved}, {"AA", diag.SourceDocumentActionsRemoved}, {"AF", diag.SourceAttachmentsRemoved}} {
 		if catalog[entry.key] != nil {
 			add(entry.code, entry.key+" will be removed from the output catalog.")
 		}

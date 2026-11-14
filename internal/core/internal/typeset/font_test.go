@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package typeset_test
@@ -81,7 +81,7 @@ func TestLoadFontRejects(t *testing.T) {
 		data []byte
 	}{
 		"empty":            {"truncated header", nil},
-		"cff":              {"OpenType CFF", append([]byte("OTTO"), make([]byte, 64)...)},
+		"malformed CFF":    {"bad table directory", append([]byte("OTTO"), make([]byte, 64)...)},
 		"collection":       {"collection", append([]byte("ttcf"), make([]byte, 64)...)},
 		"woff":             {"unknown sfnt signature", append([]byte("wOFF"), make([]byte, 64)...)},
 		"zero tables":      {"bad table directory", append([]byte{0, 1, 0, 0, 0, 0}, make([]byte, 64)...)},

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -32,6 +32,9 @@ func project(req Request, a *admission, inspected *inspection, composed *composi
 	if a.plan == nil {
 		return r
 	}
+	r.Metadata = a.plan.Metadata
+	r.Timestamp = a.plan.Timestamp
+	r.Structure = &result.Structure{Policy: a.plan.Structure}
 	r.FitTo = a.plan.FitTo
 	r.PageNumbers = a.plan.PageNumbers
 	r.Pages = &result.Pages{}
@@ -45,6 +48,11 @@ func project(req Request, a *admission, inspected *inspection, composed *composi
 		return r
 	}
 	layout := composed.layout
+	r.Numbering = &layout.Numbering
+	if composed.assembly.Coverage != "" {
+		coverage := composed.assembly.Coverage
+		r.Structure.Coverage = &coverage
+	}
 	r.Pages = &result.Pages{Source: knownCount(layout.SourcePages), Generated: knownCount(layout.GeneratedPages), Total: knownCount(layout.TotalPages)}
 	r.Sections = reportSections(layout.Sections, true)
 	r.Parts = make([]result.Part, len(layout.Parts))

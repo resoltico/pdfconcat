@@ -48,7 +48,7 @@
         "Helvetica                            Type 1            WinAnsi          no  no  no       2  0",
         "AAAAAA+NotoSans-Regular              TrueType          WinAnsi          yes yes yes     10  0"
       ],
-      "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
         "internal/core/internal/typeset/fontdata/OFL.txt"
@@ -101,7 +101,7 @@
         "Helvetica                            Type 1            WinAnsi          no  no  no       2  0",
         "Helvetica                            Type 1            Custom           no  no  no       4  0"
       ],
-      "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
         "internal/core/internal/typeset/fontdata/OFL.txt"
@@ -159,7 +159,7 @@
         "BAAAAA+CorpusNotoSans-Regular        TrueType          WinAnsi          yes yes yes     18  0",
         "CAAAAA+CorpusNotoSans-Regular        TrueType          WinAnsi          yes yes yes     13  0"
       ],
-      "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
         "internal/core/internal/typeset/fontdata/OFL.txt"
@@ -205,7 +205,7 @@
         "KYCGCG+LibertinusSerif-Bold-Identity-H CID Type 0C       Identity-H       yes yes yes     29  0",
         "VHKCZZ+LibertinusSerif-Regular-Identity-H CID Type 0C       Identity-H       yes yes yes     32  0"
       ],
-      "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
         "licenses/Libertinus-OFL-1.1.txt"
@@ -257,7 +257,7 @@
       "Fonts": [
         "Helvetica                            Type 1            WinAnsi          no  no  no       2  0"
       ],
-      "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
         "internal/core/internal/typeset/fontdata/OFL.txt"
@@ -332,7 +332,7 @@
         "Helvetica                            Type 1            WinAnsi          no  no  no      16  0",
         "AAAAAA+NotoSans-Regular              TrueType          WinAnsi          yes yes yes     19  0"
       ],
-      "ContentLicense": "MPL-2.0; original fictional project content; font-specific notices in NOTICE.txt",
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
       "FontNotices": [
         "NOTICE.txt",
         "internal/core/internal/typeset/fontdata/OFL.txt"
@@ -369,20 +369,20 @@
     }
   ],
   "AuthoredSourcesSHA256": {
-    "sources/create_scan_sources.py": "e8eadbd5daa10f692339e83d295341b4c5098148f1b1261e3831998f5033c553",
+    "sources/create_scan_sources.py": "f4247c9828196a45295beabc88eb5d8055ac1314d89db637e3ffa347661da8c8",
     "sources/export_office_report.txt": "80436ed56dbdec798947dd4503b40968ff2444e360a19e4e04f8eb65d9389920",
-    "sources/generate_business_sources.py": "aaa401cecf85f25fff98583d243c02dab6004dedf4bc45c597095d68ac68c73a",
+    "sources/generate_business_sources.py": "816b2d267ca10497ade3bed5242fd04a897166c1974e1344418c739adfe52c82",
     "sources/invoice-rgb.jpg": "7cef110905d85e5e39a4a7f07f7aeeaf3807e6b9eb53b7c031262912bb92b69d",
     "sources/invoice-rgb.png": "b2e07835b749d648ac58b4c90128e2341804e6d89cad18e40475c3fc290a907d",
     "sources/make_classic_incremental.py": "5869e9239639b35682ae2d430997876aa7ac34a97db4a4b7c4ea2ae666a16ccb",
-    "sources/office-report.fodt": "2f5efa7d8443381bba35a2e669a7034fecc137ae2cb5e027a323efe9d9e25c27",
-    "sources/prepare_office_font.py": "ee3a067491f6224ffcb67a73535effb988e202cb366890d4a0727e7c03c9e34e",
+    "sources/office-report.fodt": "0fd3eeafa6eac4f0caaf081d52d3f55c0ecd6f8f5ebb79c2684f9fbcd5014afe",
+    "sources/prepare_office_font.py": "4da1ada53e8cd402863c9d8f1a46af4e058158ef18ae2f25be1709f3721c8b0c",
     "sources/qpdf_report_encoding.txt": "4ccc9f57e317e609a6f17460c443a09d829fba935c29ebace7388726c64c35c0",
     "sources/receipt-gray.png": "a9f1ba984904fb543eb587804e7656af44ce7cf8c669ff49128ace44ece62456",
     "sources/technical-note.typ": "cac9b01d6726a53f0b8b5028a9330ec092e9d673abd9c7a1eccad3d8b071a9e4"
   },
   "OriginalContentAuthor": "PDFConcat fixture authors",
-  "OriginalContentLicense": "MPL-2.0",
+  "OriginalContentLicense": "AGPL-3.0-only",
   "PrivacyScope": "All final PDF/source metadata and both form revisions reviewed; benign example.invalid links are never followed.",
   "NotoReuse": "internal/core/internal/typeset/fontdata/NotoSans-Regular.ttf",
   "Regeneration": "Explicit reviewed authoring only; no producer/network dependencies in Go tests."

@@ -1,6 +1,6 @@
-# Plan v4
+# Plan v5
 
-A plan is one UTF-8 JSON object with `version: 4`. Use source objects to select
+A plan is one UTF-8 JSON object with `version: 5`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
@@ -13,7 +13,7 @@ packet; its input paths are relative to the directory where you save the plan.
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -71,13 +71,16 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `4` |
+| `version` | Required integer token `5` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
 | `page_defaults` | Default style for page items and dividers |
 | `fit_to` | Fit every output page onto a paper name or explicit sheet size |
-| `page_numbers` | Optional physical footer numbering configuration |
+| `page_numbers` | Optional numbering, labels and overlay placement |
+| `metadata` | Optional authored `title`, `author`, `subject`, `language` |
+| `timestamp` | Optional nonnegative UTC Unix seconds, through 253402300799 |
+| `structure` | `preserve` (default) or explicit `discard` |
 | `$schema` | Optional editor schema URL; ignored string |
 
 Each item is exactly one of:
@@ -87,6 +90,8 @@ Each item is exactly one of:
 - A contents item with `contents`.
 - A group with nonempty `items` and at least one declared `dir`, `title` or
   `start_on`; `divider` is allowed only with `title`.
+
+Every item may also declare boolean `numbering`; groups pass this eligibility choice to descendants, and the most specific declaration wins. A group containing only `items` and `numbering` is useful and valid.
 
 Unknown members are errors. Wrong combinations of known members are
 `plan_item_shape`; encountered unknown members retain first-fault precedence.
@@ -120,7 +125,7 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "output": "reordered.pdf",
   "items": [
     { "source": "source.pdf", "pages": [[3, 3]] },
@@ -183,7 +188,7 @@ Its inclusive range excludes its own entry padding but includes child padding.
 For example, after cover page 1, an unaligned parent whose first odd-start child
 inserts padding page 2 and content page 3 has range `[2,3]`, target 3; the child
 has range `[3,3]`, target 3. A section's range start and navigation target can
-differ. Reports, bookmarks, contents and footers use these same physical pages.
+differ. Reports and navigation retain these physical indexes; authored labels are resolved separately below.
 
 ## Linked contents
 
@@ -194,7 +199,7 @@ size is authored before fitting. Without a contents item, no contents pages are
 created, and ordinary plans need no sections.
 
 Contents lists all authored sections once in preorder, including its containing
-section, with wrapped titles, final physical target numbers and clickable
+section, with wrapped titles, resolved target labels and clickable
 whole-page links. It does not list itself or imported source bookmarks. It uses
 bundled Noto Sans, black text, an 18pt repeated heading, 12pt entries, 36pt
 margins, 12pt indentation per section depth, 6pt row gaps and leading 1.2.
@@ -203,38 +208,83 @@ final numbers do not reflow titles or change the measured contents page count.
 Overwide indentation, unsupported text or a row too tall for a page is refused;
 titles are not split across pages, truncated or shrunk.
 
-Enabled footers reserve their conservative physical envelope plus 6pt clearance
-before contents pagination, including an explicit contents canvas fitted to a
-different sheet size. A high footer margin can therefore reduce usable contents
-space or cause a refusal.
+Eligible generated pages reserve the selected overlay edge plus 6pt clearance before pagination/placement. Fitting inverse-transforms the physical exclusion into the authored canvas. Suppressed overlays reserve no space. Large margins can reduce usable height or cause a refusal.
 
-## Physical footer numbers
+## Page numbering
 
-Presence of `page_numbers` enables physical Arabic numbers; omission disables
-painting. An empty object enables the defaults. The only fields are:
+Omitting `page_numbers` paints no numbers and authors no PageLabels; contents
+then displays physical target pages. An empty object enables these defaults:
 
-| Field | Default | Accepted range after unit conversion |
+| Field | Default | Meaning |
 | --- | --- | --- |
-| `size` | 9 pt | 1–14,400 pt |
-| `margin` | 8 mm | 0–14,400 pt |
+| `mode` | `physical` | `physical` or `consecutive` |
+| `start` | 1 | Positive integer within the supported page-index range |
+| `kinds` | `["source","page","divider","contents"]` | Eligible kinds; `[]` selects none |
+| `position` | `bottom-center` | `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, `bottom-right` |
+| `size` | 9 pt | 1–14,400 pt; point number or length string |
+| `margin` | 8 mm | 0–14,400 pt; distance from ink to the selected nearest edges |
 
-Both accept point numbers or the length strings described under
-[generated pages](#generated-pages-and-layering). A value within these ranges
-must also fit the actual page.
+The inherited item `numbering` override applies first, then kind eligibility.
+Automatic padding is never eligible. Physical mode labels eligible physical page
+p as `start+p-1`; suppressed pages and padding still occupy physical positions.
+Consecutive mode advances only on eligible pages. Overflow is refused before
+output staging. A suppression affects both painting and consecutive counting.
 
-Numbers use black bundled Noto Sans at the bottom center, with the bottom ink
-edge at `margin`, after fitting. Every non-padding page is numbered, including
-covers, authored blanks, dividers and contents. Automatic odd-start padding
-counts in the sequence and remains visually blank.
+Contents uses the target's resolved decimal label, or an em dash (—) for an
+unnumbered target. Links retain their original physical target, including an
+unnumbered divider. PDF PageLabels agree with these labels and use empty labels
+for ineligible spans. Conservative digit bounds include the start offset and
+avoid iterative contents pagination. Numbers use black bundled Noto Sans.
 
-There are no resets, separate logical folios, Roman numerals or exclusions.
-A footer may cover existing source content; there is no overlap detector or
-content shifting. Unusable placement is refused before publication. Footer
-placement requires both logical and painted bounds to fit, so a zero bottom
-margin can fail even when the painted digit fits. Refusals identify the affected
-edges and suggest margin, font-size or sheet-size changes appropriate to them.
-Footer insertion preserves original source streams and geometry on unfitted pages;
-fitted pages preserve their immediate post-fit state outside the overlay.
+The complete logical and ink envelopes must fit. A zero margin can fail even
+when painted ink fits. Numbers may overlap existing source content; there is no
+source-content overlap detector or reflow. Generated text is laid out within the
+reserved interval; explicit `overflow: allow` still warns about overflow.
+Unfitted source content and geometry remain intact outside the overlay.
+
+## Document identity, time and structure
+
+`metadata` accepts optional strings `title`, `author`, `subject` and `language`.
+Values retain authored Unicode, with at most 10,000 characters each. NUL and
+characters forbidden in XML 1.0 are refused. `language` uses BCP 47 syntax,
+including private-use and unknown well-formed subtags; repeated variants, extension singletons, scripts and other malformed sequences are refused. No language is inferred. Author is one string,
+including any punctuation. Missing fields stay absent; an empty/whitespace title
+does not enable DisplayDocTitle.
+
+XMP is canonical output metadata. PDF 1.7 also has synchronized Info fields;
+PDF 2.0 uses XMP without compatibility Info. The catalog language is the authored
+default; imported subtrees retain their source language and narrower overrides.
+Only an authored meaningful title enables the generated DisplayDocTitle viewer
+preference. Source document titles, dates and viewer directives are not adopted.
+
+Dates are absent by default. `timestamp` supplies creation/modification times in
+UTC. The process frontend captures `SOURCE_DATE_EPOCH` as a fallback; the plan
+wins, and an overridden environment value is not parsed. Effective malformed,
+negative or unrepresentable values are invalid before staging. No timestamp CLI
+flag or core environment read is involved.
+
+The same executable and effective declarations/source/font bytes produce the
+same PDF bytes across clocks, worker counts and output/report directories.
+Equivalent resolved source path spellings do not affect PDF identity. Reports
+and cross-toolchain/platform equality are outside this byte guarantee.
+
+`structure: "preserve"` is the default. Supported source structure, reading
+order, language, attributes, IDs and annotation relationships are retained per
+occurrence, pruned for selection and remapped for fitting. Malformed or
+unsupported structures are refused, including corruption on omitted pages.
+Generated meaningful text is tagged; backgrounds, padding and overlay numbers
+are artifacts. `structure: "discard"` explicitly removes structure claims and
+ownership, with source-loss warnings.
+
+A preserved table selection must retain every referenced header element. Otherwise check and build refuse it before staging; include the header pages, select the whole source, or explicitly use `structure: "discard"`.
+
+Result `structure.coverage` is `none` when no semantic content is retained or
+structure is discarded, `partial` when retained content lacks semantic coverage,
+and `complete` when all retained meaningful content is structurally accounted
+for. Known coverage survives later failures; unresolved coverage is null.
+Sources with actual uncovered content are usable with partial-coverage warnings. Blank and artifact-only sources are neutral when combined with covered content. This does not invent
+semantics, certify PDF/UA, or replace human reading-order/accessibility review.
+Source PDF/UA identifiers are never copied to the output.
 
 ## Generated pages and layering
 
@@ -296,7 +346,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
@@ -334,7 +384,7 @@ contents or footer layout. For example, a generated page can declare:
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "items": [{ "page": {
     "size": "A4",
     "text": {
@@ -366,13 +416,11 @@ width or a wider page. Explicit authored sizes are laid out before fitting.
 ## Fonts
 
 `default` is embedded Noto Sans Regular, with mark shaping and ToUnicode/ActualText
-extraction. A file choice must be static TrueType with glyf outlines. Collections,
-variable/CFF fonts, damaged fonts, restricted embedding and bitmap-only embedding
-permissions are refused. No system-font lookup is performed.
+extraction. A file choice may be static TrueType (`glyf`) or OpenType CFF1, including Adobe Source Serif 4 static OTF. Collections, variable fonts/CFF2, damaged fonts, restricted embedding and bitmap-only embedding permissions are refused. No system-font lookup is performed.
 
 Text drawn with the same font shares its embedded program. Unused glyph
 outlines are removed when the font's permissions allow subsetting; otherwise the
-full program is retained. To discard an unusable inherited font when clearing
+full program is retained. CFF1 is fully embedded as an identity-CID CFF program, with explicit name-keyed/CID-keyed conversion and no subset prefix. To discard an unusable inherited font when clearing
 text, also set `font` to `default`.
 
 A font's PostScript name must meet the PDF name-safety policy: a literal hash
@@ -387,7 +435,7 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 4 is supported; version checks follow the same first-fault order.
+version 5 is supported; version checks follow the same first-fault order.
 
 Limits: 64 MiB original JSON, 64 group levels, 100,000 authored item nodes
 (including groups), and 100,000 explicit selection pairs across the plan.

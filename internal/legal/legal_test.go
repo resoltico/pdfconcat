@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package legal
@@ -48,7 +48,7 @@ func TestTextContainsEveryLicense(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(text, "PDFConcat is licensed under the Mozilla Public License 2.0") {
+	if !strings.HasPrefix(text, "Copyright (c) 2026 Ervins Strauhmanis.\nPDFConcat original code is licensed under AGPL-3.0-only.") {
 		t.Fatalf("missing PDFConcat notice: %.80q", text)
 	}
 	entries, err := fs.ReadDir(files, "licenses")
@@ -78,5 +78,23 @@ func TestNotoLicenseMatchesFontAsset(t *testing.T) {
 	}
 	if !bytes.Equal(beside, bundled) {
 		t.Fatal("fontdata/OFL.txt and licenses/NotoSans-OFL-1.1.txt differ")
+	}
+}
+
+// Installed single-file programs must carry the same full license as archives.
+func TestProjectLicenseMatchesArchive(t *testing.T) {
+	data, err := os.ReadFile("../../LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectLicense != string(data) {
+		t.Fatal("embedded project license differs from root LICENSE")
+	}
+	text, err := Text()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "==> LICENSE <==\n\n"+string(data)) {
+		t.Fatal("license command omits full project license")
 	}
 }

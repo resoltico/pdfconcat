@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package cli_test
@@ -129,5 +129,14 @@ func TestUsageJSONSelectionAndFirstFailure(t *testing.T) {
 				t.Fatalf("%+v / %+v", c, failure)
 			}
 		})
+	}
+}
+
+func TestHelpAcceptsItsOwnHelpFlags(t *testing.T) {
+	for _, args := range [][]string{{"help", "--help"}, {"help", "-h"}} {
+		command, failure := cli.Parse(args)
+		if failure != nil || !command.Help || command.Name != "" {
+			t.Fatalf("%v: %+v %+v", args, command, failure)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package cli
@@ -17,6 +17,7 @@ import (
 // Host supplies process capabilities without coupling the CLI to process globals.
 type Host struct {
 	WorkingDir      func() (string, error)
+	SourceDateEpoch func() (string, bool)
 	ReleaseOverride string
 }
 
@@ -132,7 +133,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		input = items
 	}
 
-	request := core.Request{Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
+	var epoch *string
+	if host.SourceDateEpoch != nil {
+		if value, present := host.SourceDateEpoch(); present {
+			epoch = &value
+		}
+	}
+	request := core.Request{SourceDateEpoch: epoch, Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
 	if command.FitTo != "" {
 		size, _ := core.ParseSheet(command.FitTo)
 		request.FitTo = &size

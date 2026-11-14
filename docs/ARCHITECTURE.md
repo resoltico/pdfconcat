@@ -6,7 +6,7 @@ are documented in [PLAN](PLAN.md) and [CLI](CLI.md).
 
 The [product scope](../README.md#scope-and-boundaries) covers PDF assembly and its
 navigation, separators, simple text inserts, numbering and fitting. The typesetter
-serves declared text pages, dividers, contents and footers. Ordinary text pages
+serves declared text pages, dividers, contents and number overlays. Ordinary text pages
 have one styled block; automatic pagination belongs to contents. Source PDF text
 is neither edited nor reflowed.
 
@@ -14,13 +14,13 @@ is neither edited nor reflowed.
 
 | Package | Responsibility |
 | --- | --- |
-| `cmd/pdfconcat` | Signals, standard streams, working directory, linker version and process exit |
+| `cmd/pdfconcat` | Signals, standard streams, working directory, environment fallback capture, linker version and process exit |
 | `internal/cli` | Argument grammar, help, stdin acquisition and text/JSON presentation |
 | `internal/legal` | Third-party notices and license texts, embedded for `pdfconcat licenses` and copied into archives |
 | `internal/core` | Admission, inspection, composition, build, result projection and reports |
 | `internal/core/internal/packet` | Sealed items, enums, styles, units, limits and physical layout |
 | `internal/core/internal/plan` | Located plan decoding and the embedded plan schema |
-| `internal/core/internal/compose` | Pure page text, contents pagination and footer placement |
+| `internal/core/internal/compose` | Pure page text, contents pagination and page-number placement |
 | `internal/core/internal/typeset` | Fonts, shaping, wrapping, placement and glyph pruning |
 | `internal/core/internal/pdf` | pdfcpu inspection, policy, generation, assembly and verification |
 | `internal/core/internal/files` | Regular-file reads, destination roles and staged publication |
@@ -40,7 +40,7 @@ Allowed production dependencies within the core tree are:
 core    -> diag, result, packet, plan, compose, typeset, pdf, files
 plan    -> packet, diag
 result  -> packet, diag
-packet  -> diag
+packet  -> diag, standard-library language syntax validation
 compose -> packet, typeset, diag
 pdf     -> packet, compose, typeset, files, diag
 files   -> diag
@@ -153,3 +153,9 @@ Validation notices are evidence; their message text does not select policy.
 Diagnostic wrappers preserve backend detail and PDF locations. Result coalescing
 merges only equivalent findings and unions their consuming item references.
 See [PDF policy](PDF-POLICY.md) for fidelity and resource limits.
+
+Document identity, timestamp, numbering and structure policy are domain facts.
+Core reads no process environment: the frontend supplies raw SOURCE_DATE_EPOCH,
+which core parses only when effective. Compose supplies semantic roles and link
+associations. The PDF adapter owns imported structure graphs and canonical
+serialization; it exposes compact facts rather than backend identities.

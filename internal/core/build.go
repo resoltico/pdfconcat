@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -38,8 +38,8 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 		}
 	}
 
-	if assembly.Footer != nil {
-		union, e := assembly.Footer.Union()
+	if assembly.NumberLayout != nil {
+		union, e := assembly.NumberLayout.Union()
 		if e != nil {
 			out.diagnostics = append(out.diagnostics, compose.Diagnostic(e, "/page_numbers"))
 			return out
@@ -72,7 +72,7 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
 	}
-	if err = pdf.Verify(c, staged.Path(), layout.TotalPages); err != nil {
+	if err = pdf.VerifyAssembly(c, staged.Path(), layout.TotalPages, assembly); err != nil {
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
 	}

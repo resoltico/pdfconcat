@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core_test
@@ -64,7 +64,7 @@ func TestEncodingAdmissionHasWholeSourceProvenance(t *testing.T) {
 				}
 				return m
 			}
-			plan, err := json.Marshal(map[string]any{"version": 4, "items": []any{map[string]any{"source": good}, source(), source()}})
+			plan, err := json.Marshal(map[string]any{"version": 5, "items": []any{map[string]any{"source": good}, source(), source()}})
 			if err != nil {
 				t.Fatal(err)
 			}

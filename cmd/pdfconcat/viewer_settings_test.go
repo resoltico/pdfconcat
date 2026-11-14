@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package main
@@ -21,7 +21,7 @@ func TestViewerSettingsCLITextAndJSONShareCoreFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, exit, _ := invokeJSON(t, []string{"check", path, path}, "")
-	if exit != 0 || r.Status != "ok" || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code.String() != "source_viewer_settings_removed" || r.Diagnostics[0].PDFLocation == nil || len(r.Diagnostics[0].Items) != 2 {
+	if exit != 0 || r.Status != "ok" || len(r.Diagnostics) != 2 || r.Diagnostics[0].Code.String() != "source_viewer_settings_removed" || r.Diagnostics[0].PDFLocation == nil || len(r.Diagnostics[0].Items) != 2 {
 		t.Fatal(r)
 	}
 	var stdout, stderr bytes.Buffer

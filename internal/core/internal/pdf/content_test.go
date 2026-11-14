@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf_test
@@ -245,7 +245,7 @@ func TestContentStreamOperators(t *testing.T) {
 		qpdfCheck(t, path)
 
 		const contents = "/Contents"
-		if got := objectStream(t, path, contents); got != row.want {
+		if got := objectStream(t, path, contents); got != "/P <</MCID 0>> BDC\n"+row.want+"EMC\n" {
 			t.Errorf("%s:\n got %q\nwant %q", row.name, got, row.want)
 		}
 	}
@@ -265,7 +265,7 @@ func TestContentStreamPaintsBackgroundAndTextColor(t *testing.T) {
 
 	path, _ := writePDF(t, []compose.Page{page})
 
-	want := "1 0.2 0 rg\n0 0 100.5 50 re\nf\n0.2 0.4 0.6 rg\nBT\n/F1 10 Tf\n1 0 0 1 1 2 Tm\n[" + hex4(handGlyphs(t).a.id) + "] TJ\nET\n"
+	want := "/Artifact BMC\n1 0.2 0 rg\n0 0 100.5 50 re\nf\nEMC\n/P <</MCID 0>> BDC\n0.2 0.4 0.6 rg\nBT\n/F1 10 Tf\n1 0 0 1 1 2 Tm\n[" + hex4(handGlyphs(t).a.id) + "] TJ\nET\nEMC\n"
 	if got := objectStream(t, path, "/Contents"); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

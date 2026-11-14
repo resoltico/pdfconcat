@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core_test
@@ -127,7 +127,7 @@ func TestDirectReferencesAndQueries(t *testing.T) {
 
 func TestPlanByteLimitAndCanceledPhysicalInputs(t *testing.T) {
 	dir := t.TempDir()
-	valid := []byte(`{"version":4,"items":[{"page":{"size":"A4"}}]}`)
+	valid := []byte(`{"version":5,"items":[{"page":{"size":"A4"}}]}`)
 	exact := append(bytes.Clone(valid), bytes.Repeat([]byte(" "), (64<<20)-len(valid))...)
 	r := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanBytes{Data: exact, Label: "limit", BaseDir: dir}, WorkingDir: dir})
 	if r.Status != "ok" {
@@ -154,7 +154,7 @@ func TestConcurrentFileBytesAndDirectRequests(t *testing.T) {
 	if err := pdffixture.Pages("SOURCE", 2).WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte(`{"version":4,"items":[{"source":"source.pdf"},{"page":{}}]}`)
+	data := []byte(`{"version":5,"items":[{"source":"source.pdf"},{"page":{}}]}`)
 	planPath := filepath.Join(dir, "plan.json")
 	if err := os.WriteFile(planPath, data, 0600); err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestUncappedDiagnosticsRemainComplete(t *testing.T) {
 		items = append(items, core.SourceItem{Path: fmt.Sprintf("missing-%d.pdf", n), Ref: fmt.Sprintf("row:%d", n)})
 	}
 	r := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.Items(items), WorkingDir: dir, Report: filepath.Join(t.TempDir(), "full.json")})
-	if len(r.Diagnostics) != 30 || len(r.Parts) != 30 || !r.Report.Written || core.ExitCode(r) != 1 {
+	if len(r.Diagnostics) != 30 || len(r.Parts) != 30 || !r.Report.Written || core.ExitCode(r) != 2 {
 		t.Fatal(r)
 	}
 	data, err := os.ReadFile(r.Report.Path)
@@ -204,7 +204,7 @@ func TestUncappedDiagnosticsRemainComplete(t *testing.T) {
 	}
 
 	// A late higher-priority error must determine exit even beyond a presentation cap.
-	r.Diagnostics = append(slices.Repeat([]core.Diagnostic{core.InvocationFailure(core.Check, core.InvalidValue, "invalid", "").Diagnostics[0]}, 25), r.Diagnostics[0])
+	r.Diagnostics = append(slices.Repeat([]core.Diagnostic{core.InvocationFailure(core.Check, core.InvalidValue, "invalid", "").Diagnostics[0]}, 25), core.InvocationFailure(core.Check, core.PlanUnreadable, "reader failed", "").Diagnostics[0])
 	if core.ExitCode(r) != 1 {
 		t.Fatal("exit used cap")
 	}
@@ -223,9 +223,9 @@ func TestEffectiveFontReservationsAndDirectBudgets(t *testing.T) {
 		want  string
 	}{
 		{`[{"source":"source.pdf"}]`, ""},
-		{`[{"page":{}}]`, "font_unreadable"},
+		{`[{"page":{}}]`, "font_input_invalid"},
 	} {
-		data := []byte(`{"version":4,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
+		data := []byte(`{"version":5,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
 		report := filepath.Join(dir, "report.json")
 		r := core.Execute(t.Context(), core.Request{Operation: core.Check, Input: core.PlanBytes{Data: data, Label: "editor", BaseDir: dir}, WorkingDir: dir, Report: report, Overwrite: true})
 		if tc.want == "" {
@@ -287,9 +287,9 @@ func TestSourceInspectionDiagnosticsFollowFirstUseWithinOutcomePriority(t *testi
 		file, code string
 		items      []string
 	}{
-		{"missing-first.pdf", "source_unreadable", []string{"first", "repeat"}},
-		{"missing-last.pdf", "source_unreadable", []string{"last"}},
-		{"broken.pdf", "source_invalid", []string{"broken"}},
+		{"missing-first.pdf", "source_input_invalid", []string{"first", "repeat"}},
+		{"broken.pdf", "source_not_pdf", []string{"broken"}},
+		{"missing-last.pdf", "source_input_invalid", []string{"last"}},
 	} {
 		got := result.Diagnostics[i]
 		if filepath.Base(got.File) != want.file || got.Code.String() != want.code || !slices.Equal(got.Items, want.items) {

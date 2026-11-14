@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 // Command pdfconcat supplies process lifetime and standard streams to the CLI.
@@ -18,7 +18,7 @@ var version string
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	go func() { <-ctx.Done(); stop() }()
-	code := cli.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, cli.Host{WorkingDir: os.Getwd, ReleaseOverride: version})
+	code := cli.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, cli.Host{SourceDateEpoch: func() (string, bool) { return os.LookupEnv("SOURCE_DATE_EPOCH") }, WorkingDir: os.Getwd, ReleaseOverride: version})
 	stop()
 	os.Exit(code)
 }

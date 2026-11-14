@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
+	"github.com/resoltico/pdfconcat/internal/core/internal/files"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
 	"github.com/resoltico/pdfconcat/internal/core/internal/result"
 )
@@ -76,7 +77,7 @@ const (
 
 // InvocationFailure adapts closed transport failures without execution or I/O.
 func InvocationFailure(hint Operation, kind InvocationFaultKind, message, reference string) Result {
-	if hint != "" && hint != Check && hint != Build || !metadata(message) || !metadata(reference) {
+	if hint != "" && hint != Check && hint != Build || !validHostText(message) || !validHostText(reference) {
 		return invalidRequest(hint)
 	}
 	switch kind {
@@ -115,16 +116,26 @@ const (
 func knownCount(n int64) *int64           { return &n }
 func hasErrors(ds []diag.Diagnostic) bool { status, _ := diag.Outcome(ds); return status != "ok" }
 func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
+	if files.InvalidInput(err) {
+		switch code {
+		case diag.SourceUnreadable, diag.SourceInputInvalid:
+			code = diag.SourceInputInvalid
+		case diag.PlanUnreadable:
+			code = diag.PlanInputInvalid
+		case diag.FontUnreadable, diag.FontInputInvalid:
+			code = diag.FontInputInvalid
+		}
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		code = diag.Interrupted
 	}
 	operation := "I/O operation failed"
 	switch code {
-	case diag.PlanUnreadable, diag.PlanTooLarge:
+	case diag.PlanUnreadable, diag.PlanInputInvalid, diag.PlanTooLarge:
 		operation = "Cannot read plan"
-	case diag.FontUnreadable:
+	case diag.FontUnreadable, diag.FontInputInvalid:
 		operation = "Cannot read font file"
-	case diag.SourceUnreadable:
+	case diag.SourceUnreadable, diag.SourceInputInvalid:
 		operation = "Cannot read source file"
 	case diag.OutputWriteFailed:
 		operation = "Cannot write output PDF"

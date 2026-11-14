@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
@@ -186,7 +186,7 @@ func (o *generatedOutput) Write(data []byte) (int, error) {
 }
 func serializeGenerated(c context.Context, s *model.Context, w io.Writer) (int64, error) {
 	output := &generatedOutput{writer: w, context: c}
-	err := api.WriteContext(c, s, output)
+	err := serialize(c, s, output)
 	if output.err != nil {
 		return output.n, fmt.Errorf("pdf: generated page: write: %w", output.err)
 	}
@@ -251,7 +251,7 @@ func generatedContext(c context.Context, pages []compose.Page, count int, prepar
 		if err = c.Err(); err != nil {
 			return nil, nil, err
 		}
-		embedded := typeset.EmbeddedFont{Font: font, Program: font.Bytes(), Glyphs: doc.usedGlyphs(index)}
+		embedded := typeset.EmbeddedFont{Font: font, Program: font.EmbeddingProgram(), Glyphs: doc.usedGlyphs(index)}
 		if prepared != nil {
 			var ok bool
 			embedded, ok = prepared[font.Identity()]
@@ -273,6 +273,17 @@ func generatedContext(c context.Context, pages []compose.Page, count int, prepar
 	if err != nil {
 		return nil, nil, err
 	}
+	semanticRoot := types.Dict{"Type": types.Name("StructTreeRoot"), "K": types.Array{}}
+	semanticRef, err := s.IndRefForNewObject(semanticRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	cat, err := s.Catalog()
+	if err != nil {
+		return nil, nil, err
+	}
+	cat["StructTreeRoot"] = *semanticRef
+	cat["MarkInfo"] = types.Dict{"Marked": types.Boolean(true)}
 	refs := make([]types.IndirectRef, 0, count)
 	var pending []generatedLink
 	var repeatedContent *types.IndirectRef
@@ -303,20 +314,31 @@ func generatedContext(c context.Context, pages []compose.Page, count int, prepar
 			}
 		}
 		pageDict["Contents"] = *contentRef
+		annotations := []types.IndirectRef{}
 		if len(page.Links) > 0 {
 			annots := types.Array{}
 			for _, link := range page.Links {
 				r := link.Rect
-				annotation := types.Dict{"Type": types.Name("Annot"), "Subtype": types.Name("Link"), "Rect": types.NewNumberArray(r.X, r.Y, r.X+r.Width, r.Y+r.Height), "Border": types.NewIntegerArray(0, 0, 0), "Dest": types.Array{*pageRef, types.Name("Fit")}}
+				annotation := types.Dict{"Type": types.Name("Annot"), "Subtype": types.Name("Link"), "P": *pageRef, "Rect": types.NewNumberArray(r.X, r.Y, r.X+r.Width, r.Y+r.Height), "Border": types.NewIntegerArray(0, 0, 0), "Dest": types.Array{*pageRef, types.Name("Fit")}}
+				if link.Label != "" {
+					annotation["Contents"] = pdfText(link.Label)
+				}
 				ref, e := s.IndRefForNewObject(annotation)
 				if e != nil {
 					return nil, nil, e
 				}
 				annots = append(annots, *ref)
+				annotations = append(annotations, *ref)
 				pending = append(pending, generatedLink{dict: annotation, target: link.TargetPage})
 			}
 			pageDict["Annots"] = annots
 		}
+		if err = tagGeneratedPage(s, semanticRoot, *semanticRef, page, *pageRef, annotations); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err = rebuildStructureIndexes(c, s, semanticRoot); err != nil {
+		return nil, nil, err
 	}
 	if err = buildGeneratedPageTree(c, s, refs); err != nil {
 		return nil, nil, err
@@ -479,11 +501,19 @@ func buildFontResource(c context.Context, s *model.Context, font typeset.Embedde
 	dictionaries[2]["CapHeight"] = types.Float(f.CapHeight() * perEm)
 	dictionaries[2]["StemV"] = types.Integer(80)
 	dictionaries[2]["FontFile2"] = refs[3]
+	fontExtra := types.Dict{"Length1": types.Integer(len(font.Program))}
+	if f.Outline() == typeset.OutlineCFF {
+		dictionaries[1]["Subtype"] = types.Name("CIDFontType0")
+		delete(dictionaries[1], "CIDToGIDMap")
+		delete(dictionaries[2], "FontFile2")
+		dictionaries[2]["FontFile3"] = refs[3]
+		fontExtra = types.Dict{"Subtype": types.Name("CIDFontType0C")}
+	}
 	for _, stream := range []struct {
 		index int
 		data  []byte
 		extra types.Dict
-	}{{3, font.Program, types.Dict{"Length1": types.Integer(len(font.Program))}}, {4, toUnicodeCMap(f, font.Glyphs), nil}} {
+	}{{3, font.Program, fontExtra}, {4, toUnicodeCMap(f, font.Glyphs), nil}} {
 		sd, err := s.NewStreamDictForBuf(stream.data)
 		if err != nil {
 			return nil, err
@@ -501,16 +531,24 @@ func buildFontResource(c context.Context, s *model.Context, font typeset.Embedde
 
 func (d *document) appendContent(page compose.Page) {
 	if page.Background != nil {
+		d.content = append(d.content, "/Artifact BMC\n"...)
 		d.appendColor(*page.Background)
 		d.content = fmt.Appendf(d.content, "0 0 %s %s re\nf\n", number(page.Width), number(page.Height))
+		d.content = append(d.content, "EMC\n"...)
 	}
-	for _, block := range page.Blocks {
+	for index, block := range page.Blocks {
 		if block.Text == nil || len(block.Text.Lines) == 0 {
 			continue
 		}
 		font := d.fonts.index[block.Text.Font.Identity()]
+		role := block.Role
+		if role == "" {
+			role = compose.RoleParagraph
+		}
+		d.content = fmt.Appendf(d.content, "/%s <</MCID %d>> BDC\n", role, index)
 		d.appendColor(block.Color)
 		d.appendText(block.Text, font)
+		d.content = append(d.content, "EMC\n"...)
 	}
 }
 

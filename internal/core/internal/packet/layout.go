@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package packet
@@ -7,7 +7,7 @@ import "github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
 // Resolve maps the cached declaration traversal to physical spans.
 func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Diagnostic) {
-	layout := Layout{PageNumbers: j.PageNumbers}
+	layout := Layout{FitTo: j.FitTo, PageNumbers: j.PageNumbers}
 	source := func(leaf Leaf) (SourceFacts, bool) {
 		if leaf.Index < 0 || leaf.Index >= len(facts) {
 			return SourceFacts{}, false
@@ -164,6 +164,9 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 
 	if len(ds) > 0 {
 		return Layout{}, ds
+	}
+	if err := resolveNumbering(&layout); err != nil {
+		return Layout{}, []diag.Diagnostic{diag.New(diag.PlanValue, err.Error(), "/page_numbers")}
 	}
 	return layout, nil
 }

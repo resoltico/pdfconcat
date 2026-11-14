@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 //go:build darwin || linux
@@ -154,7 +154,7 @@ func corpusStagedBuildSIGINT(t *testing.T) {
 			binary := corpusSignalBinary(t, race)
 			dir := t.ArtifactDir()
 			plan := filepath.Join(dir, "plan.json")
-			corpusJSON(t, plan, map[string]any{"version": 4, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4"}, "count": 50000}}})
+			corpusJSON(t, plan, map[string]any{"version": 5, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4"}, "count": 50000}}})
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, binary, "build", "--plan", plan, "--json")

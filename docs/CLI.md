@@ -1,4 +1,4 @@
-# Command line and result v6
+# Command line and result v7
 
 PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
 selections, sections, navigation and simple text inserts; see the
@@ -96,7 +96,7 @@ retained.
 
 ```json
 {
-  "format_version": 6,
+  "format_version": 7,
   "command": "build",
   "status": "ok",
   "output": {
@@ -114,7 +114,14 @@ retained.
   "diagnostics": [],
   "diagnostics_omitted": 0,
   "report": null,
-  "page_numbers": null
+  "page_numbers": null,
+  "metadata": {},
+  "timestamp": null,
+  "structure": {
+    "policy": "preserve",
+    "coverage": "partial"
+  },
+  "numbering": []
 }
 ```
 
@@ -155,6 +162,11 @@ stays readable. The same 20-diagnostic and 20-consumer limits apply, with omissi
 counts and report guidance based on actual report availability. JSON and full
 reports preserve the original values.
 
+Document metadata/timestamps, resolved numbering spans and structure coverage
+are included in results and full reports. Unknown facts are null. Physical
+`target_page` and output spans retain physical indexes regardless of numbering.
+See the [plan contract](PLAN.md#document-identity-time-and-structure).
+
 ## Reports and committed state
 
 Use `--report FILE` to request a full JSON report, including when `check` or
@@ -193,7 +205,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 6,
+  "format_version": 7,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -229,7 +241,14 @@ contents item or padding span:
     }
   ],
   "page_numbers": null,
-  "sections": []
+  "sections": [],
+  "metadata": {},
+  "timestamp": null,
+  "structure": {
+    "policy": "preserve",
+    "coverage": "partial"
+  },
+  "numbering": []
 }
 ```
 
@@ -291,7 +310,7 @@ zsh omit `shopt` (or use its `NULL_GLOB` option). For lists beyond OS argument l
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 4, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+  jq -n '{version: 5, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -305,7 +324,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 4; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 5; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -376,7 +395,7 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 | `report_is_input` | error | invalid | report is (or aliases) an input |
 | `report_is_output` | error | invalid | report and output are the same file |
 | `font_unreadable` | error | failed | font file could not be read |
-| `font_invalid` | error | invalid | not a supported static TrueType (`glyf`) font, damaged, or its PostScript name cannot be preserved |
+| `font_invalid` | error | invalid | unsupported/damaged static TrueType or CFF1 font, or unsafe PostScript name |
 | `font_not_embeddable` | error | invalid | `OS/2.fsType` forbids embedding |
 | `text_unsupported_character` | error | invalid | character outside the accepted scripts, right-to-left, control or format character |
 | `text_glyph_missing` | error | invalid | the font cannot render a character sequence |
@@ -384,7 +403,12 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 | `page_size_required` | error | invalid | `inherit` with no source page to inherit from |
 | `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
 | `source_unreadable` | error | failed | source file could not be read |
-| `source_changed` | error | failed | source bytes at merge time differ from the inspected bytes |
+| `source_changed` | error | failed | source bytes or readability at assembly differ from inspection |
+| `source_not_pdf` | error | invalid | source has no recognizable PDF header |
+| `source_input_invalid` | error | invalid | source input is absent, denied or nonregular |
+| `plan_input_invalid` | error | invalid | plan input is absent, denied or nonregular |
+| `font_input_invalid` | error | invalid | font input is absent, denied or nonregular |
+| `source_structure_partial` | warning | — | retained source content has incomplete structural coverage |
 | `source_invalid` | error | invalid | PDF parsing or validation failed |
 | `source_unsupported` | error | invalid | source structure cannot be composed with the supported fidelity guarantees |
 | `source_processing_failed` | error | failed | unexpected PDF backend failure, including a recovered panic |
@@ -412,7 +436,7 @@ The registry in `internal/core/internal/diag/codes.go` is authoritative. Warning
 | `destinations_renamed` | warning | — | colliding named destinations were renamed for later occurrences |
 | `destinations_dropped` | warning | — | named destinations whose target is not a page of the same document were omitted |
 | `source_xfa_removed` | warning | — | XFA removed; the static AcroForm remains |
-| `source_structure_removed` | warning | — | tagged-PDF structure removed; output is not tagged |
+| `source_structure_removed` | warning | — | tagged-PDF structure removed by explicit discard policy |
 | `source_page_labels_removed` | warning | — | page labels removed |
 | `source_output_intents_removed` | warning | — | output intents removed; output makes no PDF/A or PDF/X claim |
 | `source_document_actions_removed` | warning | — | `/OpenAction`, catalog `/AA` or document JavaScript removed |

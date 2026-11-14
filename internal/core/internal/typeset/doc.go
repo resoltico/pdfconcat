@@ -1,13 +1,13 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package typeset loads TrueType fonts, shapes and wraps text, and places one text block on a page.
-// It is pure computation: it knows nothing about PDF.
+// Package typeset loads static OpenType fonts, shapes and wraps text, and places one text block on a page.
+// It is pure computation: it owns no PDF object graphs or file I/O.
 //
 // # Fonts
 //
-// A [Font] is an immutable, validated static TrueType font (glyf outlines). Variable fonts, CFF
-// (OpenType/CFF), collections, fonts whose OS/2 fsType forbids embedding, and malformed files are
+// A [Font] is an immutable, validated static TrueType (glyf) or OpenType CFF1 font. Variable fonts,
+// CFF2, collections, fonts whose OS/2 fsType forbids embedding, and malformed files are
 // rejected with an error; loading never panics. A font's identity is the SHA-256 of its bytes.
 // A Font is safe to share between goroutines.
 //

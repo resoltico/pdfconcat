@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package typeset
@@ -16,7 +16,7 @@ type EmbeddedFont struct {
 	Font    *Font
 	Program []byte
 	Glyphs  []uint16
-	Subset  bool // Program was pruned; false when licensing requires the full font.
+	Subset  bool // Program was pruned; false when the complete glyph program is embedded.
 }
 
 // PrepareFonts unions shaped glyphs by font identity in deterministic GID order.
@@ -51,15 +51,18 @@ func PrepareFonts(placements []*Placed) (map[Digest]EmbeddedFont, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[id] = EmbeddedFont{Font: f, Program: program, Glyphs: glyphs, Subset: f.fsType&fsTypeNoSubsetting == 0}
+		result[id] = EmbeddedFont{Font: f, Program: program, Glyphs: glyphs, Subset: f.outline == OutlineTrueType && f.fsType&fsTypeNoSubsetting == 0}
 	}
 	return result, nil
 }
 
 // Prune keeps glyph IDs and metrics unchanged and empties unused outlines.
 // Shaping uses the original font; this program is solely for embedding in PDFs.
-// Fonts whose license forbids subsetting are returned byte-for-byte unchanged.
+// Fonts whose license forbids subsetting retain every glyph; TrueType retains exact bytes.
 func (f *Font) Prune(glyphs []uint16) ([]byte, error) {
+	if f.outline == OutlineCFF {
+		return f.program, nil
+	}
 	if f.fsType&fsTypeNoSubsetting != 0 {
 		return f.data, nil
 	}

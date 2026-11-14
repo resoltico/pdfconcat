@@ -14,6 +14,9 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | `NeedsRendering true` | Refuse `source_dynamic_form` |
 | `OCProperties` | Refuse `source_optional_content` |
 | Broken page tree or missing/malformed page contents | Refuse `source_damaged` before semantic validation |
+| No recognizable PDF header | Refuse `source_not_pdf`; scanning follows the pinned parser, including displaced headers |
+| Initial absent, denied or nonregular input | Invalid `source_input_invalid`; unexpected read errors remain failed |
+| Source changes/disappears after inspection | Failed `source_changed` against the bytes/state actually used |
 | Parse/validation failure | Refuse `source_invalid`, with backend detail and object attribution when available |
 | Unsupported structure or fidelity boundary | Refuse `source_unsupported` |
 | Unexpected backend failure, including recovered panics | Fail `source_processing_failed`; this does not establish source invalidity |
@@ -25,7 +28,8 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Named and legacy destinations | Detach, rename collisions per occurrence and rebuild |
 | Destination outside its source page tree | Omit with warning and remove unusable references/actions |
 | Source outlines | Preserve direct/named/GoTo/Next targets per occurrence |
-| Tags, page labels and output intents | Remove with warnings; output makes no tagging/PDF/A/PDF/X claim |
+| Tagged structure | Preserve supported source semantics by default; explicit `structure: discard` removes claims and warns |
+| Source page labels and output intents | Remove with warnings; authored numbering generates output labels; no PDF/A/PDF/X claim |
 | Catalog `OpenAction`/`AA` and JavaScript name tree | Remove with warning |
 | Embedded-files index and catalog `AF` | Remove with warning; page FileAttachment annotations remain |
 | Catalog `PageLayout`, `PageMode`, `ViewerPreferences` | Remove before semantic validation, with `source_viewer_settings_removed` per entry |
@@ -293,12 +297,11 @@ fitting; inherited canvases use the fit target.
 
 ### Catalog and metadata
 
-Document Info and catalog-level XMP metadata are replaced or removed. Metadata
+Source document identity is replaced by authored XMP, synchronized Info for PDF 1.7, and no Info for PDF 2.0. Dates are absent unless explicitly supplied; [PLAN](PLAN.md#document-identity-time-and-structure) defines the contract. Metadata
 attached to retained pages or other retained objects may remain. These operations
 do not sanitize the document; see [SECURITY](../SECURITY.md).
 
-The output catalog permits Type, Pages, AcroForm, Dests, Outlines, Version and
-Names containing only Dests. XFA is removed. Cleanup covers catalog entries and
+The output catalog permits Type, Pages, AcroForm, Dests, Outlines, Version, authored Metadata/Lang/ViewerPreferences/PageLabels, preserved StructTreeRoot/MarkInfo, and Names containing only Dests. XFA is removed. Cleanup covers catalog entries and
 internal caches so writing cannot recreate removed name trees. Effective version
 fields are synchronized before validation and writing: output is at least PDF
 1.7, or PDF 2.0 if any source is 2.0.
@@ -310,21 +313,21 @@ normalization. Its catalog and name-tree policy is checked before semantic
 validation can change the document. Encryption, forbidden catalog entries, XFA,
 broken page trees, reported repairs and changes to page/content identity are
 rejected. Page count
-must match the resolved packet before publication. This check is independent of
+must match the resolved packet before publication. Reopened metadata, timestamp, viewer preference, numbering spans, structure policy and coverage must also match resolved expectations. This check is independent of
 source admission policy, but uses the same PDF engine; the test suite also uses
 qpdf and Poppler for independent structural and rendering evidence. Strict
 validation is not a complete PDF conformance or arbitrary-input fidelity proof.
 
 ## Text and pruning
 
-Text is shaped and measured with the original static TrueType program. ToUnicode
+Text is shaped and measured with the original static OpenType program. ToUnicode
 and ActualText preserve text extraction for glyph aliases and clusters. See
 [PLAN](PLAN.md) for script, wrapping, placement and overflow rules.
 
 ### Font requirements
 
 PDFConcat refuses fonts with restricted or bitmap-only embedding flags. Fonts
-with a no-subsetting flag retain their original program. Empty text still
+with a no-subsetting flag retain all glyphs. TrueType retains its original program; CFF1 is converted with all glyphs to explicit identity CIDs using the maintained go-sfnt CFF implementation. Empty text still
 validates its selected font without embedding an unused font.
 
 Fonts selected for generated text must provide the metadata consumed by the
@@ -344,7 +347,7 @@ programs and body/contents/footer resources.
 
 ### Glyph pruning
 
-Glyph pruning keeps IDs, metrics, glyph count, used outlines and composite
+TrueType glyph pruning keeps IDs, metrics, glyph count, used outlines and composite
 components. It rebuilds glyf/loca and checksums, reduces post to format 3, and
 drops layout/cmap tables after shaping. Stable IDs allow Identity CID-to-GID
 mapping without a renumbering layer.
@@ -370,9 +373,44 @@ imported-tag collisions; it does not repair naming defects between sources.
 
 Each pruned font uses one `AAAAAA+PostScriptName`-style name throughout the packet;
 its Type0 wrapper, CIDFont and descriptor agree. Full programs receive no added
-prefix and retain their original sanitized PostScript name and exact bytes,
+prefix and retain their original sanitized PostScript name. Full TrueType programs retain exact bytes,
 including names that already resemble subset names. TrueType name tables remain
 unchanged.
+
+### Structure ownership
+
+The adapter validates source parent/child links, ParentTree ownership, IDs,
+role-map cycles and marked-content references before selection. Content-array
+streams keep separate token boundaries and shared marked-content state. Repeated
+sources get isolated graphs, role/class maps and IDs; table-header ID consumers
+are renamed with the IDTree. Table `Headers` bindings, including applied class
+attributes and indirect byte-string IDs, must resolve to retained standard `TH`
+elements in original and reopened output. Selection that omits a referenced
+header is refused before staging: include its pages, select the whole source,
+or explicitly discard structure. Header associations are never silently removed
+or repaired by importing omitted content. Selection prunes omitted semantic content.
+
+Fitting moves page-owned MCIDs into the new Form namespace, preserves nested
+Form namespaces and annotation OBJR ownership, and transforms scoped BBox
+attributes, including class attributes. A bounding box without a resolvable page scope is refused for fitting; use original sizes or a reviewed source with explicit page association. Final indexes are rebuilt from retained
+semantic ownership. The writer emits semantic intent supplied by compose;
+meaningful contents links receive Link/OBJR associations; each title/label pair is emitted contiguously in physical and logical reading order. Source languages belong
+on imported subtree boundaries. No PDF/UA identifier is inherited.
+
+Inline-image payloads remain opaque. Structure inspection accepts a unique
+lexically valid EI boundary, with bounded lookahead, and refuses ambiguous
+boundaries instead of guessing. PDF/UA machine fixtures and negative controls
+complement the independent PDF checks; human accessibility review remains
+separate. See [PLAN](PLAN.md#document-identity-time-and-structure) for coverage.
+
+### Deterministic serialization
+
+PDFConcat serializes the validated public backend object graph with canonical
+reference traversal, sorted dictionary keys and ordinary cross-reference tables.
+It retains encoded streams, emits only reachable objects, and omits optional
+unencrypted trailer IDs. This avoids pdfcpu writer date/ID mutations without a
+fork, module-cache changes, PDF text patching or a production subprocess. PDF 2.0
+standard-font metrics use the backend's public EnsureCoreFontMetrics API.
 
 ## Parser and resource limits
 
@@ -411,3 +449,18 @@ limits for unusually large or untrusted inputs. [SECURITY](../SECURITY.md) defin
 the trusted-input boundary; [CONTRIBUTING](../CONTRIBUTING.md#scale) describes
 optional measurements.
 
+
+### Accessibility consumer checks
+
+Structure names, arrays and mapping targets are resolved before occurrence
+remapping; reopened-output checks require surviving role/class bindings.
+Coverage tracks uncovered content separately from absent semantic content, so
+blank/artifact-only inputs neither dilute covered packets nor raise loss warnings.
+
+Poppler 26.11 `pdfinfo -struct-text` can stop at a nested ActualText span: its
+MarkedContentOutputDev ignores the inner begin without MCID but pops the outer
+sequence at the inner end. A hand-authored source reproduces this independently
+of PDFConcat; ordinary pdftotext extraction remains complete. That consumer path
+is not a complete extraction/accessibility oracle. Native Preview checks cover
+visible text, structural navigation and accessible link descriptions, not spoken
+audio/pronunciation or automatic PDF/UA certification.

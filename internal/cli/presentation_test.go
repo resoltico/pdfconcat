@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package cli_test
@@ -102,7 +102,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, core.VersionInfo{FormatVersion: 6, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, core.VersionInfo{FormatVersion: 7, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {

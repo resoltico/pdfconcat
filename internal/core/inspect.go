@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -116,7 +116,7 @@ func sourceUses(p packet.Plan) []sourceUse {
 			uses = append(uses, sourceUse{path: item.Source})
 		}
 		uses[slot].leaves = append(uses[slot].leaves, leafIndex)
-		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{Item: item.Ref, Pages: item.Selection, MeasureFooter: p.PageNumbers != nil && p.FitTo == nil})
+		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{FitTo: p.FitTo, Structure: p.Structure, Item: item.Ref, Pages: item.Selection, MeasureNumbers: p.PageNumbers != nil && p.FitTo == nil && p.PageNumbers.Eligible(item.Kind, item.NumberingEnabled)})
 	}
 	return uses
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
@@ -52,6 +52,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	usedNames := map[string]bool{}
 	var importedOutlines []importedOutlineRoot
 	var generatedLinks []generatedLink
+	var structures []structurePart
 	compatibility := CheckCompatibility(a)
 	if len(compatibility.Diagnostics) > 0 {
 		d := compatibility.Diagnostics[0]
@@ -72,7 +73,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		if part.Source != "" {
 			data, e := files.Read(c, part.Source, 0)
 			if e != nil {
-				return result, &policyError{finding: diag.New(diag.SourceUnreadable, e.Error()), err: e}
+				return result, pdfFailure(diag.SourceChanged, "The inspected source is no longer readable.", e)
 			}
 			inspected := part.Occurrence.File
 			if sha256.Sum256(data) != inspected.SHA256 {
@@ -111,6 +112,15 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			}
 			generatedLinks = append(generatedLinks, links...)
 		}
+		if a.Structure != packet.StructureDiscard {
+			if err = pruneStructure(c, s); err != nil {
+				return result, pdfFailure(diag.SourceInvalid, "The source structure cannot be preserved.", err)
+			}
+		} else {
+			if err = discardStructure(c, s); err != nil {
+				return result, err
+			}
+		}
 		if a.FitTo != nil {
 			if err = fitContext(c, s, a.FitTo); err != nil {
 				return result, err
@@ -132,6 +142,17 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				return result, e
 			}
 			importedOutlines = append(importedOutlines, root)
+		}
+		if a.Structure != packet.StructureDiscard {
+			root, e := structureRoot(s)
+			if e != nil {
+				return result, e
+			}
+			cat, e := s.Catalog()
+			if e != nil {
+				return result, e
+			}
+			structures = append(structures, structurePart{root: root, catalog: cat})
 		}
 		records, e := fields(c, s)
 		if e != nil {
@@ -170,10 +191,21 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	if err = finalizeGeneratedLinks(c, dest, generatedLinks); err != nil {
 		return result, err
 	}
-	if err = applyPageNumbers(c, dest, a.Parts, a.Fonts, names, a.Footer); err != nil {
+	if err = applyPageNumbers(c, dest, a.Parts, a.Fonts, names, a.NumberLayout, a.Numbering); err != nil {
 		return result, err
 	}
 	if err = cleanCatalog(dest, compatibility.version, needAppearances); err != nil {
+		return result, err
+	}
+	if a.Structure != packet.StructureDiscard {
+		if err = combineStructure(c, dest, structures); err != nil {
+			return result, err
+		}
+	}
+	if err = setDocumentMetadata(dest, a.Metadata, a.Timestamp); err != nil {
+		return result, err
+	}
+	if err = setPageLabels(dest, a.Numbering); err != nil {
 		return result, err
 	}
 	// Source tolerance must not repair defects introduced by composition.
@@ -193,7 +225,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		return result, err
 	}
 	output := &outputWriter{writer: w}
-	err = api.WriteContext(c, dest, output)
+	err = serialize(c, dest, output)
 	if output.err != nil {
 		return result, &policyError{finding: diag.New(diag.OutputWriteFailed, output.err.Error()), err: output.err}
 	}
@@ -218,12 +250,15 @@ func (w *outputWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-var catalogKeys = map[string]bool{"Type": true, "Pages": true, "AcroForm": true, "Names": true, "Dests": true, "Outlines": true, "Version": true}
+var catalogKeys = map[string]bool{"Type": true, "Pages": true, "AcroForm": true, "Names": true, "Dests": true, "Outlines": true, "Version": true, "StructTreeRoot": true, "MarkInfo": true, "Lang": true, "Metadata": true, "ViewerPreferences": true, "PageLabels": true}
 
 func cleanCatalog(s *model.Context, version model.Version, needAppearances bool) error {
 	cat, err := s.Catalog()
 	if err != nil {
 		return err
+	}
+	for _, key := range []string{"StructTreeRoot", "MarkInfo", "Lang", "Metadata", "ViewerPreferences", "PageLabels"} {
+		delete(cat, key)
 	}
 	for key := range cat {
 		if !catalogKeys[key] {
@@ -251,8 +286,8 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 	return nil
 }
 
-// Verify reopens the serialized output, checking page count and final catalog policy.
-func Verify(c context.Context, path string, expected int64) (err error) {
+// verify owns reopening, panic classification and the serialized output checks.
+func verify(c context.Context, path string, expected int64, a *Assembly) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.OutputInvalid, "The composed PDF could not be verified.", fmt.Errorf("%v", value))
@@ -269,8 +304,18 @@ func Verify(c context.Context, path string, expected int64) (err error) {
 	if int64(s.PageCount) != expected {
 		return refuse(diag.OutputPageCountMismatch, fmt.Sprintf("Expected %d output pages; found %d.", expected, s.PageCount))
 	}
+	if a != nil {
+		if err = verifyDocumentFacts(c, s, *a); err != nil {
+			return pdfFailure(diag.OutputInvalid, "The serialized PDF disagrees with the resolved contract.", err)
+		}
+	}
 	return nil
 }
 
 // Diagnostic preserves typed product failures at the application boundary.
 func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, diag.AssemblyFailed) }
+
+// Verify checks serialized page count and catalog policy without authored expectations.
+func Verify(c context.Context, path string, expected int64) error {
+	return verify(c, path, expected, nil)
+}

@@ -4,13 +4,14 @@ project_name: pdfconcat
 
 before:
   hooks:
+    - python3 .github/scripts/source-archive.py
     # Windows file properties (product, version, copyright) and an asInvoker
     # manifest. The .syso files are build inputs only and are git-ignored.
     - >-
       go tool -modfile=tools/go.mod go-winres simply --arch amd64,arm64
       --out cmd/pdfconcat/rsrc --manifest cli --icon ""
       --product-name PDFConcat --file-description "PDFConcat PDF packet assembler"
-      --copyright "Copyright (c) 2026 Ervins Strauhmanis. Licensed under MPL-2.0."
+      --copyright "Copyright (c) 2026 Ervins Strauhmanis. Licensed under AGPL-3.0-only."
       --original-filename pdfconcat.exe
       --product-version "{{ .Version }}" --file-version "{{ .Version }}"
     # A host build of the SBOM tool: `go tool` would build it for the SBOM's
@@ -70,6 +71,10 @@ archives:
           group: root
           mode: 0644
           mtime: "{{ .CommitDate }}"
+      - src: PROJECT-NOTICE.md
+        info: *file_info
+      - src: LICENSE-COMMERCIAL.md
+        info: *file_info
       - src: internal/legal/THIRD_PARTY_NOTICES.md
         strip_parent: true
         info: *file_info
@@ -97,6 +102,7 @@ sboms:
 checksum:
   name_template: checksums.txt
   extra_files:
+    - glob: ./.tools/SOURCE.tar.gz
     - glob: ./install/install.sh
     - glob: ./install/install.ps1
 

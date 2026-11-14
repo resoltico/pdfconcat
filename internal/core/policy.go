@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -21,6 +21,9 @@ func resolvePolicies(a pdf.Assembly, predict bool) []diag.Diagnostic {
 			d := diag.New(code, message, p.Ref)
 			d.File = p.Source
 			ds = append(ds, d)
+		}
+		if a.Structure != packet.StructureDiscard && p.Occurrence.Facts.HasUncoveredContent {
+			add(diag.SourceStructurePartial, "Retained source content has incomplete structural coverage; preservation does not invent missing semantics.")
 		}
 		if f.HasFields {
 			if predict && i > 0 {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
@@ -16,9 +16,11 @@ import (
 
 // SelectionRequest identifies one occurrence in a grouped source inspection.
 type SelectionRequest struct {
-	Item          string
-	Pages         []packet.PageRange
-	MeasureFooter bool
+	Item           string
+	Pages          []packet.PageRange
+	MeasureNumbers bool
+	Structure      packet.StructurePolicy
+	FitTo          *packet.Size
 }
 
 // Inspect reads and validates a whole source once. Each ephemeral view
@@ -44,6 +46,15 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			}
 		}
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
+	}
+	if len(requests) > 0 && requests[0].Structure == packet.StructureDiscard {
+		root, e := structureRoot(s)
+		if e != nil {
+			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
+		}
+		if root != nil {
+			ds = append(ds, diag.New(diag.SourceStructureRemoved, "Source structure is discarded by explicit policy."))
+		}
 	}
 	facts, findings, err = observe(c, s)
 	ds = append(ds, findings...)
@@ -91,7 +102,7 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			ds = append(ds, d)
 			continue
 		}
-		if request.MeasureFooter {
+		if request.MeasureNumbers {
 			if sourceGeometry == nil {
 				sourceGeometry, err = pageGeometries(c, s)
 				if err != nil {
@@ -108,6 +119,35 @@ func Inspect(c context.Context, data []byte, requests []SelectionRequest) (facts
 			}
 		}
 
+		if request.Structure != packet.StructureDiscard && !facts.HasWidgets {
+			root, e := structureRoot(view)
+			if e == nil && root != nil {
+				e = pruneStructure(c, view)
+				if e == nil && request.FitTo != nil {
+					e = fitContext(c, view, request.FitTo)
+				}
+				if e == nil && request.FitTo != nil {
+					root, e = structureRoot(view)
+					if e == nil {
+						cat, err := view.Catalog()
+						if err != nil {
+							e = err
+						} else {
+							e = combineStructure(c, view, []structurePart{{root: root, catalog: cat}})
+						}
+					}
+				}
+				if e == nil && request.FitTo != nil {
+					e = validateStructure(c, view)
+				}
+			}
+			if e != nil {
+				d := diagnostic(e, diag.SourceInvalid)
+				d.Items = []string{request.Item}
+				ds = append(ds, d)
+				continue
+			}
+		}
 		selectedFacts := selected.OccurrenceFacts
 		occurrences[index] = &selectedFacts
 		if removed {

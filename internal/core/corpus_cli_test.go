@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core_test
@@ -39,7 +39,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 			if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
 				if slices.Contains(args, "--json") {
 					var version core.VersionInfo
-					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 6 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
+					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 7 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
 						t.Fatalf("installed version facts: %s %v", raw, err)
 					}
 				} else if !bytes.HasPrefix(raw, []byte("pdfconcat ")) || bytes.Count(raw, []byte("\n")) != 1 || !bytes.Contains(raw, []byte("darwin/")) && !bytes.Contains(raw, []byte("linux/")) && !bytes.Contains(raw, []byte("windows/")) {
@@ -65,8 +65,8 @@ func corpusCLIContracts(t *testing.T, binary string) {
 						t.Fatal("schema properties missing")
 					}
 					version, ok := properties["version"].(map[string]any)
-					if !ok || version["const"] != float64(4) {
-						t.Fatal("plan4 schema fact missing")
+					if !ok || version["const"] != float64(5) {
+						t.Fatal("plan5 schema fact missing")
 					}
 				}
 			}
@@ -134,7 +134,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 		report := filepath.Join(dir, "report.json")
 		cmd := exec.CommandContext(t.Context(), binary, "check", "--plan", "-", "--base-dir", dir, "--report", report, "--json")
 		cmd.Dir = t.TempDir()
-		cmd.Stdin = strings.NewReader(`{"version":4,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
+		cmd.Stdin = strings.NewReader(`{"version":5,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatal(err, string(raw))
@@ -156,7 +156,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 func corpusCLIConcurrentPublication(t *testing.T, binary string) {
 	dir := t.ArtifactDir()
 	plan := filepath.Join(dir, "plan.json")
-	corpusJSON(t, plan, map[string]any{"version": 4, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
+	corpusJSON(t, plan, map[string]any{"version": 5, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
 	commands := []*exec.Cmd{exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json"), exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json")}
 	var outputs, errorsOut [2]bytes.Buffer
 	for n, cmd := range commands {

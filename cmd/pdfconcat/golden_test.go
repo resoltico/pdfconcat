@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package main
@@ -14,7 +14,7 @@ import (
 )
 
 func TestGoldenResultsAndReport(t *testing.T) {
-	plan := `{"version":4,"items":[{"page":{"size":"100x200pt"},"count":2}]}`
+	plan := `{"version":5,"items":[{"page":{"size":"100x200pt"},"count":2}]}`
 	for _, tc := range []struct {
 		name  string
 		args  []string

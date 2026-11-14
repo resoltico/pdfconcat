@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 // Package cli adapts argument grammar, process input and presentation to core.
@@ -29,7 +29,7 @@ type option struct{ name, alias, value, description string }
 
 var options = []option{
 	{"--blank", "", "", "Insert one generated page with default style; size comes from a source or --fit-to SIZE."},
-	{"--plan", "", "FILE|-", "Read a plan v4 JSON file or standard input."},
+	{"--plan", "", "FILE|-", "Read a plan v5 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
 	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; annotation, widget and destination limits apply."},
@@ -75,6 +75,10 @@ func Parse(args []string) (Command, *core.Result) {
 		}
 		if len(args) == 2 {
 			c.Name = args[1]
+			if c.Name == "--help" || c.Name == "-h" {
+				c.Name = ""
+				return c, nil
+			}
 			if !knownCommand(c.Name) {
 				unknown := c.Name
 				c.Name = ""
@@ -258,7 +262,7 @@ func Help(command string) string {
 	var b strings.Builder
 	switch command {
 	case "":
-		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n")
+		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n\nCopyright (c) 2026 Ervins Strauhmanis. AGPL-3.0-only; no warranty.\nCopy, modify and redistribute under that license; run pdfconcat licenses for terms.\n")
 		return b.String()
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"
@@ -285,7 +289,8 @@ func Help(command string) string {
 		fmt.Fprintf(&b, "  %-28s %s\n", names, o.description)
 	}
 	if command == "build" || command == "check" {
-		b.WriteString("\nFitting refuses widgets and numeric internal destination coordinates.\n")
+		b.WriteString("\nPlan contents use resolved labels, or an em dash (—) for unnumbered targets; links retain physical targets.\n")
+		b.WriteString("Fitting refuses widgets and numeric internal destination coordinates.\n")
 		b.WriteString("FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances.\n")
 		b.WriteString("Link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.\n")
 		b.WriteString("See https://github.com/resoltico/pdfconcat/blob/main/docs/PDF-POLICY.md#fitting\n")

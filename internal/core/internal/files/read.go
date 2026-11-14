@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 // Package files reads named regular inputs without opening known streams/devices.
@@ -8,12 +8,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
+	"syscall"
 )
 
-// ErrTooLarge reports an input that exceeds its caller-supplied byte budget.
+// ErrNotRegular identifies an input that cannot be read as a named regular file.
+var ErrNotRegular = errors.New("input is not a regular file")
+
+// ErrTooLarge bounds retained input bytes.
 var ErrTooLarge = errors.New("input exceeds its byte limit")
 
 // Read follows input symlinks. A positive limit bounds bytes retained; zero is
@@ -27,7 +30,7 @@ func Read(c context.Context, path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
+		return nil, &os.PathError{Op: "stat", Path: path, Err: ErrNotRegular}
 	}
 	if limit > 0 && info.Size() > limit {
 		return nil, ErrTooLarge
@@ -42,7 +45,7 @@ func Read(c context.Context, path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
+		return nil, &os.PathError{Op: "stat", Path: path, Err: ErrNotRegular}
 	}
 	if limit > 0 && info.Size() > limit {
 		return nil, ErrTooLarge
@@ -77,4 +80,9 @@ func readStream(c context.Context, reader io.Reader, limit int64) ([]byte, error
 		}
 	}
 	return b.Bytes(), nil
+}
+
+// InvalidInput recognizes expected caller input failures by typed causes.
+func InvalidInput(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotRegular) || errors.Is(err, syscall.ENOTDIR)
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package core
@@ -37,7 +37,7 @@ func Schema(kind SchemaKind) ([]byte, error) {
 
 // Version interprets build metadata and validates the host release override.
 func Version(releaseOverride string) (VersionInfo, error) {
-	if !metadata(releaseOverride) {
+	if !validHostText(releaseOverride) {
 		return VersionInfo{}, errors.New("invalid version metadata")
 	}
 	value, commit := "devel", ""
@@ -54,7 +54,7 @@ func Version(releaseOverride string) (VersionInfo, error) {
 	if releaseOverride != "" {
 		value = strings.TrimPrefix(releaseOverride, "v")
 	}
-	if !metadata(value) || !metadata(commit) || !metadata(runtime.Version()) {
+	if !validHostText(value) || !validHostText(commit) || !validHostText(runtime.Version()) {
 		return VersionInfo{}, errors.New("invalid version metadata")
 	}
 	return VersionInfo{FormatVersion: result.WireVersion, Command: "version", Version: value, Commit: commit, Go: runtime.Version(), Platform: runtime.GOOS + "/" + runtime.GOARCH}, nil

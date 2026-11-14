@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
@@ -26,11 +26,16 @@ type Part struct {
 
 // Assembly is the complete ordered packet and its shared resources.
 type Assembly struct {
-	Parts    []Part
-	Sections []packet.Section
-	FitTo    *packet.Size
-	Footer   *compose.Footer
-	Fonts    map[typeset.Digest]typeset.EmbeddedFont
+	Coverage     string
+	Numbering    []packet.NumberSpan
+	Metadata     *packet.Metadata
+	Timestamp    *int64
+	Structure    packet.StructurePolicy
+	Parts        []Part
+	Sections     []packet.Section
+	FitTo        *packet.Size
+	NumberLayout *compose.PageNumberLayout
+	Fonts        map[typeset.Digest]typeset.EmbeddedFont
 }
 
 // Assembled records actual renames by part index and assembly diagnostics.

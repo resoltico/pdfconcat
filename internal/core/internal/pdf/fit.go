@@ -1,11 +1,10 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 
@@ -73,21 +72,9 @@ func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
 		attrs := page.attrs
 		box := page.box
 		m, scale := fitMatrix(box, attrs.Rotate, size)
-		var data []byte
-		for _, stream := range contents[i].streams {
-			if err := c.Err(); err != nil {
-				return err
-			}
-			part, err := s.PageContent(types.Dict{"Contents": stream.ref}, i+1)
-			if err != nil && !errors.Is(err, model.ErrNoContent) {
-				return err
-			}
-			if err := checkContentLength(int64(len(data))+int64(len(part))+1, s.DecodeLimit()); err != nil {
-				return err
-			}
-			data = append(data, part...)
-			// Content arrays are separated lexical streams, but share graphics state.
-			data = append(data, '\n')
+		data, err := joinedPageContent(c, s, contents[i], i+1)
+		if err != nil {
+			return err
 		}
 		// A Form establishes the original default coordinate space for patterns and
 		// an unescapable BBox clip. Do not rewrite shared/nested resources or matrices.
@@ -97,6 +84,9 @@ func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
 		}
 		form, err := addStream(s, data, extra)
 		if err != nil {
+			return err
+		}
+		if err = fitStructure(c, s, page.ref, *form, m); err != nil {
 			return err
 		}
 		resources, name, err := withFormResource(s, attrs.Resources, "PCSource", *form)

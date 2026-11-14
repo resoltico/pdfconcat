@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf_test
@@ -254,7 +254,7 @@ func wholeOccurrences(layout packet.Layout, facts map[string]pdf.SourceFacts) ma
 }
 
 func testAssembly(layout packet.Layout, files map[string]pdf.SourceFacts, views map[string]pdf.OccurrenceFacts, pages map[int][]compose.Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont) pdf.Assembly {
-	a := pdf.Assembly{Parts: make([]pdf.Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: fonts, Footer: nil}
+	a := pdf.Assembly{Numbering: layout.Numbering, Parts: make([]pdf.Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: fonts, NumberLayout: nil}
 	facts := map[string]*pdf.SourceFacts{}
 	for path, file := range files {
 		facts[path] = &file

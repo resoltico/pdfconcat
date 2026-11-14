@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
 package pdf
@@ -20,7 +20,6 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/internal/compose"
 	"github.com/resoltico/pdfconcat/internal/core/internal/diag"
 
-	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/core/internal/packet"
@@ -54,12 +53,13 @@ func preparedFooter(t *testing.T) (map[typeset.Digest]typeset.EmbeddedFont, map[
 	return prepared, names
 }
 func footerLayout(count int) packet.Layout {
-	return packet.Layout{PageNumbers: &packet.PageNumbers{Size: 9, Margin: 24}, Parts: []packet.Part{{Leaf: packet.Leaf{Ref: "/items/0", Kind: "source"}, FirstPage: 1, LastPage: int64(count)}}}
+	first := int64(1)
+	return packet.Layout{Numbering: []packet.NumberSpan{{Output: [2]int64{1, int64(count)}, Start: &first}}, PageNumbers: &packet.PageNumbers{Size: 9, Margin: 24}, Parts: []packet.Part{{Leaf: packet.Leaf{Ref: "/items/0", Kind: "source"}, FirstPage: 1, LastPage: int64(count)}}}
 }
 func writeFooterContext(t *testing.T, s *model.Context, name string) string {
 	t.Helper()
 	var out bytes.Buffer
-	if err := api.WriteContext(t.Context(), s, &out); err != nil {
+	if err := serialize(t.Context(), s, &out); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), name+".pdf")
@@ -181,7 +181,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 						}
 					}
 					prepared, names := preparedFooter(t)
-					if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(1)), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
+					if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(1)), prepared, names, footerForLayout(t, footerLayout(1)), footerLayout(1).Numbering); err != nil {
 						t.Fatal(err)
 					}
 					if !reflect.DeepEqual(annotationBefore, annotationSnapshot) {
@@ -311,7 +311,7 @@ func TestFooterCopiesInheritedResourcesAndPreservesSharedContent(t *testing.T) {
 	second["Contents"] = first["Contents"]
 	originalContent := first["Contents"]
 	prepared, names := preparedFooter(t)
-	if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(2)), prepared, names, footerForLayout(t, footerLayout(2))); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(2)), prepared, names, footerForLayout(t, footerLayout(2)), footerLayout(2).Numbering); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(parent["Resources"], originalResources) {
@@ -359,7 +359,7 @@ func TestFooterNumbersAllPhysicalPagesExceptPadding(t *testing.T) {
 		{Leaf: packet.Leaf{Kind: "padding"}, FirstPage: 2, LastPage: 2},
 		{Leaf: packet.Leaf{Kind: "page"}, FirstPage: 3, LastPage: 3},
 	}
-	if err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout)); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout), layout.Numbering); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(padding, untouched) {
@@ -404,7 +404,7 @@ func TestFooterOnLargeSourceDoesNotImposeGeneratedCanvasLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared, names := preparedFooter(t)
-	if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(1)), prepared, names, footerForLayout(t, footerLayout(1))); err != nil {
+	if err = applyPageNumbers(t.Context(), s, footerParts(footerLayout(1)), prepared, names, footerForLayout(t, footerLayout(1)), footerLayout(1).Numbering); err != nil {
 		t.Fatal(err)
 	}
 	path := writeFooterContext(t, s, "large")
@@ -451,7 +451,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 			if tc.kind == "source" {
 				layout.Parts[0].Source = "selected.pdf"
 			}
-			err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout))
+			err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout), layout.Numbering)
 			if err == nil {
 				t.Fatal("lower logical overflow was accepted")
 			}
@@ -463,7 +463,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 	}
 }
 
-func footerForLayout(t *testing.T, layout packet.Layout) *compose.Footer {
+func footerForLayout(t *testing.T, layout packet.Layout) *compose.PageNumberLayout {
 	t.Helper()
 	if layout.PageNumbers == nil {
 		return nil
@@ -472,7 +472,7 @@ func footerForLayout(t *testing.T, layout packet.Layout) *compose.Footer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	footer, err := compose.NewFooter(font, *layout.PageNumbers)
+	footer, err := compose.NewPageNumberLayout(font, *layout.PageNumbers)
 	if err != nil {
 		t.Fatal(err)
 	}

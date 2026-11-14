@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Contents inherits root `page_defaults.text.font` instead of fixed Noto Sans; custom-font plans may reflow or fail glyph validation. Number overlays retain Noto Sans.
+- Emitted plan schemas describe static TrueType and OpenType CFF1 support and exclude variable fonts, CFF2 and collections.
+
 - **Breaking:** original project work now uses AGPL-3.0-only; prior MPL grants remain valid. Separate commercial terms are pending; third-party terms are unchanged.
 - Contributions follow standing terms that also permit Ervins Strauhmanis to license them commercially; pull requests explicitly confirm agreement.
 - Binary releases include corresponding source with vendored modules; the standalone executable prints the full project license and notices.

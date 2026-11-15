@@ -2,45 +2,34 @@
 
 ## [Unreleased]
 
-- Empty or JSON-whitespace-only plans, including a leading BOM, explain that a JSON plan object is required; classifications and source locations are unchanged.
+## [0.10.0] - 2026-11-15
 
-- Navigation and adjacent source warnings retain original object/page/path evidence through selection, fitting and merging; distinct bindings and declaration sites remain separate.
-- URI Base warnings require retained relative-action impact; orphan/omitted actions and empty bases no longer warn. Rename predictions remain separate from located actual mappings.
-
-- Structure discard precedes tag validation in check/build, while retaining page, content, encoding, signature, encryption, form and publication safeguards.
-- Tree-less sources with orphan ownership/MCIDs compose as untagged with located warnings; their streams and meaningful uncovered-content status are retained.
-- Proven unclaimed ParentTree entries and absent IDTree indexes are corrected from validated forward ownership with warnings; conflicting declared hierarchies remain refused.
-- Structure diagnostics identify source objects/paths and source-page coverage witnesses, including after page selection.
-
-- Contents inherits root `page_defaults.text.font` instead of fixed Noto Sans; custom-font plans may reflow or fail glyph validation. Number overlays retain Noto Sans.
-- Emitted plan schemas describe static TrueType and OpenType CFF1 support and exclude variable fonts, CFF2 and collections.
-
-- **Breaking:** original project work now uses AGPL-3.0-only; prior MPL grants remain valid. Separate commercial terms are pending; third-party terms are unchanged.
-- Contributions follow standing terms that also permit Ervins Strauhmanis to license them commercially; pull requests explicitly confirm agreement.
-- Binary releases include corresponding source with vendored modules; the standalone executable prints the full project license and notices.
-
-- **Breaking:** plans require version 5; results, reports and JSON version objects use format 7. Update consumers to the [contracts](docs/PLAN.md).
-- **Breaking:** supported tagged source structure is preserved by default; use `structure: "discard"` for explicit untagged output. Generated meaningful text is tagged.
-- Missing, denied or nonregular plan/source/font inputs are invalid (exit 2); unexpected reads and sources changed after inspection remain failures (exit 1).
-- Authored title, author, subject and language produce XMP, synchronized PDF 1.7 Info, catalog language and title display. PDF 2.0 uses XMP identity.
-- PDF bytes are reproducible for the same executable and effective inputs. Dates are absent unless supplied by plan timestamp or effective SOURCE_DATE_EPOCH.
+- **Breaking:** Original PDFConcat work is AGPL-3.0-only; existing MPL grants and third-party licenses are unchanged. See [licensing](PROJECT-NOTICE.md).
+- **Breaking:** Plans require version 5; results, reports and JSON version objects use format 7. Update consumers to the [contracts](docs/PLAN.md).
+- **Breaking:** Tagged source structure is preserved by default; malformed declared tags can be refused. Use `structure: "discard"` for untagged output.
+- **Breaking:** Contents inherits root `page_defaults.text.font`, which can reflow output or fail glyph checks. Keep the root font `default` for Noto Sans contents.
+- **Breaking:** Installers refuse unowned or modified targets. Remove older/manual receiptless installations yourself, or choose a fresh directory.
+- **Breaking:** Mirror bases must be HTTPS directories without credentials, queries or fragments; use a local release directory for separately authenticated downloads.
+- Contributions require agreement to standing terms permitting Ervins Strauhmanis to relicense them commercially; contributors retain copyright.
+- Releases include `SOURCE.tar.gz` with vendored modules; executable archives and `licenses` include the project license and notices.
+- Plans set title, author, subject and BCP 47 language in XMP; PDF 1.7 Info stays synchronized, PDF 2.0 uses XMP, and authored title/language guide viewers.
+- PDF bytes are reproducible for the same executable and effective inputs. Dates are absent unless supplied by plan timestamp or effective `SOURCE_DATE_EPOCH`.
 - Numbering supports physical or consecutive labels, start offsets, kind filters, inherited suppression and six placements; contents and PageLabels share resolved labels.
-- Static OpenType CFF1 fonts, including Source Serif 4 OTF, use full identity-CID embedding; TrueType behavior and embedding restrictions remain supported.
-- Blank/artifact-only sources preserve coverage when mixed with tagged or generated text; indirect role/class bindings and contents reading order survive assembly.
-- Table header associations are validated through selection, repetition and fitting; selections omitting referenced headers are refused before staging.
-- Document language tags follow BCP 47 syntax and uniqueness rules, retaining unknown well-formed subtags and private use.
-- Non-PDF inputs receive `source_not_pdf`; `help --help` and `help -h` succeed. Tagged selection, repetition and fitting retain semantic ownership and report coverage.
-- Go is updated to 1.27.4; runtime/tool dependencies and GoReleaser are refreshed, with pinned veraPDF machine checks and expanded bundled notices.
-
-- Windows uninstall preserves the executable and ownership receipt when removing its owned PATH entry fails, so cleanup can be retried.
-
-- Installers refuse unowned or modified targets; remove older/manual installs yourself or select a fresh directory. Receiptless installations are not adopted.
-- Mirror bases must be HTTPS directory URLs without credentials, queries or fragments; use a local release directory when downloads need separate authentication.
+- Generated text supports static OpenType CFF1 fonts, including Source Serif 4 OTF, with full-glyph embedding and enforced embedding permissions.
+- Generated text and contents links are tagged; selected, repeated and fitted sources retain supported semantics. Coverage reports do not certify PDF/UA.
+- Structure discard precedes tag validation while retaining page, content, encoding, signature, encryption, form and publication safeguards.
+- Tree-less sources remain usable as untagged; validated stale or absent structure indexes normalize with warnings, while conflicting ownership remains refused.
+- Preserved table selections must retain referenced headers; otherwise include the header pages, select the whole source, or explicitly discard structure.
+- Missing, denied or nonregular plan/source/font inputs are invalid (exit 2); unexpected reads and sources changed after inspection remain failures (exit 1).
+- Source warnings retain available original object/page/path evidence through selection, fitting and merging; distinct affected bindings remain separate.
+- URI Base warnings reflect retained relative actions; unrelated or omitted actions and absent or empty bases do not warn.
+- Non-PDF files get `source_not_pdf`; `help --help` and `help -h` succeed. Empty or whitespace-only plans explain that a JSON object is required.
+- Source builds use Go 1.27.4; updated runtime/tool dependencies and GoReleaser accompany pinned veraPDF checks for tagged output.
 - Installer downloads stay on one stable release and HTTPS redirects, verify exact checksums and test the program before activating a private staged update.
-- Receipts track exact file/PATH ownership; uninstall preserves user edits and pre-existing directories. NoModifyPath suppresses all PATH changes.
-- Windows updates track one uniquely named running executable; close it before another update if cleanup is refused. Arbitrary .old files are never overwritten.
-- Installer engines are shared with EML Attachment Remover and Auditory Lab apart from literal product settings, with pinned parity checks for synchronized maintenance.
-- Tag releases publish the same signed archives, installers and SBOMs qualified by all native installer jobs; hashes and notes are checked before attestation and publication.
+- Receipts track file/PATH ownership; uninstall preserves user edits, aliased startup files and pre-existing directories. Disabling PATH changes also applies to uninstall.
+- Windows updates track one owned running executable; close it before retrying refused cleanup. Uninstall retains the executable and receipt if owned PATH removal fails.
+- Installer engines are shared with EML Attachment Remover and Auditory Lab; common changes require synchronized consumer updates.
+- Tag releases publish the exact CI-qualified archives, installers, source and SBOMs, with verified checksums and build-provenance attestations.
 
 ## [0.9.0] - 2026-11-06
 

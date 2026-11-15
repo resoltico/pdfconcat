@@ -471,6 +471,9 @@ invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and count
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
 version 5 is supported; version checks follow the same first-fault order.
 
+After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
+`plan_syntax`; supply a JSON plan object.
+
 Limits: 64 MiB original JSON, 64 group levels, 100,000 authored item nodes
 (including groups), and 100,000 explicit selection pairs across the plan.
 `count` is 1–100,000. The actual generated-page total is at most 100,000,

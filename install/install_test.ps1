@@ -252,7 +252,9 @@ function Test-UninstallPathFailure {
     }
 }
 
-function Test-ActivationRecovery {
+function Test-ActivationRecovery([string]$Group = 'configured', [string[]]$Legal = $Product.LegalFiles) {
+    $Product = $Product.Clone()
+    $Product.LegalFiles = @($Legal)
     # Execute the production activation transaction with real files. Only PATH
     # persistence is mocked; injected failures occur at an actual write boundary.
     foreach ($name in @('Get-ItemOrNull', 'Assert-Regular', 'Get-Digest', 'Test-SamePath', 'Get-AbsoluteDirectory', 'ConvertTo-QuotedCommand', 'Write-Receipt', 'Read-Receipt', 'Get-InstallationFingerprint', 'Invoke-StateRemoval', 'Invoke-RetiredRemoval', 'Restore-Activation', 'Write-Step')) {
@@ -266,7 +268,7 @@ function Test-ActivationRecovery {
     $activateScript = [scriptblock]::Create('try {' + $node.Extent.Text + '} finally ' + $outer.Finally.Extent.Text)
     Set-Variable -Name utf8 -Value ([Text.UTF8Encoding]::new($false))
     foreach ($case in @('unmanaged-restore', 'missing-restore', 'changed-after-preflight', 'unmanaged-restore-failure')) {
-        $InstallDir = Join-Path $work $case
+        $InstallDir = Join-Path $work ($Group + '-' + $case)
         $exe = Join-Path $InstallDir ($Product.Command + '.exe')
         $stateDir = Join-Path $InstallDir ('.' + $Product.Command + '-install')
         $stage = Join-Path $InstallDir 'fixture-stage'
@@ -303,7 +305,15 @@ function Test-ActivationRecovery {
             $receipt = Read-Receipt $true
         }
         $preflight = Get-InstallationFingerprint
-        Set-Variable -Name newReceipt -Value ($r.Clone())
+        $nextReceipt = $r.Clone()
+        $nextReceipt.Legal = @()
+        foreach ($name in @($Product.LegalFiles)) {
+            $legalDir = Join-Path $nextState 'legal'
+            [void][IO.Directory]::CreateDirectory($legalDir)
+            [IO.File]::WriteAllText((Join-Path $legalDir $name), 'next legal fixture')
+            $nextReceipt.Legal += @{ Name = $name; Hash = Get-Digest (Join-Path $legalDir $name) }
+        }
+        Set-Variable -Name newReceipt -Value $nextReceipt
         # Deleting the candidate forces activation failure after old-file/state
         # moves, rather than failing before the restoration path is exercised.
         function Write-Receipt([string]$Directory, [hashtable]$Receipt) {
@@ -730,6 +740,7 @@ try {
     Test-UninstallPathFailure
     Test-ArchiveMemberSelection
     Test-ActivationRecovery
+    Test-ActivationRecovery -Group 'nonempty-legal' -Legal @('LICENSE', 'EXTRA-NOTICE')
     Test-LegalInventory
     Test-PipelineCancellation
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {

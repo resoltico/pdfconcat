@@ -516,3 +516,56 @@ func TestLanguageSyntaxRefusedBeforePublication(t *testing.T) {
 		}
 	}
 }
+
+func TestInitialPlanSyntaxNamedFileAndStdin(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		empty       bool
+		offset      int64
+	}{
+		{"empty", "", true, 0}, {"whitespace", " \r\n\t", true, 0},
+		{"BOM", "\ufeff", true, 3}, {"BOM whitespace", "\ufeff\t \n", true, 3},
+		{"truncated", `{"version":5,"items":[`, false, 22}, {"NBSP", "\u00a0", false, 0},
+	} {
+		for _, stdin := range []bool{false, true} {
+			t.Run(tc.name+strconv.FormatBool(stdin), func(t *testing.T) {
+				dir := t.TempDir()
+				label := filepath.Join(dir, "plan.json")
+				input := ""
+				if stdin {
+					label = "<stdin>"
+					input = tc.input
+				} else if err := os.WriteFile(label, []byte(tc.input), 0600); err != nil {
+					t.Fatal(err)
+				}
+				argument := label
+				if stdin {
+					argument = "-"
+				}
+				args := []string{"check", "--plan", argument}
+				if stdin {
+					args = append(args, "--base-dir", dir)
+				}
+				result, exit, _ := invokeJSON(t, args, input)
+				if exit != 2 || result.Status != "invalid" || len(result.Diagnostics) != 1 {
+					t.Fatalf("outcome: %d %+v", exit, result)
+				}
+				d := result.Diagnostics[0]
+				if d.Code.String() != "plan_syntax" || d.File != label || d.Location == nil || d.Location.File != label || d.Location.Offset != tc.offset {
+					t.Fatalf("attribution/classification: %+v", d)
+				}
+				emptyExplanation := d.Message == "Plan is empty; provide a JSON plan object."
+				if emptyExplanation != tc.empty || d.Message == "" {
+					t.Fatalf("explanation: %+v", d)
+				}
+				if tc.empty && (d.Location.Ref != "" || d.Location.Line != 1 || d.Location.Column != int(tc.offset)+1) {
+					t.Fatalf("root location: %+v", d)
+				}
+				var stdout, stderr bytes.Buffer
+				if code := run(args, strings.NewReader(input), &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "plan_syntax: "+d.Message) || !strings.Contains(stderr.String(), strconv.Quote(label)) {
+					t.Fatalf("text outcome: %d %q %q", code, stdout.String(), stderr.String())
+				}
+			})
+		}
+	}
+}

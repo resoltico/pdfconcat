@@ -198,6 +198,13 @@ func (p *decoder) unknown(name string) error {
 
 func (p *decoder) document(base string) (packet.Plan, error) {
 	var result packet.Plan
+	if p.d.PeekKind() == jsontext.KindInvalid {
+		_, err := p.d.ReadToken()
+		if errors.Is(err, io.EOF) {
+			return result, p.fail(diag.PlanSyntax, "Plan is empty; provide a JSON plan object.")
+		}
+		return result, err
+	}
 	var defaults packet.PageStyle
 	var nodes []node
 	var dir string

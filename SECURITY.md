@@ -23,10 +23,15 @@ shell startup or user PATH entries. Use the installer and documentation from the
 same build as the archive.
 
 A receipt records managed file hashes and PATH ownership. Install/update/removal
-refuses unowned or changed managed files; no version-string or marker-based
-adoption occurs. A per-directory lock serializes cooperating installers. Private
-staging and rollback handling reduce accidental damage but do not promise crash
-recovery or protection against a hostile process with the same account's rights.
+refuses unowned files by default and refuses changed managed files. The current
+checkout permits an explicit install-only replacement of a receiptless regular
+executable when private installer state is absent, preserving the original in a
+reported recovery backup; the published 0.10.0 installer has no replacement flag.
+See [ownership and recovery](docs/INSTALL.md#ownership-and-recovery). No
+version-string or marker-based adoption occurs. A per-directory lock serializes
+cooperating installers. Private staging and rollback handling reduce accidental
+damage but do not promise crash recovery or protection against a hostile process
+with the same account's rights.
 User edits and unrelated files remain outside installer ownership. `NoModifyPath`
 also suppresses uninstall PATH cleanup; shared Windows directories may retain an
 entry rather than breaking other programs.

@@ -140,6 +140,16 @@ the diagnostic names retained staging evidence; keep it and inspect the reported
 startup file before retrying. Later deliberate edits or removals of a successfully
 recorded entry are preserved instead of silently re-added.
 
+Unix uninstall and rollback preserve private recovery images before rewriting
+startup files in place, retaining their symlink and hardlink identities. A failed
+write or handled interruption attempts to restore only attributable changes.
+When restoration is unsafe or fails, keep the reported staging directory: each
+`rewrite.N` records the startup path and identity, exact `preimage` and intended
+`postimage`, plus any captured `observed` contents and `restore-image`. These
+files may contain private shell configuration. Inspect them privately against
+the current startup file before restoring anything or removing recovery evidence;
+a subsequent attempt refuses retained staging rather than guessing how to recover.
+
 PowerShell records exact recovery paths before activation. Cancellation attempts
 to undo only this transaction's files and new PATH entry; after a validated
 commit, the new installation remains active. If restoration cannot be verified,

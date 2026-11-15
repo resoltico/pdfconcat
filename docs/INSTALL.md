@@ -5,12 +5,8 @@ Install a standalone PDFConcat release for the current user, or
 background updater, scheduled task or file association is needed. Your PDFs,
 plans and reports are outside the installer's scope.
 
-The commands below download published release installers. The latest published
-release is currently **0.10.0**. This checkout adds recovery behavior described
-under [ownership and recovery](#ownership-and-recovery); those additions are not
-present in the published 0.10.0 installers. Do not assume a saved older script
-supports checkout-only options. Use an installer and payload from the same
-qualified build, with its matching documentation.
+Use an installer and payload from the same qualified build, with its matching
+documentation. Save the reviewed installer for update and offline removal.
 
 ## Download, inspect and install
 
@@ -83,23 +79,23 @@ unchanged.
 
 Repeat the latest download-and-install command to update an unchanged managed
 copy. Keep the saved installer for offline uninstall. To pin both installer and
-payload to the published 0.10.0 release:
+payload to version 0.11.0:
 
 ```sh
-curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/download/v0.10.0/install.sh &&
-  sh ./install-pdfconcat.sh --version 0.10.0
+curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/download/v0.11.0/install.sh &&
+  sh ./install-pdfconcat.sh --version 0.11.0
 ```
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/download/v0.10.0/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version 0.10.0
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/download/v0.11.0/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version 0.11.0
     if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 }
 ```
 
-Replace both `0.10.0` values together to choose another published stable release.
+Replace both `0.11.0` values together to choose another published stable release.
 Re-running a pinned command reinstalls that release; it does not select future
 latest releases.
 
@@ -107,8 +103,8 @@ When no version is supplied, the installer resolves latest once to a stable
 `vX.Y.Z` tag, then downloads both archive and `checksums.txt` from that release.
 A failed download, checksum or candidate test happens before replacing the active
 program. An update requires intact ownership state and every remaining managed
-file to match its receipt. The checkout installer also repairs a missing owned executable;
-the published 0.10.0 Unix installer refuses that state.
+file to match its receipt. An intact receipt with a missing executable can be
+repaired by reinstalling; remaining owned files must verify.
 
 Alternatively, `PDFCONCAT_VERSION` supplies the release when no version argument
 is given. Clear an environment pin to return to latest:
@@ -131,7 +127,7 @@ activation fails. Errors describe any remaining state; an interruption or failed
 PATH write is not a promise that nothing was installed. Inspect the reported
 paths before trying again.
 
-In the checkout Unix installer, new PATH writes are part of activation: only
+Unix PATH writes are part of activation: only
 completed additions enter the active receipt. A failed transaction attempts to
 restore the prior executable and receipt, including an executable's prior
 absence. Rollback removes only this transaction's verified additions, preserving
@@ -183,18 +179,13 @@ PATH changes. Reuse the same custom directory for update and uninstall.
 
 The current installer uses `.pdfconcat-install` beside the executable
 for ownership receipts and managed data. It verifies managed file hashes before
-update or removal and refuses existing unowned or changed files. It does not
-adopt unowned installs from their filename, version output or PATH settings.
+update or removal. It refuses unowned files by default and refuses changed
+managed files. It does not adopt unowned installs from their filename, version output or PATH settings.
 
-The published 0.10.0 installer refuses a receiptless executable, including one
-installed by 0.9.0. It cannot prove ownership from a version string. Use a fresh
-directory or review and preserve the old executable before removing it manually;
-review old PATH settings separately. Never delete an entire shared bin directory,
-copy a receipt from another directory or edit hashes to bypass a refusal.
+Never delete an entire shared bin directory, copy a receipt from another
+directory or edit hashes to bypass an ownership refusal.
 
-**Checkout installer additions (not in published 0.10.0):**
-
-- A receiptless regular executable with no private installer state is still
+- A receiptless regular executable with no private installer state is
   refused by default. Explicit `--replace-unmanaged` / `-ReplaceUnmanaged` on
   install authorizes replacing only that executable. The installer reports its
   scope, verifies the new candidate and rechecks the target under its lock.
@@ -212,11 +203,10 @@ copy a receipt from another directory or edit hashes to bypass a refusal.
   the diagnostic, preserve valuable files and use a fresh directory if needed.
 - Unix directory aliases are accepted only when requested and recorded paths
   still resolve to the same physical directory. Windows accepts normalized
-  spellings but refuses reparse-point directories. Moved receipts are not
+  spellings but refuses a reparse-point install directory. Moved receipts are not
   adopted; use the recorded path shown in a location-mismatch diagnostic.
 
-After obtaining and reviewing the installer from a qualified build containing
-these changes, explicit replacement uses the same selected directory:
+Explicit replacement uses the selected directory:
 
 ```sh
 sh ./install-pdfconcat.sh --install-dir "$HOME/.local/bin" --replace-unmanaged
@@ -287,7 +277,7 @@ Your PDFs, plans and reports are not installer-managed files.
 | `--version X.Y.Z` | `-Version X.Y.Z` | `PDFCONCAT_VERSION` | Choose a stable release; one leading `v` is allowed. |
 | `--install-dir DIR` | `-InstallDir DIR` | `PDFCONCAT_INSTALL_DIR` | Choose an absolute directory. |
 | `--no-modify-path` | `-NoModifyPath` | `PDFCONCAT_NO_MODIFY_PATH=1` | Do not change PATH or shell startup files. |
-| `--replace-unmanaged` | `-ReplaceUnmanaged` | | Checkout only: explicitly back up and replace a receiptless regular executable; install only. |
+| `--replace-unmanaged` | `-ReplaceUnmanaged` | | Explicitly back up and replace a receiptless regular executable; install only. |
 | `--uninstall` | `-Uninstall` | `PDFCONCAT_UNINSTALL=1` (Windows) | Remove unchanged owned files. |
 | `--help` | `-Help` | | Show usage. |
 

@@ -2,11 +2,12 @@
 
 ## [Unreleased]
 
-- Installers can explicitly replace receiptless executables while retaining recovery backups; changed or unverifiable files remain protected.
-- Installer repairs handle missing owned executables, detect local conflicts before downloads and roll back only verified PATH additions; incomplete recovery retains evidence.
-- Unix uninstall and rollback protect startup files during failed or interrupted rewrites; unsafe restoration retains private complete recovery images and blocks retry pending review.
-- PowerShell cancellation rolls back uncommitted owned changes, retains unverifiable recovery evidence and preserves user-edited PATH value types.
-- Standalone installation instructions include guarded downloads, version pins, update, uninstall and ownership recovery commands.
+## [0.11.0] - 2026-11-15
+
+- Installers offer explicit backed-up replacement of receiptless executables; use `--replace-unmanaged` or `-ReplaceUnmanaged`. Changed or unverifiable targets remain protected.
+- Reinstall or uninstall intact managed installations with missing executables; local ownership and lock conflicts are diagnosed before downloads.
+- Unix uninstall and rollback preserve startup-file bytes and link identity through failed or interrupted rewrites; uncertain recovery retains private complete images for review.
+- PowerShell pipeline cancellation restores uncommitted owned files and attributable PATH changes; cleanup preserves user-edited PATH value types and retains unresolved recovery evidence.
 
 ## [0.10.0] - 2026-11-15
 

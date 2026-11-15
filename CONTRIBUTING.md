@@ -206,10 +206,10 @@ Stage the unchanged source files after a local GoReleaser build; their hashes
 already belong to its checksum manifest.
 
 The PowerShell harness runs each case under `powershell` and `pwsh` when both
-exist. Cancellation boundary probes use real files, actual `Runspace.Stop` and an
-in-memory PATH record; native Windows cases separately qualify registry, ACL and
-running-image behavior. Its user PATH case edits and then restores
-`HKCU\Environment`, so it runs only when `CI` is set. Restore raw PATH text, value kind and original absence,
+exist. Portable cancellation probes use real files, actual `Runspace.Stop` and
+an in-memory PATH record. Windows CI also runs those boundaries against the real
+registry in both shells, alongside ACL and running-image cases. Registry cases
+edit and then restore `HKCU\Environment`, so they run only when `CI` is set. Restore raw PATH text, value kind and original absence,
 including on failures. Test owned/unowned targets, tampered receipts/binaries,
 locked operations, exact PATH ownership, unsafe archives, checksum/version
 failures and activation rollback. Never run these tests against a developer's

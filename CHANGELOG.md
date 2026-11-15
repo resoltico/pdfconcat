@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Empty or JSON-whitespace-only plans, including a leading BOM, explain that a JSON plan object is required; classifications and source locations are unchanged.
+
 - Navigation and adjacent source warnings retain original object/page/path evidence through selection, fitting and merging; distinct bindings and declaration sites remain separate.
 - URI Base warnings require retained relative-action impact; orphan/omitted actions and empty bases no longer warn. Rename predictions remain separate from located actual mappings.
 

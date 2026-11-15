@@ -455,3 +455,38 @@ func TestPlanVersionAndDefaultsContract(t *testing.T) {
 
 	}
 }
+
+func TestInitialDocumentSyntaxExplanations(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		empty       bool
+		offset      int64
+	}{
+		{"empty", "", true, 0}, {"space", " ", true, 0}, {"json whitespace", " \t\r\n", true, 0},
+		{"BOM only", "\ufeff", true, 3}, {"BOM whitespace", "\ufeff \r\n\t", true, 3},
+		{"truncated object", "{", false, 1}, {"truncated items", `{"version":5,"items":[`, false, 22},
+		{"truncated string", `"unfinished`, false, 11}, {"NBSP", "\u00a0", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ds := plan.Decode([]byte(tc.input), "plan.json", ".")
+			if len(ds) != 1 || ds[0].Code != diag.PlanSyntax || ds[0].Location == nil {
+				t.Fatalf("syntax classification: %+v", ds)
+			}
+			d := ds[0]
+			emptyExplanation := d.Message == "Plan is empty; provide a JSON plan object."
+			if emptyExplanation != tc.empty || d.Message == "" {
+				t.Fatalf("wrong explanation: %+v", d)
+			}
+			if d.File != "plan.json" || d.Location.File != "plan.json" || d.Location.Offset != tc.offset {
+				t.Fatalf("source/offset: %+v", d)
+			}
+			if tc.empty && (d.Location.Ref != "" || d.Location.Line != 1 || d.Location.Column != int(tc.offset)+1 || len(d.Items) != 0) {
+				t.Fatalf("empty root location changed: %+v", d)
+			}
+		})
+	}
+	_, ds := plan.Decode([]byte(`{"version":5,"items":[{"page":{"size":"A4"}}]}`), "valid.json", ".")
+	if len(ds) != 0 {
+		t.Fatalf("valid object EOF: %+v", ds)
+	}
+}

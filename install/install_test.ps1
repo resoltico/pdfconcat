@@ -34,7 +34,7 @@ function Invoke-NativeCase([string]$Shell, [string[]]$Arguments, [switch]$Stream
         if ($StreamOutput) {
             & $Shell @Arguments 2>&1 | ForEach-Object { Write-Host $_ }
         } else {
-            & $Shell @Arguments *> (Join-Path $work 'out.txt')
+            & $Shell @Arguments *>&1 | Out-File -LiteralPath (Join-Path $work 'out.txt') -Encoding utf8 -Width 32767
         }
         if ($global:LASTEXITCODE -isnot [int]) { throw "Native process did not produce an exit code: $Shell" }
         return $global:LASTEXITCODE
@@ -78,9 +78,10 @@ function Invoke-Installer([string]$Shell, [string[]]$Arguments, [string]$Base = 
             return (Invoke-NativeCase $Shell (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer) + $Arguments))
         }
         try {
+            # Keep PS5.1 host output unwrapped and UTF-8, matching catch append.
             # Reuse the exact public scriptblock, not an internal installer function.
             # Hashtable splatting preserves named binding; string arrays do not.
-            & $reviewedInstaller @options *> (Join-Path $work 'out.txt')
+            & $reviewedInstaller @options *>&1 | Out-File -LiteralPath (Join-Path $work 'out.txt') -Encoding utf8 -Width 32767
             return 0
         } catch {
             [IO.File]::AppendAllText((Join-Path $work 'out.txt'), ($_ | Out-String))

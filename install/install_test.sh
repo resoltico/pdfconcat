@@ -595,7 +595,11 @@ done
 begin 'explicit receiptless replacement preserves original bytes outside the shared bin'
 replacement_dir=${fixture_home}/tools
 mkdir -p "${replacement_dir}"
-printf '#!/bin/sh\nprintf untouched > "$HOME/unowned-was-run"\nexit 71\n' > "${replacement_dir}/${command_name}"
+cat > "${replacement_dir}/${command_name}" <<'EOF'
+#!/bin/sh
+printf untouched > "$HOME/unowned-was-run"
+exit 71
+EOF
 chmod 755 "${replacement_dir}/${command_name}"
 original_hash=$(hash_file "${replacement_dir}/${command_name}")
 printf '# user startup content\n' > "${fixture_home}/.profile"
@@ -617,13 +621,24 @@ after=$(hash_file "${replacement_dir}/${command_name}"); assert 'bad candidate p
 after=$(hash_file "${fixture_home}/.profile"); assert 'bad candidate preserves startup bytes' test "${profile_before}" = "${after}"
 assert 'bad candidate creates no receipt' test ! -e "${replacement_dir}/.${command_name}-install"
 unset download_base
+# Force the cross-platform mktemp spelling difference on every native host.
+mkdir "${fixture_home}/normalized-tools"
+real_mktemp=$(command -v mktemp)
+cat > "${fixture_home}/normalized-tools/mktemp" <<EOF
+#!/bin/sh
+created=\$('${real_mktemp}' "\$@") || exit 1
+case "\$created" in */.${command_name}-stage.*) (cd "\$created" && pwd -P) ;; *) printf '%s\\n' "\$created" ;; esac
+EOF
+chmod 755 "${fixture_home}/normalized-tools/mktemp"
+fixture_path=${fixture_home}/normalized-tools:${base_path}
 run_installer /bin/sh --install-dir "${replacement_dir}/." --replace-unmanaged; expect_exit 0 'explicit backed-up replacement through a dot alias'
 assert 'unowned executable never ran' test ! -e "${fixture_home}/unowned-was-run"
 recovery_files=("${fixture_home}/.${command_name}-recovery."*/"${command_name}")
 assert 'one exclusively named retained recovery backup' test "${#recovery_files[@]}" = 1
 assert 'retained recovery backup is a regular file' test -f "${recovery_files[0]}"
 backup_hash=$(hash_file "${recovery_files[0]}"); assert 'backup preserves exact original bytes' test "${original_hash}" = "${backup_hash}"
-reported_backup=$(cd "${recovery_files[0]%/*}" && printf '%s/%s' "$(pwd -P)" "${command_name}")
+reported_backup_directory=$(cd "${recovery_files[0]%/*}" && pwd -P)
+reported_backup=${reported_backup_directory}/${command_name}
 assert 'physical backup path is reported' grep -Fq "${reported_backup}" "${work}/out"
 assert 'new directory ownership not adopted' grep -qx 0 "${replacement_dir}/.${command_name}-install/created-dir"
 count=$(marker_count "${fixture_home}/.profile"); assert 'replacement owns only new PATH line' test "${count}" = 1
@@ -878,6 +893,57 @@ state_after=$(hash_file "${receipt}/state.sha256"); assert 'extra legal file pre
 rm "${receipt}/legal/UNOWNED-NOTE"
 run_installer /bin/sh --install-dir "${fixture_home}/update-tools" --uninstall --no-modify-path; expect_exit 0 'expanded legal inventory normal cleanup'
 installer=${saved_installer}; legal_files=${saved_legal_files}
+
+begin 'final locked inspection propagates a managed receipt read failure'
+run_installer /bin/sh --no-modify-path; expect_exit 0 'final inspection baseline'
+binary_path=${fixture_home}/.local/bin/${command_name}
+receipt=${fixture_home}/.local/bin/.${command_name}-install
+before=$(hash_file "${binary_path}"); state_before=$(hash_file "${receipt}/state.sha256")
+mkdir "${fixture_home}/inspection-tools"
+real_cat=$(command -v cat)
+cat > "${fixture_home}/inspection-tools/cat" <<EOF
+#!/bin/sh
+case "\$1" in */.${command_name}-install/version)
+    for pending in "\$HOME/.local/bin/.${command_name}-stage."*; do
+        if [ -d "\$pending" ]; then printf 'injected receipt read failure\\n' >&2; exit 75; fi
+    done ;;
+*) : ;;
+esac
+exec '${real_cat}' "\$@"
+EOF
+chmod 755 "${fixture_home}/inspection-tools/cat"
+fixture_path=${fixture_home}/inspection-tools:${base_path}
+run_installer /bin/sh --no-modify-path; expect_failure 'locked inspection read failure'
+after=$(hash_file "${binary_path}"); state_after=$(hash_file "${receipt}/state.sha256")
+assert 'read failure preserves active executable' test "${before}" = "${after}"
+assert 'read failure preserves active ownership' test "${state_before}" = "${state_after}"
+assert 'read failure exposes the actual cause' grep -q 'injected receipt read failure' "${work}/out"
+assert 'read failure releases the owned lock' test ! -e "${fixture_home}/.local/bin/.${command_name}-install.lock"
+unset fixture_path
+
+begin 'PATH append read errors never become false ownership'
+printf '# original startup\n' > "${fixture_home}/.profile"
+profile_before=$(hash_file "${fixture_home}/.profile")
+mkdir "${fixture_home}/append-read-tools"
+real_grep=$(command -v grep)
+cat > "${fixture_home}/append-read-tools/grep" <<EOF
+#!/bin/sh
+if [ "\$1" = -Fxq ]; then
+    for pending in "\$HOME/.local/bin/.${command_name}-stage."*/new-state/state.sha256; do
+        if [ -f "\$pending" ]; then printf 'injected append read failure\\n' >&2; exit 2; fi
+    done
+fi
+exec '${real_grep}' "\$@"
+EOF
+chmod 755 "${fixture_home}/append-read-tools/grep"
+fixture_path=${fixture_home}/append-read-tools:${base_path}
+run_installer /bin/sh; expect_failure 'append boundary read error'
+after=$(hash_file "${fixture_home}/.profile")
+assert 'append read failure leaves startup bytes unchanged' test "${profile_before}" = "${after}"
+assert 'append read failure creates no active ownership' test ! -e "${fixture_home}/.local/bin/.${command_name}-install"
+assert 'append read failure creates no active program' test ! -e "${fixture_home}/.local/bin/${command_name}"
+assert 'append read failure exposes the actual cause' grep -q 'Could not recheck startup file' "${work}/out"
+unset fixture_path
 
 printf '\n'
 if [[ "${failures}" -gt 0 ]]; then printf '%s check(s) failed.\n' "${failures}" >&2; exit 1; fi

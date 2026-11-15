@@ -519,6 +519,6 @@ try {
 } catch {
     Write-Host ("Installer failed: " + $_.Exception.Message)
     Write-Host "Help: $($Product.Repository)/blob/main/docs/INSTALL.md"
-    if ($MyInvocation.MyCommand.Path) { exit 1 }
+    if ($MyInvocation.MyCommand -is [Management.Automation.ExternalScriptInfo]) { exit 1 }
     throw 'CLI installation did not complete.'
 }

@@ -61,10 +61,41 @@ the current input, fidelity and publication constraints.
 
 ## Install
 
-Use a prebuilt binary from a [release](https://github.com/resoltico/pdfconcat/releases)
-or build from source below. The commands and plan format in this README describe
-the current source. For a published binary, follow the documentation at its
-matching release tag.
+Install a standalone release for your user account; no Go installation is needed.
+On macOS 15+ or Linux (Apple Silicon/ARM64 or Intel/x86-64):
+
+```sh
+curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh &&
+  sh ./install-pdfconcat.sh
+```
+
+On Windows 10/11 (x64 or ARM64), use PowerShell:
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1
+    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+}
+```
+
+These commands download and execute a release installer. To inspect it first,
+pin a release, choose a custom directory or avoid PATH changes, follow the
+[installation guide](docs/INSTALL.md). Open a new terminal after installation,
+then verify:
+
+```sh
+pdfconcat version
+pdfconcat --help
+```
+
+Re-run the download-and-install command to update an unchanged installer-managed
+copy. Existing manually copied or older receiptless executables require the
+[ownership and recovery steps](docs/INSTALL.md#ownership-and-recovery).
+
+The examples below describe the current source. For a published binary, follow
+the documentation at its matching [release tag](https://github.com/resoltico/pdfconcat/releases).
 
 ### Build from source
 

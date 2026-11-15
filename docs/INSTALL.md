@@ -140,6 +140,14 @@ the diagnostic names retained staging evidence; keep it and inspect the reported
 startup file before retrying. Later deliberate edits or removals of a successfully
 recorded entry are preserved instead of silently re-added.
 
+PowerShell records exact recovery paths before activation. Cancellation attempts
+to undo only this transaction's files and new PATH entry; after a validated
+commit, the new installation remains active. If restoration cannot be verified,
+keep the retained transaction evidence named by the next attempt. Ctrl-C can
+suppress console output, so a quiet cancellation is not proof of cleanup.
+Uninstall and rollback preserve a user-edited PATH value type instead of deleting
+that edited value merely because the install originally created it.
+
 On Windows an update can retain one uniquely named, receipt-owned running
 executable. Close processes using it before another update or uninstall if
 cleanup is refused. The installer never adopts or deletes arbitrary `.old` files.

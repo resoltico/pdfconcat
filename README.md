@@ -61,10 +61,10 @@ the current input, fidelity and publication constraints.
 
 ## Install
 
-This README describes the current source. Build the checkout to use the features
-and plan format shown below. For a published binary, choose a
-[release](https://github.com/resoltico/pdfconcat/releases) and follow the
-installation instructions at that release's tag.
+Use a prebuilt binary from a [release](https://github.com/resoltico/pdfconcat/releases)
+or build from source below. The commands and plan format in this README describe
+the current source. For a published binary, follow the documentation at its
+matching release tag.
 
 ### Build from source
 

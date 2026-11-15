@@ -1,11 +1,11 @@
 # Install, update and uninstall the CLI
 
-This guide describes the scripts in [`install/`](../install). To run the behavior
-documented by this checkout, [build from source](../README.md#build-from-source).
-For a published binary, choose a [release](https://github.com/resoltico/pdfconcat/releases)
-and follow the installation instructions at its tag. Use an installer and archive
-from the same qualified build; do not mix downloaded scripts and assets from
-different revisions.
+This guide describes the scripts in [`install/`](../install). For a published
+binary, choose a [release](https://github.com/resoltico/pdfconcat/releases) and
+follow the installation instructions at its matching tag. Use an installer and
+archive from the same qualified build; do not mix downloaded scripts and assets
+from different revisions. [Building from source](../README.md#build-from-source)
+is an alternative to installing a prebuilt binary.
 
 The installer downloads PDFConcat for the current user, verifies the archive's
 SHA-256 checksum and test-runs the program before replacing an owned installation.

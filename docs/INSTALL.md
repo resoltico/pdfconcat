@@ -1,39 +1,56 @@
 # Install, update and uninstall the CLI
 
-This guide describes the scripts in [`install/`](../install). For a published
-binary, choose a [release](https://github.com/resoltico/pdfconcat/releases) and
-follow the installation instructions at its matching tag. Use an installer and
-archive from the same qualified build; do not mix downloaded scripts and assets
-from different revisions. [Building from source](../README.md#build-from-source)
-is an alternative to installing a prebuilt binary.
+Install a standalone PDFConcat release for the current user, or
+[build from source](../README.md#build-from-source). No administrator account,
+background updater, scheduled task or file association is needed. Your PDFs,
+plans and reports are outside the installer's scope.
 
-The installer downloads PDFConcat for the current user, verifies the archive's
-SHA-256 checksum and test-runs the program before replacing an owned installation.
-No administrator account, background updater, scheduled task or file association
-is needed. The CLI's inputs and outputs are outside the installer's scope.
+The commands below download published release installers. The latest published
+release is currently **0.10.0**. This checkout adds recovery behavior described
+under [ownership and recovery](#ownership-and-recovery); those additions are not
+present in the published 0.10.0 installers. Do not assume a saved older script
+supports checkout-only options. Use an installer and payload from the same
+qualified build, with its matching documentation.
 
-## Install
+## Download, inspect and install
 
-Save and review the selected build's installer as `install.sh` or `install.ps1`.
-The current scripts accept these invocations. Replace `X.Y.Z` with the selected
-stable release number. On macOS or Linux:
+On macOS or Linux, save the latest installer, inspect it, then run it:
 
 ```sh
-sh ./install.sh --version X.Y.Z
+curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh &&
+  less ./install-pdfconcat.sh &&
+  sh ./install-pdfconcat.sh
 ```
 
-HTTPS downloads use curl or wget. The installer also requires standard shell
-tools, tar and a SHA-256 tool (`sha256sum`, `shasum` or `openssl`).
+If curl is unavailable, use `wget --https-only -O ./install-pdfconcat.sh URL`
+with the same URL and `&&` chain. The installer itself can use curl or wget and
+requires standard shell tools, tar and a SHA-256 tool (`sha256sum`, `shasum` or
+`openssl`). `less` is only for your review; the [README quick start](../README.md#install)
+omits it.
 
-On Windows, use PowerShell:
+On Windows, use Windows PowerShell 5.1 or PowerShell 7:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -File .\install.ps1 -Version X.Y.Z
+& {
+    $ErrorActionPreference = 'Stop'
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+    Get-Content .\install-pdfconcat.ps1
+    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1
+    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+}
 ```
 
-Windows PowerShell 5.1 and PowerShell 7 are supported. `ByPass` applies only to the
-launched PowerShell session; it does not change persistent policy or override
-Group Policy. Managed systems can still refuse the program.
+To pause for review, stop after the download, inspect the saved file, and run the
+child command only after a successful download. `ByPass` applies only to that
+child session; it does not change persistent policy or override Group Policy.
+Use `pwsh` instead of `powershell` to select PowerShell 7. Managed systems can
+still refuse the program.
+
+The Unix `&&` chain and PowerShell script block prevent a failed fetch from
+executing a stale saved installer. An installer failure remains a failure of the
+whole command: Unix returns its nonzero status; PowerShell throws when the child
+reports a nonzero exit. Keep these guards in automation. A bare `curl | sh`
+pipeline can hide a failed download behind a successful empty shell.
 
 Supported systems are macOS 15 or later on Apple Silicon and Intel, Linux on
 x86-64 and ARM64, and Windows 10/11 on x64 and ARM64. Linux builds use
@@ -58,17 +75,40 @@ The Windows command above runs in a child process, so its PATH changes do
 not reach an already-open parent terminal. Running the script directly in the
 current PowerShell session may also update that session's PATH. On macOS/Linux,
 use the quoted full executable path printed by the installer while this terminal
-keeps its current PATH, or open a new terminal after successful persistence. `--no-modify-path` / `-NoModifyPath` leaves persistent
-and current-session PATH unchanged.
+keeps its current PATH, or open a new terminal after successful persistence.
+`--no-modify-path` / `-NoModifyPath` leaves persistent and current-session PATH
+unchanged.
 
 ## Update and choose a release
 
-Run the same install command again to update or reinstall the selected release.
+Repeat the latest download-and-install command to update an unchanged managed
+copy. Keep the saved installer for offline uninstall. To pin both installer and
+payload to the published 0.10.0 release:
+
+```sh
+curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/download/v0.10.0/install.sh &&
+  sh ./install-pdfconcat.sh --version 0.10.0
+```
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/download/v0.10.0/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version 0.10.0
+    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+}
+```
+
+Replace both `0.10.0` values together to choose another published stable release.
+Re-running a pinned command reinstalls that release; it does not select future
+latest releases.
+
 When no version is supplied, the installer resolves latest once to a stable
 `vX.Y.Z` tag, then downloads both archive and `checksums.txt` from that release.
 A failed download, checksum or candidate test happens before replacing the active
-program. An update requires the existing binary, legal files and ownership state
-to match their receipt.
+program. An update requires intact ownership state and every remaining managed
+file to match its receipt. The checkout installer also repairs a missing owned executable;
+the published 0.10.0 Unix installer refuses that state.
 
 Alternatively, `PDFCONCAT_VERSION` supplies the release when no version argument
 is given. Clear an environment pin to return to latest:
@@ -91,44 +131,114 @@ activation fails. Errors describe any remaining state; an interruption or failed
 PATH write is not a promise that nothing was installed. Inspect the reported
 paths before trying again.
 
+In the checkout Unix installer, new PATH writes are part of activation: only
+completed additions enter the active receipt. A failed transaction attempts to
+restore the prior executable and receipt, including an executable's prior
+absence. Rollback removes only this transaction's verified additions, preserving
+later user content. If a partial write or concurrent edit prevents exact cleanup,
+the diagnostic names retained staging evidence; keep it and inspect the reported
+startup file before retrying. Later deliberate edits or removals of a successfully
+recorded entry are preserved instead of silently re-added.
+
 On Windows an update can retain one uniquely named, receipt-owned running
 executable. Close processes using it before another update or uninstall if
 cleanup is refused. The installer never adopts or deletes arbitrary `.old` files.
 
-## Ownership
+## Custom directory and PATH
+
+Use the saved, reviewed installer with an absolute directory, for example:
+
+```sh
+sh ./install-pdfconcat.sh --install-dir "$HOME/my tools" --no-modify-path
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -InstallDir "$env:LOCALAPPDATA\My Tools" -NoModifyPath
+if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+```
+
+Omit the no-PATH option to enable normal PATH setup. With it, use the full
+executable path printed by the installer; neither persistent nor current-session
+PATH changes. Reuse the same custom directory for update and uninstall.
+
+## Ownership and recovery
 
 The current installer uses `.pdfconcat-install` beside the executable
 for ownership receipts and managed data. It verifies managed file hashes before
 update or removal and refuses existing unowned or changed files. It does not
 adopt unowned installs from their filename, version output or PATH settings.
 
-For any installation without a valid receipt,
-remove the existing executable yourself or select a fresh directory. Keep any files
-you need and remove obsolete PATH settings by hand after reviewing them. Do not
+The published 0.10.0 installer refuses a receiptless executable, including one
+installed by 0.9.0. It cannot prove ownership from a version string. Use a fresh
+directory or review and preserve the old executable before removing it manually;
+review old PATH settings separately. Never delete an entire shared bin directory,
 copy a receipt from another directory or edit hashes to bypass a refusal.
-A non-directory target or non-regular managed entry is also left alone.
+
+**Checkout installer additions (not in published 0.10.0):**
+
+- A receiptless regular executable with no private installer state is still
+  refused by default. Explicit `--replace-unmanaged` / `-ReplaceUnmanaged` on
+  install authorizes replacing only that executable. The installer reports its
+  scope, verifies the new candidate and rechecks the target under its lock.
+- The original executable is preserved in a unique recovery location in the
+  install directory's parent, outside the bin directory being managed. Its exact
+  path is printed. Keep it until you have verified the replacement. Normal
+  uninstall does not delete it or treat it as another active tool that requires
+  retaining a PATH entry. Pre-existing PATH entries and directories are not adopted.
+- A valid receipt with only the managed executable missing can be repaired by
+  re-running install, or cleaned up with uninstall. Remaining owned files must
+  still verify. Repeating uninstall after complete cleanup is harmless.
+- Changed managed files, corrupt or incomplete state, inaccessible files, and
+  symlinks or other nonregular executable/state targets remain conservative refusals; the
+  replacement option cannot bypass them. Inspect the exact path and cause in
+  the diagnostic, preserve valuable files and use a fresh directory if needed.
+- Unix directory aliases are accepted only when requested and recorded paths
+  still resolve to the same physical directory. Windows accepts normalized
+  spellings but refuses reparse-point directories. Moved receipts are not
+  adopted; use the recorded path shown in a location-mismatch diagnostic.
+
+After obtaining and reviewing the installer from a qualified build containing
+these changes, explicit replacement uses the same selected directory:
+
+```sh
+sh ./install-pdfconcat.sh --install-dir "$HOME/.local/bin" --replace-unmanaged
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -InstallDir "$env:LOCALAPPDATA\Programs\PDFConcat" -ReplaceUnmanaged
+if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+```
+
+The flag is install-only, takes no stdin consent and does not authorize an
+unmanaged uninstall. It does not execute the old executable to identify it.
+If activation fails, the installer attempts to restore the original executable
+and prior state, including prior absence. If restoration fails, keep all reported
+recovery paths and inspect them before retrying; do not discard evidence based
+on a successful earlier download. An operation reporting incomplete restoration
+has not restored the prior installation.
 
 Pre-existing directories may be shared with other tools. They are never removed
 merely because they became empty. Unrelated files are preserved.
 
 ## Uninstall
 
-Use the same reviewed installer, saved as `install.sh` / `install.ps1`, to remove
-an unchanged installation and only the PATH entries it owns:
+Use the same reviewed installer, saved as `install-pdfconcat.sh` or
+`install-pdfconcat.ps1`, to remove an unchanged installation and only the PATH
+entries it owns:
 
 ```sh
-sh ./install.sh --uninstall
+sh ./install-pdfconcat.sh --uninstall
 ```
 
 ```powershell
-powershell -ExecutionPolicy ByPass -File .\install.ps1 -Uninstall
+powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Uninstall
+if ($LASTEXITCODE -ne 0) { throw "Uninstall failed ($LASTEXITCODE)." }
 ```
 
 Pass the same custom install directory used for installation, for example
-`sh ./install.sh --uninstall --install-dir '/absolute/my tools'` or
-`powershell -ExecutionPolicy ByPass -File .\install.ps1 -Uninstall -InstallDir 'C:\My Tools'`.
-Removal does not
-need a download of the program. An offline saved copy of the installer can be
+`sh ./install-pdfconcat.sh --uninstall --install-dir '/absolute/my tools'` or
+`powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Uninstall -InstallDir 'C:\My Tools'`.
+Removal does not need a download of the program. An offline saved copy of the installer can be
 run with the same uninstall option.
 
 Changed or unowned managed files are refused rather than silently deleted. For
@@ -159,6 +269,7 @@ Your PDFs, plans and reports are not installer-managed files.
 | `--version X.Y.Z` | `-Version X.Y.Z` | `PDFCONCAT_VERSION` | Choose a stable release; one leading `v` is allowed. |
 | `--install-dir DIR` | `-InstallDir DIR` | `PDFCONCAT_INSTALL_DIR` | Choose an absolute directory. |
 | `--no-modify-path` | `-NoModifyPath` | `PDFCONCAT_NO_MODIFY_PATH=1` | Do not change PATH or shell startup files. |
+| `--replace-unmanaged` | `-ReplaceUnmanaged` | | Checkout only: explicitly back up and replace a receiptless regular executable; install only. |
 | `--uninstall` | `-Uninstall` | `PDFCONCAT_UNINSTALL=1` (Windows) | Remove unchanged owned files. |
 | `--help` | `-Help` | | Show usage. |
 
@@ -182,6 +293,8 @@ another directory. Startup/registry write failures are reported.
 - The executable at the selected install directory.
 - The private `.pdfconcat-install` ownership directory. Its receipt is data, not
   an executable shell configuration file.
+- An explicit receiptless replacement also leaves a recovery backup outside the
+  install directory; its printed path is preserved by later uninstall.
 - PDFConcat embeds its license notices (`pdfconcat licenses`) and schemas
   (`pdfconcat schema plan` / `pdfconcat schema result`); no external legal files
   are needed by the installed program.
@@ -220,8 +333,8 @@ archive's legal material with any copy you redistribute.
 ## Troubleshooting
 
 If an ownership check fails, inspect the selected path and private directory.
-Choose a fresh directory or remove the prior files manually; a version string
-is not proof that this installer owns a file. If a lock remains after a crash,
+Use the state-specific diagnosis under [ownership and recovery](#ownership-and-recovery);
+a version string is not proof that this installer owns a file. If a lock remains after a crash,
 first establish that no installer is using it before manual cleanup.
 
 If the verified candidate cannot run, use its reported diagnostic to check the

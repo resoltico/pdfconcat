@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Installers can explicitly replace receiptless executables while retaining recovery backups; changed or unverifiable files remain protected.
+- Installer repairs handle missing owned executables, detect local conflicts before downloads and roll back only verified PATH additions; incomplete recovery retains evidence.
+- Standalone installation instructions include guarded downloads, version pins, update, uninstall and ownership recovery commands.
+
 ## [0.10.0] - 2026-11-15
 
 - **Breaking:** Original PDFConcat work is AGPL-3.0-only; existing MPL grants and third-party licenses are unchanged. See [licensing](PROJECT-NOTICE.md).

@@ -186,7 +186,8 @@ or CI; this is not an installation-time dependency. PDF CI checks its canonical
 behavior without depending on either consumer's default branch.
 
 The test harnesses install, update and uninstall real archives from a
-GoReleaser dist directory. They use a temporary `HOME` or install folder; the
+GoReleaser dist directory. Unix signal-boundary tests require Python 3.8 or later
+to isolate process groups; the delivered installer has no Python dependency. They use a temporary `HOME` or install folder; the
 Unix harness never reads or edits your own startup files:
 
 ```sh

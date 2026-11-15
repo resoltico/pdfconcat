@@ -4,6 +4,7 @@
 
 - Installers can explicitly replace receiptless executables while retaining recovery backups; changed or unverifiable files remain protected.
 - Installer repairs handle missing owned executables, detect local conflicts before downloads and roll back only verified PATH additions; incomplete recovery retains evidence.
+- PowerShell cancellation rolls back uncommitted owned changes, retains unverifiable recovery evidence and preserves user-edited PATH value types.
 - Standalone installation instructions include guarded downloads, version pins, update, uninstall and ownership recovery commands.
 
 ## [0.10.0] - 2026-11-15

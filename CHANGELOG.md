@@ -2,9 +2,11 @@
 
 ## [Unreleased]
 
-## [0.11.1] - 2026-11-16
+## [0.12.0] - 2026-11-16
 
+- **Breaking:** Installers require the complete current receipt inventory. Remove incompatible installations with their matching installer or use a fresh directory; receipts are not converted.
 - Installer ownership refusals explain replacement or removal, link directly to matching Help, and offer quoted rerun commands preserving release and PATH choices.
+- Corpus contributors maintain behavioral tests directly; the duplicate field-disposition ledger is removed.
 
 ## [0.11.0] - 2026-11-15
 

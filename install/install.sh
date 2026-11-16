@@ -145,11 +145,12 @@ refuse_unmanaged() {
         retry_script=./install-${command_name}.sh
         retry_instruction="This installer cannot locate its saved file. Save this installer as ${retry_script}, then run this example to replace only the named executable and keep its original bytes in a recovery backup:"
     fi
+    quoted_script=$(shell_quote "${retry_script}")
     die "Existing executable has no installer receipt: ${binary}" \
         'This installer has no record that it installed this file, so replacement needs your explicit choice.' \
         'No program or PATH entry was changed.' \
         "${retry_instruction}" \
-        "sh $(shell_quote "${retry_script}") ${retry_options}" \
+        "sh ${quoted_script} ${retry_options}" \
         'The backup location will be printed. Keep it until you have verified the replacement.'
 }
 

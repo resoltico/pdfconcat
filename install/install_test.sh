@@ -128,6 +128,7 @@ for boundary in macos linux unsupported; do
         macos) boundary_kernel=Darwin; boundary_machine=arm64; expected_asset=tool_1.2.3-aarch64-apple-darwin.tar.gz ;;
         linux) boundary_kernel=Linux; boundary_machine=x86_64; expected_asset=tool_1.2.3-x86_64-unknown-linux-musl.tar.gz ;;
         unsupported) boundary_kernel=Linux; boundary_machine=aarch64; expected_asset='' ;;
+        *) fail 'unknown platform boundary fixture'; exit 1 ;;
     esac
     requests=${fixture_home}/requests-${boundary}
     if env -i HOME="${fixture_home}" PATH="${base_path}" sh -s -- "${boundary_engine}" "${requests}" "${boundary_kernel}" "${boundary_machine}" > "${work}/out" 2>&1 <<'EOF'
@@ -151,8 +152,10 @@ EOF
         assert 'unsupported pair does not request downloads' test ! -e "${requests}"
     else
         expect_exit 73 "${boundary} reaches expected archive request"
-        assert "${boundary} uses exact producer suffix" test "$(tail -n 1 "${requests}")" = "${expected_asset}"
-        assert "${boundary} requests checksum then archive" test "$(wc -l < "${requests}" | tr -d ' ')" = 2
+        requested_asset=$(tail -n 1 "${requests}")
+        request_count=$(wc -l < "${requests}" | tr -d ' ')
+        assert "${boundary} uses exact producer suffix" test "${requested_asset}" = "${expected_asset}"
+        assert "${boundary} requests checksum then archive" test "${request_count}" = 2
     fi
 done
 
@@ -642,7 +645,10 @@ recovery_dir=${fixture_home}/"tools' bin"
 saved_installer=${fixture_home}/"saved installers' folder/install script.sh"
 mkdir -p "${recovery_dir}" "${saved_installer%/*}"
 cp "${installer}" "${saved_installer}"
-printf '#!/bin/sh\nprintf executed > "$HOME/unowned-was-run"\n' > "${recovery_dir}/${command_name}"
+cat > "${recovery_dir}/${command_name}" <<'EOF'
+#!/bin/sh
+printf executed > "$HOME/unowned-was-run"
+EOF
 chmod 755 "${recovery_dir}/${command_name}"
 original_hash=$(hash_file "${recovery_dir}/${command_name}")
 printf '# existing startup content\n' > "${fixture_home}/.profile"
@@ -655,7 +661,8 @@ if env -i HOME="${fixture_home}" PATH="${base_path}" SHELL=/bin/sh TMPDIR="${wor
     sh "${saved_installer}" --install-dir "${recovery_dir}" --version v1.2.3 --no-modify-path > "${work}/out" 2>&1; then last_exit=0; else last_exit=$?; fi
 expect_failure 'saved installer receiptless refusal'
 sed -n 's/^    \(sh .*\)$/\1/p' "${work}/out" > "${work}/retry-command"
-assert 'exactly one copyable command is printed' test "$(wc -l < "${work}/retry-command" | tr -d ' ')" = 1
+retry_count=$(wc -l < "${work}/retry-command" | tr -d ' ')
+assert 'exactly one copyable command is printed' test "${retry_count}" = 1
 assert 'retry keeps normalized explicit version' grep -Fq -- "--version '1.2.3'" "${work}/retry-command"
 assert 'retry keeps disabled PATH writes' grep -Fq -- '--no-modify-path' "${work}/retry-command"
 assert 'retry does not print mirror configuration' test "$(grep -Fc "${recovery_release}" "${work}/out" || :)" = 0

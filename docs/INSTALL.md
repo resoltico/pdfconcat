@@ -131,23 +131,23 @@ unchanged.
 
 Repeat the latest download-and-install command to update an unchanged managed
 copy. Keep the saved installer for offline uninstall. To pin both installer and
-payload to version 0.11.0:
+payload to version 0.11.1:
 
 ```sh
-curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/download/v0.11.0/install.sh &&
-  sh ./install-pdfconcat.sh --version 0.11.0
+curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/download/v0.11.1/install.sh &&
+  sh ./install-pdfconcat.sh --version 0.11.1
 ```
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/download/v0.11.0/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version 0.11.0
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/download/v0.11.1/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version 0.11.1
     if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 }
 ```
 
-Replace both `0.11.0` values together to choose another published stable release.
+Replace both `0.11.1` values together to choose another published stable release.
 Re-running a pinned command reinstalls that release; it does not select future
 latest releases.
 

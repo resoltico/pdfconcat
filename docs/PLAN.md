@@ -142,7 +142,7 @@ source version still contributes to the output version. Source PageLabels are
 removed. Selection composes visible pages; it is not redaction and does not
 promise that every omitted-page byte or private object is erased.
 
-A genuinely partial selection of a source with nonempty form fields or any
+A partial selection of a source with nonempty form fields or any
 widgets is `source_selection_form_unsupported`. Full-range forms follow the
 [form rules](PDF-POLICY.md#forms-fitting-and-catalog). Fitting and effective-PDF-2.0
 appearance compatibility use the retained selected view, so omitted annotations

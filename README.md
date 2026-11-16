@@ -283,7 +283,7 @@ pdfcpu also provides broader editing commands, including encryption and form
 filling, outside PDFConcat's [scope](#scope-and-boundaries).
 
 The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**.
-The PDFConcat column describes version 0.11.0.
+The PDFConcat column describes the current source and its documented limits.
 
 **●** means built-in support for the task as described; **—** means no dedicated
 built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu

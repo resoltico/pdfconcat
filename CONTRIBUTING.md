@@ -192,19 +192,22 @@ They use a temporary `HOME` or install folder; the Unix harness never reads or
 edits your own startup files:
 
 ```sh
-cp install/install.sh install/install.ps1 dist/
+cp .tools/installers/install.sh .tools/installers/install.ps1 dist/
 bash install/install_test.sh "$PWD/dist"
 ```
 
 ```powershell
-Copy-Item install/install.sh, install/install.ps1 dist/
+Copy-Item .tools/installers/install.sh, .tools/installers/install.ps1 dist/
 ./install/install_test.ps1 -Dist "$PWD\dist"
 ```
 
 The harnesses execute the staged `dist/install.sh` / `dist/install.ps1`, not a
 source fallback, and check them against the primary manifest before the cases.
-Stage the unchanged source files after a local GoReleaser build; their hashes
-already belong to its checksum manifest.
+For a GoReleaser build, copy `.tools/installers/install.sh` and
+`.tools/installers/install.ps1` instead: its checksum manifest binds those generated
+bytes. The before hook stamps their Help links with the build's full Git commit,
+leaving source installers unchanged. Source staging with `--revision main` is for
+locally prepared archive sets whose checksums are generated after staging.
 
 The PowerShell harness runs each case under `powershell` and `pwsh` when both
 exist. Portable cancellation probes use real files, actual `Runspace.Stop` and
@@ -322,7 +325,7 @@ plus `go mod vendor` output in temporary storage. It produces
 After the build, stage the exact standalone files for the installer harnesses:
 
 ```sh
-cp install/install.sh install/install.ps1 .tools/SOURCE.tar.gz dist/
+cp .tools/installers/install.sh .tools/installers/install.ps1 .tools/SOURCE.tar.gz dist/
 ```
 
 Inspect the archives, checksums, native version invocations and

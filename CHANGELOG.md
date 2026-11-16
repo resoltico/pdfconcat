@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Installer ownership refusals explain replacement or removal, link directly to matching Help, and offer quoted rerun commands preserving release and PATH choices.
+
 ## [0.11.0] - 2026-11-15
 
 - Installers offer explicit backed-up replacement of receiptless executables; use `--replace-unmanaged` or `-ReplaceUnmanaged`. Changed or unverifiable targets remain protected.

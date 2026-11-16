@@ -92,7 +92,7 @@ pdfconcat --help
 
 Re-run the download-and-install command to update an unchanged installer-managed
 copy. Receiptless executables require the
-[ownership and recovery steps](docs/INSTALL.md#ownership-and-recovery).
+[replacement or keep-existing steps](docs/INSTALL.md#existing-executable-without-an-installer-receipt).
 
 The examples below describe the current source. For a published binary, follow
 the documentation at its matching [release tag](https://github.com/resoltico/pdfconcat/releases).

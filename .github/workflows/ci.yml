@@ -50,6 +50,8 @@ jobs:
         run: |
           actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
           go run "github.com/rhysd/actionlint/cmd/actionlint@$actionlint_version"
+      - name: Installer packaging tests
+        run: python3 -m unittest discover -s install -p '*_test.py'
       - name: Installer shell lint
         run: shellcheck install/*.sh .github/scripts/*.sh
       - name: Installer PowerShell lint
@@ -149,7 +151,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Stage the published installer bytes
-        run: cp install/install.sh install/install.ps1 .tools/SOURCE.tar.gz dist/
+        run: cp .tools/installers/install.sh .tools/installers/install.ps1 .tools/SOURCE.tar.gz dist/
       - name: Verify checksums, archive contents, macOS signatures and minimum OS
         run: |
           # All published assets are staged flat, including the exact installer bytes.

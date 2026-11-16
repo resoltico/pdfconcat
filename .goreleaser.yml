@@ -5,6 +5,7 @@ project_name: pdfconcat
 before:
   hooks:
     - python3 .github/scripts/source-archive.py
+    - python3 install/prepare-installers.py --revision "{{ .FullCommit }}" --output-dir .tools/installers
     # Windows file properties (product, version, copyright) and an asInvoker
     # manifest. The .syso files are build inputs only and are git-ignored.
     - >-
@@ -103,8 +104,8 @@ checksum:
   name_template: checksums.txt
   extra_files:
     - glob: ./.tools/SOURCE.tar.gz
-    - glob: ./install/install.sh
-    - glob: ./install/install.ps1
+    - glob: ./.tools/installers/install.sh
+    - glob: ./.tools/installers/install.ps1
 
 # Tagged CHANGELOG.md is the sole source of published notes.
 changelog:

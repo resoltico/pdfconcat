@@ -92,7 +92,7 @@ pdfconcat --help
 
 Re-run the download-and-install command to update an unchanged installer-managed
 copy. Receiptless executables require the
-[ownership and recovery steps](docs/INSTALL.md#ownership-and-recovery).
+[replacement or keep-existing steps](docs/INSTALL.md#existing-executable-without-an-installer-receipt).
 
 The examples below describe the current source. For a published binary, follow
 the documentation at its matching [release tag](https://github.com/resoltico/pdfconcat/releases).
@@ -283,7 +283,7 @@ pdfcpu also provides broader editing commands, including encryption and form
 filling, outside PDFConcat's [scope](#scope-and-boundaries).
 
 The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**.
-The PDFConcat column describes version 0.11.0.
+The PDFConcat column describes the current source and its documented limits.
 
 **●** means built-in support for the task as described; **—** means no dedicated
 built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu

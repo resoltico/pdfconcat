@@ -166,15 +166,15 @@ version and archive identity must agree. Keep network and mirror paths subject
 to the same checksum, regular-file and ownership checks. Explicit release pins
 are stable versions; local snapshot fixtures may report canonical SemVer suffixes.
 
-PDFConcat owns the common engine bodies shared with EML Attachment Remover and
-Auditory Lab.
+PDFConcat owns the common engine bodies shared with EML Attachment Remover,
+Auditory Lab and HTMLCut.
 Keep only literal product differences between `BEGIN PRODUCT SETTINGS` and
-`END PRODUCT SETTINGS`; change common behavior in all three repositories together.
+`END PRODUCT SETTINGS`; change common behavior in all four repositories together.
 The copies are self-contained and have no runtime cross-repository dependency.
-Both consumers pin a reviewed PDFConcat commit for development/CI parity checks.
+Consumers pin a reviewed PDFConcat commit for development/CI parity checks.
 Commit the canonical PDF engine change first, preserve each consumer's product
-settings when copying the scripts, then update both `install/engine-source.txt`
-files to that full PDF commit. From either consumer checkout run:
+settings when copying the scripts, then update every `install/engine-source.txt`
+file to that full PDF commit. From a consumer checkout run:
 
 ```sh
 python3 install/check-sync.py /absolute/path/to/PDFConcat
@@ -183,7 +183,7 @@ python3 install/check-sync.py /absolute/path/to/PDFConcat
 The offline check reads the pinned Git object, not uncommitted files. Without a
 checkout argument the checker fetches the pinned files over HTTPS for development
 or CI; this is not an installation-time dependency. PDF CI checks its canonical
-behavior without depending on either consumer's default branch.
+behavior without depending on the consumers' default branches.
 
 The test harnesses install, update and uninstall real archives from a
 GoReleaser dist directory. Unix signal-boundary tests require Python 3.8 or later
@@ -192,19 +192,22 @@ They use a temporary `HOME` or install folder; the Unix harness never reads or
 edits your own startup files:
 
 ```sh
-cp install/install.sh install/install.ps1 dist/
+cp .tools/installers/install.sh .tools/installers/install.ps1 dist/
 bash install/install_test.sh "$PWD/dist"
 ```
 
 ```powershell
-Copy-Item install/install.sh, install/install.ps1 dist/
+Copy-Item .tools/installers/install.sh, .tools/installers/install.ps1 dist/
 ./install/install_test.ps1 -Dist "$PWD\dist"
 ```
 
 The harnesses execute the staged `dist/install.sh` / `dist/install.ps1`, not a
 source fallback, and check them against the primary manifest before the cases.
-Stage the unchanged source files after a local GoReleaser build; their hashes
-already belong to its checksum manifest.
+For a GoReleaser build, copy `.tools/installers/install.sh` and
+`.tools/installers/install.ps1` instead: its checksum manifest binds those generated
+bytes. The before hook stamps their Help links with the build's full Git commit,
+leaving source installers unchanged. Source staging with `--revision main` is for
+locally prepared archive sets whose checksums are generated after staging.
 
 The PowerShell harness runs each case under `powershell` and `pwsh` when both
 exist. Portable cancellation probes use real files, actual `Runspace.Stop` and
@@ -322,7 +325,7 @@ plus `go mod vendor` output in temporary storage. It produces
 After the build, stage the exact standalone files for the installer harnesses:
 
 ```sh
-cp install/install.sh install/install.ps1 .tools/SOURCE.tar.gz dist/
+cp .tools/installers/install.sh .tools/installers/install.ps1 .tools/SOURCE.tar.gz dist/
 ```
 
 Inspect the archives, checksums, native version invocations and

@@ -13,12 +13,13 @@ import (
 )
 
 type compositionState struct {
-	source, fitted             matrix.Matrix
-	known, accurate            bool
-	fillPattern, strokePattern *selectedPattern
-	font                       *selectedFont
-	textMode                   int
-	horizontalScale, textRise  float64
+	source, fitted                    matrix.Matrix
+	known, accurate                   bool
+	fillPattern, strokePattern        *selectedPattern
+	font                              *selectedFont
+	textMode                          int
+	horizontalScale, textRise         float64
+	charSpacing, wordSpacing, leading float64
 }
 
 func (p compositionState) concat(m matrix.Matrix) compositionState {

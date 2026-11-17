@@ -19,9 +19,9 @@ type selectedFont struct {
 	size   float64
 }
 type selectedPattern struct {
-	object                     types.Object
-	resources                  types.Dict
-	anchorSource, anchorFitted matrix.Matrix
+	object    types.Object
+	resources types.Dict
+	parent    *compositionState
 }
 
 type compositionProgramRole uint8
@@ -58,7 +58,7 @@ func textShowing(op string) bool { return op == "Tj" || op == "TJ" || op == "'" 
 
 // paintResources dispatches actual resource consumers. Type3 programs execute
 // their own paint operators, so inherited patterns are not consumed at Tj itself.
-func (a *compositionInspector) paintResources(state compositionState, owner types.IndirectRef, depth int, op string) error {
+func (a *compositionInspector) paintResources(state compositionState, text *compositionText, owner types.IndirectRef, depth int, op string) error {
 	if textShowing(op) && state.textMode != 3 && state.font != nil {
 		font, err := a.pdf.DereferenceDict(state.font.object)
 		if err != nil {
@@ -75,7 +75,10 @@ func (a *compositionInspector) paintResources(state compositionState, owner type
 					return a.failure(owner, "Font.FontMatrix")
 				}
 				textScale := matrix.Matrix{{state.font.size * state.horizontalScale, 0, 0}, {0, state.font.size, 0}, {0, state.textRise, 1}}
-				glyphState := state.concat(textScale).concat(m)
+				if text == nil || !text.known {
+					return a.failure(owner, "Content.TextCursor")
+				}
+				glyphState := state.concat(text.matrix).concat(textScale).concat(m)
 				if !a.certified(&glyphState) {
 					return a.failure(owner, "Font.FontMatrix")
 				}
@@ -112,7 +115,10 @@ func (a *compositionInspector) paintResources(state compositionState, owner type
 		if err != nil {
 			return err
 		}
-		anchor := compositionState{source: binding.anchorSource, fitted: binding.anchorFitted, horizontalScale: 1}
+		if binding.parent == nil {
+			return a.failure(owner, "Pattern.ParentState")
+		}
+		anchor := *binding.parent
 		switch p := value.(type) {
 		case types.StreamDict:
 			if err = a.program(tilingPatternProgram, binding.object, binding.resources, anchor, owner, "Pattern", depth); err != nil {

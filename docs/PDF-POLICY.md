@@ -610,7 +610,8 @@ checks and independent qpdf/Poppler fidelity controls remain separate safeguards
 The fitting observer binds selected font objects at both Tf and ExtGState Font,
 including size, and selected pattern objects at scn/SCN. q/Q and Form entry preserve
 those bindings; a child dictionary's same-name alias cannot replace an inherited
-selection. Pattern bindings retain their selecting scope's default-space anchor.
+selection. Pattern bindings retain the complete supported graphics state at entry to their
+parent stream; pattern execution installs that state before its own matrix.
 Type3 glyph resource fallback uses the page resource dictionary when the font has
 no Resources entry. Names serve provenance and selection, not late paint lookup.
 
@@ -632,3 +633,18 @@ budgets do not merge these distinct PDF contracts.
 
 These role and state rules follow PDF32000-1:2008 sections8.4,8.7,8.10,9.3 and9.6;
 see [the Adobe-hosted standard](https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf).
+
+### Text execution context
+
+Type3 rendering certification composes FontMatrix, text scale/rise, current Tm
+and the graphics CTM at each shown character. BT/ET owns the text/line matrices;
+q/Q saves text parameters but does not restore those matrices. Td/TD, T*, quotes,
+TJ adjustments and simple Type3 widths/spacing advance the observed cursor.
+Raw character bytes remain font codes rather than being decoded as Unicode.
+
+The observer does not duplicate other font interpreters. After their strings the
+cursor is unknown; Tm or a known line position can establish it again. A later
+visible Type3 show with an unknown cursor refuses fitting, rather than assuming
+identity. Invisible Type3 text does not execute CharProcs but still advances the
+cursor. Retained CharProcs are conservatively inspected at each known cursor.
+This bounded observation does not change kept-page execution or source bytes.

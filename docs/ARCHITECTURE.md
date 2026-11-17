@@ -238,3 +238,9 @@ q/Q copies immutable selections. Paint-channel dispatch and explicit executable
 program roles determine which matrices/programs run. CharProcs share lexical and
 budget mechanics with Forms but not Matrix/Resources/implicit-clip semantics.
 Hidden appearances skip execution certification without skipping source validity.
+
+Text rendering certification includes FontMatrix, font size/horizontal scale/rise,
+the current text matrix and the graphics CTM at each Type3 glyph. Text matrices
+and line matrices belong to the content invocation's BT/ET lifetime, separate
+from q/Q graphics state. Tiling patterns install their parent stream's entry
+graphics state, including inherited text parameters, before their own matrix.

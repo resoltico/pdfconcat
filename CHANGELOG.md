@@ -6,6 +6,7 @@
 - Results and reports require format 9, with selected source page_sizes runs containing original ranges, source dimensions and expected output dimensions, retained through later failures.
 - Rename facts remain null when unestablished or inapplicable; an observed empty mapping is an empty array.
 - Mixed fitting constrains numeric navigation by target-page transformation and allows proved kept widgets; multiply bound annotation dictionaries refuse if any binding transforms.
+- Fitting observes Type3 text matrices and cursor advances, and installs complete parent-entry graphics state for tiling patterns; unproved text contexts refuse transformation.
 - Fitting preserves selected font/pattern bindings across scopes, handles gs fonts and actual paint channels, and ignores hidden AP execution and private matrix keys in unrelated roles.
 - Fitting also checks source graphics-state and invoked resource compositions; unsafe cancellation refuses before publication while kept programs retain their native behavior.
 - Fitting refuses ill-conditioned forward maps before publication; a uniform output-space error bound protects interior painting even when corners or target boxes appear correct.

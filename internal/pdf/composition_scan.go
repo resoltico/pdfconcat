@@ -138,6 +138,7 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 		return a.failure(owner, "Content.WorkBudget")
 	}
 	entry := state
+	text := compositionText{}
 	stack := []compositionState{}
 	args := []types.Object{}
 	rest := string(data)
@@ -179,6 +180,79 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 		op := rest[:n]
 		rest = rest[n:]
 		switch op {
+		case "BT":
+			text.begin()
+		case "ET":
+			text.active = false
+			text.known = false
+			text.lineKnown = false
+		case "Tm":
+			m, ok := contentMatrix(args)
+			if !ok || !text.active {
+				return a.failure(owner, "Content.Tm")
+			}
+			text.position(m)
+		case "Td", "TD":
+			if len(args) != 2 || !text.active {
+				return a.failure(owner, "Content."+op)
+			}
+			x, e := a.pdf.DereferenceNumber(args[0])
+			if e != nil {
+				return e
+			}
+			y, e := a.pdf.DereferenceNumber(args[1])
+			if e != nil {
+				return e
+			}
+			if op == "TD" {
+				state.leading = -y
+			}
+			text.moveLine(x, y)
+		case "TL", "Tc", "Tw":
+			if len(args) != 1 {
+				return a.failure(owner, "Content."+op)
+			}
+			value, e := a.pdf.DereferenceNumber(args[0])
+			if e != nil {
+				return e
+			}
+			switch op {
+			case "TL":
+				state.leading = value
+			case "Tc":
+				state.charSpacing = value
+			case "Tw":
+				state.wordSpacing = value
+			}
+		case "T*":
+			if !text.active {
+				return a.failure(owner, "Content.T*")
+			}
+			text.moveLine(0, -state.leading)
+		case "Tj", "TJ", "'", "\"":
+			if op == "\"" {
+				if len(args) != 3 {
+					return a.failure(owner, "Content.Quote")
+				}
+				var e error
+				state.wordSpacing, e = a.pdf.DereferenceNumber(args[0])
+				if e != nil {
+					return e
+				}
+				state.charSpacing, e = a.pdf.DereferenceNumber(args[1])
+				if e != nil {
+					return e
+				}
+			}
+			if op == "'" || op == "\"" {
+				text.moveLine(0, -state.leading)
+			}
+			if e := a.showText(args, state, &text, owner, depth, op); e != nil {
+				return e
+			}
+			if state.textMode != 3 && !a.certified(&state) {
+				return a.failure(owner, "Content."+op)
+			}
 		case "q":
 			if len(stack) >= 256 || len(args) != 0 {
 				return a.failure(owner, "Content.q")
@@ -208,7 +282,8 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 					if e != nil {
 						return e
 					}
-					binding = &selectedPattern{object: patterns[string(name)], resources: resources, anchorSource: entry.source, anchorFitted: entry.fitted}
+					parent := entry
+					binding = &selectedPattern{object: patterns[string(name)], resources: resources, parent: &parent}
 				}
 			}
 			if op == "scn" {
@@ -341,7 +416,7 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 			}
 		default:
 			if compositionPaintOperator(op) {
-				if err := a.paintResources(state, owner, depth, op); err != nil {
+				if err := a.paintResources(state, &text, owner, depth, op); err != nil {
 					return err
 				}
 			}

@@ -5,6 +5,7 @@ package diag
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -46,7 +47,7 @@ type XRefEntry struct {
 
 // IgnoredXRefEntry owns the product explanation and factual identity of this finding.
 func IgnoredXRefEntry(entry XRefEntry) Diagnostic {
-	d := Report(SourceXRefEntryIgnored, explain("ignored_xref_entry", "An unreferenced zero-offset classic xref entry was ignored.", fmt.Sprint(entry.Object), fmt.Sprint(entry.Generation), fmt.Sprint(entry.Revision), fmt.Sprint(entry.Offset)))
+	d := Report(SourceXRefEntryIgnored, explain("ignored_xref_entry", "An unreferenced zero-offset classic xref entry was ignored.", strconv.Itoa(entry.Object), strconv.Itoa(entry.Generation), strconv.Itoa(entry.Revision), strconv.FormatInt(entry.Offset, 10)))
 	d.Identity.Phase = "source_admission"
 	d.PDFLocation = &PDFLocation{Object: entry.Object, Path: fmt.Sprintf("xref/%d/revision/%d/generation/%d", entry.Offset, entry.Revision, entry.Generation)}
 	return d

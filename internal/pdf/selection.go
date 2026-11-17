@@ -141,7 +141,6 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			loc.Page = originalSelectionPage(ranges, loc.Page)
 			selected.UncoveredLocation = &loc
 		}
-		selected.AnnotationFittingIssue.Site.Page = originalSelectionPage(ranges, selected.AnnotationFittingIssue.Site.Page)
 		selected.PDF20AppearanceIssue.Site.Page = originalSelectionPage(ranges, selected.PDF20AppearanceIssue.Site.Page)
 		selected.OutlineDepth, err = outlineDepth(c, view)
 		if err != nil {
@@ -151,10 +150,6 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			continue
 		}
 
-		for i := range selected.fitting.Pages {
-			selected.fitting.Pages[i].Original = originalSelectionPage(ranges, i+1)
-		}
-		selected.PageSizes = fittingRuns(selected.fitting)
 		// Publish complete metric knowledge before any later compatibility/rehearsal refusal.
 		selectedFacts := selected.OccurrenceFacts
 		occurrences[index] = &selectedFacts

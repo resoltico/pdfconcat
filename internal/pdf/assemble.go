@@ -138,11 +138,11 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			if e != nil {
 				return result, e
 			}
-			plans, e = planFitting(geometries, a.FitTo, part.Repeat)
+			origins, e = sourceOriginsFor(c, s)
 			if e != nil {
 				return result, e
 			}
-			origins, e = sourceOriginsFor(c, s)
+			plans, e = planFitting(geometries, a.FitTo, part.Repeat, origins)
 			if e != nil {
 				return result, e
 			}

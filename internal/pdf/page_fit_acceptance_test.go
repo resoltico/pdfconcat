@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/app"
@@ -694,5 +695,32 @@ func validatePhysicalReport(t *testing.T, result app.Result) {
 	size["width"] = float64(0)
 	if schema.Validate(value) == nil {
 		t.Fatal("zero source dimension accepted")
+	}
+}
+
+func TestUnrepresentableSelectedTransformNamesOriginalSourcePage(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.pdf")
+	tiny := strconv.FormatFloat(1e-300, 'f', -1, 64)
+	d := pdffixture.WithBoxes("identity", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 100 100]"}, pdffixture.PageBoxes{Media: "[0 0 " + tiny + " " + tiny + "]"})
+	if e := d.WriteFile(source); e != nil {
+		t.Fatal(e)
+	}
+	target, e := app.ParseSheet("100x100")
+	if e != nil {
+		t.Fatal(e)
+	}
+	r := app.Execute(t.Context(), app.Request{Operation: app.Check, InspectionWorkers: 1, WorkingDir: dir, FitTo: &target, Input: app.Declared{Declaration: packet.Declaration{Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: source, Selection: []packet.PageRange{{First: 2, Last: 2}}}}}}})
+	found := false
+	for _, d := range r.Diagnostics {
+		if d.Code == diag.FitGeometryUnsupported {
+			found = true
+			if d.PDFLocation == nil || d.PDFLocation.Page != 2 {
+				t.Fatalf("selected ordinal misreported as original page: %+v", d)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("representability refusal not exercised", r.Diagnostics)
 	}
 }

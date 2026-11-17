@@ -23,11 +23,11 @@ func fitToForTest(c context.Context, s *model.Context, target *packet.Size) erro
 	if err != nil {
 		return err
 	}
-	plans, err := planFitting(geometries, target, 1)
+	origins, err := sourceOriginsFor(c, s)
 	if err != nil {
 		return err
 	}
-	origins, err := sourceOriginsFor(c, s)
+	plans, err := planFitting(geometries, target, 1, origins)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func TestRepeatedGeneratedFittingPlansStayCompact(t *testing.T) {
 	for i := range pages {
 		pages[i] = p
 	}
-	plan, err := planFitting(pages, &packet.Size{Width: 300, Height: 400}, len(pages))
+	plan, err := planFitting(pages, &packet.Size{Width: 300, Height: 400}, len(pages), sourceOrigins{pages: map[types.IndirectRef]int{p.ref: 1}})
 	if err != nil || plan.Count != 100000 || len(plan.Pages) != 1 || !plan.Repeated {
 		t.Fatal("expanded repeated plan", len(plan.Pages), err)
 	}
@@ -112,7 +112,7 @@ func TestUnrepresentableFittingRefusesBeforeMutation(t *testing.T) {
 	for _, side := range []float64{1e-300, 1e308} {
 		box := types.NewRectangle(0, 0, side, side)
 		page := pageGeometry{box: *box, attrs: model.InheritedPageAttrs{MediaBox: box}, unit: 1, size: packet.Size{Width: side, Height: side}}
-		_, err := planFitting([]pageGeometry{page}, &packet.Size{Width: 100, Height: 100}, 1)
+		_, err := planFitting([]pageGeometry{page}, &packet.Size{Width: 100, Height: 100}, 1, sourceOrigins{pages: map[types.IndirectRef]int{page.ref: 7}})
 		if err == nil || Diagnostic(err).Code != diag.FitGeometryUnsupported {
 			t.Fatal("unusable affine accepted", side, err)
 		}
@@ -165,7 +165,7 @@ func TestMixedFittingPreservesSharedStructureClassOnKeptPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := planFitting(geometries, &packet.Size{Width: 600, Height: 800}, 1)
+	plan, err := planFitting(geometries, &packet.Size{Width: 600, Height: 800}, 1, origins)
 	if err != nil {
 		t.Fatal(err)
 	}

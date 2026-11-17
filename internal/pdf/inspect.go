@@ -494,7 +494,7 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins, target 
 	if err != nil {
 		return facts, ds, err
 	}
-	facts.fitting, err = planFitting(geometries, target, 1)
+	facts.fitting, err = planFitting(geometries, target, 1, origins)
 	if err != nil {
 		return facts, ds, err
 	}

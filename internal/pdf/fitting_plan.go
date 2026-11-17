@@ -68,7 +68,7 @@ func (p fittingPlan) page(index int) pageFitting {
 	}
 	return p.Pages[index]
 }
-func planFitting(geometries []pageGeometry, target *packet.Size, repeat int) (fittingPlan, error) {
+func planFitting(geometries []pageGeometry, target *packet.Size, repeat int, origins sourceOrigins) (fittingPlan, error) {
 	count := len(geometries)
 	if repeat > 1 {
 		if repeat != count {
@@ -83,11 +83,15 @@ func planFitting(geometries []pageGeometry, target *packet.Size, repeat int) (fi
 	}
 	plans := make([]pageFitting, len(geometries))
 	for i, p := range geometries {
+		original, known := origins.pages[p.ref]
+		if !known || original < 1 {
+			return fittingPlan{}, refuse(diag.SourceProcessingFailed, diag.SourceOccurrenceGeometryIsInconsistent())
+		}
 		d, err := packet.DecideFit(p.size, target)
 		if err != nil {
 			return fittingPlan{}, err
 		}
-		plan := pageFitting{Original: i + 1, Native: nativeOf(p), Expected: nativeOf(p), Decision: d, Matrix: matrix.IdentMatrix, Scale: 1}
+		plan := pageFitting{Original: original, Native: nativeOf(p), Expected: nativeOf(p), Decision: d, Matrix: matrix.IdentMatrix, Scale: 1}
 		if d.Transform {
 			plan.Expected = canvasGeometry(d.Output)
 			plan.Matrix, plan.Scale = fitMatrix(p.box, p.attrs.Rotate, &d.Output)
@@ -102,7 +106,7 @@ func planFitting(geometries []pageGeometry, target *packet.Size, repeat int) (fi
 			usable = usable && validPhysicalDimension(math.Abs(determinant)) && validPhysicalDimension(box.Width()) && validPhysicalDimension(box.Height())
 			if !usable {
 				finding := diag.Report(diag.FitGeometryUnsupported, diag.FittingAffineCannotBeRepresented())
-				finding.PDFLocation = &diag.PDFLocation{Page: i + 1, Object: p.ref.ObjectNumber.Value(), Path: "Pages.EffectiveGeometry"}
+				finding.PDFLocation = &diag.PDFLocation{Page: original, Object: p.ref.ObjectNumber.Value(), Path: "Pages.EffectiveGeometry"}
 				return fittingPlan{}, &policyError{finding: finding}
 			}
 		}

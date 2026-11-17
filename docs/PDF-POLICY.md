@@ -570,3 +570,37 @@ entirely. Native tuples and displayed sizes are still verified exactly before
 serialization and after strict reopening. The bound addresses the fitting map
 within its visible frame; it does not certify arbitrary source operator/resource
 semantics or every renderer's implementation.
+
+### Source graphics composition under fitting
+
+A page-space affine certificate does not certify subsequent source graphics-state
+execution. Transformed pages also undergo a bounded q/Q/cm observation before
+Check can succeed and again before fitting mutation. The observer tracks intrinsic
+source CTM and actual fitted CTM separately, restores both on Q, and certifies
+geometry-consuming operations. It preserves source programs rather than rewriting
+or rasterizing them. Kept pages do not run this transformation-specific gate.
+
+At consumption, exact fixed-size rational arithmetic compares the represented
+concatenated CTM with intrinsic source execution followed by the outer map. The
+visible frame is pulled back through the intrinsic CTM to bound all relevant local
+coordinates; uniform floating evaluation and propagated source error must fit the
+same 64 target-axis ULP budget. A singular or unbounded local domain cannot be
+certified. This uses an exact domain calculation, not a floating determinant or
+inverse representability proxy. Conservative refusals are possible.
+
+Invoked Forms are checked per incoming state, including their own Matrix and
+implicit clip. An object reference is not a reusable global certificate. Tiling
+and shading pattern matrices, retained appearance N/R/D states, soft-mask group
+Forms and used font matrices/Type3 programs are also observed at their matrix
+boundaries. Shared AP placement comes from the same mapping owner as wrapping.
+Used Type3 fonts are conservatively checked across retained CharProcs rather than
+adding a second glyph decoder. Missing or otherwise malformed resources remain
+subject to existing source policy; this is not a universal PDF resource validator.
+
+The observer uses the existing strict operand/inline-image parsing and decoded
+stream limits. It bounds operands, graphics/recursive depth and repeated invocation
+work, checks cancellation, and preserves original page/object/operator attribution.
+A valid source may keep successfully while refusing fitting when its composition
+accuracy cannot be established. Large cancelling translations that erase a fitting
+offset are one example, not a special-case magnitude rule. Exact native geometry
+checks and independent qpdf/Poppler fidelity controls remain separate safeguards.

@@ -223,3 +223,11 @@ it is independent of the core .01pt keep decision and exact native verification.
 Corner residuals alone are insufficient: uniform magnitude bounds cover interior
 cancellation. An ill-conditioned transform refuses rather than publishing a
 correctly sized page with shifted painting. True keep paths do not run this gate.
+
+Fitting composition admission tracks intrinsic/fitted q/Q/cm CTMs separately and
+checks geometry consumers under invocation-specific state. Fixed-size rational
+current-matrix arithmetic and uniform evaluation bounds certify the visible local
+domain; no exact unbounded expression history is retained. Forms, patterns,
+appearances and other retained matrix resources use that same observer, with a
+bounded repeated-invocation budget and no ref-only certificate. The AP placement
+mapping is shared with the writer. Kept pages bypass transformation-only scanning.

@@ -29,3 +29,9 @@ func FittingPrintBoxOmission(key string) Explanation {
 func SourceOccurrenceGeometryIsInconsistent() Explanation {
 	return explain("source_geometry_owner", "Source occurrence geometry does not match its resolved fitting owner.")
 }
+
+// FittingCompositionAccuracyCannotBeEstablished explains a source graphics-state
+// composition whose transformed placement cannot be certified.
+func FittingCompositionAccuracyCannotBeEstablished() Explanation {
+	return explain("fit_composition_accuracy", "The source graphics-state composition cannot preserve supported fitting accuracy; use original page sizes or a reviewed rebased source.")
+}

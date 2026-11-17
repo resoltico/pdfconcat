@@ -307,28 +307,13 @@ func fitAppearance(c context.Context, s *model.Context, obj types.Object, resour
 	if stream == nil {
 		return obj, nil
 	}
-	box, err := readRectangle(s, stream.Dict["BBox"])
+	placement, painted, err := appearancePlacement(s, *stream, rect)
 	if err != nil {
 		return nil, err
 	}
-
-	originalMatrix := matrix.IdentMatrix
-	if stream.Dict["Matrix"] != nil {
-		v, err := fitNumbers(s, stream.Dict["Matrix"])
-		if err != nil {
-			return nil, err
-		}
-		if len(v) != 6 {
-			return nil, fmt.Errorf("invalid appearance matrix length: %d", len(v))
-		}
-		originalMatrix = matrix.Matrix{{v[0], v[1], 0}, {v[2], v[3], 0}, {v[4], v[5], 1}}
-	}
-	transformed := fitRectangle(*box, originalMatrix)
-	if transformed.Width() == 0 || transformed.Height() == 0 || rect.Width() == 0 || rect.Height() == 0 {
+	if !painted {
 		return obj, nil
 	}
-	sx, sy := rect.Width()/transformed.Width(), rect.Height()/transformed.Height()
-	placement := matrix.CalcTransformMatrix(sx, sy, 0, 1, rect.LL.X-sx*transformed.LL.X, rect.LL.Y-sy*transformed.LL.Y)
 	command := fmt.Appendf(nil, "q\n%s %s %s %s re W n\n", number(clip.LL.X), number(clip.LL.Y), number(clip.Width()), number(clip.Height()))
 	command = append(command, matrixCommand(placement)...)
 	resources, name, err := withFormResource(s, resources, "Original", obj)
@@ -344,4 +329,32 @@ func fitAppearance(c context.Context, s *model.Context, obj types.Object, resour
 		return nil, err
 	}
 	return *ref, nil
+}
+
+// appearancePlacement owns the source AP BBox/Matrix-to-Rect mapping used both
+// by pre-mutation accuracy observation and by appearance wrapping.
+func appearancePlacement(s *model.Context, stream types.StreamDict, rect types.Rectangle) (matrix.Matrix, bool, error) {
+	box, err := readRectangle(s, stream.Dict["BBox"])
+	if err != nil {
+		return matrix.Matrix{}, false, err
+	}
+
+	originalMatrix := matrix.IdentMatrix
+	if stream.Dict["Matrix"] != nil {
+		v, err := fitNumbers(s, stream.Dict["Matrix"])
+		if err != nil {
+			return matrix.Matrix{}, false, err
+		}
+		if len(v) != 6 {
+			return matrix.Matrix{}, false, fmt.Errorf("invalid appearance matrix length: %d", len(v))
+		}
+		originalMatrix = matrix.Matrix{{v[0], v[1], 0}, {v[2], v[3], 0}, {v[4], v[5], 1}}
+	}
+	transformed := fitRectangle(*box, originalMatrix)
+	if transformed.Width() == 0 || transformed.Height() == 0 || rect.Width() == 0 || rect.Height() == 0 {
+		return matrix.IdentMatrix, false, nil
+	}
+	sx, sy := rect.Width()/transformed.Width(), rect.Height()/transformed.Height()
+	placement := matrix.CalcTransformMatrix(sx, sy, 0, 1, rect.LL.X-sx*transformed.LL.X, rect.LL.Y-sy*transformed.LL.Y)
+	return placement, true, nil
 }

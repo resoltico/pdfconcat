@@ -217,10 +217,15 @@ func fittingFindings(c context.Context, s *model.Context, pages []pageGeometry, 
 	if !anyTransform(plans) {
 		return nil, nil
 	}
+	composition, err := fittingCompositionFindings(c, s, pages, plans)
+	if err != nil {
+		return nil, err
+	}
 	ds, err := fittingOwnership(c, s, pages, plans, origins)
 	if err != nil {
 		return nil, err
 	}
+	ds = append(ds, composition...)
 	destinations, err := fittingDestinations(c, s, origins)
 	if err != nil {
 		return nil, err

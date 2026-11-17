@@ -817,7 +817,7 @@ func parseFloat(s string) (types.Object, error) {
 	// With decimal syntax established, ParseFloat reports overflow as a range error.
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	if log.ParseEnabled() {
@@ -838,22 +838,21 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
 	// we have to check first for integer
 	s, l1, i1 := startParseNumericOrIndRef(l)
 
+	// Dispatch explicit real syntax before integer conversion: strconv may
+	// report integer range overflow before reaching a late decimal marker.
+	if strings.ContainsRune(s, '.') {
+		*line = l1
+		return parseFloat(s)
+	}
+
 	// Try int
 	i, err := strconv.Atoi(s)
 	if err != nil {
 		if isRangeError(err) {
-			// Decimal round-trip real tokens may have integer spelling beyond
-			// the native integer range. Preserve finite numeric values rather
-			// than replacing them with zero. They cannot be indirect refs.
+			// An integer outside the native model range must not become
+			// zero or a rounded real. Large real values require real syntax.
 			*line = l1
-			value, e := parseFloat(s)
-			if e != nil {
-				return nil, e
-			}
-			if value == nil {
-				return nil, errors.New("pdfcpu: numeric value exceeds the finite model range")
-			}
-			return value, nil
+			return nil, errors.New("pdfcpu: integer exceeds the native model range")
 		}
 		*line = l1
 		return parseFloat(s)

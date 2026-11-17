@@ -101,9 +101,8 @@ func planFitting(geometries []pageGeometry, target *packet.Size, repeat int, ori
 					usable = usable && !math.IsNaN(n) && !math.IsInf(n, 0)
 				}
 			}
-			determinant := plan.Matrix[0][0]*plan.Matrix[1][1] - plan.Matrix[0][1]*plan.Matrix[1][0]
 			box := fitRectangle(p.box, plan.Matrix)
-			usable = usable && validPhysicalDimension(math.Abs(determinant)) && validPhysicalDimension(box.Width()) && validPhysicalDimension(box.Height())
+			usable = usable && validPhysicalDimension(box.Width()) && validPhysicalDimension(box.Height())
 			if !usable {
 				finding := diag.Report(diag.FitGeometryUnsupported, diag.FittingAffineCannotBeRepresented())
 				finding.PDFLocation = &diag.PDFLocation{Page: original, Object: p.ref.ObjectNumber.Value(), Path: "Pages.EffectiveGeometry"}

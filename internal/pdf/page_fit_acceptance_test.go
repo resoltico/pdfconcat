@@ -701,12 +701,12 @@ func validatePhysicalReport(t *testing.T, result app.Result) {
 func TestUnrepresentableSelectedTransformNamesOriginalSourcePage(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.pdf")
-	tiny := strconv.FormatFloat(1e-300, 'f', -1, 64)
-	d := pdffixture.WithBoxes("identity", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 100 100]"}, pdffixture.PageBoxes{Media: "[0 0 " + tiny + " " + tiny + "]"})
+	tiny := strconv.FormatFloat(1e-306, 'f', -1, 64)
+	d := pdffixture.WithBoxes("identity", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 100 100]"}, pdffixture.PageBoxes{Media: "[0 0 " + tiny + " " + tiny + "]", UserUnit: strconv.FormatFloat(1e308, 'f', -1, 64) + ".0"})
 	if e := d.WriteFile(source); e != nil {
 		t.Fatal(e)
 	}
-	target, e := app.ParseSheet("100x100")
+	target, e := app.ParseSheet("14400x14400")
 	if e != nil {
 		t.Fatal(e)
 	}

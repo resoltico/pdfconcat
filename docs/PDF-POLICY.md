@@ -497,10 +497,12 @@ is not exhaustively validated: a malformed source using an undefined font can be
 accepted and render differently across readers or fitting. Supply a reviewed
 valid source; composition does not reconstruct missing font bindings.
 
-Decoded finite float64 model values serialize as non-exponent round-trip decimals
-with canonical numeric zero; nonfinite scalars refuse serialization. Integer-shaped
-real tokens beyond the native integer range retain their finite numeric value;
-out-of-range tokens refuse rather than becoming zero. This does not recover
+Decoded finite float64 model reals serialize as non-exponent round-trip decimals,
+with a decimal marker for nonzero integral-valued reals and canonical numeric zero.
+Model scalars and content operands use the same real emitter. Nonfinite output
+scalars refuse. Real syntax is parsed before native integer conversion; oversized
+integer tokens and out-of-range real values refuse rather than becoming zero or
+rounded substitutes. This does not recover
 arbitrary decimal precision already lost during parsing. Exact normalized native
 MediaBox/CropBox, rotation, UserUnit and displayed sizes are verified before writing
 and after strict reopening; the fitting match tolerance is not a verifier epsilon. PDFConcat inspects content

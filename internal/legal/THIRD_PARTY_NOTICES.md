@@ -86,8 +86,9 @@ the canonical replacement and verifies the same patched files in vendored code.
 Build metadata and SBOMs must identify the local replacement as modified source.
 
 The local numeric changes retain finite model float64 values with round-trip
-non-exponent decimal output and canonical zero, reject nonfinite scalars, and
-preserve finite integer-shaped real tokens beyond the native integer range
-instead of replacing them with zero. Exact changed/upstream source hashes remain
+non-exponent real decimal output, explicit nonzero real markers and canonical
+zero. They reject nonfinite scalars, dispatch real syntax before integer conversion,
+and refuse oversized integer tokens and real range errors without substituting
+zero or rounded values. Exact changed/upstream source hashes remain
 in `third_party/pdfcpu/PDFCONCAT-PATCH.json`; modified-source SBOMs identify that
 manifest. Upstream notices and PDFConcat modification licensing remain unchanged.

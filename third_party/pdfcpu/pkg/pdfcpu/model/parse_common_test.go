@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 package model
 
 import (
@@ -111,5 +114,5 @@ func TestParseObject(t *testing.T) {
 	doTestParseObjectOK("<</n 1 0 R>>", t)
 	doTestParseObjectOK("(!\\(S:\\356[\\272H\\355>>R{sb\\007)", t)
 
-	doTestParseObjectOK("18446744071963345064 0 R", t)
+	doTestParseObjectFail("18446744071963345064 0 R", t)
 }

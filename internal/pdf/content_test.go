@@ -58,7 +58,7 @@ const (
 	toUnicodeHeader   = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
 		"/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n" +
 		"1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
-	contentHead     = "0 0 0 rg\nBT\n/F1 10 Tf\n1 0 0 1 12.3456 190.25 Tm\n"
+	contentHead     = "0 0 0 rg\nBT\n/F1 10.0 Tf\n1 0 0 1 12.3456 190.25 Tm\n"
 	contentTail     = "ET\n"
 	toUnicodeFooter = "endcmap\nCMapName currentdict /CMap defineresource pop\n" + "end\n" + "end\n"
 )
@@ -171,16 +171,16 @@ func offsetRows(font *typeset.Font, hand glyphs) []contentRow {
 		},
 		{
 			"a glyph offset becomes a thousandths-of-an-em adjustment and is undone after",
-			contentHead + "[" + glyphA + "-100" + glyphB + "100" + glyphA + "] TJ\n" + contentTail,
+			contentHead + "[" + glyphA + "-100.0" + glyphB + "100.0" + glyphA + "] TJ\n" + contentTail,
 			[]typeset.Line{handLine(0, plain(hand.a), cluster(font, hand.b, tenth, 0), plain(hand.a))},
 		},
 		{
-			"a negative glyph offset moves the other way", contentHead + "[" + glyphA + "100" + glyphB + "] TJ\n" + contentTail,
+			"a negative glyph offset moves the other way", contentHead + "[" + glyphA + "100.0" + glyphB + "] TJ\n" + contentTail,
 			[]typeset.Line{handLine(0, plain(hand.a), cluster(font, hand.b, -tenth, 0))},
 		},
 		{
 			"justification widens interior spaces only, not leading ones",
-			contentHead + "[" + space + glyphA + space + "-250" + glyphB + space + "-250" + glyphA + "] TJ\n" + contentTail,
+			contentHead + "[" + space + glyphA + space + "-250.0" + glyphB + space + "-250.0" + glyphA + "] TJ\n" + contentTail,
 			[]typeset.Line{
 				handLine(2.5, plain(hand.space), plain(hand.a), plain(hand.space), plain(hand.b), plain(hand.space), plain(hand.a)),
 			},
@@ -265,7 +265,7 @@ func TestContentStreamPaintsBackgroundAndTextColor(t *testing.T) {
 
 	path, _ := writePDF(t, []compose.Page{page})
 
-	want := "/Artifact BMC\n1 0.2 0 rg\n0 0 100.5 50 re\nf\nEMC\n/P <</MCID 0>> BDC\n0.2 0.4 0.6 rg\nBT\n/F1 10 Tf\n1 0 0 1 1 2 Tm\n[" + hex4(handGlyphs(t).a.id) + "] TJ\nET\nEMC\n"
+	want := "/Artifact BMC\n1.0 0.2 0 rg\n0 0 100.5 50.0 re\nf\nEMC\n/P <</MCID 0>> BDC\n0.2 0.4 0.6 rg\nBT\n/F1 10.0 Tf\n1 0 0 1 1.0 2.0 Tm\n[" + hex4(handGlyphs(t).a.id) + "] TJ\nET\nEMC\n"
 	if got := objectStream(t, path, "/Contents"); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

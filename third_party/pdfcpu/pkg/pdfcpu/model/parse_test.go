@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 package model
 
 import (
@@ -129,7 +132,7 @@ func TestParseFloatRejectsNonPDFNumbers(t *testing.T) {
 	for _, input := range []string{
 		"NaN", "nan", "NAN", "Inf", "+Inf", "-Inf", "Infinity", "-Infinity", "iNfInItY",
 		"1e5", "-1E-5", "0x1p2", "0X1.FP+3", "1_000.0", "1.2.3", "1,2,3", "1.-2.-3",
-		"", ".", "+.", "-", "+", "1a", "١.٥", strings.Repeat("9", 400) + ".0",
+		"", ".", "+.", "-", "+", "1a", "١.٥",
 	} {
 		t.Run(input, func(t *testing.T) {
 			got, err := parseFloat(input)

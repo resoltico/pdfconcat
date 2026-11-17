@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestLargeFiniteIntegerShapedRealRoundTrip(t *testing.T) {
+func TestRealLexicalRoundTripAndIntegerRangeRefusal(t *testing.T) {
 	for _, value := range []float64{1e20, -1e20, math.MaxFloat64, -math.MaxFloat64} {
 		token := types.Float(value).PDFString()
 		remaining := token
@@ -19,10 +19,13 @@ func TestLargeFiniteIntegerShapedRealRoundTrip(t *testing.T) {
 			t.Errorf("%q decoded as %T %v: %v", token, object, object, err)
 		}
 	}
-	overflow := strings.Repeat("9", 400)
-	if _, err := parseNumericOrIndRef(&overflow); err == nil {
-		t.Error("nonfinite integer-shaped token did not fail")
+	for _, token := range []string{strings.Repeat("9", 400), strings.Repeat("9", 400) + ".0", "100000000000000000000", "-100000000000000000000"} {
+		remaining := token
+		if value, err := parseNumericOrIndRef(&remaining); err == nil || value != nil {
+			t.Errorf("out-of-range integer became a plausible result: %q %v %v", token, value, err)
+		}
 	}
+
 	ordinary := "42"
 	object, err := parseNumericOrIndRef(&ordinary)
 	if err != nil || object != types.Integer(42) {

@@ -208,6 +208,10 @@ Kept pages bypass every fitting mutation. Transformed frames are zero-origin, an
 one affine handles content, annotations and structure. Native tuples and displayed
 sizes are compared exactly before serialization and after strict reopening. The
 local numeric serializer preserves decoded finite float64 values with non-exponent
-round-trip decimals and canonical zero; the parser preserves finite integer-shaped
-reals beyond the native integer range rather than replacing them with zero.
+round-trip real decimals and canonical zero. Nonzero integral reals retain a decimal
+marker; content operands share the model serializer. The parser dispatches real
+syntax before integer conversion and refuses oversized integer tokens and real
+range errors rather than substituting values. Forward fitting checks its actual
+scale, coefficients and mapped frame; it does not require an unused determinant
+to fit in a float64.
 Wire `page_sizes` runs are owner-bound expectations and do not assert publication.

@@ -47,18 +47,18 @@ PDFConcat uses the category and subtype facts rather than matching the English
 error sentence. Other dictionary, shape and dereference failures remain errors.
 
 The numeric extension emits finite model reals as non-exponent float64 round-trip
-decimals, with canonical zero, and refuses nonfinite scalars. It also corrects
-the parser branch that previously replaced integer-shaped tokens beyond the
-native integer range with zero: finite values now remain numeric reals and
-out-of-range values refuse. This is required because the round-trip decimal
-formatter emits integer-shaped tokens for large finite real values. It does not
-recover arbitrary decimal precision already lost during parsing. Ordinary native
-integers and indirect-reference rules retain their existing behavior.
+decimals, retaining a decimal marker for nonzero integral-valued reals and a
+canonical zero. Content/operator emission uses this same owner. Nonfinite output
+scalars refuse. Real syntax is dispatched before native integer conversion, so
+large explicit reals do not hit an integer range error. Oversized integer tokens
+and out-of-range real values refuse visibly; they never become zero or a rounded
+real substitute. Ordinary integers and valid indirect-reference syntax retain
+their native meaning. This does not recover precision lost during float64 parsing.
 
 Additional dependency-owned qualification (also explicitly discovered by CI):
 
 ```
-go test ./pkg/pdfcpu/types ./pkg/pdfcpu/model -run 'TestFloatPDFRoundTrip|TestLargeFiniteIntegerShapedRealRoundTrip' -count=1
+go test ./pkg/pdfcpu/types ./pkg/pdfcpu/model -run 'TestFloatPDFRoundTrip|TestRealLexicalRoundTripAndIntegerRangeRefusal' -count=1
 ```
 
 The root serializer independently refuses nonfinite scalars before emitting PDF

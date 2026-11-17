@@ -21,13 +21,23 @@
     },
     {
       "path": "pkg/pdfcpu/model/numeric_roundtrip_test.go",
-      "sha256": "ae4a193b165e6c9a7d5641327bca095cd85dae270a02405dea941c21b4da4dfc",
+      "sha256": "8870e26022781ab41b839ffb7a178fe558cafae081ba2717042f3f1b59b3c80c",
       "upstream_sha256": null
     },
     {
       "path": "pkg/pdfcpu/model/parse.go",
-      "sha256": "9237f8149026ef59b89675894812c468bb3e04a926a2b794cb2f50bbc36697ca",
+      "sha256": "570329483b4a6881144c9e9fc7882caab64dfecd816e52b0926c03c70922357f",
       "upstream_sha256": "b053ed6bce569fb71ce6ce43edddd53481f2e5709a2a92d578c2cd2dca24b130"
+    },
+    {
+      "path": "pkg/pdfcpu/model/parse_common_test.go",
+      "sha256": "86cc7d441f99bb93f774f263f53bbf529d0a10e849bcc5e0a5f71569d0a4b21c",
+      "upstream_sha256": "c4e2191cbef5b646cf411cd92c61732ec37915f6ace8415e8b52a6fb40b6e519"
+    },
+    {
+      "path": "pkg/pdfcpu/model/parse_test.go",
+      "sha256": "9ae906a9c7ee03fbffc89b5b03cb13022afd9e4c95af40ff5af7aa0bc2ccdd1e",
+      "upstream_sha256": "3c9fc2a1833671b30e1de1bc7f61e16eb5b1e568ac8136545aab7f9ba4e358fb"
     },
     {
       "path": "pkg/pdfcpu/model/xreftable.go",
@@ -46,12 +56,12 @@
     },
     {
       "path": "pkg/pdfcpu/types/float_pdf_test.go",
-      "sha256": "7c329ae4637c241f9b74bf7e60330aca1815182854f4867217a6f7b83414290c",
+      "sha256": "7d0cadadc7d88845b7cc4df1d0cd8e7164373a49b3fc0d7607c11fac4b4cbf78",
       "upstream_sha256": null
     },
     {
       "path": "pkg/pdfcpu/types/types.go",
-      "sha256": "48041540cb810b58ef927214e911fccf43fec340b6a6fa32668b0c7a421daacd",
+      "sha256": "636e924a749a650a882ab306187360472de0d472f44f6618d2e722df07ab4292",
       "upstream_sha256": "acbe1a8b3d28083f88bd0b07af2dd1ef7db0da64267e42e4410e73120b37fec3"
     },
     {

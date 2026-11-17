@@ -10,11 +10,14 @@ import (
 )
 
 func TestFloatPDFRoundTrip(t *testing.T) {
-	for _, n := range []float64{0, math.Copysign(0, -1), 1e-13, math.SmallestNonzeroFloat64, math.MaxFloat64, -123.45678901234567, 595.2755905511812} {
+	for _, n := range []float64{1, -1, 1e20, -1e20, 0, math.Copysign(0, -1), 1e-13, math.SmallestNonzeroFloat64, math.MaxFloat64, -123.45678901234567, 595.2755905511812} {
 		token := Float(n).PDFString()
 		got, e := strconv.ParseFloat(token, 64)
 		if e != nil || got != n || strings.ContainsAny(token, "eE") {
 			t.Errorf("%g => %q => %g %v", n, token, got, e)
+		}
+		if n != 0 && !strings.ContainsRune(token, '.') {
+			t.Errorf("real lost its decimal marker: %q", token)
 		}
 		if n == 0 && token != "0" {
 			t.Errorf("noncanonical zero %q", token)

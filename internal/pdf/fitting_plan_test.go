@@ -109,14 +109,13 @@ func TestRepeatedGeneratedFittingPlansStayCompact(t *testing.T) {
 	}
 }
 func TestUnrepresentableFittingRefusesBeforeMutation(t *testing.T) {
-	for _, side := range []float64{1e-300, 1e308} {
-		box := types.NewRectangle(0, 0, side, side)
-		page := pageGeometry{box: *box, attrs: model.InheritedPageAttrs{MediaBox: box}, unit: 1, size: packet.Size{Width: side, Height: side}}
-		_, err := planFitting([]pageGeometry{page}, &packet.Size{Width: 100, Height: 100}, 1, sourceOrigins{pages: map[types.IndirectRef]int{page.ref: 7}})
-		if err == nil || Diagnostic(err).Code != diag.FitGeometryUnsupported {
-			t.Fatal("unusable affine accepted", side, err)
-		}
+	box := types.NewRectangle(0, 0, 1e-306, 1e-306)
+	page := pageGeometry{box: *box, attrs: model.InheritedPageAttrs{MediaBox: box}, unit: 1e308, size: packet.Size{Width: 100, Height: 100}}
+	_, err := planFitting([]pageGeometry{page}, &packet.Size{Width: 14400, Height: 14400}, 1, sourceOrigins{pages: map[types.IndirectRef]int{page.ref: 7}})
+	if err == nil || Diagnostic(err).Code != diag.FitGeometryUnsupported {
+		t.Fatal("actual overflowing scale accepted", err)
 	}
+
 }
 
 func TestSerializedFiniteModelScalarsReopenExactly(t *testing.T) {

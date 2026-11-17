@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 )
 
 // Supported line delimiters
@@ -126,7 +127,13 @@ func (f Float) PDFString() string {
 	if value == 0 {
 		return "0"
 	}
-	return strconv.FormatFloat(value, 'f', -1, 64)
+	token := strconv.FormatFloat(value, 'f', -1, 64)
+	// A real with integer spelling can overflow another reader's integer parser.
+	// Preserve a decimal marker for every nonzero model real.
+	if !strings.ContainsRune(token, '.') {
+		token += ".0"
+	}
+	return token
 }
 
 // Value returns a float64 value for this PDF object.

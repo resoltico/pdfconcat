@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strconv"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -561,15 +560,8 @@ func (d *document) appendColor(color packet.Color) {
 	d.content = append(d.content, "rg\n"...)
 }
 
-// number emits round-trip decimal precision without scientific notation. Canvas dimensions and
-// captured physical placements must describe the numbers actually written into the resource PDF.
-func number(value float64) string {
-	if value == 0 {
-		return "0"
-	}
-
-	return strconv.FormatFloat(value, 'f', -1, 64)
-}
+// number uses the same finite real lexical contract as PDF model scalars.
+func number(value float64) string { return types.Float(value).PDFString() }
 
 func utf16Hex(text string) string {
 	units := utf16.Encode([]rune(text))

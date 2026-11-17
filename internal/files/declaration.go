@@ -22,7 +22,7 @@ func ResolveDeclaration(d packet.Declaration, base string) (packet.Declaration, 
 		}
 		p, err := Path(base, path)
 		if err != nil {
-			ds = append(ds, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()), ref))
+			ds = append(ds, diag.Report(diag.PathInvalid, diag.InvalidPathFailure(err.Error()), ref))
 		}
 		return p
 	}

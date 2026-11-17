@@ -40,3 +40,8 @@ The first-party reader and application tests exercise the linked replacement,
 including original-reference guards and independently checked serialized output.
 The source archive check verifies that vendoring retains these exact modified
 files, and an offline vendor build uses the same code without a patch step.
+
+The patch also returns a typed `MissingAnnotationAppearanceError` from the
+existing PDF 2.0 appearance checker. It changes no exception or graph rule;
+PDFConcat uses the category and subtype facts rather than matching the English
+error sentence. Other dictionary, shape and dereference failures remain errors.

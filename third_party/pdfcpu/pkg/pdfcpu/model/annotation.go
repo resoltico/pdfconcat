@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 package model
 
 import (
@@ -396,7 +399,7 @@ func (xRefTable *XRefTable) CheckAnnotationAppearance(d types.Dict) error {
 	if r.Width() == 0 && r.Height() == 0 {
 		return nil
 	}
-	return fmt.Errorf("PDF 2.0 %s annotation requires an appearance dictionary (AP)", subtype)
+	return &MissingAnnotationAppearanceError{Subtype: string(subtype)}
 }
 
 // RenderDict renders ann as dict.

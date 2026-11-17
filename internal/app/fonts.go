@@ -58,7 +58,7 @@ func loadFonts(c context.Context, j packet.Plan) (compose.Fonts, []diag.Diagnost
 	}
 	for _, name := range fontOrder {
 		if c.Err() != nil {
-			ds = append(ds, diag.Report(diag.Interrupted, diag.TechnicalFailure("interruption", c.Err().Error())))
+			ds = append(ds, diag.Report(diag.Interrupted, diag.InterruptedFailure(c.Err().Error())))
 			return fonts, ds
 		}
 		var data []byte
@@ -90,7 +90,7 @@ func loadFonts(c context.Context, j packet.Plan) (compose.Fonts, []diag.Diagnost
 	preflight := compose.NewTextPreflight(j)
 	for _, key := range textOrder {
 		if c.Err() != nil {
-			ds = append(ds, diag.Report(diag.Interrupted, diag.TechnicalFailure("interruption", c.Err().Error())))
+			ds = append(ds, diag.Report(diag.Interrupted, diag.InterruptedFailure(c.Err().Error())))
 			return fonts, ds
 		}
 		if font := fonts[key.font]; font != nil {
@@ -104,7 +104,7 @@ func loadFonts(c context.Context, j packet.Plan) (compose.Fonts, []diag.Diagnost
 			}
 		}
 		if err := c.Err(); err != nil {
-			ds = append(ds, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
+			ds = append(ds, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 			break
 		}
 	}

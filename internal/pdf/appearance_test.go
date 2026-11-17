@@ -78,8 +78,8 @@ func TestAppearanceInspectionBoundaries(t *testing.T) {
 			}
 			header, root := s.HeaderVersion, s.RootVersion
 			issue, err := appearanceIssue(t.Context(), s)
-			if err != nil || (issue != "") != tc.issue {
-				t.Fatalf("issue %q err %v", issue, err)
+			if err != nil || issue.Present() != tc.issue {
+				t.Fatalf("issue %+v err %v", issue, err)
 			}
 			if s.HeaderVersion != header || s.RootVersion != root || s.XRefTable.Version() != model.V17 {
 				t.Fatal("version was not restored")

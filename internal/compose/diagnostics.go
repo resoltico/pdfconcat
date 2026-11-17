@@ -20,7 +20,7 @@ func diagnosticWidth(err error, item, widthOrigin string) diag.Diagnostic {
 		return diag.Report(diag.TextOverflow, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return diag.Report(diag.Interrupted, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
+		return diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error()), item)
 	}
 	var embedding *typeset.EmbeddingError
 	var text *typeset.TextError

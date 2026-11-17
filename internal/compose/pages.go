@@ -50,7 +50,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			continue
 		}
 		if err := c.Err(); err != nil {
-			ds = append(ds, diag.Report(diag.Interrupted, diag.TechnicalFailure("pdf", err.Error())))
+			ds = append(ds, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 			break
 		}
 		style := p.Page

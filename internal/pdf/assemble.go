@@ -245,7 +245,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	output := &outputWriter{writer: w}
 	err = serialize(c, dest, output)
 	if output.err != nil {
-		return result, &policyError{finding: diag.Report(diag.OutputWriteFailed, diag.TechnicalFailure("pdf", output.err.Error())), err: output.err}
+		return result, &policyError{finding: diag.Report(diag.OutputWriteFailed, diag.OutputWritingFailure(output.err.Error())), err: output.err}
 	}
 	return result, err
 }

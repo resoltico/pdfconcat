@@ -166,7 +166,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 	d.Objs[3] = append(append(append([]byte{}, d.Objs[3][:last]...), []byte(" /Annots [8 0 R] ")...), d.Objs[3][last:]...)
 	d.Objs = append(d.Objs, []byte("<< /Subtype /Text /Rect [10 10 20 20] >>"))
 	_, views = inspectSelection(t, d, []SelectionRequest{{Item: "omit", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "retain", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
-	if views["omit"].PDF20AppearanceIssue != "" || views["retain"].PDF20AppearanceIssue == "" {
+	if views["omit"].PDF20AppearanceIssue.Present() || views["retain"].PDF20AppearanceIssue.Present() == false {
 		t.Fatal(views)
 	}
 }
@@ -725,7 +725,7 @@ func TestFitAnnotationCompatibilityUsesSelectedPages(t *testing.T) {
 	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 7 0 R] >>")
 	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
 	_, facts := inspectSelection(t, doc, []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 1, Last: 1}}}, {Item: "good", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
-	if facts["bad"].AnnotationFittingIssue == "" || facts["good"].AnnotationFittingIssue != "" {
+	if facts["bad"].AnnotationFittingIssue.Present() == false || facts["good"].AnnotationFittingIssue.Present() {
 		t.Fatalf("selection facts: %+v", facts)
 	}
 	path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "/items/0", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 500})

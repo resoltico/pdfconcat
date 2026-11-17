@@ -37,7 +37,7 @@ func (f Roles) checkReport() []diag.Diagnostic {
 	if f.Report != "" && f.Output != "" && !hasNonregularReport(ds) {
 		same, err := samePathOrFile(f.Report, f.Output)
 		if err != nil {
-			d := diag.Report(diag.ReportInspectionFailed, diag.TechnicalFailure("input", err.Error()))
+			d := diag.Report(diag.ReportInspectionFailed, diag.PublicationInspectionFailure(err.Error()))
 			d.File = f.Report
 			ds = append(ds, d)
 		}

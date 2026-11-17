@@ -149,7 +149,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	cursor := firstRowTop
 	for _, section := range sections {
 		if err := c.Err(); err != nil {
-			return nil, []diag.Diagnostic{diag.Report(diag.Interrupted, diag.TechnicalFailure("pdf", err.Error()))}
+			return nil, []diag.Diagnostic{diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error()))}
 		}
 		left := 36 + 12*float64(section.Depth)
 		right := size.Width - 36

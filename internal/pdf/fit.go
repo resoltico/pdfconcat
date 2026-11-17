@@ -58,8 +58,11 @@ func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
 	if err != nil {
 		return err
 	}
-	if issue != "" {
-		return refuse(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(issue))
+	if issue.Present() {
+		d := diag.Report(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(issue))
+		loc := issue.Site
+		d.PDFLocation = &loc
+		return &policyError{finding: d}
 	}
 	contents, err := capturePageContent(c, s)
 	if err != nil {

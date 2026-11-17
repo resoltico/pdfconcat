@@ -61,23 +61,34 @@ func AttachEvidence(d *Diagnostic, e Explanation) {
 	d.Identity.Phase = phase
 }
 
-// TechnicalFailure keeps opaque library/native evidence as a named parameter of
-// a complete sentence. It has no coalescing identity until a boundary supplies facts.
-func TechnicalFailure(phase, reason string) Explanation {
-	var text string
-	switch phase {
-	case "input":
-		text = fmt.Sprintf("The input path could not be used: %s.", reason)
-	case "typography":
-		text = fmt.Sprintf("Generated text or font preparation failed: %s.", reason)
-	case "interruption":
-		text = fmt.Sprintf("The operation was interrupted: %s.", reason)
-	case "publication":
-		text = fmt.Sprintf("Publication inspection failed: %s.", reason)
-	default:
-		text = fmt.Sprintf("PDF processing failed: %s.", reason)
-	}
-	return Explanation{text: text, detail: reason}
+// InterruptedFailure explains cancellation/deadline evidence, never a path or PDF fault.
+func InterruptedFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("The operation was interrupted: %s.", reason), detail: reason}
+}
+
+// InvalidPathFailure explains native path-grammar evidence.
+func InvalidPathFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("The input path could not be used: %s.", reason), detail: reason}
+}
+
+// FontPreparationFailure explains font preparation evidence.
+func FontPreparationFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("Font preparation failed: %s.", reason), detail: reason}
+}
+
+// PublicationInspectionFailure explains native destination inspection evidence.
+func PublicationInspectionFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("Publication inspection failed: %s.", reason), detail: reason}
+}
+
+// PDFProcessingFailure explains unclassified backend evidence without deciding policy.
+func PDFProcessingFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("PDF processing failed: %s.", reason), detail: reason}
+}
+
+// OutputWritingFailure explains a staged output writer failure.
+func OutputWritingFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("Writing the staged output failed: %s.", reason), detail: reason}
 }
 
 // GeneratedTextFailure owns both whole-sentence variants of width attribution.
@@ -86,9 +97,4 @@ func GeneratedTextFailure(reason, widthOrigin string) Explanation {
 		return Explanation{text: fmt.Sprintf("Generated text could not be prepared: %s.", reason), detail: reason}
 	}
 	return Explanation{text: fmt.Sprintf("Generated text could not be prepared using width from %q: %s.", widthOrigin, reason), detail: reason}
-}
-
-// FittingAnnotationRefusal preserves the technical issue as a named parameter.
-func FittingAnnotationRefusal(issue string) Explanation {
-	return Explanation{text: fmt.Sprintf("%s Supply complete normal appearances and keep interactive hit areas inside the source frame, or use original page sizes.", issue)}
 }

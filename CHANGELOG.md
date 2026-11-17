@@ -15,6 +15,8 @@
 - Generated contract checks reject stale schema/reference values; release checks require every supported target and compare deliverables from two isolated clean builds.
 - Source delivery retains the modified pdfcpu reader, upstream licenses and exact patch provenance, and verifies that offline vendoring uses the patched source.
 
+- Cancellation and deadlines consistently report interruption across stages; annotation refusals use typed facts and core wording, and missing-appearance acceptance no longer depends on backend text.
+
 ## [0.12.0] - 2026-11-16
 
 - Installers require the complete current receipt inventory. Remove incompatible installations with their matching installer or use a fresh directory; receipts are not converted.

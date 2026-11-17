@@ -97,7 +97,7 @@ func noteCancellation(c context.Context, r *outcome.Result) {
 				return
 			}
 		}
-		r.Diagnostics = append(r.Diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
+		r.Diagnostics = append(r.Diagnostics, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 	}
 }
 

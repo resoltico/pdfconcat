@@ -5,7 +5,8 @@ package pdf
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -40,10 +41,10 @@ func normalAppearance(s *model.Context, d types.Dict) (bool, error) {
 // Missing-AP path annotations inside the source frame remain supported. A
 // fallback renderer cannot be clipped through page-content graphics state, and
 // FreeText DA/rich-text layout cannot be preserved by coordinate changes alone.
-func annotationFittingIssue(c context.Context, s *model.Context, geometries []pageGeometry) (string, error) {
+func annotationFittingIssue(c context.Context, s *model.Context, geometries []pageGeometry) (diag.AnnotationIssue, error) {
 	for index, geometry := range geometries {
 		if err := c.Err(); err != nil {
-			return "", err
+			return diag.AnnotationIssue{}, err
 		}
 		page := index + 1
 		d, attrs, box := geometry.dict, geometry.attrs, geometry.box
@@ -56,15 +57,15 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 		visible := fitRectangle(box, m)
 		annots, err := s.DereferenceArray(d["Annots"])
 		if err != nil {
-			return "", err
+			return diag.AnnotationIssue{}, err
 		}
 		for _, obj := range annots {
 			if err := c.Err(); err != nil {
-				return "", err
+				return diag.AnnotationIssue{}, err
 			}
 			annot, err := s.DereferenceDict(obj)
 			if err != nil {
-				return "", err
+				return diag.AnnotationIssue{}, err
 			}
 			if annot == nil {
 				continue
@@ -73,7 +74,7 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 			if annot["F"] != nil {
 				v, err := s.DereferenceNumber(annot["F"])
 				if err != nil {
-					return "", err
+					return diag.AnnotationIssue{}, err
 				}
 				flags = int(v)
 			}
@@ -82,15 +83,23 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 			} // Hidden annotations are never painted or interactive.
 			hasAppearance, err := normalAppearance(s, annot)
 			if err != nil {
-				return "", err
+				return diag.AnnotationIssue{}, err
 			}
 			subtype, err := s.Dereference(annot["Subtype"])
 			if err != nil {
-				return "", err
+				return diag.AnnotationIssue{}, err
 			}
 			rect, err := readRectangle(s, annot["Rect"])
 			if err != nil {
-				return "", err
+				return diag.AnnotationIssue{}, err
+			}
+			issue := func(kind diag.AnnotationIssueKind) diag.AnnotationIssue {
+				site := diag.PDFLocation{Page: page, Path: "Annots"}
+				if ref, ok := obj.(types.IndirectRef); ok {
+					site.Object = ref.ObjectNumber.Value()
+				}
+				name, _ := subtype.(types.Name)
+				return diag.AnnotationIssue{Kind: kind, Page: page, Subtype: string(name), Site: site}
 			}
 			// FreeText has no displayed area on either empty side. Text icons
 			// and path annotations can paint despite a zero Rect; do not
@@ -104,17 +113,17 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 			if flags&int(model.AnnNoView) == 0 && !readOnly {
 				action, err := s.Dereference(annot["A"])
 				if err != nil {
-					return "", err
+					return diag.AnnotationIssue{}, err
 				}
 				hitArea = subtype == types.Name("Link") || action != nil
 				aa, err := s.DereferenceDict(annot["AA"])
 				if err != nil {
-					return "", err
+					return diag.AnnotationIssue{}, err
 				}
 				for _, trigger := range []string{"E", "X", "D", "U", "Fo", "Bl"} {
 					action, err := s.Dereference(aa[trigger])
 					if err != nil {
-						return "", err
+						return diag.AnnotationIssue{}, err
 					}
 					if action != nil {
 						hitArea = true
@@ -125,41 +134,41 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 				continue
 			}
 			if !hasAppearance && attrs.Rotate%360 != 0 && (flags&int(model.AnnNoRotate) != 0 || subtype == types.Name("Text")) {
-				return fmt.Sprintf("Selected page %d NoRotate annotation has no usable normal appearance; baking rotation cannot preserve viewer-generated bounds and pivot.", page), nil
+				return issue(diag.RotatedAppearanceMissing), nil
 			}
 			if !hasAppearance && subtype == types.Name("Text") {
-				return fmt.Sprintf("Selected page %d Text icon has no usable normal appearance; its rectangle does not bound the viewer-generated icon, so fitting cannot preserve source clipping.", page), nil
+				return issue(diag.TextIconAppearanceMissing), nil
 			}
 			if !hasAppearance && subtype == types.Name("Caret") {
-				return fmt.Sprintf("Selected page %d Caret has no usable normal appearance; fitting cannot preserve its viewer-generated symbol through rectangle and inset changes alone.", page), nil
+				return issue(diag.CaretAppearanceMissing), nil
 			}
 			if !hasAppearance && subtype == types.Name("Line") {
 				caption, err := s.Dereference(annot["Cap"])
 				if err != nil {
-					return "", err
+					return diag.AnnotationIssue{}, err
 				}
 				if caption == types.Boolean(true) {
-					return fmt.Sprintf("Selected page %d captioned Line has no usable normal appearance; fitting cannot preserve viewer-generated caption text layout.", page), nil
+					return issue(diag.CaptionedLineAppearanceMissing), nil
 				}
 			}
 			if !hasAppearance && subtype == types.Name("FreeText") {
-				return fmt.Sprintf("Selected page %d FreeText has no usable normal appearance; fitting cannot preserve its text layout.", page), nil
+				return issue(diag.FreeTextAppearanceMissing), nil
 			}
 			if rect.Width() == 0 || rect.Height() == 0 {
 				continue
 			}
 			transform, err := annotationTransform(s, annot, *rect, m, 1)
 			if err != nil {
-				return "", err
+				return diag.AnnotationIssue{}, err
 			}
 			displayed := fitRectangle(*rect, transform)
 			if displayed.LL.X < visible.LL.X || displayed.LL.Y < visible.LL.Y || displayed.UR.X > visible.UR.X || displayed.UR.Y > visible.UR.Y {
 				if hasAppearance {
-					return fmt.Sprintf("Selected page %d Interactive annotation hit area crosses the visible source boundary; fitting cannot preserve its clipped interaction region.", page), nil
+					return issue(diag.InteractiveAreaCrossesFrame), nil
 				}
-				return fmt.Sprintf("Selected page %d annotation without a usable normal appearance crosses the visible source boundary; fitting cannot clip viewer-generated artwork or hit areas.", page), nil
+				return issue(diag.ArtworkCrossesFrame), nil
 			}
 		}
 	}
-	return "", nil
+	return diag.AnnotationIssue{}, nil
 }

@@ -44,7 +44,7 @@ func admit(ctx context.Context, req Request) *admission {
 	if req.Report != "" {
 		path, err := files.Path(req.WorkingDir, req.Report)
 		if err != nil {
-			a.diagnostics = append(a.diagnostics, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error())))
+			a.diagnostics = append(a.diagnostics, diag.Report(diag.PathInvalid, diag.InvalidPathFailure(err.Error())))
 			return a
 		}
 		a.roles.Report = path
@@ -52,7 +52,7 @@ func admit(ctx context.Context, req Request) *admission {
 	if req.Output != "" {
 		path, err := files.Path(req.WorkingDir, req.Output)
 		if err != nil {
-			a.diagnostics = append(a.diagnostics, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error())))
+			a.diagnostics = append(a.diagnostics, diag.Report(diag.PathInvalid, diag.InvalidPathFailure(err.Error())))
 			return a
 		}
 		a.roles.Output = path
@@ -82,7 +82,7 @@ func admit(ctx context.Context, req Request) *admission {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		a.diagnostics = append(a.diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
+		a.diagnostics = append(a.diagnostics, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 		return a
 	}
 	var declared packet.Plan
@@ -91,7 +91,7 @@ func admit(ctx context.Context, req Request) *admission {
 	case PlanFile:
 		path, err := files.Path(req.WorkingDir, input.Path)
 		if err != nil {
-			ds = []diag.Diagnostic{diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()))}
+			ds = []diag.Diagnostic{diag.Report(diag.PathInvalid, diag.InvalidPathFailure(err.Error()))}
 			break
 		}
 		data, err := files.Read(ctx, path, MaxPlanBytes)
@@ -111,7 +111,7 @@ func admit(ctx context.Context, req Request) *admission {
 			base, err = files.Path(req.WorkingDir, input.BaseDir)
 		}
 		if err != nil {
-			ds = []diag.Diagnostic{diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()))}
+			ds = []diag.Diagnostic{diag.Report(diag.PathInvalid, diag.InvalidPathFailure(err.Error()))}
 			break
 		}
 		if len(input.Data) > MaxPlanBytes {
@@ -216,7 +216,7 @@ func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 		} // Request validation seals the variants.
 		path, err := files.Path(base, source.Path)
 		if err != nil {
-			ds = append(ds, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()), source.Ref))
+			ds = append(ds, diag.Report(diag.PathInvalid, diag.InvalidPathFailure(err.Error()), source.Ref))
 			continue
 		}
 		declared = append(declared, &packet.SourceItem{Ref: source.Ref, Path: path})

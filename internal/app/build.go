@@ -33,11 +33,11 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 	}
 	embedded, err := compose.PrepareFonts(pages, assembly.NumberLayout)
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, diag.Report(diag.FontInvalid, diag.TechnicalFailure("input", err.Error())))
+		out.diagnostics = append(out.diagnostics, diag.Report(diag.FontInvalid, diag.FontPreparationFailure(err.Error())))
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
+		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 		return out
 	}
 	staged, err := files.Create(j.Output())
@@ -91,7 +91,7 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
+		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 		return out
 	}
 	published, err := staged.Commit(overwrite)

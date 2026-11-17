@@ -175,3 +175,58 @@ func TestPlanConstructionHasOneCheckedProductionEntry(t *testing.T) {
 		t.Fatalf("unchecked prepared-state entry exposed: %v", constructors)
 	}
 }
+
+func appearanceFactFields(data []byte) (int, bool) {
+	file, err := parser.ParseFile(token.NewFileSet(), "inspect.go", data, 0)
+	if err != nil {
+		return 0, false
+	}
+	found := 0
+	valid := true
+	ast.Inspect(file, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok {
+			return true
+		}
+		for _, name := range field.Names {
+			if name.Name != "AnnotationFittingIssue" && name.Name != "PDF20AppearanceIssue" {
+				continue
+			}
+			found++
+			selector, ok := field.Type.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "AnnotationIssue" {
+				valid = false
+			}
+		}
+		return true
+	})
+	return found, valid
+}
+
+func TestAppearanceBoundaryIsFactsNotSentences(t *testing.T) {
+	data, err := os.ReadFile("../pdf/inspect.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, valid := appearanceFactFields(data); found != 2 || !valid {
+		t.Fatal("appearance fact contract is absent or carries rendered wording")
+	}
+	for _, source := range []struct {
+		text  string
+		valid bool
+	}{
+		{`package observer; type Facts struct { AnnotationFittingIssue string; PDF20AppearanceIssue string }`, false},
+		{`package observer; type Facts struct { AnnotationFittingIssue diag.AnnotationIssue; PDF20AppearanceIssue diag.AnnotationIssue }`, true},
+	} {
+		if found, valid := appearanceFactFields([]byte(source.text)); found != 2 || valid != source.valid {
+			t.Fatal("appearance fact gate failed its negative or positive control")
+		}
+	}
+	retained, err := os.ReadFile("../pdf/retained.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(retained), "Contains(err.Error()") || strings.Contains(string(retained), "requires an appearance dictionary") {
+		t.Fatal("appearance policy depends on backend wording")
+	}
+}

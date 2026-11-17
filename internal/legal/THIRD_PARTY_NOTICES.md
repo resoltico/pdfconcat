@@ -78,7 +78,8 @@ update; `cmd/pdfconcat/notices_test.go` checks those three. Version-only changes
 do not require duplicating a new version number here.
 
 PDFConcat ships a modified pdfcpu v0.16.4 through the in-tree module replacement
-`third_party/pdfcpu`. Its typed source-only classic-xref admission patch, exact
+`third_party/pdfcpu`. Its typed source-only classic-xref admission patch and typed missing-appearance
+error category, exact
 changed-source hashes and upstream module checksums are recorded in that
 directory's `PROVENANCE.md` and `PDFCONCAT-PATCH.json`. The source archive retains
 the canonical replacement and verifies the same patched files in vendored code.

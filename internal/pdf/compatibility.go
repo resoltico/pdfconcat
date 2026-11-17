@@ -67,8 +67,10 @@ func CheckCompatibility(a Assembly) Compatibility {
 		if a.FitTo != nil && f.HasWidgets {
 			add(diag.FitFormUnsupported, diag.FittingSourceFormWidgetsIsUnsupported())
 		}
-		if a.FitTo != nil && selected.AnnotationFittingIssue != "" {
+		if a.FitTo != nil && selected.AnnotationFittingIssue.Present() {
 			add(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(selected.AnnotationFittingIssue))
+			loc := selected.AnnotationFittingIssue.Site
+			result.Diagnostics[len(result.Diagnostics)-1].PDFLocation = &loc
 		}
 		if a.FitTo != nil && selected.HasCoordinateDestinations {
 			add(diag.FitDestinationUnsupported, diag.FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported())
@@ -80,8 +82,10 @@ func CheckCompatibility(a Assembly) Compatibility {
 				defaults = f.FormDefaultsDigest
 			}
 		}
-		if result.version >= model.V20 && selected.PDF20AppearanceIssue != "" {
-			add(diag.SourceOutputIncompatible, diag.SSourceQRequiresPDFOutputSupplyCompleteAnnotationAppearances(selected.PDF20AppearanceIssue, versionSource))
+		if result.version >= model.V20 && selected.PDF20AppearanceIssue.Present() {
+			add(diag.SourceOutputIncompatible, diag.PDF20AnnotationRefusal(selected.PDF20AppearanceIssue, versionSource))
+			loc := selected.PDF20AppearanceIssue.Site
+			result.Diagnostics[len(result.Diagnostics)-1].PDFLocation = &loc
 		}
 	}
 	return result

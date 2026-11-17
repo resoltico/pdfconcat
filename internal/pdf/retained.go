@@ -5,8 +5,10 @@ package pdf
 
 import (
 	"context"
+	"errors"
 	"slices"
-	"strings"
+
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -292,23 +294,43 @@ func coordinateDestinations(c context.Context, s *model.Context, named map[strin
 // appearanceIssue delegates the exception rules to the pinned writer's public
 // checker. Only its missing-appearance failure is a compatibility fact; graph,
 // dereference and cancellation failures must still fail inspection.
-func appearanceIssue(c context.Context, s *model.Context) (string, error) {
+func appearanceIssue(c context.Context, s *model.Context) (diag.AnnotationIssue, error) {
 	header, root := s.HeaderVersion, s.RootVersion
 	defer func() { s.HeaderVersion = header; s.RootVersion = root }()
 	version := model.V20
 	s.HeaderVersion = &version
 	s.RootVersion = &version
-	issue := ""
-	err := retainedObjects(c, s, func(d types.Dict) error {
-		if err := s.CheckAnnotationAppearance(d); err != nil {
-			if !strings.Contains(err.Error(), "requires an appearance dictionary (AP)") {
-				return err
-			}
-			if issue == "" {
-				issue = err.Error()
+	issue := diag.AnnotationIssue{}
+	origins, e := sourceOriginsFor(c, s)
+	if e != nil {
+		return issue, e
+	}
+	err := walkRetained(c, s, origins, func(d types.Dict, site sourceSite) error {
+		observed, e := appearanceCompatibilityFact(s.CheckAnnotationAppearance(d))
+		if e != nil {
+			return e
+		}
+		if !issue.Present() && observed.Present() {
+			issue = observed
+			if location := site.location(); location != nil {
+				issue.Site = *location
+				issue.Page = location.Page
 			}
 		}
+
 		return nil
-	}, func(types.Object) (bool, error) { return true, nil })
+	}, func(types.Dict, string, sourceSite, sourceSite) (bool, error) { return true, nil }, nil, false)
 	return issue, err
+}
+
+// appearanceCompatibilityFact selects a typed category, never its rendering.
+func appearanceCompatibilityFact(err error) (diag.AnnotationIssue, error) {
+	if err == nil {
+		return diag.AnnotationIssue{}, nil
+	}
+	var missing *model.MissingAnnotationAppearanceError
+	if !errors.As(err, &missing) {
+		return diag.AnnotationIssue{}, err
+	}
+	return diag.AnnotationIssue{Kind: diag.PDF20AppearanceMissing, Subtype: missing.Subtype}, nil
 }

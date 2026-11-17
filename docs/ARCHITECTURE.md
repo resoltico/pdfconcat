@@ -187,3 +187,10 @@ Validation notices are evidence; their message text does not select policy.
 Diagnostic wrappers preserve backend detail and PDF locations. Result coalescing
 merges only equivalent findings and unions their consuming item references.
 See [PDF policy](PDF-POLICY.md) for fidelity and resource limits.
+
+Annotation compatibility observations carry closed issue kinds and typed
+page/subtype/original-site facts. Core owns all fitting and PDF 2.0 refusal
+sentences. The PDF adapter recognizes the local reader's typed missing-appearance
+category; backend error wording cannot select acceptance. Cancellation and other
+technical failures use explicit explanation constructors, with opaque causes
+retained separately as Detail. There is no free-form phase/default renderer.

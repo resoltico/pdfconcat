@@ -26,8 +26,8 @@ type OccurrenceFacts struct {
 	packet.SourceFacts
 	DestNames                 []string
 	HasCoordinateDestinations bool
-	PDF20AppearanceIssue      string
-	AnnotationFittingIssue    string
+	PDF20AppearanceIssue      diag.AnnotationIssue
+	AnnotationFittingIssue    diag.AnnotationIssue
 	OutlineDepth              int
 	StructureCoverage         string
 	HasUncoveredContent       bool
@@ -81,7 +81,7 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 	if code == diag.SourceInvalid && errors.As(err, &backendFault) {
 		code = diag.SourceProcessingFailed
 	}
-	d := diag.Report(code, diag.TechnicalFailure("pdf", err.Error()))
+	d := diag.Report(code, diag.PDFProcessingFailure(err.Error()))
 	if policy != nil {
 		d = policy.finding
 	}

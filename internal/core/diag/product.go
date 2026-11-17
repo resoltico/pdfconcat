@@ -423,11 +423,6 @@ func SIsOmitted(originalSite string) Explanation {
 	return explain("SIsOmitted", fmt.Sprintf("%s is omitted.", originalSite), originalSite)
 }
 
-// SSourceQRequiresPDFOutputSupplyCompleteAnnotationAppearances renders the core-owned explanation.
-func SSourceQRequiresPDFOutputSupplyCompleteAnnotationAppearances(appearanceIssue string, versionSource string) Explanation {
-	return explain("SSourceQRequiresPDFOutputSupplyCompleteAnnotationAppearances", fmt.Sprintf("%s; source %q requires PDF 2.0 output. Supply complete annotation appearances or assemble the affected source separately.", appearanceIssue, versionSource), appearanceIssue, versionSource)
-}
-
 // SWillBeRemovedFromTheOutputCatalog renders the core-owned explanation.
 func SWillBeRemovedFromTheOutputCatalog(catalogKey string) Explanation {
 	return explain("SWillBeRemovedFromTheOutputCatalog", fmt.Sprintf("%s will be removed from the output catalog.", catalogKey), catalogKey)

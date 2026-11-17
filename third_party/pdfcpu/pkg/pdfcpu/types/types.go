@@ -14,12 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 // Package types defines low-level PDF objects, geometry, streams, and layout values.
 package types
 
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strconv"
 )
 
@@ -115,8 +119,14 @@ func (f Float) String() string {
 
 // PDFString returns a string representation as found in and written to a PDF file.
 func (f Float) PDFString() string {
-	// The max precision encountered so far has been 12 (fontType3 fontmatrix components).
-	return strconv.FormatFloat(f.Value(), 'f', 12, 64)
+	value := f.Value()
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		panic("pdfcpu: nonfinite PDF scalar")
+	}
+	if value == 0 {
+		return "0"
+	}
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 // Value returns a float64 value for this PDF object.

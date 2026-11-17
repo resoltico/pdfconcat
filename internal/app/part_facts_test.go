@@ -13,8 +13,8 @@ import (
 )
 
 func TestPartFactBindingsRefuseInconsistency(t *testing.T) {
-	part := pdf.Part{Part: packet.Part{Leaf: packet.Leaf{Ref: "page", Kind: packet.PartPage}, FirstPage: 1}}
-	for _, facts := range [][]compose.PreparedPart{nil, {{Owner: packet.PartIdentity{Ref: "other", Kind: packet.PartPage, FirstPage: 1}}}} {
+	part := pdf.Part{Part: packet.Part{Leaf: packet.Leaf{Ref: "page", Kind: packet.PartPage}, FirstPage: 1, Size: packet.Size{Width: 100, Height: 200}}}
+	for _, facts := range [][]compose.PreparedPart{nil, {{Owner: part.Identity(), Pages: []compose.Page{{Width: 99, Height: 200}}}}, {{Owner: packet.PartIdentity{Ref: "other", Kind: packet.PartPage, FirstPage: 1}}}} {
 		parts := []pdf.Part{part}
 		if ds := bindComposition(parts, facts, true); len(ds) != 1 || diag.Outcome(ds) != diag.StatusFailed || parts[0].Text != nil {
 			t.Fatalf("misaligned composition became plausible: %+v", ds)

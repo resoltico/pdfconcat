@@ -28,8 +28,8 @@ func fitMatrix(box types.Rectangle, rotation int, size *packet.Size) (matrix.Mat
 	upright := fitRectangle(box, m)
 	scale := math.Min(size.Width/upright.Width(), size.Height/upright.Height())
 	placement := matrix.CalcTransformMatrix(scale, scale, 0, 1,
-		box.LL.X+(size.Width-scale*upright.Width())/2-scale*upright.LL.X,
-		box.LL.Y+(size.Height-scale*upright.Height())/2-scale*upright.LL.Y)
+		(size.Width-scale*upright.Width())/2-scale*upright.LL.X,
+		(size.Height-scale*upright.Height())/2-scale*upright.LL.Y)
 	return m.Multiply(placement), scale
 }
 
@@ -49,20 +49,25 @@ func matrixCommand(m matrix.Matrix) []byte {
 	return fmt.Appendf(nil, "%s %s %s %s %s %s cm\n", number(m[0][0]), number(m[0][1]), number(m[1][0]), number(m[1][1]), number(m[2][0]), number(m[2][1]))
 }
 
-func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
+func fitContext(c context.Context, s *model.Context, plans fittingPlan, origins sourceOrigins) error {
 	geometries, err := pageGeometries(c, s)
 	if err != nil {
 		return err
 	}
-	issue, err := annotationFittingIssue(c, s, geometries)
-	if err != nil {
+	if err = bindFitting(geometries, plans); err != nil {
 		return err
 	}
-	if issue.Present() {
-		d := diag.Report(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(issue))
-		loc := issue.Site
-		d.PDFLocation = &loc
-		return &policyError{finding: d}
+	findings, e := fittingFindings(c, s, geometries, plans, origins)
+	if e != nil {
+		return e
+	}
+	for _, d := range findings {
+		if d.Severity == diag.Error {
+			return &policyError{finding: d}
+		}
+	}
+	if !anyTransform(plans) {
+		return c.Err()
 	}
 	contents, err := capturePageContent(c, s)
 	if err != nil {
@@ -72,9 +77,12 @@ func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
 		if err := c.Err(); err != nil {
 			return err
 		}
+		if !plans.page(i).Decision.Transform {
+			continue
+		}
 		attrs := page.attrs
 		box := page.box
-		m, scale := fitMatrix(box, attrs.Rotate, size)
+		m, scale := plans.page(i).Matrix, plans.page(i).Scale
 		data, err := joinedPageContent(c, s, contents[i], i+1)
 		if err != nil {
 			return err
@@ -107,10 +115,19 @@ func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
 		}
 		page.dict["Resources"] = resources
 		page.dict["Contents"] = *content
-		target := types.RectForWidthAndHeight(box.LL.X, box.LL.Y, size.Width, size.Height)
+		target := types.RectForWidthAndHeight(0, 0, plans.page(i).Decision.Output.Width, plans.page(i).Decision.Output.Height)
 		page.dict["MediaBox"], page.dict["CropBox"] = target.Array(), target.Array()
 		page.dict["Rotate"] = types.Integer(0)
 		delete(page.dict, "UserUnit")
+		for _, key := range []string{"BleedBox", "TrimBox", "ArtBox"} {
+			value, e := s.Dereference(page.dict[key])
+			if e != nil {
+				return e
+			}
+			if value != nil {
+				delete(page.dict, key)
+			}
+		}
 	}
 	s.EnsureVersionForWriting()
 	return c.Err()

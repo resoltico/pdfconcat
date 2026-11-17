@@ -22,24 +22,26 @@ import (
 
 // OccurrenceFacts describes one retained selection, without duplicating source identity.
 type OccurrenceFacts struct {
+	fittingTarget        *packet.Size
+	fitting              fittingPlan
+	fitFindings          []diag.Diagnostic
 	DestinationLocations map[string][]diag.PDFLocation
 	packet.SourceFacts
-	DestNames                 []string
-	HasCoordinateDestinations bool
-	PDF20AppearanceIssue      diag.AnnotationIssue
-	AnnotationFittingIssue    diag.AnnotationIssue
-	OutlineDepth              int
-	StructureCoverage         string
-	HasUncoveredContent       bool
-	UncoveredLocation         *diag.PDFLocation
-	UnboundMCIDLocation       *diag.PDFLocation
+	DestNames              []string
+	CoordinateDestinations []coordinateDestination
+	PDF20AppearanceIssue   diag.AnnotationIssue
+	AnnotationFittingIssue diag.AnnotationIssue
+	OutlineDepth           int
+	StructureCoverage      string
+	HasUncoveredContent    bool
+	UncoveredLocation      *diag.PDFLocation
+	UnboundMCIDLocation    *diag.PDFLocation
 }
 
 // SourceFacts retains immutable whole-file identity and policy facts.
 type SourceFacts struct {
 	FieldCollectionLocation *diag.PDFLocation
 	OccurrenceFacts
-	PageSizes                              map[int]packet.Size
 	SubsetPrefixes                         []string
 	SHA256                                 [32]byte
 	Bytes                                  int64
@@ -399,8 +401,12 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 	return objectLocations(c, s, true, func(d types.Dict, _ diag.PDFLocation) error { return visit(d) })
 }
 
-func observe(c context.Context, s *model.Context, origins sourceOrigins) (SourceFacts, []diag.Diagnostic, error) {
+func observe(c context.Context, s *model.Context, origins sourceOrigins, target *packet.Size, geometries []pageGeometry) (SourceFacts, []diag.Diagnostic, error) {
 	facts := SourceFacts{OccurrenceFacts: OccurrenceFacts{SourceFacts: packet.SourceFacts{Pages: s.PageCount}}, Version: s.XRefTable.Version().String()}
+	if target != nil {
+		value := *target
+		facts.fittingTarget = &value
+	}
 	prefixes, err := importedSubsetPrefixes(c, s)
 	facts.SubsetPrefixes = prefixes
 	if err != nil {
@@ -488,10 +494,11 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins) (Source
 	if err != nil {
 		return facts, ds, err
 	}
-	geometries, err := pageGeometries(c, s)
+	facts.fitting, err = planFitting(geometries, target, 1)
 	if err != nil {
 		return facts, ds, err
 	}
+	facts.PageSizes = fittingRuns(facts.fitting)
 	facts.FirstSize = geometries[0].size
 	facts.LastSize = geometries[len(geometries)-1].size
 
@@ -524,7 +531,7 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins) (Source
 			}
 		}
 	}
-	facts.HasCoordinateDestinations, err = coordinateDestinations(c, s, destinations)
+	facts.CoordinateDestinations, err = fittingDestinations(c, s, origins)
 	if err != nil {
 		return facts, ds, err
 	}
@@ -532,7 +539,7 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins) (Source
 	if err != nil {
 		return facts, ds, err
 	}
-	facts.AnnotationFittingIssue, err = annotationFittingIssue(c, s, geometries)
+	facts.AnnotationFittingIssue, err = annotationFittingIssue(c, s, geometries, facts.fitting)
 	if err != nil {
 		return facts, ds, err
 	}

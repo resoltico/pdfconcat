@@ -32,7 +32,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 8
+          "const": 9
         },
         "command": {
           "enum": [
@@ -318,7 +318,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 8
+          "const": 9
         },
         "command": {
           "const": "version"
@@ -447,7 +447,7 @@
     },
     "size": {
       "type": "object",
-      "description": "Width and height in points (1/72 inch). A generated part's size is its authored canvas before fitting; fit_to is the final sheet size.",
+      "description": "A generated part's authored canvas in points before optional selective fitting.",
       "additionalProperties": false,
       "required": [
         "width",
@@ -553,7 +553,8 @@
         "output_pages",
         "text",
         "input_pages",
-        "spans"
+        "spans",
+        "page_sizes"
       ],
       "properties": {
         "item": {
@@ -694,6 +695,20 @@
         },
         "before_item": {
           "type": "string"
+        },
+        "page_sizes": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/page_size_run"
+              }
+            }
+          ]
         }
       },
       "allOf": [
@@ -714,6 +729,24 @@
           "else": {
             "properties": {
               "spans": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "const": "source"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "page_sizes": {
                 "type": "null"
               }
             }
@@ -912,6 +945,52 @@
           "minLength": 1
         }
       }
+    },
+    "physical_size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "description": "Finite positive displayed physical dimensions in points (1/72 inch), without generated canvas limits."
+    },
+    "page_size_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "source_size",
+        "output_size"
+      ],
+      "properties": {
+        "source": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "source_size": {
+          "$ref": "#/$defs/physical_size"
+        },
+        "output_size": {
+          "$ref": "#/$defs/physical_size"
+        }
+      },
+      "description": "Adjacent original selected source pages with exactly equal source and resolved expected output dimensions. Output size does not assert publication."
     }
   }
 }

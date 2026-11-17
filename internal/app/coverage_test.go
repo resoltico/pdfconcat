@@ -23,7 +23,7 @@ func TestNeutralSourceCoverageComposesWithMeaningfulContent(t *testing.T) {
 	}
 	// One source contains a blank, artifact-only artwork and actual uncovered
 	// content. Selecting either neutral page must not inherit page 3's gap.
-	source := []byte(`{"version":6,"page_defaults":{"size":"A4"},"items":[{"page":{}},{"page":{"background":"#abc"}},{"source":"plain.pdf"}]}`)
+	source := []byte(`{"version":7,"page_defaults":{"size":"A4"},"items":[{"page":{}},{"page":{"background":"#abc"}},{"source":"plain.pdf"}]}`)
 	result := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, Input: app.PlanBytes{Data: source}, WorkingDir: dir, Output: "mixed-source.pdf"})
 	if result.Status != "ok" {
 		t.Fatal(result.Diagnostics)
@@ -44,7 +44,7 @@ func TestNeutralSourceCoverageComposesWithMeaningfulContent(t *testing.T) {
 						if reverse {
 							items = []any{companion, neutral}
 						}
-						plan := map[string]any{"version": 6, "items": items}
+						plan := map[string]any{"version": 7, "items": items}
 						if fitted {
 							plan["fit_to"] = "A4"
 						}

@@ -11,12 +11,12 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/app` | Acquisition, original input reservation, inspection, composition, digest rechecks and publication ordering |
 | `internal/core` | Typed declarations, semantic validation, owned traversal, layout, vocabulary and domain facts |
 | `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence and complete execution facts |
-| `internal/plan` | Strict, located plan v6 decoding with an explicit native path resolver |
+| `internal/plan` | Strict, located plan v7 decoding with an explicit native path resolver |
 | `internal/compose` | Measured generated pages, contents and numbering |
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
 | `internal/files` | Native path semantics, regular-file acquisition, role checks and staged-file lifecycle |
-| `internal/wire` | Result v8 DTOs, domain projection and schema |
+| `internal/wire` | Result v9 DTOs, domain projection and schema |
 | `internal/legal` | Embedded license notices |
 | `internal/oracle`, `internal/pdffixture` | Test-only independent observations and synthetic PDFs |
 
@@ -194,3 +194,20 @@ sentences. The PDF adapter recognizes the local reader's typed missing-appearanc
 category; backend error wording cannot select acceptance. Cancellation and other
 technical failures use explicit explanation constructors, with opaque causes
 retained separately as Detail. There is no free-form phase/default renderer.
+
+The core owns the per-page fit decision and expected displayed size. It compares
+ordered dimensions directly against one target with absolute .01 pt tolerance.
+The PDF adapter binds those decisions to original selected identities and exact
+native geometry, checks destination TARGET dispositions and mutable annotation/
+widget ownership before mutation, and rechecks actual re-admitted pages. Declared
+generated repetitions share a single fitting record with an explicit count.
+Source metrics come unconditionally from the existing batched geometry observation;
+there is no numbering-dependent selector or independently aligned metric array.
+
+Kept pages bypass every fitting mutation. Transformed frames are zero-origin, and
+one affine handles content, annotations and structure. Native tuples and displayed
+sizes are compared exactly before serialization and after strict reopening. The
+local numeric serializer preserves decoded finite float64 values with non-exponent
+round-trip decimals and canonical zero; the parser preserves finite integer-shaped
+reals beyond the native integer range rather than replacing them with zero.
+Wire `page_sizes` runs are owner-bound expectations and do not assert publication.

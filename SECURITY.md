@@ -123,3 +123,12 @@ checks and revision tombstones. It does not enable relaxed input parsing or
 runtime repair programs. Exceptional hybrid/xref-stream chains remain refused.
 Original input reservations include every consumed external font and protect
 both publication destinations; undecoded plans keep create-new-only reports.
+
+Selective fitting never bypasses whole-source admission or PDF2 output checks.
+Only transformed target pages impose numeric-destination guards. Shared annotation
+dictionaries and unresolved widget ownership refuse before any fitting mutation.
+Kept frames retain source clipping and coordinate systems; transformed optional
+printing boxes are explicitly omitted with located warnings. This is not a
+production-print or redaction guarantee. Native/displayed output geometry is
+verified exactly, using finite round-trip scalar serialization rather than a
+physical-size epsilon. See [fitting](docs/PDF-POLICY.md#fitting).

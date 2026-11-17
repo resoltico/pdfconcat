@@ -66,7 +66,7 @@ func TestEncodingAdmissionHasWholeSourceProvenance(t *testing.T) {
 				}
 				return m
 			}
-			plan, err := json.Marshal(map[string]any{"version": 6, "items": []any{map[string]any{"source": good}, source(), source()}})
+			plan, err := json.Marshal(map[string]any{"version": 7, "items": []any{map[string]any{"source": good}, source(), source()}})
 			if err != nil {
 				t.Fatal(err)
 			}

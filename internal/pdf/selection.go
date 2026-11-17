@@ -16,10 +16,9 @@ import (
 
 // SelectionRequest identifies one occurrence in a grouped source inspection.
 type SelectionRequest struct {
-	Item           string
-	Pages          []packet.PageRange
-	MeasureNumbers bool
-	FitTo          *packet.Size
+	Item  string
+	Pages []packet.PageRange
+	FitTo *packet.Size
 }
 
 // Inspect reads and validates a whole source once. Each ephemeral view
@@ -46,7 +45,11 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		}
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
 	}
-	facts, findings, err = observe(c, s, origins)
+	sourceGeometry, e := pageGeometries(c, s)
+	if e != nil {
+		return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
+	}
+	facts, findings, err = observe(c, s, origins, nil, sourceGeometry)
 	ds = append(ds, findings...)
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
@@ -78,7 +81,6 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
 		}
 	}
-	var sourceGeometry []pageGeometry
 	for index, request := range requests {
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
 		if err == nil && !wholeSelection(ranges, s.PageCount) && (facts.HasFields || facts.HasWidgets) {
@@ -119,7 +121,14 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 			continue
 		}
-		selected, _, err := observe(c, view, origins)
+		geometries, e := pageGeometries(c, view)
+		if e != nil {
+			d := diagnostic(e, diag.SourceInvalid)
+			d.Items = []string{request.Item}
+			ds = append(ds, d)
+			continue
+		}
+		selected, _, err := observe(c, view, origins, request.FitTo, geometries)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
@@ -141,29 +150,34 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 			continue
 		}
-		if request.MeasureNumbers {
-			if sourceGeometry == nil {
-				sourceGeometry, err = pageGeometries(c, s)
-				if err != nil {
-					return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
-				}
-			}
-			if facts.PageSizes == nil {
-				facts.PageSizes = map[int]packet.Size{}
-			}
-			for _, span := range ranges {
-				for number := span.First; number <= span.Last; number++ {
-					facts.PageSizes[number] = sourceGeometry[number-1].size
-				}
-			}
-		}
 
-		if policy != packet.StructureDiscard && !facts.HasWidgets {
+		for i := range selected.fitting.Pages {
+			selected.fitting.Pages[i].Original = originalSelectionPage(ranges, i+1)
+		}
+		selected.PageSizes = fittingRuns(selected.fitting)
+		// Publish complete metric knowledge before any later compatibility/rehearsal refusal.
+		selectedFacts := selected.OccurrenceFacts
+		occurrences[index] = &selectedFacts
+		selectedFacts.fitFindings, e = fittingFindings(c, view, geometries, selectedFacts.fitting, origins)
+		if e != nil {
+			d := diagnostic(e, diag.SourceInvalid)
+			d.Items = []string{request.Item}
+			ds = append(ds, d)
+			continue
+		}
+		for _, finding := range selectedFacts.fitFindings {
+			finding.Items = []string{request.Item}
+			ds = append(ds, finding)
+		}
+		if diag.Outcome(selectedFacts.fitFindings) != "ok" {
+			continue
+		}
+		if policy != packet.StructureDiscard {
 			root, e := structureRoot(view)
 			if e == nil && root != nil {
 				e = pruneStructure(c, view)
 				if e == nil && request.FitTo != nil {
-					e = fitContext(c, view, request.FitTo)
+					e = fitContext(c, view, selectedFacts.fitting, origins)
 				}
 				if e == nil && request.FitTo != nil {
 					root, e = structureRoot(view)
@@ -187,8 +201,6 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 				continue
 			}
 		}
-		selectedFacts := selected.OccurrenceFacts
-		occurrences[index] = &selectedFacts
 
 	}
 	return facts, occurrences, ds

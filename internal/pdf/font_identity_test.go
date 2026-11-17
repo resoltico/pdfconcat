@@ -151,7 +151,7 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 		var previous map[string]int
 		for repeat := range 2 {
 			var out bytes.Buffer
-			if _, err = pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), generated, nil, prepared), &out); err != nil {
+			if _, err = pdf.Assemble(t.Context(), testAssembly(t, layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), generated, nil, prepared), &out); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, fmt.Sprintf("packet%d.pdf", repeat))
@@ -285,7 +285,7 @@ func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset
 		t.Fatal(ds)
 	}
 	var out bytes.Buffer
-	if _, err = pdf.Assemble(t.Context(), testAssembly(layout, nil, nil, pages, nil, prepared), &out); err != nil {
+	if _, err = pdf.Assemble(t.Context(), testAssembly(t, layout, nil, nil, pages, nil, prepared), &out); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "packet.pdf")
@@ -429,7 +429,7 @@ func TestHashEscapeFontNamesAreRefusedBeforePublication(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, value := range []string{"Ā Ελληνικά", ""} {
-			recipe := map[string]any{"version": 6, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"value": value, "font": map[string]any{"file": "font.ttf"}}}}}}
+			recipe := map[string]any{"version": 7, "output": "packet.pdf", "items": []any{map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"value": value, "font": map[string]any{"file": "font.ttf"}}}}}}
 			data, err := json.Marshal(recipe)
 			if err != nil {
 				t.Fatal(err)

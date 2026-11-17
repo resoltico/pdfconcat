@@ -45,3 +45,22 @@ The patch also returns a typed `MissingAnnotationAppearanceError` from the
 existing PDF 2.0 appearance checker. It changes no exception or graph rule;
 PDFConcat uses the category and subtype facts rather than matching the English
 error sentence. Other dictionary, shape and dereference failures remain errors.
+
+The numeric extension emits finite model reals as non-exponent float64 round-trip
+decimals, with canonical zero, and refuses nonfinite scalars. It also corrects
+the parser branch that previously replaced integer-shaped tokens beyond the
+native integer range with zero: finite values now remain numeric reals and
+out-of-range values refuse. This is required because the round-trip decimal
+formatter emits integer-shaped tokens for large finite real values. It does not
+recover arbitrary decimal precision already lost during parsing. Ordinary native
+integers and indirect-reference rules retain their existing behavior.
+
+Additional dependency-owned qualification (also explicitly discovered by CI):
+
+```
+go test ./pkg/pdfcpu/types ./pkg/pdfcpu/model -run 'TestFloatPDFRoundTrip|TestLargeFiniteIntegerShapedRealRoundTrip' -count=1
+```
+
+The root serializer independently refuses nonfinite scalars before emitting PDF
+bytes. Root tests reopen finite scalar witnesses through the actual parser and
+verify numeric equality, including subnormals and the largest finite values.

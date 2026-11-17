@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 package model
 
 import (
@@ -839,10 +842,18 @@ func parseNumericOrIndRef(line *string) (types.Object, error) {
 	i, err := strconv.Atoi(s)
 	if err != nil {
 		if isRangeError(err) {
-			// #407
-			i = 0
+			// Decimal round-trip real tokens may have integer spelling beyond
+			// the native integer range. Preserve finite numeric values rather
+			// than replacing them with zero. They cannot be indirect refs.
 			*line = l1
-			return types.Integer(i), nil
+			value, e := parseFloat(s)
+			if e != nil {
+				return nil, e
+			}
+			if value == nil {
+				return nil, errors.New("pdfcpu: numeric value exceeds the finite model range")
+			}
+			return value, nil
 		}
 		*line = l1
 		return parseFloat(s)

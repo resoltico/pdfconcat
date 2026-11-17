@@ -2,19 +2,23 @@
 
 ## [Unreleased]
 
-- Results and reports require format 8: rename facts are null when unestablished or inapplicable, and an observed empty mapping is an empty array.
+- Plans require version 7: fitting keeps native geometry within .01 pt per ordered displayed side. Review version 5/6 plans before changing their version; no migration is provided.
+- Results and reports require format 9, with selected source page_sizes runs containing original ranges, source dimensions and expected output dimensions, retained through later failures.
+- Rename facts remain null when unestablished or inapplicable; an observed empty mapping is an empty array.
+- Mixed fitting constrains numeric navigation by target-page transformation and allows proved kept widgets; multiply bound annotation dictionaries refuse if any binding transforms.
+- Transformed pages use zero-origin target frames and omit optional printing boxes with located warnings. Kept pages retain native boxes, rotation, UserUnit and clipping.
+- Numbering, contents exclusions and odd-start padding use actual expected page dimensions; native and displayed geometry are verified before writing and after strict reopening.
+- Finite PDF model numbers round-trip without twelve-digit collapse or integer-range zero substitution; nonfinite output scalars and unrepresentable fitting affines refuse.
+- Authored language selects generated body, divider and contents glyphs, with explicit neutral fallback for unmatched well-formed tags.
 - Typed admission rejects authored/divider identity collisions; every production plan constructor validates and owns its declarations, including later-mutated snapshots.
 - Part text and actual rename facts are bound to their resolved owners; inconsistent or missing required facts fail processing instead of silently disappearing from reports.
 - Product explanations and named parameters are core-owned; factual finding identities preserve cause, site and phase independently of rendered wording.
-
-- Plans require version 6: authored language now selects generated body, divider and contents glyphs. Review appearance before updating version 5 plans; no migration is provided.
 - Unreferenced zero-offset classic xref entries can be admitted with located warnings and revision tombstones; referenced entries and exceptional hybrid chains remain refused.
 - Both output and report destinations protect contents-only external fonts, including existing-file aliases, through a shared effective-input inventory.
 - Full typed declarations share semantic admission with JSON plans; prepared traversal and font views own their mutable data, and inspection takes an explicit worker budget.
 - Domain facts, I/O orchestration, PDF processing and wire projection have separate owners; the CLI alone maps complete outcomes to process exits.
 - Generated contract checks reject stale schema/reference values; release checks require every supported target and compare deliverables from two isolated clean builds.
 - Source delivery retains the modified pdfcpu reader, upstream licenses and exact patch provenance, and verifies that offline vendoring uses the patched source.
-
 - Cancellation and deadlines consistently report interruption across stages; annotation refusals use typed facts and core wording, and missing-appearance acceptance no longer depends on backend text.
 
 ## [0.12.0] - 2026-11-16

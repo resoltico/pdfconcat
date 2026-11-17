@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package plan decodes strict, located version 6 assembly plans.
+// Package plan decodes strict, located version 7 assembly plans.
 package plan
 
 //go:generate go run ../contractgen -root ../..
@@ -27,7 +27,7 @@ import (
 // MaxBytes bounds the original UTF-8 plan, including an optional BOM.
 const MaxBytes = 64 << 20
 
-// Schema is the editor-facing plan v6 JSON Schema.
+// Schema is the editor-facing plan v7 JSON Schema.
 //
 //go:embed plan.schema.json
 var Schema []byte
@@ -229,11 +229,11 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 				case token.Kind() == 'n':
 					err = &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: "/version", offset: start}
 				case token.Kind() == '0':
-					if token.String() != "6" {
-						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 6.", pointer: "/version", offset: start}
+					if token.String() != "7" {
+						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 7.", pointer: "/version", offset: start}
 					}
 				default:
-					err = p.fail(diag.PlanType, "version must be the JSON integer 6.")
+					err = p.fail(diag.PlanType, "version must be the JSON integer 7.")
 				}
 			}
 		case "metadata":
@@ -303,7 +303,7 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 		return result, err
 	}
 	if !seenVersion {
-		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 6.")
+		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 7.")
 	}
 	if !seenItems {
 		return result, p.fail(diag.PlanType, "Required member items is missing.")

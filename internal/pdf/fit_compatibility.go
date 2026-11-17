@@ -41,8 +41,11 @@ func normalAppearance(s *model.Context, d types.Dict) (bool, error) {
 // Missing-AP path annotations inside the source frame remain supported. A
 // fallback renderer cannot be clipped through page-content graphics state, and
 // FreeText DA/rich-text layout cannot be preserved by coordinate changes alone.
-func annotationFittingIssue(c context.Context, s *model.Context, geometries []pageGeometry) (diag.AnnotationIssue, error) {
+func annotationFittingIssue(c context.Context, s *model.Context, geometries []pageGeometry, plans fittingPlan) (diag.AnnotationIssue, error) {
 	for index, geometry := range geometries {
+		if !plans.page(index).Decision.Transform {
+			continue
+		}
 		if err := c.Err(); err != nil {
 			return diag.AnnotationIssue{}, err
 		}
@@ -94,7 +97,7 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 				return diag.AnnotationIssue{}, err
 			}
 			issue := func(kind diag.AnnotationIssueKind) diag.AnnotationIssue {
-				site := diag.PDFLocation{Page: page, Path: "Annots"}
+				site := diag.PDFLocation{Page: plans.page(index).Original, Path: "Annots"}
 				if ref, ok := obj.(types.IndirectRef); ok {
 					site.Object = ref.ObjectNumber.Value()
 				}

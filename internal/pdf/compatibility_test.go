@@ -61,7 +61,7 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 		t.Run(position, func(t *testing.T) {
 			d := localLink(position, true)
 			f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
-			if status := diag.Outcome(ds); status != "ok" || !f.HasCoordinateDestinations {
+			if status := diag.Outcome(ds); status != "ok" || len(f.CoordinateDestinations) == 0 {
 				t.Fatalf("facts %+v: %+v", f, ds)
 			}
 			_, _, ds = assembleDocs(t, []*pdffixture.Doc{d}, &packet.Size{Width: 300, Height: 400})
@@ -155,7 +155,7 @@ func TestRetainedDestinationRoles(t *testing.T) {
 		}
 		t.Run(tc.name, func(t *testing.T) {
 			f, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), "", nil)
-			if status := diag.Outcome(ds); status != "ok" || f.HasCoordinateDestinations != tc.want {
+			if status := diag.Outcome(ds); status != "ok" || (len(f.CoordinateDestinations) > 0) != tc.want {
 				t.Fatalf("want coordinates=%v: facts %+v ds %+v", tc.want, f, ds)
 			}
 			docs := []*pdffixture.Doc{tc.doc}
@@ -378,7 +378,7 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 				// A deep local target must still be observed, not silently truncated.
 				d.Objs[len(d.Objs)-1] = []byte("<< /S /GoTo /D [3 0 R /FitH 20] >>")
 				facts, _, ds = pdf.Inspect(t.Context(), d.Bytes(), "", nil)
-				if status := diag.Outcome(ds); status != "ok" || !facts.HasCoordinateDestinations {
+				if status := diag.Outcome(ds); status != "ok" || len(facts.CoordinateDestinations) == 0 {
 					t.Fatalf("deep target was not inspected: %+v %+v", facts, ds)
 				}
 			})

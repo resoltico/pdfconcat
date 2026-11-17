@@ -74,6 +74,7 @@ type Part struct {
 	Size          *packet.Size
 	Text          *Text
 	FieldsRenamed []packet.FieldRename
+	PageSizes     *[]packet.PageSizeRun
 }
 
 // Result is the complete run outcome before stdout caps.

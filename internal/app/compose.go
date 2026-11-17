@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/resoltico/pdfconcat/internal/compose"
 	packet "github.com/resoltico/pdfconcat/internal/core"
@@ -61,16 +62,27 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 					break
 				}
 				size := part.Size
-				if j.FitTo() != nil {
-					size = *j.FitTo()
-				} else if part.Kind == packet.PartSource {
+				if part.Kind == packet.PartSource {
 					number := part.FirstPage + int64(offset)
 					for mappingIndex+1 < len(part.Mapping) && number >= part.Mapping[mappingIndex+1].OutputFirst {
 						mappingIndex++
 					}
 					span := part.Mapping[mappingIndex]
 					original := span.SourceFirst + int(number-span.OutputFirst)
-					size = inspected.byLeaf[part.Index].occurrence.File.PageSizes[original]
+					var known bool
+					size, known = packet.ExpectedPageSize(inspected.byLeaf[part.Index].occurrence.Facts.PageSizes, original)
+					if !known {
+						err = errors.New("expected source page geometry is unavailable")
+						break
+					}
+				}
+				if part.Kind != packet.PartSource {
+					fit, e := packet.DecideFit(size, j.FitTo())
+					if e != nil {
+						err = e
+						break
+					}
+					size = fit.Output
 				}
 				if err = numberLayout.Check(size, numberForPage(layout.Numbering, part.FirstPage+int64(offset))); err != nil {
 					break
@@ -166,6 +178,13 @@ func bindComposition(parts []pdf.Part, prepared []compose.PreparedPart, complete
 		fact := prepared[index]
 		if fact.Owner != part.Identity() {
 			return failure()
+		}
+		if complete && part.Kind != packet.PartSource {
+			for _, page := range fact.Pages {
+				if page.Width != part.Size.Width || page.Height != part.Size.Height {
+					return failure()
+				}
+			}
 		}
 		if complete && part.Page != nil && part.Page.Text.Value.Value != "" && fact.Text == nil {
 			return failure()

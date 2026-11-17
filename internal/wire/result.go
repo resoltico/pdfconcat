@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v8 and its complete factual outcomes.
+// Package result defines result v9 and its complete factual outcomes.
 package result
 
 import (
@@ -13,13 +13,13 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/outcome"
 )
 
-// Schema covers result v8, full reports and version objects.
+// Schema covers result v9, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 8
+const WireVersion = 9
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -66,6 +66,13 @@ type Section struct {
 	OutputPages *[2]int64 `json:"output_pages"`
 }
 
+// PageSizeRun records original selected dimensions and resolved expected output.
+type PageSizeRun struct {
+	Source     [2]int      `json:"source"`
+	SourceSize packet.Size `json:"source_size"`
+	OutputSize packet.Size `json:"output_size"`
+}
+
 // Part is one compact declared or resolved leaf in the complete report.
 type Part struct {
 	Item          string          `json:"item"`
@@ -83,6 +90,7 @@ type Part struct {
 	OutputPages   *[2]int64       `json:"output_pages"`
 	Size          *packet.Size    `json:"size,omitempty"`
 	Text          *Text           `json:"text"`
+	PageSizes     *[]PageSizeRun  `json:"page_sizes"`
 	FieldsRenamed RenameFacts     `json:"fields_renamed"`
 }
 
@@ -140,6 +148,13 @@ func Project(input outcome.Result) Result {
 	}
 	for _, part := range r.Parts {
 		p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, FieldsRenamed: RenameFacts(part.FieldsRenamed)}
+		if part.PageSizes != nil {
+			runs := make([]PageSizeRun, len(*part.PageSizes))
+			for i, r := range *part.PageSizes {
+				runs[i] = PageSizeRun{Source: r.Source, SourceSize: r.SourceSize, OutputSize: r.OutputSize}
+			}
+			p.PageSizes = &runs
+		}
 		if part.Text != nil {
 			p.Text = &Text{Font: part.Text.Font, FontSize: part.Text.FontSize, Bounds: part.Text.Bounds, InkBounds: part.Text.InkBounds, Overflow: part.Text.Overflow}
 		}
@@ -158,7 +173,7 @@ func Project(input outcome.Result) Result {
 	return result
 }
 
-// RenameFacts distinguishes unknown/null from an observed empty array in result v8.
+// RenameFacts distinguishes unknown/null from an observed empty array in result v9.
 type RenameFacts []packet.FieldRename
 
 // MarshalJSON preserves the factual null/empty distinction across JSON implementations.

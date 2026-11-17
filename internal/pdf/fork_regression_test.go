@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
@@ -34,7 +33,7 @@ func assembleSourceBytes(t *testing.T, data []byte) string {
 	}
 	layout, _ := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: source, Ref: source}}}), map[string]packet.SourceFacts{source: facts.SourceFacts})
 	var b bytes.Buffer
-	if _, err := pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil), &b); err != nil {
+	if _, err := pdf.Assemble(t.Context(), testAssembly(t, layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil), &b); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(out, b.Bytes(), 0600); err != nil {
@@ -120,7 +119,7 @@ func TestFreeObjectRecyclingPreservesDestinations(t *testing.T) {
 	}
 }
 
-func TestUpstreamNumericSerializationLimitIsExplicit(t *testing.T) {
+func TestModelNumericSerializationRoundTripsExactly(t *testing.T) {
 	tools := oracle.RequireTools(t)
 	d := pdffixture.WithBoxes("precision", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 612.123456789012345 792]", UserUnit: "1.123456789012345"})
 	path := assembleSourceBytes(t, d.Bytes())
@@ -128,9 +127,22 @@ func TestUpstreamNumericSerializationLimitIsExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "1.123456789012") {
-		t.Fatalf("expected observed upstream 12-fraction-digit serialization: %s", raw)
+	if len(raw) == 0 {
+		t.Fatal("qpdf returned no facts")
 	}
+	pages := qpdfPages(t, path)
+	native := nativePageFacts(pages[0])
+	if native["/UserUnit"] != float64(1.123456789012345) {
+		t.Fatalf("UserUnit lost precision: %+v", native)
+	}
+	box, ok := native["/MediaBox"].([]any)
+	if !ok || len(box) != 4 {
+		t.Fatal("missing numeric MediaBox", native)
+	}
+	if box[2] != float64(612.123456789012345) {
+		t.Fatalf("MediaBox lost precision: %+v", box)
+	}
+
 	document, err := oracle.Load(tools, path)
 	if err != nil {
 		t.Fatal(err)

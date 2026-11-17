@@ -28,7 +28,7 @@ func TestIntegratedDocumentFeatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := map[string]any{"version": 6, "metadata": map[string]any{"title": "Rīga <&> report", "author": "One; authored string", "subject": "Έκθεση", "language": "lv"}, "timestamp": 0, "fit_to": "A4", "page_defaults": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": font}}}, "page_numbers": map[string]any{"mode": "consecutive", "start": 9, "position": "top-right", "kinds": []string{"source", "divider"}}, "items": []any{
+	plan := map[string]any{"version": 7, "metadata": map[string]any{"title": "Rīga <&> report", "author": "One; authored string", "subject": "Έκθεση", "language": "lv"}, "timestamp": 0, "fit_to": "A4", "page_defaults": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": font}}}, "page_numbers": map[string]any{"mode": "consecutive", "start": 9, "position": "top-right", "kinds": []string{"source", "divider"}}, "items": []any{
 		map[string]any{"page": map[string]any{"text": map[string]any{"value": "Rīgas office report"}}, "numbering": false}, map[string]any{"contents": map[string]any{}}, map[string]any{"title": "Annex", "divider": map[string]any{}, "items": []any{map[string]any{"source": "a.pdf"}, map[string]any{"source": "b.pdf", "numbering": false}, map[string]any{"source": "a.pdf"}}},
 	}}
 	data, err := json.Marshal(plan)
@@ -100,7 +100,7 @@ func TestMetadataTimestampsAcrossPDFVersions(t *testing.T) {
 			if err := pdffixture.Versioned("source", version, "").WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 				t.Fatal(err)
 			}
-			plan := map[string]any{"version": 6, "metadata": map[string]any{"title": "<Rīga & report>", "author": "One, authored; string", "language": "x-private"}, "items": []any{map[string]any{"source": "source.pdf"}}}
+			plan := map[string]any{"version": 7, "metadata": map[string]any{"title": "<Rīga & report>", "author": "One, authored; string", "language": "x-private"}, "items": []any{map[string]any{"source": "source.pdf"}}}
 			if epoch != nil {
 				plan["timestamp"] = epoch
 			}

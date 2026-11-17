@@ -129,7 +129,7 @@ func sourceUses(p packet.Plan) []sourceUse {
 			uses = append(uses, sourceUse{path: item.Source, structure: p.Structure()})
 		}
 		uses[slot].leaves = append(uses[slot].leaves, leafIndex)
-		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{FitTo: p.FitTo(), Item: item.Ref, Pages: item.Selection, MeasureNumbers: p.PageNumbers() != nil && p.FitTo() == nil && p.PageNumbers().Eligible(item.Kind, item.NumberingEnabled)})
+		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{FitTo: p.FitTo(), Item: item.Ref, Pages: item.Selection})
 	}
 	return uses
 }

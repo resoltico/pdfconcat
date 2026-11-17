@@ -94,7 +94,7 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 }
 
 func TestRangesUseInt64(t *testing.T) {
-	layout, ds := resolvePacket(newPlan("", nil, nil, PageStyle{}, []Item{&SourceItem{Path: "a", Ref: "a0"}, &SourceItem{Path: "a", Ref: "a1"}}), map[string]SourceFacts{"a0": {Pages: 2_000_000_000}, "a1": {Pages: 2_000_000_000}}, 0)
+	layout, ds := resolvePacket(newPlan("", nil, nil, PageStyle{}, []Item{&SourceItem{Path: "a", Ref: "a0"}, &SourceItem{Path: "a", Ref: "a1"}}), map[string]SourceFacts{"a0": {Pages: 2_000_000_000, FirstSize: Size{100, 200}, LastSize: Size{100, 200}}, "a1": {Pages: 2_000_000_000, FirstSize: Size{100, 200}, LastSize: Size{100, 200}}}, 0)
 	if len(ds) > 0 || layout.TotalPages != 4_000_000_000 || layout.Parts[1].FirstPage != 2_000_000_001 {
 		t.Fatalf("ranges %+v %+v", layout, ds)
 	}
@@ -260,8 +260,8 @@ func TestLayoutLimitsAndNoInventedPartialSequence(t *testing.T) {
 		facts := map[string]SourceFacts{"source": {Pages: 1, FirstSize: size, LastSize: size}}
 		_, isSource := j.Items()[1].(*SourceItem)
 		if len(j.Items()) == 2 && isSource {
-			facts["source"] = SourceFacts{Pages: int(MaxPageIndex)}
-			facts["source2"] = SourceFacts{Pages: 1}
+			facts["source"] = SourceFacts{Pages: int(MaxPageIndex), FirstSize: size, LastSize: size}
+			facts["source2"] = SourceFacts{Pages: 1, FirstSize: size, LastSize: size}
 		}
 		layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 1)
 		if len(ds) == 0 || ds[0].Code != diag.PlanLimit || len(layout.Parts) != 0 || layout.TotalPages != 0 || len(layout.Sections) != 0 {

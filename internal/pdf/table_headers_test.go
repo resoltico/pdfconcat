@@ -56,7 +56,7 @@ func TestTableHeaderSelectionsAndSerializedBindings(t *testing.T) {
 					}
 					_, slots, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "invalid", Pages: []packet.PageRange{{First: 3, Last: 3}}, FitTo: size}})
 					status := diag.Outcome(ds)
-					if status != "invalid" || slots[0] != nil {
+					if status != "invalid" || slots[0] == nil || len(slots[0].PageSizes) == 0 {
 						t.Fatalf("dangling selection accepted: %+v", ds)
 					}
 					if len(ds) != 1 || ds[0].Code != diag.SourceUnsupported || !strings.Contains(ds[0].Message, "Include the referenced header pages") {

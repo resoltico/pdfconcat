@@ -213,7 +213,7 @@ func assembleAdmission(t *testing.T, d *pdffixture.Doc, policy packet.StructureP
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	assembly := testAssembly(layout, files, views, fit)
+	assembly := testAssembly(t, layout, files, views, fit)
 	assembly.Structure = policy
 	if generated != nil {
 		fonts, err := typeset.PrepareFonts([]*typeset.Placed{generated})
@@ -398,14 +398,20 @@ func TestStructureAdmissionDiscardKeepsGeneralProtections(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Even a forged admission cache cannot waive checks of the actual bytes.
-			facts := SourceFacts{SHA256: sha256.Sum256(d.Bytes()), Version: "1.7"}
-			view := OccurrenceFacts{SourceFacts: packet.SourceFacts{Pages: 1, FirstSize: packet.Size{Width: 300, Height: 400}, LastSize: packet.Size{Width: 300, Height: 400}, Selection: []packet.PageRange{{First: 1, Last: 1}}}}
+			facts, _, cleanDS := Inspect(t.Context(), pdffixture.Plain("admitted cache").Bytes(), packet.StructureDiscard, nil)
+			if diag.Outcome(cleanDS) != "ok" {
+				t.Fatal(cleanDS)
+			}
+			// Forge only the content identity; retain an internally consistent prepared
+			// geometry owner so this control reaches actual-byte re-admission.
+			facts.SHA256 = sha256.Sum256(d.Bytes())
+			view := facts.OccurrenceFacts
 			plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "bad", Path: path}}})
 			layout, findings := resolvePacket(plan, map[string]packet.SourceFacts{"bad": view.SourceFacts})
 			if len(findings) > 0 {
 				t.Fatal(findings)
 			}
-			assembly := testAssembly(layout, map[string]SourceFacts{path: facts}, map[string]OccurrenceFacts{"bad": view}, nil)
+			assembly := testAssembly(t, layout, map[string]SourceFacts{path: facts}, map[string]OccurrenceFacts{"bad": view}, nil)
 			assembly.Structure = packet.StructureDiscard
 			var output bytes.Buffer
 			_, err := Assemble(t.Context(), assembly, &output)
@@ -460,8 +466,8 @@ func TestStructureAdmissionDiscardKeepsFormBoundaries(t *testing.T) {
 	if got := admissionError(t, ds); got.Code != diag.SourceSelectionFormUnsupported {
 		t.Fatalf("discard bypassed partial form protection: %+v", got)
 	}
-	f, views, ds := Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []SelectionRequest{{Item: "whole"}})
-	if status := diag.Outcome(ds); status != "ok" {
+	f, views, ds := Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []SelectionRequest{{Item: "whole", FitTo: &packet.Size{Width: 300, Height: 400}}})
+	if admissionError(t, ds).Code != diag.FitFormUnsupported {
 		t.Fatal(ds)
 	}
 	if !f.HasWidgets || !f.HasFields {

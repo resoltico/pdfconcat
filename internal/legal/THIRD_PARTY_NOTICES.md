@@ -9,7 +9,7 @@ versions linked into an executable.
 
 | Module | License | Purpose | License copy |
 | --- | --- | --- | --- |
-| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT; PDFConcat modifications AGPL-3.0-only | PDF reading, validation, merging, fitting and object types; locally modified v0.16.4 reader | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
+| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT; PDFConcat modifications AGPL-3.0-only | PDF reading, validation, merging, fitting and object types; locally modified v0.16.4 reader and numeric serialization | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
 | `github.com/go-text/typesetting` | Unlicense OR BSD-3-Clause (used under BSD-3-Clause); its `harfbuzz` package MIT | OpenType parsing and text shaping | [go-text](licenses/go-text-typesetting-LICENSE.txt), [HarfBuzz port](licenses/go-text-harfbuzz-MIT.txt) |
 | `github.com/clipperhouse/uax29/v2` | MIT | Unicode segmentation | [uax29](licenses/clipperhouse-uax29-MIT.txt) |
 | `github.com/hhrutter/tiff` | BSD-3-Clause | PDF image decoding | [tiff](licenses/hhrutter-tiff-BSD-3-Clause.txt) |
@@ -84,3 +84,10 @@ changed-source hashes and upstream module checksums are recorded in that
 directory's `PROVENANCE.md` and `PDFCONCAT-PATCH.json`. The source archive retains
 the canonical replacement and verifies the same patched files in vendored code.
 Build metadata and SBOMs must identify the local replacement as modified source.
+
+The local numeric changes retain finite model float64 values with round-trip
+non-exponent decimal output and canonical zero, reject nonfinite scalars, and
+preserve finite integer-shaped real tokens beyond the native integer range
+instead of replacing them with zero. Exact changed/upstream source hashes remain
+in `third_party/pdfcpu/PDFCONCAT-PATCH.json`; modified-source SBOMs identify that
+manifest. Upstream notices and PDFConcat modification licensing remain unchanged.

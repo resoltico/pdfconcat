@@ -20,6 +20,16 @@
       "upstream_sha256": "920db67316d4480ec627c6a71a97aa89c3d05a92a48019bbca48edd1cd3e487f"
     },
     {
+      "path": "pkg/pdfcpu/model/numeric_roundtrip_test.go",
+      "sha256": "ae4a193b165e6c9a7d5641327bca095cd85dae270a02405dea941c21b4da4dfc",
+      "upstream_sha256": null
+    },
+    {
+      "path": "pkg/pdfcpu/model/parse.go",
+      "sha256": "9237f8149026ef59b89675894812c468bb3e04a926a2b794cb2f50bbc36697ca",
+      "upstream_sha256": "b053ed6bce569fb71ce6ce43edddd53481f2e5709a2a92d578c2cd2dca24b130"
+    },
+    {
       "path": "pkg/pdfcpu/model/xreftable.go",
       "sha256": "ef6877de11f9548c0302b5aa5db5da0ac0ba02e17ac1a9f3c8751a6d00a0e455",
       "upstream_sha256": "05433cb1782d3b88efe95b5e66669b6a84026aae944470b1b27742623904413d"
@@ -33,6 +43,16 @@
       "path": "pkg/pdfcpu/read.go",
       "sha256": "4d2bd0c8644d4f7b6277a1a6433090d9349153e12adbbf9f93c20ffad90f172f",
       "upstream_sha256": "2677cca296d7d63f603bc141de938f99cabe466b73d5d279fd434f23e00ca64c"
+    },
+    {
+      "path": "pkg/pdfcpu/types/float_pdf_test.go",
+      "sha256": "7c329ae4637c241f9b74bf7e60330aca1815182854f4867217a6f7b83414290c",
+      "upstream_sha256": null
+    },
+    {
+      "path": "pkg/pdfcpu/types/types.go",
+      "sha256": "48041540cb810b58ef927214e911fccf43fec340b6a6fa32668b0c7a421daacd",
+      "upstream_sha256": "acbe1a8b3d28083f88bd0b07af2dd1ef7db0da64267e42e4410e73120b37fec3"
     },
     {
       "path": "pkg/pdfcpu/zero_offset.go",

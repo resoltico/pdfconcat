@@ -396,7 +396,7 @@
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 6). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
+  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 7). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
   "properties": {
     "$schema": {
       "description": "Ignored by PDFConcat; for editors.",
@@ -523,7 +523,7 @@
       "type": "integer"
     },
     "version": {
-      "const": 6,
+      "const": 7,
       "description": "Plan format version."
     }
   },

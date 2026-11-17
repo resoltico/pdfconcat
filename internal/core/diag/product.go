@@ -220,7 +220,7 @@ func ExpectedDOutputPagesFoundD(expectedPages int64, actualPages int64) Explanat
 
 // FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported renders the core-owned explanation.
 func FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported() Explanation {
-	return explain("FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported", "Fitting internal page destinations with numeric position coordinates is unsupported; use the original page sizes.")
+	return explain("FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported", "A retained local destination has numeric position coordinates on a page that transforms; use original page sizes or a destination without position coordinates.")
 }
 
 // FittingSourceFormWidgetsIsUnsupported renders the core-owned explanation.

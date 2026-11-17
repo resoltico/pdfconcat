@@ -1,4 +1,4 @@
-# Command line and result v8
+# Command line and result v9
 
 PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
 selections, sections, navigation and simple text inserts; see the
@@ -96,7 +96,7 @@ retained.
 
 ```json
 {
-  "format_version": 8,
+  "format_version": 9,
   "command": "build",
   "status": "ok",
   "output": {
@@ -209,7 +209,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 8,
+  "format_version": 9,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -241,7 +241,9 @@ contents item or padding span:
       },
       "text": null,
       "input_pages": null,
-      "spans": null
+      "spans": null,
+      "page_sizes": null,
+      "fields_renamed": null
     }
   ],
   "page_numbers": null,
@@ -272,8 +274,9 @@ Source parts include path, known byte hash/length and actual
 `fields_renamed` records. Readable refused sources retain byte facts; unestablished
 page counts/ranges remain null. Page items and dividers include `count` and, when
 known, authored `size` and measured `text`. Contents and padding parts include
-their generated size but no text-layout object. Under fitting, the final sheet
-is top-level `fit_to`; generated size/text describe the authored layout.
+their generated size but no text-layout object. Generated size/text describe the
+authored canvas. `fit_to` requests displayed dimensions; near-target pages retain
+their actual dimensions rather than snapping to the nominal target.
 
 Text `bounds` and `ink_bounds` are `[left, bottom, right, top]` in points
 (1/72 inch), measured from the lower-left corner of the authored page before
@@ -292,7 +295,29 @@ Sans or the resolved path of the selected font file.
 Ranges are inclusive and 1-based. Check ranges and rename warnings are predictions.
 Only build records actual field-name mappings. The backend may namespace a later
 nonempty form even without a collision; check does not copy its private prefix
-algorithm. Check's empty mapping arrays mean no actual merge was performed.
+algorithm. Check uses null for unestablished mapping facts; [] means an observed empty mapping.
+
+### Selected source page-size runs
+
+Every part has nullable `page_sizes`. Non-source parts use null and retain the
+existing authored meaning of `size`. Once complete validated selected geometry
+and fit decisions are known, source parts contain nonempty runs:
+
+`[{"source":[2,4],"source_size":{"width":595.28,"height":841.89},"output_size":{"width":595.28,"height":841.89}}]`
+
+`source` is an inclusive original source-page range, not a selected or output
+ordinal. `spans` separately owns physical output mapping. Runs combine only
+adjacent original pages whose source AND output sizes are exactly equal; gaps and
+near-but-distinct dimensions never merge. Dimensions are full-precision positive
+finite physical points (1/72 inch), without generated canvas limits.
+
+`source_size` is the pre-fit displayed frame. `output_size` is the resolved
+EXPECTED displayed size, not evidence of PDF publication. Without fitting, or on
+a kept page, it is the actual source size; on a transformed page it is the target.
+Complete known runs survive later refusals and failures even if counts/spans
+remain unresolved. Unknown/invalid selections or incomplete geometry use null,
+never an empty array or a falsely complete prefix. Standard output may omit parts;
+request the existing full report to inspect all runs.
 
 ```sh
 # Part covering output page 12 (for a successful/published packet).
@@ -317,7 +342,7 @@ limits, generate the plan in batches or with a program that preserves filenames.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 6, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+  jq -n '{version: 7, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -331,7 +356,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 6; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 7; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -365,8 +390,10 @@ Check rename warnings identify known source scopes/definitions as predictions;
 only build reports actual old/new mappings. Generated-layout warnings keep plan
 provenance, and backend notices expose only locations the backend supplies.
 
-Warnings merge their consuming `items` only when their code, file, message,
-detail and both locations are equivalent. Different viewer entries therefore
+Warnings merge their consuming `items` only when their code, stable typed
+cause/parameters, phase and file/site are equivalent. Message rendering and
+opaque backend detail do not define identity; findings without sufficient stable
+identity remain distinct. Different viewer entries therefore
 remain different findings, including when a source is repeated. Full reports
 retain all findings; stdout summaries still apply the documented caps.
 
@@ -438,10 +465,13 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_signed` | error | invalid | signature value, catalog permission structures (`/Perms`) or document timestamp |
 | `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
 | `source_optional_content` | error | invalid | `/OCProperties` present |
-| `fit_destination_unsupported` | error | invalid | fitting internal page destinations with numeric position coordinates is unsupported |
+| `fit_geometry_unsupported` | error | invalid | the required fitting affine cannot be represented with finite usable geometry |
+| `fit_annotation_ownership_unsupported` | error | invalid | a multiply bound annotation dictionary belongs to at least one transformed page |
+| `fit_print_box_omitted` | warning | — | fitting omits a page's optional printing box; output defaults apply |
+| `fit_destination_unsupported` | error | invalid | a retained local destination has numeric position coordinates on a transformed target page |
 | `source_output_incompatible` | error | invalid | retained annotations lack appearances required by the effective PDF 2.0 output |
 | `fit_annotation_unsupported` | error | invalid | fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame |
-| `fit_form_unsupported` | error | invalid | `fit_to` with a source that has form widgets |
+| `fit_form_unsupported` | error | invalid | a widget transforms or its page ownership is unresolved or conflicting while other pages transform |
 | `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
 | `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |
 | `output_invalid` | error | failed | the written output did not validate |
@@ -473,6 +503,5 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 <!-- END GENERATED DIAGNOSTICS -->
 
-Result format 8 represents unknown or inapplicable `fields_renamed` facts as
-`null`; an observed empty mapping is `[]`. All part facts are bound to their
-resolved owner. Format 7 is unsupported by the current result schema.
+Result format 9 binds all part facts to their resolved owner. Formats 7 and 8
+are unsupported by the current result schema.

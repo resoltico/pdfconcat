@@ -224,21 +224,44 @@ serialization failures can still produce `assembly_failed`;
 
 ### Fitting
 
-Fitting scales pages proportionally to the chosen paper size, enforces its
-orientation and applies no extra content rotation. Sources with form widgets
-are refused. For sources with numeric local navigation targets, use original
-page sizes instead.
+Fitting compares each page's ordered displayed physical size to the fixed target.
+Within .01 pt per side, the page keeps its actual geometry: no fit Form, box or
+coordinate rewrite, rotation baking, UserUnit deletion, or annotation/structure
+fitting. The interval endpoints use deterministic float64 rounding. Two-decimal
+A4 keeps; integer 595 × 842 pt A4 transforms. A kept CropBox may retain a larger
+MediaBox: the promise concerns displayed frames, not exact printer sheets.
+
+Other pages scale proportionally into zero-origin target MediaBox/CropBox with
+zero rotation and effective UserUnit one. A finite usable affine is required before
+Check succeeds. The same affine handles content, annotations and structure.
+Static widgets may remain on proved kept owners while unrelated pages transform.
+Transformed or unresolved/conflicting widget owners refuse. Partial-selection and
+all general form, security, source and PDF2 compatibility rules still apply.
+
+Before mutation, multiply bound annotation dictionaries refuse when any binding
+transforms, including duplicate bindings on one page. All-keep sharing remains
+subject to existing source policy. Ordinary shared appearance streams/resources
+remain supported. This guard does not clone partial annotation graphs.
+
+Transformed pages omit only their own present non-null BleedBox, TrimBox and
+ArtBox references, with separate original-page/entry warnings describing expected
+default printing bounds. Shared rectangle objects and kept entries are untouched;
+original validation precedes omission. Production-print/imposition fidelity remains
+unsupported. Reports expose actual source and expected output dimensions even on
+later refusal; `output_size` does not mean that publication occurred.
 
 The destination restrictions are:
 
 | Destination | Fitting behavior |
 | --- | --- |
-| Explicit numeric position coordinates: XYZ left/top, FitH/FitBH top, FitV/FitBV left, or FitR rectangle coordinates | Refuse `fit_destination_unsupported` |
+| Explicit numeric position coordinates: XYZ left/top, FitH/FitBH top, FitV/FitBV left, or FitR rectangle coordinates | Refuse `fit_destination_unsupported` only when the retained TARGET page transforms |
 | Whole-page Fit/FitB, null-only position coordinates, or zoom-only XYZ | Supported |
 | Remote destinations, removed catalog actions, or omitted out-of-tree named definitions | Do not trigger the coordinate guard |
 
-The coordinate guard covers retained named definitions, links, outlines and
-chained local GoTo actions. Print-box, bleed and imposition fidelity beyond these
+The coordinate guard covers retained named definitions, including unused ones,
+legacy names, direct/indirect targets, links, outlines and chained local GoTo
+actions. It follows target disposition, never the originating link page. Numeric
+tails targeting kept pages remain unchanged apart from page-reference rebinding. Print-box, bleed and imposition fidelity beyond these
 limits is not guaranteed.
 
 Fitting interprets annotation Rect and appearance BBox opposite corners in
@@ -264,7 +287,7 @@ the original upper-left corner; NoZoom remains a viewer magnification rule.
 FreeText callouts and insets transform, but its default/rich-text style strings
 remain authored. Subsequent appearance regeneration after editing is viewer-dependent.
 
-`fit_annotation_unsupported` refuses these specific selected-page cases:
+`fit_annotation_unsupported` refuses these specific TRANSFORMED selected-page cases:
 
 - FreeText without a usable normal appearance, whose text layout cannot be preserved by coordinate changes alone.
 - A Text icon without a usable normal appearance, whose supplied Rect need not bound its viewer-generated icon and therefore cannot preserve source clipping.
@@ -282,7 +305,7 @@ normal appearance. This exemption does not apply to Text icons or path annotatio
 Interactive regions include Links, activation actions (A), and annotation AA
 pointer/focus triggers E, X, D, U, Fo and Bl. NoView annotations have no on-screen
 hit area. ReadOnly also disables user interaction for non-widget annotations;
-Widgets use field flags and remain unsupported for fitting. ReadOnly does not
+Widgets use field flags; fitting requires proved kept widget ownership. ReadOnly does not
 waive appearance requirements or clipping. Page-lifecycle actions alone do not
 create an interactive area. Appearance clipping still applies to printed artwork. Supply reviewed normal appearances for the
 appearance-related cases, or use original page sizes; crossing interactive regions
@@ -291,8 +314,8 @@ and Circle annotations remain supported without appearances. Text icons, Carets 
 sizes without appearances.
 The guards apply equally in `check` and `build`, before output staging.
 
-Fitted pages have UserUnit 1 so target dimensions describe physical sheets.
-Nonzero output box origins are permitted; target side lengths are the contract.
+Transformed pages have UserUnit 1 and zero-origin target MediaBox/CropBox.
+Kept pages retain their native origins and actual displayed dimensions.
 Explicit generated canvases retain authored layout and overflow checks before
 fitting; inherited canvases use the fit target.
 
@@ -422,10 +445,10 @@ header is refused before staging: include its pages, select the whole source,
 or explicitly discard structure. Header associations are never silently removed
 or repaired by importing omitted content. Selection prunes omitted semantic content.
 
-Fitting moves page-owned MCIDs into the new Form namespace, preserves nested
+On transformed pages, fitting moves page-owned MCIDs into the new Form namespace, preserves nested
 Form namespaces and annotation OBJR ownership, and transforms scoped BBox
 attributes, including class attributes. A bounding box without a resolvable page
-scope is refused for fitting; use original sizes or a reviewed source with
+scope refuses when a transformation needs it; use original sizes or a reviewed source with
 explicit page association. Final indexes are rebuilt from retained semantic
 ownership. Generated meaningful text is tagged, and contents links receive
 Link/OBJR associations. Each title/label pair is emitted contiguously in physical
@@ -474,8 +497,13 @@ is not exhaustively validated: a malformed source using an undefined font can be
 accepted and render differently across readers or fitting. Supply a reviewed
 valid source; composition does not reconstruct missing font bindings.
 
-Finite PDF real numbers are serialized to at most twelve fractional digits;
-bitwise numeric round trips are not promised. PDFConcat inspects content
+Decoded finite float64 model values serialize as non-exponent round-trip decimals
+with canonical numeric zero; nonfinite scalars refuse serialization. Integer-shaped
+real tokens beyond the native integer range retain their finite numeric value;
+out-of-range tokens refuse rather than becoming zero. This does not recover
+arbitrary decimal precision already lost during parsing. Exact normalized native
+MediaBox/CropBox, rotation, UserUnit and displayed sizes are verified before writing
+and after strict reopening; the fitting match tolerance is not a verifier epsilon. PDFConcat inspects content
 operators and may rebuild page streams for fitting. Document-level metadata is
 replaced or removed as described under [catalog and metadata](#catalog-and-metadata);
 this does not cover all metadata attached to retained pages or other objects.

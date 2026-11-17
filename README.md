@@ -176,7 +176,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 6,
+  "version": 7,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -215,7 +215,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 6,
+  "version": 7,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -255,7 +255,7 @@ It records input SHA-256 hashes, page mappings and uncapped diagnostics. PDF and
 inspect the final result before retrying after a failure. See
 [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v6; results and reports use format v8. Print their schemas with:
+Plans use format v7; results and reports use format v9. Print their schemas with:
 
 ```sh
 pdfconcat schema plan
@@ -381,7 +381,7 @@ untagged output. This does not certify PDF/UA. See
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).
-- Forms and numeric internal destinations restrict fitting. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
+- Only transforming destination targets and widget owners impose fitting restrictions. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
 - Page-number overlays may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#page-numbering).
 - PDF and report publication are separate operations, and a late failure can occur after a file becomes visible. Inspect [publication facts](docs/CLI.md#reports-and-committed-state) before retrying.
 
@@ -394,9 +394,16 @@ Contributor prerequisites, checks and release procedures are in
 Original code and documentation use [AGPL-3.0-only](LICENSE). See [licensing, source and contribution terms](PROJECT-NOTICE.md) and [commercial licensing status](LICENSE-COMMERCIAL.md). Third-party terms remain separate; `pdfconcat licenses` prints the project license and [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md).
 
 Generated body text, divider titles and contents use the authored BCP 47 language
-in plan v6, with deterministic neutral fallback when absent or unmatched. See
-[the language contract](docs/PLAN.md#authored-language-and-plan-version-6).
+in plan v7, with deterministic neutral fallback when absent or unmatched. See
+[the language contract](docs/PLAN.md#authored-language-and-plan-version-7).
 Consumed external fonts, including a contents-only font, are protected inputs
 for both output and report destinations. The narrowly patched strict reader can
 admit unreferenced zero-offset classic xref entries with located warnings; see
 [PDF input policy](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).
+
+Source dimensions are available directly in full reports as `page_sizes` runs,
+with original selected page ranges, observed `source_size` and expected
+`output_size`. Fitting keeps pages within .01 pt per ordered displayed dimension,
+including ordinary two-decimal A4; it does not snap integer-rounded A4 or promise
+exact target MediaBoxes. See [source page-size reports](docs/CLI.md#selected-source-page-size-runs)
+and [selective fitting](docs/PDF-POLICY.md#fitting).

@@ -73,7 +73,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 		t.Fatal(ds)
 	}
 	var output bytes.Buffer
-	_, err := Assemble(t.Context(), testAssembly(layout, map[string]SourceFacts{path: facts}, occurrences, fit), &output)
+	_, err := Assemble(t.Context(), testAssembly(t, layout, map[string]SourceFacts{path: facts}, occurrences, fit), &output)
 	if err != nil {
 		return "", []diag.Diagnostic{Diagnostic(err)}
 	}
@@ -153,7 +153,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 
 	doc := pdffixture.Links("links")
 	source, views := inspectSelection(t, doc, []SelectionRequest{{Item: "one", Pages: []packet.PageRange{{First: 1, Last: 1}}}, {Item: "two", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
-	if !source.HasCoordinateDestinations || views["one"].HasCoordinateDestinations || views["two"].HasCoordinateDestinations {
+	if len(source.CoordinateDestinations) == 0 || (len(views["one"].CoordinateDestinations) > 0) || (len(views["two"].CoordinateDestinations) > 0) {
 		t.Fatalf("omitted links still restrict fitting: %+v", views)
 	}
 	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "one", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "two", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 400})
@@ -365,23 +365,27 @@ func TestComposedOutlineHierarchyUsesBackendBoundary(t *testing.T) {
 	}
 }
 
-func TestGroupedFooterMeasurementsUseOnlyRequestedOriginalPages(t *testing.T) {
+func TestUnconditionalMetricsCoverEveryOriginalPageAndSelectedRun(t *testing.T) {
 	doc := pdffixture.WithBoxes("footer geometry", pdffixture.PageBoxes{Media: "[0 0 400 600]"}, pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: "[0 0 200 300]"}, pdffixture.PageBoxes{Rotate: "90", UserUnit: "2"})
-	facts, views := inspectSelection(t, doc, []SelectionRequest{{Item: "one", Pages: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}, MeasureNumbers: true}, {Item: "two", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "repeat", Pages: []packet.PageRange{{First: 3, Last: 3}}, MeasureNumbers: true}})
-	if len(facts.PageSizes) != 2 || facts.PageSizes[1] != views["one"].FirstSize || facts.PageSizes[3] != views["repeat"].FirstSize {
-		t.Fatalf("shared source geometry: %+v views %+v", facts.PageSizes, views)
+	facts, views := inspectSelection(t, doc, []SelectionRequest{{Item: "one", Pages: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}}, {Item: "two", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "repeat", Pages: []packet.PageRange{{First: 3, Last: 3}}}})
+	if len(facts.PageSizes) != 3 {
+		t.Fatalf("all original metrics missing: %+v", facts.PageSizes)
 	}
-	if _, extra := facts.PageSizes[2]; extra {
-		t.Fatal("unrequested source geometry was retained")
+	if got, ok := packet.ExpectedPageSize(facts.PageSizes, 1); !ok || got != views["one"].FirstSize {
+		t.Fatal(got, ok)
+	}
+	if len(views["one"].PageSizes) != 2 || views["one"].PageSizes[1].Source != [2]int{3, 3} {
+		t.Fatal(views)
 	}
 	ordinary, _ := inspectSelection(t, doc, []SelectionRequest{{Item: "whole"}})
-	if ordinary.PageSizes != nil {
-		t.Fatal("ordinary inspection allocated footer geometry")
+	if len(ordinary.PageSizes) != 3 {
+		t.Fatal("ordinary inspection did not measure all geometry")
 	}
-	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}, MeasureNumbers: true}})
-	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || invalid.PageSizes != nil || (len(occurrences) != 1 || occurrences[0] != nil) {
+	invalid, occurrences, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 4, Last: 4}}}})
+	if len(ds) != 1 || ds[0].Code != diag.SourceSelectionOutOfRange || len(invalid.PageSizes) != 3 || len(occurrences) != 1 || occurrences[0] != nil {
 		t.Fatalf("invalid selection invented geometry: %+v %+v %+v", invalid.PageSizes, occurrences, ds)
 	}
+
 }
 
 func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T) {
@@ -411,7 +415,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	_, err := Assemble(t.Context(), testAssembly(layout, map[string]SourceFacts{path: facts}, occurrences, nil), &output)
+	_, err := Assemble(t.Context(), testAssembly(t, layout, map[string]SourceFacts{path: facts}, occurrences, nil), &output)
 	if err == nil || Diagnostic(err).Code != diag.SourceChanged || output.Len() != 0 {
 		t.Fatalf("changed omitted bytes were not refused before writing: err=%v bytes=%d", err, output.Len())
 	}
@@ -513,7 +517,7 @@ func TestSelectedAdditionalActionsDoNotRetainNumericFitRestriction(t *testing.T)
 		t.Run(owner, func(t *testing.T) {
 			doc := additionalActionSelection(owner, "indirect", false)
 			whole, views := inspectSelection(t, doc, []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
-			if !whole.HasCoordinateDestinations || views["selected"].HasCoordinateDestinations {
+			if len(whole.CoordinateDestinations) == 0 || (len(views["selected"].CoordinateDestinations) > 0) {
 				t.Fatalf("omitted additional action still restricts fitting: %+v", views)
 			}
 			_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, &packet.Size{Width: 300, Height: 400})
@@ -687,7 +691,7 @@ func TestOnPagePopupRetainsSoleParentActionsAcrossOccurrences(t *testing.T) {
 	}
 }
 
-func testAssembly(layout packet.Layout, files map[string]SourceFacts, views map[string]OccurrenceFacts, fit *packet.Size) Assembly {
+func testAssembly(t *testing.T, layout packet.Layout, files map[string]SourceFacts, views map[string]OccurrenceFacts, fit *packet.Size) Assembly {
 	a := Assembly{Parts: make([]Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: nil, NumberLayout: nil}
 	facts := map[string]*SourceFacts{}
 	for path, file := range files {
@@ -699,6 +703,13 @@ func testAssembly(layout packet.Layout, files map[string]SourceFacts, views map[
 		case packet.PartSource:
 			a.Parts[i].Data, _ = os.ReadFile(part.Source)
 			view := views[part.Ref]
+			if fit != nil {
+				_, slots, ds := Inspect(t.Context(), a.Parts[i].Data, "", []SelectionRequest{{Item: part.Ref, Pages: view.Selection, FitTo: fit}})
+				if len(slots) != 1 || slots[0] == nil {
+					t.Fatalf("fixture fitting admission: %+v", ds)
+				}
+				view = *slots[0]
+			}
 			file := facts[part.Source]
 			if file == nil {
 				file = &SourceFacts{}
@@ -724,10 +735,11 @@ func TestFitAnnotationCompatibilityUsesSelectedPages(t *testing.T) {
 	doc := pdffixture.FitAnnotation("FreeText", "/Contents (Hello world) /DA (/Helv 10 Tf 0 g)", false, 0, 4)
 	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 7 0 R] >>")
 	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
-	_, facts := inspectSelection(t, doc, []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 1, Last: 1}}}, {Item: "good", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
-	if facts["bad"].AnnotationFittingIssue.Present() == false || facts["good"].AnnotationFittingIssue.Present() {
-		t.Fatalf("selection facts: %+v", facts)
+	_, slots, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 1, Last: 1}}, FitTo: &packet.Size{Width: 300, Height: 500}}, {Item: "good", Pages: []packet.PageRange{{First: 2, Last: 2}}, FitTo: &packet.Size{Width: 300, Height: 500}}})
+	if diag.Outcome(ds) != "invalid" || slots[0] == nil || slots[1] == nil || !slots[0].AnnotationFittingIssue.Present() || slots[1].AnnotationFittingIssue.Present() {
+		t.Fatal(slots, ds)
 	}
+
 	path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "/items/0", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 500})
 	if len(ds) != 0 || path == "" {
 		t.Fatalf("unselected unsupported annotation blocked fit: %s %+v", path, ds)
@@ -748,8 +760,11 @@ func TestAnnotationIssueLocationsRetainOriginalPage(t *testing.T) {
 	// The annotated source page is second, but first in the retained selection.
 	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [7 0 R 3 0 R] >>")
 	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
-	_, views := inspectSelection(t, doc, []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
-	view := views["selected"]
+	_, slots, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 2, Last: 2}}, FitTo: &packet.Size{Width: 300, Height: 500}}})
+	if diag.Outcome(ds) != "invalid" || slots[0] == nil {
+		t.Fatal(ds)
+	}
+	view := *slots[0]
 	for _, issue := range []diag.AnnotationIssue{view.AnnotationFittingIssue, view.PDF20AppearanceIssue} {
 		if !issue.Present() || issue.Site.Page != 2 || issue.Site.Object != 6 {
 			t.Fatalf("lost original location: %+v", issue)

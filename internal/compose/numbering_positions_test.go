@@ -82,3 +82,31 @@ func TestTopContentsExclusionOnlyWhenEligible(t *testing.T) {
 		}
 	}
 }
+
+func TestNearTargetCanvasUsesIdentityNumberExclusion(t *testing.T) {
+	font, e := typeset.LoadDefaultFont()
+	if e != nil {
+		t.Fatal(e)
+	}
+	target := packet.Size{Width: 300, Height: 400}
+	for _, position := range []packet.NumberPosition{packet.NumberTopLeft, packet.NumberBottomCenter} {
+		numbers := packet.DefaultPageNumbers()
+		numbers.Position = position
+		footer, e := NewPageNumberLayout(font, *numbers)
+		if e != nil {
+			t.Fatal(e)
+		}
+		canvas := packet.Size{Width: 300.005, Height: 400.009}
+		a, b := footer.Available(canvas, nil)
+		c, d := footer.Available(canvas, &target)
+		if a != c || b != d {
+			t.Fatal("kept canvas exclusion was inverse-scaled", a, b, c, d)
+		}
+		changed := packet.Size{Width: 500, Height: 600}
+		a, b = footer.Available(changed, nil)
+		c, d = footer.Available(changed, &target)
+		if a == c && b == d {
+			t.Fatal("transformed canvas lost inverse exclusion")
+		}
+	}
+}

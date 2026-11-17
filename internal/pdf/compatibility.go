@@ -64,16 +64,14 @@ func CheckCompatibility(a Assembly) Compatibility {
 		if authoredDepth+selected.OutlineDepth > model.DefaultResourceLimits().MaxRecursionDepth+1 {
 			add(diag.SourceOutlineDepthUnsupported, diag.AuthoredSectionsAndImportedBookmarksExceedThePDFBackendS())
 		}
-		if a.FitTo != nil && f.HasWidgets {
-			add(diag.FitFormUnsupported, diag.FittingSourceFormWidgetsIsUnsupported())
+		if !fittingOwnsSelection(selected, a.FitTo, f.Pages) {
+			add(diag.SourceProcessingFailed, diag.SourceOccurrenceGeometryIsInconsistent())
+			continue
 		}
-		if a.FitTo != nil && selected.AnnotationFittingIssue.Present() {
-			add(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(selected.AnnotationFittingIssue))
-			loc := selected.AnnotationFittingIssue.Site
-			result.Diagnostics[len(result.Diagnostics)-1].PDFLocation = &loc
-		}
-		if a.FitTo != nil && selected.HasCoordinateDestinations {
-			add(diag.FitDestinationUnsupported, diag.FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported())
+		for _, finding := range selected.fitFindings {
+			finding.File = p.Source
+			finding.Items = []string{p.Ref}
+			result.Diagnostics = append(result.Diagnostics, finding)
 		}
 		if f.HasFields {
 			if defaults != "" && defaults != f.FormDefaultsDigest {
@@ -89,4 +87,8 @@ func CheckCompatibility(a Assembly) Compatibility {
 		}
 	}
 	return result
+}
+
+func sameFittingTarget(a, b *packet.Size) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }

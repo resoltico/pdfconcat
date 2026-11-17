@@ -165,7 +165,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := pdf.Assemble(t.Context(), testAssembly(layout, facts, wholeOccurrences(layout, facts), nil, fit, nil), f)
+	a, err := pdf.Assemble(t.Context(), testAssembly(t, layout, facts, wholeOccurrences(layout, facts), nil, fit, nil), f)
 	closeErr := f.Close()
 	if err != nil {
 		return path, a, []diag.Diagnostic{pdf.Diagnostic(err)}
@@ -332,20 +332,20 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
-	_, err := pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), &bytes.Buffer{})
+	_, err := pdf.Assemble(t.Context(), testAssembly(t, layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != diag.SourceChanged {
 		t.Fatalf("change detection %v", err)
 	}
 	if err = os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	_, err = pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), &bytes.Buffer{})
+	_, err = pdf.Assemble(t.Context(), testAssembly(t, layout, map[string]pdf.SourceFacts{path: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{path: facts}), nil, nil, nil), &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != diag.SourceChanged {
 		t.Fatalf("post-inspection disappearance lost execution-time classification/native detail: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = pdf.Assemble(ctx, testAssembly(layout, nil, nil, nil, nil, nil), &bytes.Buffer{})
+	_, err = pdf.Assemble(ctx, testAssembly(t, layout, nil, nil, nil, nil, nil), &bytes.Buffer{})
 	if err == nil || pdf.Diagnostic(err).Code != diag.Interrupted {
 		t.Fatalf("cancel %v", err)
 	}
@@ -499,7 +499,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		t.Fatal(ds)
 	}
 	var b bytes.Buffer
-	if _, err = pdf.Assemble(t.Context(), testAssembly(layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), pages, nil, fonts), &b); err != nil {
+	if _, err = pdf.Assemble(t.Context(), testAssembly(t, layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), pages, nil, fonts), &b); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "output.pdf")
@@ -581,11 +581,7 @@ func TestFitPhysicalGeometryAndPixels(t *testing.T) {
 		}
 		exp := oracle.Expectation{}
 		for p := 1; p <= 2; p++ {
-			origin := 1.0
-			if path == b {
-				origin = float64(p + 1)
-			}
-			box := []float64{10 * origin, 20 * origin, 10*origin + 300, 20*origin + 500}
+			box := []float64{0, 0, 300, 500}
 			exp.Pages = append(exp.Pages, oracle.ExpectedPage{Text: doc.FirstLine(p), Geometry: &oracle.Geometry{MediaBox: box, CropBox: box, UserUnit: 1}})
 		}
 		if findings := doc.Verify(exp); len(findings) > 0 {
@@ -613,12 +609,7 @@ func TestFitPhysicalGeometryAndPixels(t *testing.T) {
 			t.Fatal("fit omitted link annotation")
 		}
 		for coordinate := range 4 {
-			origin := 10.0
-			if coordinate%2 == 1 {
-				origin = 20
-			}
-			want := control[0][coordinate] - origin*float64(page+1)
-			got := actual[0][coordinate] - origin
+			want, got := control[0][coordinate], actual[0][coordinate]
 			if math.Abs(want-got) > 1e-8 {
 				t.Fatalf("physical annotation geometry differs: page %d got %v control %v", page, actual, control)
 			}

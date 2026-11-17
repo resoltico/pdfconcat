@@ -246,7 +246,7 @@ func TestNavigationWarningsRepeatOriginalSitesThroughAssemblyAndFitting(t *testi
 		t.Fatal(ds)
 	}
 	var output bytes.Buffer
-	assembled, err := Assemble(t.Context(), testAssembly(layout, map[string]SourceFacts{path: facts}, views, fit), &output)
+	assembled, err := Assemble(t.Context(), testAssembly(t, layout, map[string]SourceFacts{path: facts}, views, fit), &output)
 	if err != nil {
 		t.Fatal(err)
 	}

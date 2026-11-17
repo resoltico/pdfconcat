@@ -89,6 +89,10 @@ func inspectedSource(entry *outcome.Part, index int, inspected *inspection) {
 	if occurrence == nil || occurrence.File == nil {
 		return
 	}
+	if occurrence.Facts != nil && len(occurrence.Facts.PageSizes) > 0 {
+		runs := append([]packet.PageSizeRun(nil), occurrence.Facts.PageSizes...)
+		entry.PageSizes = &runs
+	}
 	facts := occurrence.File
 	entry.SHA256 = fmt.Sprintf("%x", facts.SHA256)
 	entry.Bytes = knownCount(facts.Bytes)

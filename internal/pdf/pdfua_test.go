@@ -120,11 +120,11 @@ func TestPDFUAMachineFixture(t *testing.T) {
 	}
 	// Preserve two occurrences of this independently machine-checked source,
 	// including fitting. Output must omit the source conformance declaration.
-	facts, _, findings := Inspect(t.Context(), out.Bytes(), "", nil)
+	facts, views, findings := Inspect(t.Context(), out.Bytes(), "", []SelectionRequest{{Item: "fitted", FitTo: &packet.Size{Width: 450, Height: 600}}})
 	if status := diag.Outcome(findings); status != "ok" {
 		t.Fatal(findings)
 	}
-	occurrence := &Occurrence{File: &facts, Facts: &facts.OccurrenceFacts}
+	occurrence := &Occurrence{File: &facts, Facts: views[0]}
 	assembly := Assembly{Metadata: &packet.Metadata{Title: &title, Language: &lang}, Structure: packet.StructurePreserve, FitTo: &packet.Size{Width: 450, Height: 600}, Parts: []Part{
 		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "first", Source: path}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: occurrence, Data: out.Bytes()},
 		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "repeat", Source: path}, Pages: 1, FirstPage: 2, LastPage: 2}, Occurrence: occurrence, Data: out.Bytes()},

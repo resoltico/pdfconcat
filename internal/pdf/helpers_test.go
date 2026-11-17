@@ -253,7 +253,7 @@ func wholeOccurrences(layout packet.Layout, facts map[string]pdf.SourceFacts) ma
 	return result
 }
 
-func testAssembly(layout packet.Layout, files map[string]pdf.SourceFacts, views map[string]pdf.OccurrenceFacts, pages map[int][]compose.Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont) pdf.Assembly {
+func testAssembly(t *testing.T, layout packet.Layout, files map[string]pdf.SourceFacts, views map[string]pdf.OccurrenceFacts, pages map[int][]compose.Page, fit *packet.Size, fonts map[typeset.Digest]typeset.EmbeddedFont) pdf.Assembly {
 	a := pdf.Assembly{Numbering: layout.Numbering, Parts: make([]pdf.Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: fonts, NumberLayout: nil}
 	facts := map[string]*pdf.SourceFacts{}
 	for path, file := range files {
@@ -265,6 +265,13 @@ func testAssembly(layout packet.Layout, files map[string]pdf.SourceFacts, views 
 		case packet.PartSource:
 			a.Parts[i].Data, _ = os.ReadFile(part.Source)
 			view := views[part.Ref]
+			if fit != nil {
+				_, slots, ds := pdf.Inspect(t.Context(), a.Parts[i].Data, "", []pdf.SelectionRequest{{Item: part.Ref, Pages: view.Selection, FitTo: fit}})
+				if len(slots) != 1 || slots[0] == nil {
+					t.Fatalf("fixture fitting admission: %+v", ds)
+				}
+				view = *slots[0]
+			}
 			file := facts[part.Source]
 			if file == nil {
 				file = &pdf.SourceFacts{}

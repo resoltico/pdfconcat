@@ -174,6 +174,7 @@ func (p Plan) OddStarts() int { return p.oddStarts }
 
 // SourceFacts contains one occurrence's selected count, boundaries and ranges.
 type SourceFacts struct {
+	PageSizes           []PageSizeRun
 	Pages               int
 	FirstSize, LastSize Size
 	Selection           []PageRange

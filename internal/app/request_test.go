@@ -140,7 +140,7 @@ func TestDirectReferencesAndQueries(t *testing.T) {
 
 func TestPlanByteLimitAndCanceledPhysicalInputs(t *testing.T) {
 	dir := t.TempDir()
-	valid := []byte(`{"version":6,"items":[{"page":{"size":"A4"}}]}`)
+	valid := []byte(`{"version":7,"items":[{"page":{"size":"A4"}}]}`)
 	exact := append(bytes.Clone(valid), bytes.Repeat([]byte(" "), (64<<20)-len(valid))...)
 	r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.PlanBytes{Data: exact, Label: "limit", BaseDir: dir}, WorkingDir: dir})
 	if r.Status != "ok" {
@@ -167,7 +167,7 @@ func TestConcurrentFileBytesAndDirectRequests(t *testing.T) {
 	if err := pdffixture.Pages("SOURCE", 2).WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte(`{"version":6,"items":[{"source":"source.pdf"},{"page":{}}]}`)
+	data := []byte(`{"version":7,"items":[{"source":"source.pdf"},{"page":{}}]}`)
 	planPath := filepath.Join(dir, "plan.json")
 	if err := os.WriteFile(planPath, data, 0600); err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestEffectiveFontReservationsAndDirectBudgets(t *testing.T) {
 		{`[{"source":"source.pdf"}]`, ""},
 		{`[{"page":{}}]`, "font_input_invalid"},
 	} {
-		data := []byte(`{"version":6,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
+		data := []byte(`{"version":7,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":` + tc.items + `}`)
 		report := filepath.Join(dir, "report.json")
 		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.PlanBytes{Data: data, Label: "editor", BaseDir: dir}, WorkingDir: dir, Report: report, Overwrite: true})
 		if tc.want == "" {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 
 	pdffont "github.com/pdfcpu/pdfcpu/pkg/pdfcpu/font"
@@ -93,7 +94,12 @@ func serialize(c context.Context, s *model.Context, w io.Writer) error {
 				a[i] = y
 			}
 			return a, nil
-		case nil, types.Name, types.Integer, types.Float, types.Boolean, types.StringLiteral, types.HexLiteral:
+		case types.Float:
+			if math.IsNaN(v.Value()) || math.IsInf(v.Value(), 0) {
+				return nil, errors.New("nonfinite output PDF scalar")
+			}
+			return v, nil
+		case nil, types.Name, types.Integer, types.Boolean, types.StringLiteral, types.HexLiteral:
 			return o, nil
 		default:
 			return nil, fmt.Errorf("unsupported output object %T", o)

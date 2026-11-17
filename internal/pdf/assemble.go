@@ -55,10 +55,12 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	var generatedLinks []generatedLink
 	var structures []structurePart
 	compatibility := CheckCompatibility(a)
-	if len(compatibility.Diagnostics) > 0 {
-		d := compatibility.Diagnostics[0]
-		return result, &policyError{finding: d, err: errors.New(d.Message)}
+	for _, d := range compatibility.Diagnostics {
+		if d.Severity == diag.Error {
+			return result, &policyError{finding: d, err: errors.New(d.Message)}
+		}
 	}
+	result.Diagnostics = append(result.Diagnostics, compatibility.Diagnostics...)
 	needAppearances := false
 	for index, part := range a.Parts {
 		current = &a.Parts[index]
@@ -128,10 +130,25 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				return result, err
 			}
 		}
-		if a.FitTo != nil {
-			if err = fitContext(c, s, a.FitTo); err != nil {
-				return result, err
+		var plans fittingPlan
+		if part.Source != "" {
+			plans = part.Occurrence.Facts.fitting
+		} else {
+			geometries, e := pageGeometries(c, s)
+			if e != nil {
+				return result, e
 			}
+			plans, e = planFitting(geometries, a.FitTo, part.Repeat)
+			if e != nil {
+				return result, e
+			}
+			origins, e = sourceOriginsFor(c, s)
+			if e != nil {
+				return result, e
+			}
+		}
+		if err = fitContext(c, s, plans, origins); err != nil {
+			return result, err
 		}
 		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage, origins)
 		if e != nil {
@@ -242,6 +259,9 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	if err = freeUnreachable(c, dest); err != nil {
 		return result, err
 	}
+	if err = verifyPlannedGeometry(c, dest, a); err != nil {
+		return result, pdfFailure(diag.AssemblyFailed, diag.TheComposedPDFFailedFinalValidation(), err)
+	}
 	output := &outputWriter{writer: w}
 	err = serialize(c, dest, output)
 	if output.err != nil {
@@ -319,6 +339,9 @@ func verify(c context.Context, data []byte, expected int64, a *Assembly) (err er
 		return refuse(diag.OutputPageCountMismatch, diag.ExpectedDOutputPagesFoundD(expected, int64(s.PageCount)))
 	}
 	if a != nil {
+		if err = verifyPlannedGeometry(c, s, *a); err != nil {
+			return pdfFailure(diag.OutputInvalid, diag.TheComposedPDFFailedOutputVerification(), err)
+		}
 		if err = verifyDocumentFacts(c, s, *a); err != nil {
 			return pdfFailure(diag.OutputInvalid, diag.TheSerializedPDFDisagreesWithTheResolvedContract(), err)
 		}

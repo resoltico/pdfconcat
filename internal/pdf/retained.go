@@ -256,41 +256,6 @@ func numericPosition(tail types.Array) bool {
 	return false
 }
 
-func coordinateDestinations(c context.Context, s *model.Context, named map[string]destination) (bool, error) {
-	found := false
-	for _, d := range named {
-		if d.page > 0 && numericPosition(d.tail) {
-			found = true
-		}
-	}
-	err := retainedObjects(c, s, func(types.Dict) error { return nil }, func(o types.Object) (bool, error) {
-		value, err := s.Dereference(o)
-		if err != nil {
-			return false, err
-		}
-		if name, e := destinationName(s, value); e == nil {
-			if d, ok := named[name]; ok && d.page < 1 {
-				return false, nil
-			}
-		}
-		a, ok := value.(types.Array)
-		if !ok || len(a) < 2 {
-			return true, nil
-		}
-		tail := make(types.Array, 0, len(a)-1)
-		for _, entry := range a[1:] {
-			v, err := s.Dereference(entry)
-			if err != nil {
-				return false, err
-			}
-			tail = append(tail, v)
-		}
-		found = found || numericPosition(tail)
-		return true, nil
-	})
-	return found, err
-}
-
 // appearanceIssue delegates the exception rules to the pinned writer's public
 // checker. Only its missing-appearance failure is a compatibility fact; graph,
 // dereference and cancellation failures must still fail inspection.

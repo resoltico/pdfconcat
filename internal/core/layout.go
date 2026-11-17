@@ -93,7 +93,13 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 				add(diag.SourceProcessingFailed, "Selected source ranges and page count disagree.", leaf.Ref)
 				return
 			}
-			sourceSize, physicalSize = f.LastSize, f.LastSize
+			sourceSize = f.LastSize
+			fit, err := DecideFit(f.LastSize, j.FitTo())
+			if err != nil {
+				add(diag.SourceProcessingFailed, err.Error(), leaf.Ref)
+				return
+			}
+			physicalSize = fit.Output
 		} else {
 			p.Pages = leaf.Count
 			switch leaf.Kind {
@@ -125,14 +131,16 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 				add(diag.PlanLimit, "Generated pages exceed 100000 or the contents page count is unavailable.", leaf.Ref)
 				return
 			}
-			physicalSize = p.Size
+			fit, err := DecideFit(p.Size, j.FitTo())
+			if err != nil {
+				add(diag.SourceProcessingFailed, err.Error(), leaf.Ref)
+				return
+			}
+			physicalSize = fit.Output
 		}
 		if int64(p.Pages) > MaxPageIndex-layout.TotalPages {
 			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Ref)
 			return
-		}
-		if j.FitTo() != nil {
-			physicalSize = *j.FitTo()
 		}
 		layout.TotalPages += int64(p.Pages)
 		p.LastPage = layout.TotalPages

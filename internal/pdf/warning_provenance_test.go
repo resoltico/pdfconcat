@@ -185,7 +185,7 @@ func TestWarningFormRequestAndActualRenameSourceSites(t *testing.T) {
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}
-	assembled, err := Assemble(t.Context(), testAssembly(layout, files, views, nil), &bytes.Buffer{})
+	assembled, err := Assemble(t.Context(), testAssembly(t, layout, files, views, nil), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestWarningNavigationSurvivesLaterStructureFitFailure(t *testing.T) {
 			}
 			fitting := warningCode(ds, diag.FitAnnotationUnsupported)
 			if fitted {
-				if len(fitting) != 1 || occurrences[0] != nil {
+				if len(fitting) != 1 || occurrences[0] == nil || len(occurrences[0].PageSizes) == 0 {
 					t.Fatalf("expected later annotation fitting failure: findings=%+v occurrence=%+v", ds, occurrences[0])
 				}
 			} else {

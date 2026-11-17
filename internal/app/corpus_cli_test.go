@@ -41,7 +41,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 			if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
 				if slices.Contains(args, "--json") {
 					var version exchange.Version
-					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 8 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
+					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 9 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
 						t.Fatalf("installed version facts: %s %v", raw, err)
 					}
 				} else if !bytes.HasPrefix(raw, []byte("pdfconcat ")) || bytes.Count(raw, []byte("\n")) != 1 || !bytes.Contains(raw, []byte("darwin/")) && !bytes.Contains(raw, []byte("linux/")) && !bytes.Contains(raw, []byte("windows/")) {
@@ -67,7 +67,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 						t.Fatal("schema properties missing")
 					}
 					version, ok := properties["version"].(map[string]any)
-					if !ok || version["const"] != float64(6) {
+					if !ok || version["const"] != float64(7) {
 						t.Fatal("plan6 schema fact missing")
 					}
 				}
@@ -136,7 +136,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 		report := filepath.Join(dir, "report.json")
 		cmd := exec.CommandContext(t.Context(), binary, "check", "--plan", "-", "--base-dir", dir, "--report", report, "--json")
 		cmd.Dir = t.TempDir()
-		cmd.Stdin = strings.NewReader(`{"version":6,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
+		cmd.Stdin = strings.NewReader(`{"version":7,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatal(err, string(raw))
@@ -158,7 +158,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 func corpusCLIConcurrentPublication(t *testing.T, binary string) {
 	dir := t.ArtifactDir()
 	plan := filepath.Join(dir, "plan.json")
-	corpusJSON(t, plan, map[string]any{"version": 6, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
+	corpusJSON(t, plan, map[string]any{"version": 7, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
 	commands := []*exec.Cmd{exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json"), exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json")}
 	var outputs, errorsOut [2]bytes.Buffer
 	for n, cmd := range commands {

@@ -32,7 +32,7 @@ func TestContentsOnlyFontProtected(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				req := app.Request{InspectionWorkers: 1, Operation: app.Build, WorkingDir: dir, Overwrite: true, Output: "out.pdf", Input: app.PlanBytes{Data: []byte(`{"version":6,"page_defaults":{"size":"A4","text":{"font":{"file":"font.ttf"}}},"items":[{"contents":{}},{"title":"Section","items":[{"page":{"text":{"font":"default"}}}]}]}`)}}
+				req := app.Request{InspectionWorkers: 1, Operation: app.Build, WorkingDir: dir, Overwrite: true, Output: "out.pdf", Input: app.PlanBytes{Data: []byte(`{"version":7,"page_defaults":{"size":"A4","text":{"font":{"file":"font.ttf"}}},"items":[{"contents":{}},{"title":"Section","items":[{"page":{"text":{"font":"default"}}}]}]}`)}}
 				if role == "output" {
 					req.Output = dest
 				} else {

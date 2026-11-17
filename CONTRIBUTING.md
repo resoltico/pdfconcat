@@ -323,6 +323,14 @@ the tagged source and the orchestration workflow revision separately; its signer
 identity remains the actual workflow that ran. Check both identities when
 verifying a manually retried release.
 
+If only publication failed after `Required CI` passed, supply that Release run's
+numeric ID as `qualified_run_id`. The workflow verifies its completed Release
+identity, main ancestry, unchanged CI definition, successful aggregate and retained
+artifact before reuse. It checks source-file identity and executable commit/version
+against the tag. Missing, expired or mismatched evidence fails visibly; there is
+no rebuild fallback. The already-qualified first assets are published unchanged; provenance records
+the prior qualification run and its immutable artifact digest.
+
 ### Local packaging
 
 Use the exact GoReleaser version in [CI](.github/workflows/ci.yml). Complete release

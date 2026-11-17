@@ -16,7 +16,7 @@ import (
 )
 
 var dependencies = map[string][]string{
-	"core": {"core"}, "typeset": {}, "compose": {"core", "typeset"}, "plan": {"core"}, "files": {"core"}, "pdf": {"core", "compose", "typeset"}, "wire": {"core"}, "app": {"core", "compose", "plan", "files", "pdf", "wire", "typeset"}, "cli": {"app", "core", "wire", "legal"},
+	"core": {"core"}, "typeset": {}, "compose": {"core", "typeset"}, "plan": {"core"}, "files": {"core"}, "pdf": {"core", "compose", "typeset"}, "wire": {"core"}, "app": {"core", "compose", "plan", "files", "pdf", "wire"}, "cli": {"app", "core", "wire", "legal"},
 }
 
 func allowed(owner, path string) error {
@@ -85,7 +85,7 @@ func TestProductionDependencies(t *testing.T) {
 	}
 }
 func TestForbiddenDependencyControls(t *testing.T) {
-	for _, tc := range [][2]string{{"core", "os"}, {"core", "encoding/json/v2"}, {"core", "runtime"}, {"core", "path/filepath"}, {"core", "github.com/resoltico/pdfconcat/internal/app"}, {"plan", "github.com/resoltico/pdfconcat/internal/files"}, {"typeset", "github.com/resoltico/pdfconcat/internal/core"}, {"cli", "github.com/resoltico/pdfconcat/internal/pdf"}, {"app", "github.com/pdfcpu/pdfcpu/pkg/api"}, {"pdf", "github.com/resoltico/pdfconcat/internal/files"}, {"wire", "github.com/resoltico/pdfconcat/internal/app"}, {"app", "github.com/resoltico/pdfconcat/internal/pdffixture"}, {"app", "golang.org/x/sys/unix"}, {"compose", "github.com/go-text/typesetting/shaping"}} {
+	for _, tc := range [][2]string{{"core", "os"}, {"core", "encoding/json/v2"}, {"core", "runtime"}, {"core", "path/filepath"}, {"core", "github.com/resoltico/pdfconcat/internal/app"}, {"plan", "github.com/resoltico/pdfconcat/internal/files"}, {"typeset", "github.com/resoltico/pdfconcat/internal/core"}, {"cli", "github.com/resoltico/pdfconcat/internal/pdf"}, {"app", "github.com/pdfcpu/pdfcpu/pkg/api"}, {"app", "github.com/resoltico/pdfconcat/internal/typeset"}, {"pdf", "github.com/resoltico/pdfconcat/internal/files"}, {"wire", "github.com/resoltico/pdfconcat/internal/app"}, {"app", "github.com/resoltico/pdfconcat/internal/pdffixture"}, {"app", "golang.org/x/sys/unix"}, {"compose", "github.com/go-text/typesetting/shaping"}} {
 		if allowed(tc[0], tc[1]) == nil {
 			t.Errorf("gate admitted forbidden edge %v", tc)
 		}

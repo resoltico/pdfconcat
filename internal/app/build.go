@@ -16,7 +16,6 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/outcome"
 	"github.com/resoltico/pdfconcat/internal/files"
 	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
 // build owns the complete staging lifecycle, including abort on every failure.
@@ -29,25 +28,11 @@ type buildOutcome struct {
 func build(c context.Context, j packet.Plan, composition *composition, overwrite bool) buildOutcome {
 	out := buildOutcome{output: outcome.Output{Path: j.Output()}}
 	layout, assembly := composition.layout, composition.assembly
-	var placements []*typeset.Placed
+	var pages []compose.Page
 	for _, part := range assembly.Parts {
-		for _, page := range part.Generated {
-			for _, block := range page.Blocks {
-				placements = append(placements, block.Text)
-			}
-		}
+		pages = append(pages, part.Generated...)
 	}
-
-	if assembly.NumberLayout != nil {
-		union, e := assembly.NumberLayout.Union()
-		if e != nil {
-			out.diagnostics = append(out.diagnostics, compose.Diagnostic(e, "/page_numbers"))
-			return out
-		}
-		placements = append(placements, union)
-	}
-
-	embedded, err := typeset.PrepareFonts(placements)
+	embedded, err := compose.PrepareFonts(pages, assembly.NumberLayout)
 	if err != nil {
 		out.diagnostics = append(out.diagnostics, diag.New(diag.FontInvalid, err.Error()))
 		return out

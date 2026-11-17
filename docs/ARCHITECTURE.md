@@ -37,7 +37,7 @@ compose -> core, typeset
 typeset -> value libraries
 pdf     -> core, compose, typeset, pdfcpu
 wire    -> core, core/outcome
-app     -> core, plan, files, compose, typeset, pdf, wire
+app     -> core, plan, files, compose, pdf, wire
 cli     -> app, core, wire, legal
 cmd     -> cli
 ```

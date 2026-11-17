@@ -5,7 +5,6 @@ package app
 
 import (
 	"context"
-	"errors"
 
 	"github.com/resoltico/pdfconcat/internal/compose"
 
@@ -13,12 +12,11 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/files"
 	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
-func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font, []diag.Diagnostic) {
+func loadFonts(c context.Context, j packet.Plan) (compose.Fonts, []diag.Diagnostic) {
 	var ds []diag.Diagnostic
-	fonts := map[packet.Font]*typeset.Font{}
+	fonts := compose.Fonts{}
 	var fontOrder []packet.Font
 	fontItems := map[packet.Font][]string{}
 	fontPointers := map[packet.Font]map[string]bool{}
@@ -63,12 +61,9 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 			ds = append(ds, diag.New(diag.Interrupted, c.Err().Error()))
 			return fonts, ds
 		}
-		var font *typeset.Font
+		var data []byte
 		var err error
-		if name == (packet.Font{}) {
-			font, err = typeset.LoadDefaultFont()
-		} else {
-			var data []byte
+		if name != (packet.Font{}) {
 			data, err = files.Read(c, name.Path, 0)
 			if err != nil {
 				d := ioDiagnostic(diag.FontUnreadable, err, name.Path)
@@ -76,18 +71,14 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 				ds = append(ds, d)
 				continue
 			}
-			font, err = typeset.LoadFont(data)
 		}
+		font, err := compose.ParseFont(name, data)
 		if err == nil {
 			err = pdf.ValidateFontName(font)
 		}
 		if err != nil {
-			code := diag.FontInvalid
-			var embedding *typeset.EmbeddingError
-			if errors.As(err, &embedding) {
-				code = diag.FontNotEmbeddable
-			}
-			d := diag.New(code, err.Error(), fontItems[name]...)
+			d := compose.Diagnostic(err, "")
+			d.Items = fontItems[name]
 			if name != (packet.Font{}) {
 				d.File = name.Path
 			}
@@ -96,14 +87,14 @@ func loadFonts(c context.Context, j packet.Plan) (map[packet.Font]*typeset.Font,
 			fonts[name] = font
 		}
 	}
-	var shaper typeset.Shaper
+	preflight := compose.NewTextPreflight(j)
 	for _, key := range textOrder {
 		if c.Err() != nil {
 			ds = append(ds, diag.New(diag.Interrupted, c.Err().Error()))
 			return fonts, ds
 		}
 		if font := fonts[key.font]; font != nil {
-			if err := shaper.ValidateText(font, key.value, typeset.ShapingLanguage(j.Language())); err != nil {
+			if err := preflight.Check(font, key.value); err != nil {
 				d := compose.Diagnostic(err, "")
 				d.Items = textItems[key]
 				if key.font != (packet.Font{}) {

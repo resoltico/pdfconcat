@@ -7,15 +7,15 @@ import (
 	"context"
 	"sync"
 
+	"github.com/resoltico/pdfconcat/internal/compose"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/files"
 	"github.com/resoltico/pdfconcat/internal/pdf"
-	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
 type inspection struct {
-	fonts       map[packet.Font]*typeset.Font
+	fonts       compose.Fonts
 	byLeaf      []inspectedLeaf
 	diagnostics []diag.Diagnostic
 }

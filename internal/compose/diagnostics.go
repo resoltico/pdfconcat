@@ -21,9 +21,12 @@ func Diagnostic(err error, item string) diag.Diagnostic {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return diag.New(diag.Interrupted, err.Error(), item)
 	}
+	var embedding *typeset.EmbeddingError
 	var text *typeset.TextError
 	var overflow *typeset.OverflowError
 	switch {
+	case errors.As(err, &embedding):
+		code = diag.FontNotEmbeddable
 	case errors.As(err, &text):
 		code = diag.TextUnsupportedCharacter
 		if text.GlyphMissingOnly() {

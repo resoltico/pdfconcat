@@ -71,6 +71,7 @@ PDFCONCAT_REQUIRE_VERAPDF=1 go test -count=1 ./internal/pdf -run '^TestPDFUAMach
 Machine reports are retained as test artifacts. Passing these tests does not
 replace visual, reading-order or screen-reader review of actual packets.
 
+Pull requests run CI; tag publication invokes the same workflow before releasing.
 Race tests run on Linux/macOS; Windows runs ordinary tests. CI gates lint,
 tests on those three operating systems, cross-builds, release packaging and
 native installation through `Required CI`. That aggregate name is a required repository
@@ -84,10 +85,13 @@ To install the current checkout into Go's executable directory:
 go install ./cmd/pdfconcat
 ```
 
-To install the latest published source release instead:
+To install the source release, clone its tag and run the command from that
+checkout so the root module selects the required in-tree pdfcpu source:
 
 ```sh
-go install github.com/resoltico/pdfconcat/cmd/pdfconcat@latest
+git clone --branch v0.13.0 --depth 1 https://github.com/resoltico/pdfconcat.git
+cd pdfconcat
+go install ./cmd/pdfconcat
 ```
 
 Use the Go version declared in [go.mod](go.mod). The executable goes into the
@@ -143,11 +147,15 @@ We test behavior at the boundary where users rely on it:
 - Installation, update and removal from the exact release archives on Linux,
   macOS and Windows; see [installer verification](#installer-verification).
 
-We deliberately do not gate on mutation testing, coverage percentages, fuzzing
-campaigns, dependency test suites, native ACL/console/closed-stream fault injection,
-checks of a testing platform or deliberately failing workflows. Fuzz seeds run
-as normal tests. Short local fuzz runs up to 30 seconds are permitted. Cross-
-compilation covers additional CPU targets; it is not native execution proof.
+Targeted local-dependency tests exercise the modified reader and numeric parser/
+serializer. Actual executable subprocesses exercise closed stdout and retained
+publication state. The installer matrix includes native Windows ACL, registry,
+console and running-image cases.
+
+Mutation testing, coverage percentages, full upstream dependency suites and fuzzing
+campaigns are not CI gates. Fuzz seeds run as ordinary tests; short local fuzz runs
+up to 30 seconds are permitted. Cross-compilation covers additional CPU targets;
+it is not native execution proof.
 
 A new check needs a concrete user-visible risk and the cheapest meaningful test
 for it. Preserve failure visibility and expected test discovery. Do not create a
@@ -203,9 +211,9 @@ Copy-Item .tools/installers/install.sh, .tools/installers/install.ps1 dist/
 
 The harnesses execute the staged `dist/install.sh` / `dist/install.ps1`, not a
 source fallback, and check them against the primary manifest before the cases.
-For a GoReleaser build, copy `.tools/installers/install.sh` and
-`.tools/installers/install.ps1` instead: its checksum manifest binds those generated
-bytes. The before hook stamps their Help links with the build's full Git commit,
+The checksum manifest binds the generated `.tools/installers/install.sh` and
+`.tools/installers/install.ps1` bytes shown above. The before hook stamps their Help
+links with the build's full Git commit,
 leaving source installers unchanged. Source staging with `--revision main` is for
 locally prepared archive sets whose checksums are generated after staging.
 
@@ -389,7 +397,7 @@ Missing or expired qualified artifacts fail publication rather than trigger an
 untested rebuild. Ad hoc signing, checksums and attestations do not establish
 Apple notarization.
 
-## Foundation contracts and source delivery
+## Contracts and source delivery
 
 Run `go generate ./internal/plan` to regenerate semantic schema fragments and the
 CLI diagnostic registry reference. `go run ./internal/contractgen -check` refuses

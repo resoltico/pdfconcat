@@ -2,31 +2,26 @@
 
 ## [Unreleased]
 
-- Stdout write failures, including closed pipes, return exit 1 with a diagnostic when stderr works; already-published PDFs and reports remain saved.
-- Plans require version 7: fitting keeps native geometry within .01 pt per ordered displayed side. Review version 5/6 plans before changing their version; no migration is provided.
-- Results and reports require format 9, with selected source page_sizes runs containing original ranges, source dimensions and expected output dimensions, retained through later failures.
-- Rename facts remain null when unestablished or inapplicable; an observed empty mapping is an empty array.
-- Mixed fitting constrains numeric navigation by target-page transformation and allows proved kept widgets; multiply bound annotation dictionaries refuse if any binding transforms.
-- Type3 characters outside their declared width interval use zero glyph width during fitting; spacing still advances their cursor, and malformed metrics remain refused.
-- Fitting observes Type3 text matrices and cursor advances, and installs complete parent-entry graphics state for tiling patterns; unproved text contexts refuse transformation.
-- Fitting preserves selected font/pattern bindings across scopes, handles gs fonts and actual paint channels, and ignores hidden AP execution and private matrix keys in unrelated roles.
-- Fitting also checks source graphics-state and invoked resource compositions; unsafe cancellation refuses before publication while kept programs retain their native behavior.
-- Fitting refuses ill-conditioned forward maps before publication; a uniform output-space error bound protects interior painting even when corners or target boxes appear correct.
-- Finite forward fitting transforms remain supported when an unused determinant would overflow or underflow; actual scale, coefficients and mapped-frame safeguards remain.
-- Transformed pages use zero-origin target frames and omit optional printing boxes with located warnings. Kept pages retain native boxes, rotation, UserUnit and clipping.
-- Numbering, contents exclusions and odd-start padding use actual expected page dimensions; native and displayed geometry are verified before writing and after strict reopening.
+## [0.13.0] - 2026-11-17
+
+- Plans require version 7. Review earlier plans against current language and fitting behavior before updating their version; no migration is provided.
+- Results, reports and JSON version objects require format 9; source page_sizes records original ranges, established source and expected output dimensions, retained through later failures.
+- Rename facts are null when unestablished or inapplicable; an observed empty mapping is an empty array.
+- Fitting keeps native boxes, rotation, UserUnit and clipping when both ordered displayed sides match the target within .01 pt.
+- Transformed pages use zero-origin target frames and omit optional printing boxes with located warnings; numbering, contents and padding use actual expected dimensions.
+- Numeric destinations may target kept pages, and widgets need proved kept owners; multiply bound annotation dictionaries refuse when any binding transforms.
+- Fitting checks forward and invoked graphics/text/pattern compositions before publication; unproved accuracy refuses while kept pages retain native execution.
 - PDF reals retain decimal syntax and round-trip precision in objects and content; oversized integers and nonfinite numbers refuse without zero substitution.
-- Authored language selects generated body, divider and contents glyphs, with explicit neutral fallback for unmatched well-formed tags.
-- Typed admission rejects authored/divider identity collisions; every production plan constructor validates and owns its declarations, including later-mutated snapshots.
-- Part text and actual rename facts are bound to their resolved owners; inconsistent or missing required facts fail processing instead of silently disappearing from reports.
-- Product explanations and named parameters are core-owned; factual finding identities preserve cause, site and phase independently of rendered wording.
 - Unreferenced zero-offset classic xref entries can be admitted with located warnings and revision tombstones; referenced entries and exceptional hybrid chains remain refused.
-- Both output and report destinations protect contents-only external fonts, including existing-file aliases, through a shared effective-input inventory.
-- Full typed declarations share semantic admission with JSON plans; prepared traversal and font views own their mutable data, and inspection takes an explicit worker budget.
-- Domain facts, I/O orchestration, PDF processing and wire projection have separate owners; the CLI alone maps complete outcomes to process exits.
-- Generated contract checks reject stale schema/reference values; release checks require every supported target and compare deliverables from two isolated clean builds.
+- Output and report destinations protect every effective input, including contents-only external fonts and existing-file aliases, through one shared inventory.
+- Authored language selects generated body, divider and contents glyphs, with explicit neutral fallback for unmatched well-formed tags.
+- Full typed declarations and JSON plans share semantic admission; prepared plans, traversal and font views own mutable data, and inspection takes an explicit worker budget.
+- Core vocabulary and outcomes, I/O orchestration, PDF processing and wire projection have separate owners; the CLI alone maps complete outcomes to process exits.
+- Cancellation and deadlines report interruption consistently; annotation refusals retain original PDF sites and use typed causes rather than backend wording.
+- Generated contract checks reject stale schema/reference values; release checks require all supported targets and compare deliverables from two clean builds.
 - Source delivery retains the modified pdfcpu reader, upstream licenses and exact patch provenance, and verifies that offline vendoring uses the patched source.
-- Cancellation and deadlines consistently report interruption across stages; annotation refusals use typed facts and core wording, and missing-appearance acceptance no longer depends on backend text.
+- Stdout write failures, including closed pipes, return exit 1 with a diagnostic when stderr works; already-published PDFs and reports remain saved.
+- CI uses setup-go 7.1.0 and go-diff 1.4.5, including Unicode diff fixes; protected PR and release qualification avoid redundant main-push runs.
 
 ## [0.12.0] - 2026-11-16
 

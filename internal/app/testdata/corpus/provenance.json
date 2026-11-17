@@ -370,14 +370,14 @@
   ],
   "AuthoredSourcesSHA256": {
     "sources/create_scan_sources.py": "f4247c9828196a45295beabc88eb5d8055ac1314d89db637e3ffa347661da8c8",
-    "sources/export_office_report.txt": "80436ed56dbdec798947dd4503b40968ff2444e360a19e4e04f8eb65d9389920",
+    "sources/export_office_report.txt": "717fb4a20c0378e59feabb37125c8d7a154d9f8074f2a7a88516c5c234aba425",
     "sources/generate_business_sources.py": "816b2d267ca10497ade3bed5242fd04a897166c1974e1344418c739adfe52c82",
     "sources/invoice-rgb.jpg": "7cef110905d85e5e39a4a7f07f7aeeaf3807e6b9eb53b7c031262912bb92b69d",
     "sources/invoice-rgb.png": "b2e07835b749d648ac58b4c90128e2341804e6d89cad18e40475c3fc290a907d",
     "sources/make_classic_incremental.py": "5869e9239639b35682ae2d430997876aa7ac34a97db4a4b7c4ea2ae666a16ccb",
     "sources/office-report.fodt": "0fd3eeafa6eac4f0caaf081d52d3f55c0ecd6f8f5ebb79c2684f9fbcd5014afe",
     "sources/prepare_office_font.py": "4da1ada53e8cd402863c9d8f1a46af4e058158ef18ae2f25be1709f3721c8b0c",
-    "sources/qpdf_report_encoding.txt": "4ccc9f57e317e609a6f17460c443a09d829fba935c29ebace7388726c64c35c0",
+    "sources/qpdf_report_encoding.txt": "c2468bb404ddcd55af6a456a90ca60fc8d3d696be0d17272a69edc1cf2997be9",
     "sources/receipt-gray.png": "a9f1ba984904fb543eb587804e7656af44ce7cf8c669ff49128ace44ece62456",
     "sources/technical-note.typ": "cac9b01d6726a53f0b8b5028a9330ec092e9d673abd9c7a1eccad3d8b071a9e4"
   },

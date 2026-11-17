@@ -265,6 +265,17 @@ sequences are refused. No language is inferred. Author is one string, including
 any punctuation. Missing fields stay absent; an empty/whitespace title does not
 enable DisplayDocTitle.
 
+### Authored language
+
+`metadata.language` is the default shaping language for generated body text,
+divider titles and contents headings/rows. Absent language is neutral; private-use
+or unmatched well-formed tags use the shaping engine's neutral language-system
+fallback. The authored tag and ToUnicode text are preserved. Default navigation
+text such as Contents remains English. Imported source language and canonical
+decimal page labels retain their meanings.
+
+### Metadata and time
+
 XMP is canonical output metadata. PDF 1.7 also has synchronized Info fields;
 PDF 2.0 uses XMP without compatibility Info. The catalog language is the authored
 default; imported subtrees retain their source language and narrower overrides.
@@ -281,6 +292,8 @@ The same executable and effective declarations/source/font bytes produce the
 same PDF bytes across clocks, worker counts and output/report directories.
 Equivalent resolved source path spellings do not affect PDF identity. Reports
 and cross-toolchain/platform equality are outside this byte guarantee.
+
+### Structure
 
 `structure: "preserve"` is the default. Supported source structure, reading
 order, language, attributes, IDs and annotation relationships are retained per
@@ -476,6 +489,8 @@ After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
 
 Limits: 64 MiB original JSON, 64 group levels, 100,000 authored item nodes
 (including groups), and 100,000 explicit selection pairs across the plan.
+Aggregate authored text is bounded to 64 MiB independently of JSON encoding;
+repeated page counts retain one authored text declaration.
 `count` is 1–100,000. The actual generated-page total is at most 100,000,
 including dividers, contents and automatic padding. Source selections and
 repeated generated runs stay compact; selected source pages have no fixed
@@ -492,31 +507,6 @@ distinguish integer lexemes such as `3` and `3.0`; encoding, duplicate members,
 converted unit bounds, platform paths and aggregate limits also require the
 decoder. Schema validity alone is not a successful check of a packet.
 
-## Authored language and plan version 7
-
-Version 7 uses `metadata.language` as the default shaping language for generated
-body text, divider titles and contents headings/rows. Absent language is neutral;
-private-use or unmatched well-formed tags use the shaping engine's neutral
-language-system fallback. The authored tag and ToUnicode text are preserved.
-Default navigation text such as Contents remains English. Imported source
-language and canonical decimal page labels retain their existing semantics.
-
-Versions 5 and 6 are refused. Update its version deliberately after reviewing the
-appearance and fitting changes; there is no migration, alternate parser or locale inference.
-
-The core also bounds aggregate authored text to 64 MiB, independently of JSON
-encoding. Repeated generated-page counts retain one authored text declaration.
-Typed numbering callers begin with `packet.DefaultPageNumbers()` and then set
-effective values; explicit zero starts are refused. Typed contents and group
-titles use `TitlePresent` to distinguish explicit empty text from absence.
-
-Typed declarations may contain bare grouping containers. That is a domain tree
-container without a new capability; JSON deliberately requires an explicit
-numbering, directory, title or alignment grouping shape. Both paths use the same
-semantic admission engine. Only `packet.AdmitDeclaration` constructs a production
-plan; normalized mutable declarations are not prepared state and are revalidated
-on every admission. Authored and derived divider identities share one namespace.
-
 ## Selective fitting and source geometry
 
 `fit_to` compares each page's ordered displayed width and height directly to the
@@ -524,7 +514,7 @@ fixed target, with an inclusive absolute .01 pt tolerance per side. The core
 rounds each interval endpoint once in float64 arithmetic. It never swaps
 orientation or chains matches through earlier pages. Ordinary two-decimal
 595.28 × 841.89 pt A4 keeps its actual dimensions; integer 595 × 842 pt does not.
-No target means keep. There is no alternate fitting mode or migration.
+Without a target, pages keep their native geometry.
 
 Displayed size uses the validated effective CropBox/MediaBox intersection,
 rotation and UserUnit. Matching pages retain native origins, boxes, rotation,

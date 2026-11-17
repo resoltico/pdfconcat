@@ -508,6 +508,3 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
 | `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 <!-- END GENERATED DIAGNOSTICS -->
-
-Result format 9 binds all part facts to their resolved owner. Formats 7 and 8
-are unsupported by the current result schema.

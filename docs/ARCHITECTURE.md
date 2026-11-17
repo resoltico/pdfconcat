@@ -91,9 +91,18 @@ including its declaration provenance; all its heading, row and label measurement
 use that font. Its other layout rules remain owned by compose, and page-number
 overlays retain the bundled font.
 
-`packet.NewPlan` walks the item tree once, caching item order, section ancestry
-and traversal events. Resolution consumes that traversal after source shapes and
-contents page count are known. Padding has no declared item index.
+`packet.AdmitDeclaration` validates and owns each declaration, then prepares the
+cached item order, section ancestry and traversal events. Snapshots are owned
+copies; mutable declarations are revalidated on every admission. Authored and
+derived divider identities share one namespace. Resolution consumes the prepared
+traversal after source shapes and contents page count are known. Padding has no
+declared item index.
+
+Typed numbering callers start with `packet.DefaultPageNumbers()` and set effective
+values; zero starts are refused. Typed titles use `TitlePresent` to distinguish
+explicit empty text from absence. Typed declarations may contain bare grouping
+containers; JSON requires a numbering, directory, title or alignment grouping shape.
+Both producers share semantic admission and aggregate text/node limits.
 
 ## Execution and projection
 
@@ -131,11 +140,13 @@ the returned stage outcomes. It preserves readable refused sources' known hashes
 byte counts and page counts. Unknown facts remain null. Report writing records
 its own visibility and any trailing failure.
 
-Per-item inspection facts align with `Plan.Leaves()`; physical facts and rename
-slots align with `Layout.Parts`. Each physical part retains its declared item
-index, or `-1` for padding. Each source occurrence refers to one shared file-fact
-record. Composition passes one typed part sequence to assembly. Fonts and PDF
-assembly remain sequential.
+Inspection owns leaf-associated occurrence facts and derives the shapes consumed
+by core layout. Each physical part retains its declared item index, or `-1` for
+padding. Each source occurrence refers to one shared file-fact record. Composition
+binds generated pages/text to typed owning parts and checks their identities and
+cardinality. Assembly results use `PartIdentity` keys for actual rename facts;
+missing or mismatched required facts fail processing. Fonts and PDF assembly
+remain sequential.
 
 The compose package owns measured geometry. `PageNumberLayout` shares the bundled
 overlay font's digit measurements across exclusion geometry, pre-assembly checks,
@@ -195,52 +206,25 @@ category; backend error wording cannot select acceptance. Cancellation and other
 technical failures use explicit explanation constructors, with opaque causes
 retained separately as Detail. There is no free-form phase/default renderer.
 
-The core owns the per-page fit decision and expected displayed size. It compares
-ordered dimensions directly against one target with absolute .01 pt tolerance.
-The PDF adapter binds those decisions to original selected identities and exact
-native geometry, checks destination TARGET dispositions and mutable annotation/
-widget ownership before mutation, and rechecks actual re-admitted pages. Declared
-generated repetitions share a single fitting record with an explicit count.
-Source metrics come unconditionally from the existing batched geometry observation;
-there is no numbering-dependent selector or independently aligned metric array.
+### Fitting ownership
 
-Kept pages bypass every fitting mutation. Transformed frames are zero-origin, and
-one affine handles content, annotations and structure. Native tuples and displayed
-sizes are compared exactly before serialization and after strict reopening. The
-local numeric serializer preserves decoded finite float64 values with non-exponent
-round-trip real decimals and canonical zero. Nonzero integral reals retain a decimal
-marker; content operands share the model serializer. The parser dispatches real
-syntax before integer conversion and refuses oversized integer tokens and real
-range errors rather than substituting values. Forward fitting checks its actual
-scale, coefficients and mapped frame; it does not require an unused determinant
-to fit in a float64.
-Wire `page_sizes` runs are owner-bound expectations and do not assert publication.
+Core owns each page's keep/transform decision and expected displayed size. The PDF
+adapter binds those decisions to original selected identities and exact native
+geometry, checks destination target dispositions and annotation/widget ownership,
+and rechecks the actual re-admitted pages before mutation. Source metrics come
+from the batched geometry observation. Repeated generated pages share a fitting
+record with an explicit count; wire page-size runs carry expectations rather
+than publication claims.
 
-Forward fitting admission also bounds represented centered-placement error and
-uniform dot-product rounding over the entire visible frame, within 64 binary64
-ULPs per target axis. The PDF adapter owns this arithmetic precision boundary;
-it is independent of the core .01pt keep decision and exact native verification.
-Corner residuals alone are insufficient: uniform magnitude bounds cover interior
-cancellation. An ill-conditioned transform refuses rather than publishing a
-correctly sized page with shifted painting. True keep paths do not run this gate.
+Kept pages bypass fitting mutation. The adapter owns affine placement and source
+composition accuracy admission, finite round-trip numeric serialization, explicit
+resource-execution roles and exact output geometry verification. It observes
+intrinsic/fitted graphics state per invocation, with bounded repeated work and
+cancellation. Resolved font/pattern selections survive scope changes; text-object
+matrices have their BT/ET lifetime separately from q/Q graphics state. Tiling
+patterns install their parent stream's entry state. Shared appearance placement
+comes from the same owner used by the writer.
 
-Fitting composition admission tracks intrinsic/fitted q/Q/cm CTMs separately and
-checks geometry consumers under invocation-specific state. Fixed-size rational
-current-matrix arithmetic and uniform evaluation bounds certify the visible local
-domain; no exact unbounded expression history is retained. Forms, patterns,
-appearances and other retained matrix resources use that same observer, with a
-bounded repeated-invocation budget and no ref-only certificate. The AP placement
-mapping is shared with the writer. Kept pages bypass transformation-only scanning.
-
-Composition graphics state stores resolved selected-resource bindings, not names
-that an invoked scope may shadow. Tf/gs.Font and scn/SCN bind their actual objects;
-q/Q copies immutable selections. Paint-channel dispatch and explicit executable
-program roles determine which matrices/programs run. CharProcs share lexical and
-budget mechanics with Forms but not Matrix/Resources/implicit-clip semantics.
-Hidden appearances skip execution certification without skipping source validity.
-
-Text rendering certification includes FontMatrix, font size/horizontal scale/rise,
-the current text matrix and the graphics CTM at each Type3 glyph. Text matrices
-and line matrices belong to the content invocation's BT/ET lifetime, separate
-from q/Q graphics state. Tiling patterns install their parent stream's entry
-graphics state, including inherited text parameters, before their own matrix.
+See [fitting policy](PDF-POLICY.md#fitting), [forward accuracy](PDF-POLICY.md#forward-fitting-accuracy)
+and [text execution](PDF-POLICY.md#text-execution-context) for the supported
+precision, resource and cursor boundaries.

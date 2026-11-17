@@ -6,7 +6,7 @@ Python: 3.12; fonttools 4.61.1.
    its font directory:
    AUTHORING=/absolute/fresh/office
    mkdir -p "$AUTHORING/fonts"
-2. python3 internal/core/testdata/corpus/sources/prepare_office_font.py "$AUTHORING/fonts/CorpusNotoSans-Regular.ttf"
+2. python3 internal/app/testdata/corpus/sources/prepare_office_font.py "$AUTHORING/fonts/CorpusNotoSans-Regular.ttf"
    This transient derivative changes only name
    records in the authoritative bundled Noto Sans so exporter font selection is
    unambiguous. The Noto copyright, OFL and outlines remain intact. Do not commit
@@ -17,7 +17,7 @@ Python: 3.12; fonttools 4.61.1.
 4. FONTCONFIG_FILE="$AUTHORING/fonts.conf" soffice \
    -env:UserInstallation="file://$AUTHORING/profile" --headless \
    --convert-to 'pdf:writer_pdf_Export:{"ExportBookmarks":{"type":"boolean","value":"true"}}' \
-   --outdir "$AUTHORING" internal/core/testdata/corpus/sources/office-report.fodt
+   --outdir "$AUTHORING" internal/app/testdata/corpus/sources/office-report.fodt
 5. Review actual embedded fonts (CorpusNotoSans-Regular only), two pages, native
    bookmarks/link, table/vector content, all source/export metadata and renders.
    Replace the frozen office-report.pdf only after review and provenance refresh.

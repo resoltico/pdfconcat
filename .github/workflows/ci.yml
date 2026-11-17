@@ -4,6 +4,15 @@ on:
   # Protected main requires PR CI; version tags invoke this workflow for release qualification.
   pull_request:
   workflow_call:
+    inputs:
+      source_ref:
+        description: Exact source commit selected by the release workflow
+        type: string
+        default: ''
+      release_tag:
+        description: Existing release tag; empty for snapshot qualification
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -21,6 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
@@ -81,6 +91,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
@@ -122,6 +133,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
@@ -139,11 +151,14 @@ jobs:
     # Darwin executables are ad hoc signed during the build, which needs macOS.
     runs-on: macos-15
     timeout-minutes: 20
+    env:
+      GORELEASER_CURRENT_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
@@ -157,7 +172,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+          if [[ -n "$GORELEASER_CURRENT_TAG" || "$GITHUB_REF_TYPE" == tag ]]; then
             goreleaser release --clean --skip=publish
           else
             goreleaser release --snapshot --clean
@@ -199,8 +214,8 @@ jobs:
           second="$RUNNER_TEMP/pdfconcat-reproducibility"
           git worktree add --detach "$second" HEAD
           goreleaser_binary=$(command -v goreleaser)
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            (cd "$second" && "$goreleaser_binary" release --clean)
+          if [[ -n "$GORELEASER_CURRENT_TAG" || "$GITHUB_REF_TYPE" == tag ]]; then
+            (cd "$second" && "$goreleaser_binary" release --clean --skip=publish)
           else
             (cd "$second" && "$goreleaser_binary" release --snapshot --clean)
           fi
@@ -233,6 +248,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-files

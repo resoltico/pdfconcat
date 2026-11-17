@@ -314,6 +314,15 @@ before publication; keep `Required CI` intact. Do not publish a second release b
 hand while it is running. Do not create tags, releases or upstream issues without
 maintainer authorization.
 
+To retry qualification for an existing unpublished tag after a workflow repair,
+run the **Release** workflow manually from `main` with its `tag` input. It resolves
+the tag once, checks out that exact source commit in every qualification and
+publication job, and uses the explicit tag for both nonpublishing builds. It
+never moves the tag or replaces an existing release. The attestation identifies
+the tagged source and the orchestration workflow revision separately; its signer
+identity remains the actual workflow that ran. Check both identities when
+verifying a manually retried release.
+
 ### Local packaging
 
 Use the exact GoReleaser version in [CI](.github/workflows/ci.yml). Complete release

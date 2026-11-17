@@ -54,7 +54,7 @@ jobs:
           go run ./internal/contractgen -check
           python3 .github/scripts/verify-dependency.py
           python3 -m unittest discover -s .github/scripts -p '*_test.py'
-          (cd third_party/pdfcpu && go test ./pkg/pdfcpu ./pkg/pdfcpu/types ./pkg/pdfcpu/model -run 'TestZeroOffsetEntryPolicy|TestFloatPDFRoundTrip|TestRealLexicalRoundTripAndIntegerRangeRefusal' -count=1)
+          (cd third_party/pdfcpu && go test ./pkg/pdfcpu ./pkg/pdfcpu/types ./pkg/pdfcpu/model -run 'TestZeroOffsetEntryPolicy|TestEncryptedInputReadPolicy|TestFloatPDFRoundTrip|TestRealLexicalRoundTripAndIntegerRangeRefusal' -count=1)
       - name: Installer packaging tests
         run: python3 -m unittest discover -s install -p '*_test.py'
       - name: Installer shell lint

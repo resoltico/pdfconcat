@@ -66,6 +66,12 @@ or active scripts embedded in source PDFs, but retained page/annotation actions
 may execute in a PDF viewer. Removing document-level scripts/attachments is not
 sanitization.
 
+Recognized encrypted sources are refused before backend password validation,
+key derivation or decryption. Header/xref/trailer parsing still runs first and
+can fail before that refusal; this does not remove parser/resource risks.
+The backend retains its format-specific cryptographic implementations, but
+PDFConcat supplies no password interface and does not create encrypted output.
+
 Encrypted sources (including empty-password encryption), signature values,
 catalog permission structures, timestamps, dynamic forms, optional content and
 known content-dropping page-tree shapes are refused. Empty

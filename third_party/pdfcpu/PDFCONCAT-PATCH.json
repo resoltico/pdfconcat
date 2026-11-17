@@ -5,6 +5,11 @@
   "upstream_module_sum": "h1:XW7q98xu3vNAimTSX93fIWnTDA2F0zz8mu88wiXoMjU=",
   "files": [
     {
+      "path": "pkg/pdfcpu/encrypted_input_test.go",
+      "sha256": "74bfbef8e078fa2f0ab26550b296306d5f20fe96f5e772e446cc29eacabed718",
+      "upstream_sha256": null
+    },
+    {
       "path": "pkg/pdfcpu/model/annotation.go",
       "sha256": "82ed833b4ef79ac249ad9067a0c466695f8d60a72c76a50481ef15575c27041e",
       "upstream_sha256": "d5e0d7a0c95834046c6766f36186a849847a83a0d5b06bb40d0b76a8c7d83ff9"
@@ -16,7 +21,7 @@
     },
     {
       "path": "pkg/pdfcpu/model/configuration.go",
-      "sha256": "6547922279b2c651fa28f12a134d3037172625598433b37e7e7c3d7c89d895ee",
+      "sha256": "e005d8c923818c8e8598b5352a7cbc7b10027b7ec62505d048d31d6d75ad2dfd",
       "upstream_sha256": "920db67316d4480ec627c6a71a97aa89c3d05a92a48019bbca48edd1cd3e487f"
     },
     {
@@ -51,7 +56,7 @@
     },
     {
       "path": "pkg/pdfcpu/read.go",
-      "sha256": "4d2bd0c8644d4f7b6277a1a6433090d9349153e12adbbf9f93c20ffad90f172f",
+      "sha256": "f91ebe3a95947c8a2c0d91f366c1f10cc38cbd183e680f39541ff017863347ce",
       "upstream_sha256": "2677cca296d7d63f603bc141de938f99cabe466b73d5d279fd434f23e00ca64c"
     },
     {

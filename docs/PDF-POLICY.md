@@ -8,7 +8,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 
 | Source feature | Behavior |
 | --- | --- |
-| Encryption, including empty passwords | Refuse `source_encrypted`, including recognized password errors before a context is returned |
+| Encryption, including empty passwords | Refuse `source_encrypted` once the reader recognizes encryption, before password validation/key setup/decryption |
 | Signature values, catalog permission structures or document timestamps | Refuse `source_signed`; signatures are not authenticated |
 | Empty unsigned signature fields, including null values | Keep |
 | `NeedsRendering true` | Refuse `source_dynamic_form` |

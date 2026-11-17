@@ -4549,12 +4549,16 @@ func checkForEncryption(c context.Context, ctx *model.Context) error {
 		log.Read.Printf("Encryption: %v\n", indRef)
 	}
 
-	if ctx.Cmd == model.BOOKLET ||
+	if ctx.RejectEncryptedInput ||
+		ctx.Cmd == model.BOOKLET ||
 		ctx.Cmd == model.ENCRYPT ||
 		ctx.Cmd == model.MERGEAPPEND ||
 		ctx.Cmd == model.MERGECREATE ||
 		ctx.Cmd == model.MERGECREATEZIP ||
 		ctx.Cmd == model.ADDSIGNATURE {
+		if err := contextutil.Check(c); err != nil {
+			return err
+		}
 		return fmt.Errorf("encryption status: %w", ErrEncrypted)
 	}
 

@@ -4,6 +4,7 @@
 
 ## [0.13.0] - 2026-11-17
 
+- Recognized encrypted inputs are refused before password validation, key derivation or decryption; header, xref and trailer parsing still run first.
 - Plans require version 7. Review earlier plans against current language and fitting behavior before updating their version; no migration is provided.
 - Results, reports and JSON version objects require format 9; source page_sizes records original ranges, established source and expected output dimensions, retained through later failures.
 - Rename facts are null when unestablished or inapplicable; an observed empty mapping is an empty array.

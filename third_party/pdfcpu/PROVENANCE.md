@@ -64,3 +64,18 @@ go test ./pkg/pdfcpu/types ./pkg/pdfcpu/model -run 'TestFloatPDFRoundTrip|TestRe
 The root serializer independently refuses nonfinite scalars before emitting PDF
 bytes. Root tests reopen finite scalar witnesses through the actual parser and
 verify numeric equality, including subnormals and the largest finite values.
+
+The runtime-only `Configuration.RejectEncryptedInput` option defaults to false.
+When enabled, a recognized encryption reference returns the existing typed
+`ErrEncrypted` before encryption-dictionary dereference or key setup, with context
+cancellation preserved. PDFConcat enables it for source admission/re-admission
+and strict output reopening. Header/xref/trailer parsing still occurs first;
+existing encryption-reference recognition and earlier malformed-input failures
+are unchanged. No cryptographic algorithms or configuration-file schema change.
+
+Dependency-owned controls explicitly exercise default encryption support, refusal
+before dictionary I/O/key work, cancellation, cloning and the supported xref forms:
+
+```
+go test ./pkg/pdfcpu -run TestEncryptedInputReadPolicy -count=1
+```

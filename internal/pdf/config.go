@@ -15,6 +15,7 @@ func configuration() (*model.Configuration, error) {
 		return nil, err
 	}
 	conf.Offline = true
+	conf.RejectEncryptedInput = true
 	conf.ValidationMode = model.ValidationRelaxed
 	conf.CreateBookmarks = true
 	conf.MergeBookmarkMode = model.MergeBookmarkModePreserve

@@ -8,100 +8,127 @@ import (
 	"slices"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/matrix"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
-// paintResources follows retained matrix consumers at use, with the incoming
-// state. No object-reference-only certificate is shared across invocations.
-func (a *compositionInspector) paintResources(resources types.Dict, state, entry compositionState, owner types.IndirectRef, depth int, op string) error {
-	patterns, err := a.pdf.DereferenceDict(resources["Pattern"])
-	if err != nil {
-		return err
-	}
-	for _, name := range []types.Name{state.fillPattern, state.strokePattern} {
-		if name == "" {
-			continue
+// Selected resources are immutable graphics-state bindings. Resource names are
+// resolved at selection, never reinterpreted in an invoked program's scope.
+type selectedFont struct {
+	object types.Object
+	size   float64
+}
+type selectedPattern struct {
+	object                     types.Object
+	resources                  types.Dict
+	anchorSource, anchorFitted matrix.Matrix
+}
+
+type compositionProgramRole uint8
+
+const (
+	formProgram compositionProgramRole = iota
+	appearanceProgram
+	tilingPatternProgram
+	softMaskProgram
+	type3GlyphProgram
+)
+
+func paintChannels(op string, textMode int) (fill, stroke bool) {
+	switch op {
+	case "S", "s":
+		return false, true
+	case "f", "F", "f*":
+		return true, false
+	case "B", "B*", "b", "b*":
+		return true, true
+	case "Tj", "TJ", "'", "\"":
+		switch textMode {
+		case 0, 4:
+			return true, false
+		case 1, 5:
+			return false, true
+		case 2, 6:
+			return true, true
 		}
-		object := patterns[string(name)]
-		value, err := a.pdf.Dereference(object)
+	}
+	return false, false
+}
+func textShowing(op string) bool { return op == "Tj" || op == "TJ" || op == "'" || op == "\"" }
+
+// paintResources dispatches actual resource consumers. Type3 programs execute
+// their own paint operators, so inherited patterns are not consumed at Tj itself.
+func (a *compositionInspector) paintResources(state compositionState, owner types.IndirectRef, depth int, op string) error {
+	if textShowing(op) && state.textMode != 3 && state.font != nil {
+		font, err := a.pdf.DereferenceDict(state.font.object)
 		if err != nil {
 			return err
 		}
-		switch p := value.(type) {
-		case types.StreamDict:
-			// Pattern matrices are anchored to the scope's default space. Also check
-			// current space: painting consumers may combine it before pattern setup.
-			if err = a.form(object, resources, entry, owner, "Pattern", depth); err != nil {
+		if font != nil {
+			subtype, err := nameValue(a.pdf, font["Subtype"])
+			if err != nil {
 				return err
 			}
-			if state.source != entry.source || state.fitted != entry.fitted {
-				if err = a.form(object, resources, state, owner, "Pattern", depth); err != nil {
+			if subtype == "Type3" {
+				m, err := objectMatrix(a.pdf, font["FontMatrix"])
+				if err != nil {
+					return a.failure(owner, "Font.FontMatrix")
+				}
+				textScale := matrix.Matrix{{state.font.size * state.horizontalScale, 0, 0}, {0, state.font.size, 0}, {0, state.textRise, 1}}
+				glyphState := state.concat(textScale).concat(m)
+				if !a.certified(&glyphState) {
+					return a.failure(owner, "Font.FontMatrix")
+				}
+				glyphs, err := a.pdf.DereferenceDict(font["CharProcs"])
+				if err != nil {
 					return err
 				}
+				child := a.pageResources
+				if font["Resources"] != nil {
+					child, err = a.pdf.DereferenceDict(font["Resources"])
+					if err != nil {
+						return err
+					}
+				}
+				for _, name := range slices.Sorted(maps.Keys(glyphs)) {
+					if err = a.program(type3GlyphProgram, glyphs[name], child, glyphState, owner, "Font.CharProcs", depth); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+		}
+	}
+	fill, stroke := paintChannels(op, state.textMode)
+	var patterns []*selectedPattern
+	if fill && state.fillPattern != nil {
+		patterns = append(patterns, state.fillPattern)
+	}
+	if stroke && state.strokePattern != nil && (!fill || state.strokePattern != state.fillPattern) {
+		patterns = append(patterns, state.strokePattern)
+	}
+	for _, binding := range patterns {
+		value, err := a.pdf.Dereference(binding.object)
+		if err != nil {
+			return err
+		}
+		anchor := compositionState{source: binding.anchorSource, fitted: binding.anchorFitted, horizontalScale: 1}
+		switch p := value.(type) {
+		case types.StreamDict:
+			if err = a.program(tilingPatternProgram, binding.object, binding.resources, anchor, owner, "Pattern", depth); err != nil {
+				return err
 			}
 		case types.Dict:
 			m, err := objectMatrix(a.pdf, p["Matrix"])
 			if err != nil {
 				return a.failure(owner, "Pattern.Matrix")
 			}
-			p1, p2 := entry.concat(m), state.concat(m)
-			if !a.certified(&p1) || !a.certified(&p2) {
+			placed := anchor.concat(m)
+			if !a.certified(&placed) {
 				return a.failure(owner, "Pattern.Matrix")
 			}
 		default:
 			return a.failure(owner, "Pattern")
-		}
-	}
-	if op != "Tj" && op != "TJ" && op != "'" && op != "\"" {
-		return nil
-	}
-	if state.font == "" {
-		return nil
-	} // existing source resource policy owns missing bindings
-	fonts, err := a.pdf.DereferenceDict(resources["Font"])
-	if err != nil {
-		return err
-	}
-	font, err := a.pdf.DereferenceDict(fonts[string(state.font)])
-	if err != nil {
-		return err
-	}
-	if font == nil {
-		return nil
-	}
-	if font["FontMatrix"] != nil {
-		m, err := objectMatrix(a.pdf, font["FontMatrix"])
-		if err != nil {
-			return a.failure(owner, "Font.FontMatrix")
-		}
-		state = state.concat(m)
-		if !a.certified(&state) {
-			return a.failure(owner, "Font.FontMatrix")
-		}
-	}
-	subtype, err := nameValue(a.pdf, font["Subtype"])
-	if err != nil {
-		return err
-	}
-	if subtype != "Type3" {
-		return nil
-	}
-	glyphs, err := a.pdf.DereferenceDict(font["CharProcs"])
-	if err != nil {
-		return err
-	}
-	child := resources
-	if font["Resources"] != nil {
-		child, err = a.pdf.DereferenceDict(font["Resources"])
-		if err != nil {
-			return err
-		}
-	}
-	// Glyph resolution is not reimplemented here: certify all retained programs
-	// of a used Type3 font conservatively, under this invocation's font matrix.
-	for _, name := range slices.Sorted(maps.Keys(glyphs)) {
-		if err = a.form(glyphs[name], child, state, owner, "Font.CharProcs", depth); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -119,6 +146,15 @@ func (a *compositionInspector) appearances(page pageGeometry, plan pageFitting) 
 		}
 		if d == nil {
 			continue
+		}
+		if d["F"] != nil {
+			flags, e := a.pdf.DereferenceNumber(d["F"])
+			if e != nil {
+				return e
+			}
+			if int(flags)&int(model.AnnHidden) != 0 {
+				continue
+			}
 		}
 		ap, err := a.pdf.DereferenceDict(d["AP"])
 		if err != nil {
@@ -168,8 +204,8 @@ func (a *compositionInspector) appearances(page pageGeometry, plan pageFitting) 
 					if !painted {
 						continue
 					}
-					state := compositionState{source: matrix.IdentMatrix, fitted: outer}.concat(placement)
-					if err = a.form(obj, page.attrs.Resources, state, page.ref, "AP."+key, 0); err != nil {
+					state := compositionState{source: matrix.IdentMatrix, fitted: outer, horizontalScale: 1}.concat(placement)
+					if err = a.program(appearanceProgram, obj, page.attrs.Resources, state, page.ref, "AP."+key, 0); err != nil {
 						return err
 					}
 				}

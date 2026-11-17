@@ -604,3 +604,31 @@ A valid source may keep successfully while refusing fitting when its composition
 accuracy cannot be established. Large cancelling translations that erase a fitting
 offset are one example, not a special-case magnitude rule. Exact native geometry
 checks and independent qpdf/Poppler fidelity controls remain separate safeguards.
+
+### Effective resources and execution roles
+
+The fitting observer binds selected font objects at both Tf and ExtGState Font,
+including size, and selected pattern objects at scn/SCN. q/Q and Form entry preserve
+those bindings; a child dictionary's same-name alias cannot replace an inherited
+selection. Pattern bindings retain their selecting scope's default-space anchor.
+Type3 glyph resource fallback uses the page resource dictionary when the font has
+no Resources entry. Names serve provenance and selection, not late paint lookup.
+
+Resource execution follows paint channels. S/s consumes stroke, f/F/f* consumes
+fill, combined path paints consume both, and sh does not consume selected colour
+patterns. Non-Type3 text uses its rendering mode; invisible text consumes neither.
+Type3 programs execute their own paint operators (except invisible mode), so a
+parent pattern is not scanned merely because text is shown if the glyph replaces
+that colour before painting. Colour resets and q/Q restore each channel.
+
+Hidden annotations do not execute appearance-composition certification; independent
+source, encoding, security and PDF2 checks remain. Later visible annotations are
+still checked. FontMatrix belongs to the Type3 font dictionary in this observer;
+a private same-name key in a Type1 font is not an executable transform. Likewise,
+a Type3 CharProc is a glyph program, not a Form: private Matrix/Resources entries
+in its stream dictionary do not acquire Form meanings. Form, appearance, pattern
+and soft-mask matrix/clip roles retain their own checks. Shared parsing and work
+budgets do not merge these distinct PDF contracts.
+
+These role and state rules follow PDF32000-1:2008 sections8.4,8.7,8.10,9.3 and9.6;
+see [the Adobe-hosted standard](https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf).

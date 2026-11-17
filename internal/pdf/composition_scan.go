@@ -16,14 +16,15 @@ import (
 )
 
 type compositionInspector struct {
-	context   context.Context
-	pdf       *model.Context
-	outer     matrix.Matrix
-	frame     types.Rectangle
-	target    packet.Size
-	original  int
-	remaining int64
-	active    map[types.IndirectRef]bool
+	context       context.Context
+	pdf           *model.Context
+	outer         matrix.Matrix
+	frame         types.Rectangle
+	target        packet.Size
+	original      int
+	remaining     int64
+	active        map[types.IndirectRef]bool
+	pageResources types.Dict
 }
 
 func (a *compositionInspector) failure(owner types.IndirectRef, path string) error {
@@ -81,7 +82,7 @@ func objectMatrix(s *model.Context, object types.Object) (matrix.Matrix, error) 
 	}
 	return m, nil
 }
-func (a *compositionInspector) form(object types.Object, resources types.Dict, state compositionState, owner types.IndirectRef, path string, depth int) error {
+func (a *compositionInspector) program(role compositionProgramRole, object types.Object, resources types.Dict, state compositionState, owner types.IndirectRef, path string, depth int) error {
 	if err := a.context.Err(); err != nil {
 		return err
 	}
@@ -99,19 +100,20 @@ func (a *compositionInspector) form(object types.Object, resources types.Dict, s
 	if a.active[ref] || depth > 256 {
 		return a.failure(ref, path)
 	}
-	m, err := objectMatrix(a.pdf, stream.Dict["Matrix"])
-	if err != nil {
-		return a.failure(ref, "Matrix")
-	}
-	state = state.concat(m)
-	// A Form establishes a clip before its operators execute.
-	if !a.certified(&state) {
-		return a.failure(ref, "Matrix")
-	}
-	if stream.Dict["Resources"] != nil {
-		resources, err = a.pdf.DereferenceDict(stream.Dict["Resources"])
-		if err != nil {
-			return err
+	if role != type3GlyphProgram {
+		m, e := objectMatrix(a.pdf, stream.Dict["Matrix"])
+		if e != nil {
+			return a.failure(ref, "Matrix")
+		}
+		state = state.concat(m)
+		if !a.certified(&state) {
+			return a.failure(ref, "Matrix")
+		}
+		if stream.Dict["Resources"] != nil {
+			resources, err = a.pdf.DereferenceDict(stream.Dict["Resources"])
+			if err != nil {
+				return err
+			}
 		}
 	}
 	data, err := decodeDrawingStream(a.context, a.pdf, *stream)
@@ -199,20 +201,26 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 			}
 			state = state.concat(m)
 		case "scn", "SCN":
+			var binding *selectedPattern
 			if len(args) > 0 {
 				if name, ok := args[len(args)-1].(types.Name); ok {
-					if op == "scn" {
-						state.fillPattern = name
-					} else {
-						state.strokePattern = name
+					patterns, e := a.pdf.DereferenceDict(resources["Pattern"])
+					if e != nil {
+						return e
 					}
+					binding = &selectedPattern{object: patterns[string(name)], resources: resources, anchorSource: entry.source, anchorFitted: entry.fitted}
 				}
 			}
-		case "cs", "CS", "g", "G", "rg", "RG", "k", "K":
-			if op == "cs" || op == "g" || op == "rg" || op == "k" {
-				state.fillPattern = ""
+			if op == "scn" {
+				state.fillPattern = binding
 			} else {
-				state.strokePattern = ""
+				state.strokePattern = binding
+			}
+		case "cs", "CS", "sc", "SC", "g", "G", "rg", "RG", "k", "K":
+			if op == "cs" || op == "sc" || op == "g" || op == "rg" || op == "k" {
+				state.fillPattern = nil
+			} else {
+				state.strokePattern = nil
 			}
 		case "gs":
 			if len(args) == 1 {
@@ -225,20 +233,69 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 					if e != nil {
 						return e
 					}
+					if graphics["Font"] != nil {
+						values, e := a.pdf.DereferenceArray(graphics["Font"])
+						if e != nil {
+							return e
+						}
+						if len(values) != 2 {
+							return a.failure(owner, "ExtGState.Font")
+						}
+						size, e := a.pdf.DereferenceNumber(values[1])
+						if e != nil {
+							return e
+						}
+						state.font = &selectedFont{object: values[0], size: size}
+					}
 					value, e := a.pdf.Dereference(graphics["SMask"])
 					if e != nil {
 						return e
 					}
 					if mask, ok := value.(types.Dict); ok && mask["G"] != nil {
-						if e = a.form(mask["G"], resources, state, owner, "ExtGState.SMask.G", depth); e != nil {
+						if e = a.program(softMaskProgram, mask["G"], resources, state, owner, "ExtGState.SMask.G", depth); e != nil {
 							return e
 						}
 					}
 				}
 			}
 		case "Tf":
-			if len(args) > 0 {
-				state.font, _ = args[0].(types.Name)
+			if len(args) != 2 {
+				return a.failure(owner, "Content.Tf")
+			}
+			name, ok := args[0].(types.Name)
+			if !ok {
+				return a.failure(owner, "Content.Tf")
+			}
+			fonts, e := a.pdf.DereferenceDict(resources["Font"])
+			if e != nil {
+				return e
+			}
+			size, e := a.pdf.DereferenceNumber(args[1])
+			if e != nil {
+				return e
+			}
+			state.font = &selectedFont{object: fonts[string(name)], size: size}
+		case "Tr":
+			if len(args) != 1 {
+				return a.failure(owner, "Content.Tr")
+			}
+			mode, e := a.pdf.DereferenceInteger(args[0])
+			if e != nil || mode == nil || mode.Value() < 0 || mode.Value() > 7 {
+				return a.failure(owner, "Content.Tr")
+			}
+			state.textMode = mode.Value()
+		case "Tz", "Ts":
+			if len(args) != 1 {
+				return a.failure(owner, "Content."+op)
+			}
+			value, e := a.pdf.DereferenceNumber(args[0])
+			if e != nil {
+				return e
+			}
+			if op == "Tz" {
+				state.horizontalScale = value / 100
+			} else {
+				state.textRise = value
 			}
 		case "Do":
 			if len(args) != 1 {
@@ -266,7 +323,7 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 				return err
 			}
 			if subtype == "Form" {
-				if err = a.form(object, resources, state, owner, "Content.Do", depth); err != nil {
+				if err = a.program(formProgram, object, resources, state, owner, "Content.Do", depth); err != nil {
 					return err
 				}
 			} else if !a.certified(&state) {
@@ -284,12 +341,12 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 			}
 		default:
 			if compositionPaintOperator(op) {
-				if err := a.paintResources(resources, state, entry, owner, depth, op); err != nil {
+				if err := a.paintResources(state, owner, depth, op); err != nil {
 					return err
 				}
 			}
 			// Path construction also consumes CTM before a later q/Q or painting op.
-			if (compositionPaintOperator(op) || compositionPathOperator(op)) && !a.certified(&state) {
+			if (compositionPathOperator(op) || (compositionPaintOperator(op) && (!textShowing(op) || state.textMode != 3))) && !a.certified(&state) {
 				return a.failure(owner, "Content."+op)
 			}
 		}
@@ -317,8 +374,8 @@ func fittingCompositionFindings(c context.Context, s *model.Context, pages []pag
 		if limit < 0 {
 			limit = model.DefaultResourceLimits().MaxDecodeBytes
 		}
-		observer := compositionInspector{context: c, pdf: s, outer: plan.Matrix, frame: page.box, target: plan.Decision.Output, original: plan.Original, remaining: limit, active: map[types.IndirectRef]bool{}}
-		err = observer.scan(data, page.attrs.Resources, compositionState{source: matrix.IdentMatrix, fitted: plan.Matrix}, page.ref, 0)
+		observer := compositionInspector{context: c, pdf: s, outer: plan.Matrix, frame: page.box, target: plan.Decision.Output, original: plan.Original, remaining: limit, pageResources: page.attrs.Resources, active: map[types.IndirectRef]bool{}}
+		err = observer.scan(data, page.attrs.Resources, compositionState{source: matrix.IdentMatrix, fitted: plan.Matrix, horizontalScale: 1}, page.ref, 0)
 		if err == nil {
 			err = observer.appearances(page, plan)
 		}

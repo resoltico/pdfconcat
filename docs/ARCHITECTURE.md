@@ -231,3 +231,10 @@ domain; no exact unbounded expression history is retained. Forms, patterns,
 appearances and other retained matrix resources use that same observer, with a
 bounded repeated-invocation budget and no ref-only certificate. The AP placement
 mapping is shared with the writer. Kept pages bypass transformation-only scanning.
+
+Composition graphics state stores resolved selected-resource bindings, not names
+that an invoked scope may shadow. Tf/gs.Font and scn/SCN bind their actual objects;
+q/Q copies immutable selections. Paint-channel dispatch and explicit executable
+program roles determine which matrices/programs run. CharProcs share lexical and
+budget mechanics with Forms but not Matrix/Resources/implicit-clip semantics.
+Hidden appearances skip execution certification without skipping source validity.

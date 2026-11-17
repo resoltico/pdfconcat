@@ -317,7 +317,7 @@ limits, generate the plan in batches or with a program that preserves filenames.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 5, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+  jq -n '{version: 6, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -331,7 +331,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 5; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 6; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -377,11 +377,12 @@ status `invalid`; a processing failure selects `failed`.
 
 ## Diagnostic codes
 
-The [diagnostic registry](../internal/core/internal/diag/codes.go) is authoritative.
+The [diagnostic registry](../internal/core/diag/codes.go) is authoritative.
 Warning class is empty (shown as —); warnings never select an error outcome.
 
 <!-- codes -->
 
+<!-- BEGIN GENERATED DIAGNOSTICS -->
 | Code | Severity | Class | Meaning |
 | --- | --- | --- | --- |
 | `request_invalid` | error | invalid | invalid application request envelope |
@@ -391,12 +392,6 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_outline_depth_unsupported` | error | invalid | authored sections and imported bookmarks exceed the supported outline hierarchy |
 | `source_form_unsupported` | error | invalid | nonempty forms require identical resolved DR/DA/Q representations |
 | `source_uri_base_removed` | warning | — | source URI Base is removed; retained relative actions may resolve differently |
-| `usage_unknown_command` | error | invalid | first argument is not a command |
-| `usage_unknown_option` | error | invalid | option not defined for the command |
-| `usage_missing_value` | error | invalid | option needs a value |
-| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
-| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
-| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 | `output_required` | error | invalid | build requires an output destination |
 | `plan_unreadable` | error | failed | plan file or stdin could not be read |
 | `plan_too_large` | error | invalid | plan exceeds 64 MiB |
@@ -408,7 +403,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `plan_type` | error | invalid | wrong JSON type |
 | `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
 | `plan_item_shape` | error | invalid | an item object without exactly one supported source, page, group or contents shape |
-| `plan_limit` | error | invalid | nesting, entries, count or total generated pages over the limit |
+| `plan_limit` | error | invalid | nesting, entries, count, authored text or total generated pages over the limit |
 | `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
 | `output_exists` | error | invalid | output exists and replacement was not authorized |
 | `report_exists` | error | invalid | report exists and replacement was not authorized, or plan inputs are unknown |
@@ -427,11 +422,12 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
 | `source_unreadable` | error | failed | source file could not be read |
 | `source_changed` | error | failed | source bytes or readability at assembly differ from inspection |
+| `source_structure_partial` | warning | — | retained source content has incomplete structural coverage |
 | `source_not_pdf` | error | invalid | source has no recognizable PDF header |
 | `source_input_invalid` | error | invalid | source input is absent, denied or nonregular |
 | `plan_input_invalid` | error | invalid | plan input is absent, denied or nonregular |
 | `font_input_invalid` | error | invalid | font input is absent, denied or nonregular |
-| `source_structure_partial` | warning | — | retained source content has incomplete structural coverage |
+| `source_xref_entry_ignored` | warning | — | unreferenced zero-offset classic xref entry ignored without changing original source bytes |
 | `source_invalid` | error | invalid | PDF parsing or validation failed |
 | `source_unsupported` | error | invalid | source structure cannot be composed with the supported fidelity guarantees |
 | `source_processing_failed` | error | failed | unexpected PDF backend failure, including a recovered panic |
@@ -469,3 +465,10 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `working_directory_unavailable` | error | failed | The process working directory could not be determined |
 | `output_inspection_failed` | error | failed | The output destination could not be inspected |
 | `report_inspection_failed` | error | failed | The report destination could not be inspected |
+| `usage_unknown_command` | error | invalid | first argument is not a command |
+| `usage_unknown_option` | error | invalid | option not defined for the command |
+| `usage_missing_value` | error | invalid | option needs a value |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
+| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
+| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
+<!-- END GENERATED DIAGNOSTICS -->

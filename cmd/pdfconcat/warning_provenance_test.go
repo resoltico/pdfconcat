@@ -12,7 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	exchange "github.com/resoltico/pdfconcat/internal/wire"
+
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
 
@@ -36,7 +37,7 @@ func TestLocatedWarningsSurviveIndependentSummaryCapsAndLaterFailure(t *testing.
 	for range 22 {
 		items = append(items, map[string]any{"source": "source.pdf", "pages": [][2]int{{2, 2}}})
 	}
-	plan := map[string]any{"version": 5, "items": items}
+	plan := map[string]any{"version": 6, "items": items}
 	for _, laterFailure := range []bool{false, true} {
 		if laterFailure {
 			if err := os.WriteFile(filepath.Join(dir, "bad.pdf"), []byte("not a PDF"), 0600); err != nil {
@@ -62,7 +63,7 @@ func TestLocatedWarningsSurviveIndependentSummaryCapsAndLaterFailure(t *testing.
 			t.Fatal(err)
 		}
 		validateResult(t, raw)
-		var full core.Result
+		var full exchange.Result
 		if err = json.Unmarshal(raw, &full); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +109,7 @@ func TestRenamePredictionsUseOnlyRetainedOriginalSourceSites(t *testing.T) {
 	if e := pdffixture.NamedDests("PREDICT").WriteFile(source); e != nil {
 		t.Fatal(e)
 	}
-	input := `{"version":5,"items":[{"source":"named.pdf","pages":[[1,1]]},{"source":"named.pdf","pages":[[2,2]]},{"source":"named.pdf","pages":[[2,2]]}]}`
+	input := `{"version":6,"items":[{"source":"named.pdf","pages":[[1,1]]},{"source":"named.pdf","pages":[[2,2]]},{"source":"named.pdf","pages":[[2,2]]}]}`
 	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, input)
 	if exit != 0 {
 		t.Fatal(r.Diagnostics)
@@ -130,7 +131,7 @@ func TestRenamePredictionsUseOnlyRetainedOriginalSourceSites(t *testing.T) {
 	if e := pdffixture.Form("FORM").WriteFile(form); e != nil {
 		t.Fatal(e)
 	}
-	r, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, `{"version":5,"items":[{"source":"form.pdf"},{"source":"form.pdf"}]}`)
+	r, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, `{"version":6,"items":[{"source":"form.pdf"},{"source":"form.pdf"}]}`)
 	if exit != 0 {
 		t.Fatal(r.Diagnostics)
 	}

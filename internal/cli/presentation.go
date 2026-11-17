@@ -11,12 +11,13 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/app"
+	result "github.com/resoltico/pdfconcat/internal/wire"
 )
 
 // Summary omits parts and bounds both diagnostics and their consumer pointers.
-func Summary(r core.Result) core.Result {
-	r = r.Full()
+func Summary(input app.Result) result.Result {
+	r := result.Project(input)
 	r.Parts = nil
 	r.Sections = nil
 	if len(r.Diagnostics) > 20 {
@@ -43,22 +44,22 @@ func JSON(w io.Writer, value any) error {
 }
 
 // Render writes a capped JSON document or a text summary with separate diagnostics.
-func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
+func Render(w, stderr io.Writer, r app.Result, asJSON bool) error {
 	if asJSON {
 		return JSON(w, Summary(r))
 	}
 	rows, omitted := previewRows(r)
-	r = Summary(r)
-	if _, err := fmt.Fprintf(w, "%s %s\n", r.Command, r.Status); err != nil {
+	summary := Summary(r)
+	if _, err := fmt.Fprintf(w, "%s %s\n", summary.Command, summary.Status); err != nil {
 		return err
 	}
-	if r.Pages != nil && r.Pages.Total != nil {
-		if _, err := fmt.Fprintf(w, "Pages: %d\n", *r.Pages.Total); err != nil {
+	if summary.Pages != nil && summary.Pages.Total != nil {
+		if _, err := fmt.Fprintf(w, "Pages: %d\n", *summary.Pages.Total); err != nil {
 			return err
 		}
 	}
-	if r.Output != nil {
-		if _, err := fmt.Fprintf(w, "Output: %s (published: %t)\n", strconv.Quote(r.Output.Path), r.Output.Published); err != nil {
+	if summary.Output != nil {
+		if _, err := fmt.Fprintf(w, "Output: %s (published: %t)\n", strconv.Quote(summary.Output.Path), summary.Output.Published); err != nil {
 			return err
 		}
 	}
@@ -68,22 +69,22 @@ func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
 		}
 	}
 	if omitted > 0 {
-		if _, err := fmt.Fprintf(w, "%d more preview rows; %s\n", omitted, reportHint(r.Report)); err != nil {
+		if _, err := fmt.Fprintf(w, "%d more preview rows; %s\n", omitted, reportHint(summary.Report)); err != nil {
 			return err
 		}
 	}
-	for _, d := range r.Diagnostics {
-		if _, err := fmt.Fprintln(stderr, diagnosticText(d, r.Report)); err != nil {
+	for _, d := range summary.Diagnostics {
+		if _, err := fmt.Fprintln(stderr, diagnosticText(d, summary.Report)); err != nil {
 			return err
 		}
 	}
-	if r.DiagnosticsOmitted > 0 {
-		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; %s\n", r.DiagnosticsOmitted, reportHint(r.Report)); err != nil {
+	if summary.DiagnosticsOmitted > 0 {
+		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; %s\n", summary.DiagnosticsOmitted, reportHint(summary.Report)); err != nil {
 			return err
 		}
 	}
-	if r.Report != nil {
-		if _, err := fmt.Fprintf(w, "Report: %s (written: %t)\n", strconv.Quote(r.Report.Path), r.Report.Written); err != nil {
+	if summary.Report != nil {
+		if _, err := fmt.Fprintf(w, "Report: %s (written: %t)\n", strconv.Quote(summary.Report.Path), summary.Report.Written); err != nil {
 			return err
 		}
 	}
@@ -91,7 +92,7 @@ func Render(w, stderr io.Writer, r core.Result, asJSON bool) error {
 }
 
 // reportHint describes access to uncapped details using actual report visibility.
-func reportHint(report *core.Report) string {
+func reportHint(report *result.Report) string {
 	if report == nil {
 		return "use --report for full details."
 	}
@@ -102,7 +103,7 @@ func reportHint(report *core.Report) string {
 }
 
 // diagnosticText keeps each diagnostic on one terminal-safe line.
-func diagnosticText(d core.Diagnostic, report *core.Report) string {
+func diagnosticText(d app.Diagnostic, report *result.Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s: %s", d.Severity, d.Code, printableMessage(d.Message))
 	if location := d.PDFLocation; location != nil {
@@ -176,7 +177,8 @@ func printableMessage(message string) string {
 	return b.String()
 }
 
-func previewRows(r core.Result) ([]string, int) {
+func previewRows(r app.Result) ([]string, int) {
+	report := result.Project(r).Report
 	var rows []string
 	pages := func(span *[2]int64) string {
 		if span == nil {
@@ -199,7 +201,7 @@ func previewRows(r core.Result) ([]string, int) {
 			break
 		}
 		switch part.Kind {
-		case core.PartSource:
+		case app.PartSource:
 			source := "unknown"
 			if part.Spans != nil {
 				mapping := *part.Spans
@@ -209,13 +211,13 @@ func previewRows(r core.Result) ([]string, int) {
 				}
 				source = strings.Join(spans, ",")
 				if len(mapping) > 20 {
-					source += fmt.Sprintf(" (%d more spans; %s)", len(mapping)-20, strings.TrimSuffix(reportHint(r.Report), "."))
+					source += fmt.Sprintf(" (%d more spans; %s)", len(mapping)-20, strings.TrimSuffix(reportHint(report), "."))
 				}
 			}
 			rows = append(rows, fmt.Sprintf("Source %s: selected %s → pages %s", strconv.Quote(part.Path), source, pages(part.OutputPages)))
-		case core.PartPadding:
+		case app.PartPadding:
 			rows = append(rows, fmt.Sprintf("Padding before %s: pages %s (odd_start)", strconv.Quote(part.BeforeItem), pages(part.OutputPages)))
-		case core.PartPage, core.PartDivider, core.PartContents:
+		case app.PartPage, app.PartDivider, app.PartContents:
 			rows = append(rows, fmt.Sprintf("%s %s: pages %s", part.Kind, strconv.Quote(part.Item), pages(part.OutputPages)))
 		}
 	}

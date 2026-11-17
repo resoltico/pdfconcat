@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Plans require version 6: authored language now selects generated body, divider and contents glyphs. Review appearance before updating version 5 plans; no migration is provided.
+- Unreferenced zero-offset classic xref entries can be admitted with located warnings and revision tombstones; referenced entries and exceptional hybrid chains remain refused.
+- Both output and report destinations protect contents-only external fonts, including existing-file aliases, through a shared effective-input inventory.
+- Full typed declarations share semantic admission with JSON plans; prepared traversal and font views own their mutable data, and inspection takes an explicit worker budget.
+- Domain facts, I/O orchestration, PDF processing and wire projection have separate owners; the CLI alone maps complete outcomes to process exits.
+- Generated contract checks reject stale schema/reference values; release checks require every supported target and compare deliverables from two isolated clean builds.
+- Source delivery retains the modified pdfcpu reader, upstream licenses and exact patch provenance, and verifies that offline vendoring uses the patched source.
+
 ## [0.12.0] - 2026-11-16
 
 - Installers require the complete current receipt inventory. Remove incompatible installations with their matching installer or use a fresh directory; receipts are not converted.
@@ -123,7 +131,7 @@
 - Distinct source paths are inspected concurrently with at most `GOMAXPROCS` workers and findings merged in first-use order. Font preparation and PDF assembly remain sequential; parsing and assembly still have no universal time or memory bound.
 - Updated the PDF engine to pdfcpu v0.16.3 and its selected dependency versions.
 - Source and development-tool builds require Go 1.27.3. Upgrade the Go toolchain before building.
-- Editor-schema source paths are `internal/core/internal/plan/plan.schema.json` and `internal/core/internal/result/result.schema.json`. Update source-tree schema URLs, or obtain matching schemas with `pdfconcat schema plan|result`; binary archives still contain them under `schemas/`.
+- Editor-schema source paths are `internal/plan/plan.schema.json` and `internal/wire/result.schema.json`. Update source-tree schema URLs, or obtain matching schemas with `pdfconcat schema plan|result`; binary archives still contain them under `schemas/`.
 
 ### Removed
 

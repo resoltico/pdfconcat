@@ -9,7 +9,7 @@ versions linked into an executable.
 
 | Module | License | Purpose | License copy |
 | --- | --- | --- | --- |
-| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT | PDF reading, validation, merging, fitting and object types | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
+| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT; PDFConcat modifications AGPL-3.0-only | PDF reading, validation, merging, fitting and object types; locally modified v0.16.4 reader | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
 | `github.com/go-text/typesetting` | Unlicense OR BSD-3-Clause (used under BSD-3-Clause); its `harfbuzz` package MIT | OpenType parsing and text shaping | [go-text](licenses/go-text-typesetting-LICENSE.txt), [HarfBuzz port](licenses/go-text-harfbuzz-MIT.txt) |
 | `github.com/clipperhouse/uax29/v2` | MIT | Unicode segmentation | [uax29](licenses/clipperhouse-uax29-MIT.txt) |
 | `github.com/hhrutter/tiff` | BSD-3-Clause | PDF image decoding | [tiff](licenses/hhrutter-tiff-BSD-3-Clause.txt) |
@@ -46,7 +46,7 @@ go-postscript embeds `agl-aglfn/aglfn.txt`, `agl-aglfn/glyphlist.txt` and
 
 The executable embeds Noto Sans Regular, Copyright 2022 The Noto Project Authors,
 under the [SIL Open Font License 1.1](licenses/NotoSans-OFL-1.1.txt).
-The same notice accompanies the asset in `internal/core/internal/typeset/fontdata/OFL.txt`.
+The same notice accompanies the asset in `internal/typeset/fontdata/OFL.txt`.
 Generated PDFs normally embed a glyph-pruned copy with stable glyph IDs. A font
 whose embedding permission prohibits subsetting is embedded unchanged. The font
 is not sold separately.
@@ -60,8 +60,8 @@ Source PDFs and user-supplied font files can independently contain Roboto.
 
 Source checkouts include Go Italic and Go Mono fonts, plus frozen PDFs with
 embedded Noto Sans and Libertinus Serif font programs. Their credits, licenses
-and authoring details are recorded in the [corpus notices](https://github.com/resoltico/pdfconcat/blob/main/internal/core/testdata/corpus/NOTICE.txt).
-Adobe Source Serif 4 static CFF is also included under its accompanying SIL Open Font License in `internal/core/testdata/fonts/source-serif`.
+and authoring details are recorded in the [corpus notices](https://github.com/resoltico/pdfconcat/blob/main/internal/app/testdata/corpus/NOTICE.txt).
+Adobe Source Serif 4 static CFF is also included under its accompanying SIL Open Font License in `internal/app/testdata/fonts/source-serif`.
 These test assets are not included in the executable or binary release archives.
 
 ## Development tools
@@ -76,3 +76,10 @@ A dependency update that changes the linked module set, a license or NOTICE
 file of a linked package, or the assets a dependency embeds requires a notice
 update; `cmd/pdfconcat/notices_test.go` checks those three. Version-only changes
 do not require duplicating a new version number here.
+
+PDFConcat ships a modified pdfcpu v0.16.4 through the in-tree module replacement
+`third_party/pdfcpu`. Its typed source-only classic-xref admission patch, exact
+changed-source hashes and upstream module checksums are recorded in that
+directory's `PROVENANCE.md` and `PDFCONCAT-PATCH.json`. The source archive retains
+the canonical replacement and verifies the same patched files in vendored code.
+Build metadata and SBOMs must identify the local replacement as modified source.

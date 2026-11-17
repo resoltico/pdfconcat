@@ -13,8 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	exchange "github.com/resoltico/pdfconcat/internal/wire"
+
 	"github.com/resoltico/pdfconcat/internal/cli"
-	"github.com/resoltico/pdfconcat/internal/core"
 )
 
 func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
@@ -27,12 +28,12 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 				if format == "json" {
 					args = append(args, "--json")
 				}
-				exit := cli.Run(t.Context(), args, nil, &stdout, &stderr, cli.Host{WorkingDir: func() (string, error) { return "", errors.New(tc.message) }})
+				exit := cli.Run(t.Context(), args, nil, &stdout, &stderr, cli.Host{InspectionWorkers: 1, WorkingDir: func() (string, error) { return "", errors.New(tc.message) }})
 				if exit != 1 || format == "json" && stderr.Len() != 0 || format == "text" && stderr.Len() == 0 {
 					t.Fatalf("host failure classification: %d %q %q", exit, stdout.String(), stderr.String())
 				}
 				if format == "json" {
-					var r core.Result
+					var r exchange.Result
 					if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
 						t.Fatal(err)
 					}
@@ -51,7 +52,7 @@ func TestAcquiredWorkingDirectoryErrorsKeepEnvironmentalOutcome(t *testing.T) {
 }
 func TestParserRetainsCompleteNormalizedFailure(t *testing.T) {
 	command, failure := cli.Parse([]string{"check", "--bad", "--json"})
-	if !command.JSON || failure == nil || failure.FormatVersion != 7 || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || core.ExitCode(*failure) != 2 {
+	if !command.JSON || failure == nil || failure.Command != "check" || failure.Status != "invalid" || failure.Parts == nil || failure.Sections == nil || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code.String() != "usage_unknown_option" || failure.Diagnostics[0].Items[0] != "argv:1" || cli.ExitCode(failure.Status) != 2 {
 		t.Fatalf("complete parse outcome: %+v %+v", command, failure)
 	}
 }
@@ -69,9 +70,9 @@ func TestStdinAcquisitionFailureDoesNotWriteReport(t *testing.T) {
 			cancel()
 		}
 		var stdout, stderr bytes.Buffer
-		exit := cli.Run(ctx, []string{"check", "--plan", "-", "--report", report, "--json"}, failingPlanReader{}, &stdout, &stderr, cli.Host{WorkingDir: func() (string, error) { return dir, nil }})
+		exit := cli.Run(ctx, []string{"check", "--plan", "-", "--report", report, "--json"}, failingPlanReader{}, &stdout, &stderr, cli.Host{InspectionWorkers: 1, WorkingDir: func() (string, error) { return dir, nil }})
 		cancel()
-		var outcome core.Result
+		var outcome exchange.Result
 		if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
 			t.Fatal(err)
 		}

@@ -34,7 +34,7 @@ jobs:
           (cd tools && go mod tidy -diff)
       - name: No inline lint suppressions
         run: |
-          if git grep -n -E '//[[:space:]]*nolint' -- '*.go'; then
+          if git grep -n -E '//[[:space:]]*nolint' -- '*.go' ':!third_party/**'; then
             echo "Inline //nolint is not allowed; add a commented exclusion to .golangci.yml instead."
             exit 1
           fi
@@ -50,6 +50,12 @@ jobs:
         run: |
           actionlint_version=$(go list -modfile=tools/go.mod -m -f '{{.Version}}' github.com/rhysd/actionlint)
           go run "github.com/rhysd/actionlint/cmd/actionlint@$actionlint_version"
+      - name: Generated contracts and dependency source
+        run: |
+          go run ./internal/contractgen -check
+          python3 .github/scripts/verify-dependency.py
+          python3 -m unittest discover -s .github/scripts -p '*_test.py'
+          (cd third_party/pdfcpu && go test ./pkg/pdfcpu -run TestZeroOffsetEntryPolicy -count=1)
       - name: Installer packaging tests
         run: python3 -m unittest discover -s install -p '*_test.py'
       - name: Installer shell lint
@@ -71,7 +77,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -133,7 +139,7 @@ jobs:
     name: Release packaging
     # Darwin executables are ad hoc signed during the build, which needs macOS.
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -156,21 +162,12 @@ jobs:
         run: |
           # All published assets are staged flat, including the exact installer bytes.
           (cd dist && /usr/bin/shasum -a 256 --check --strict checksums.txt)
-          test "$(/usr/bin/grep -c -E '  (SOURCE\.tar\.gz|install\.(sh|ps1)|pdfconcat_[a-z]+_(amd64|arm64)\.(tar\.gz|zip|cdx\.json))$' dist/checksums.txt)" = 15
+          go run ./internal/releasecheck -dir dist
           # Each SBOM describes its own executable's platform.
           for sbom in dist/pdfconcat_*.cdx.json; do
             platform=${sbom#dist/pdfconcat_}; platform=${platform%.cdx.json}
             goos=${platform%_*} goarch=${platform#*_}
             test "$(jq -r '[.components[].purl | capture("goarch=(?<a>[^&]+)&goos=(?<o>[^&]+)") | "\(.o)_\(.a)"] | unique | join(",")' "$sbom")" = "${goos}_${goarch}"
-          done
-          # Archives hold the program and its license notices, nothing else.
-          expected=$( (echo LICENSE; echo PROJECT-NOTICE.md; echo LICENSE-COMMERCIAL.md; echo THIRD_PARTY_NOTICES.md; cd internal/legal && /bin/ls licenses/*.txt) | LC_ALL=C sort)
-          for archive in dist/pdfconcat_*.tar.gz dist/pdfconcat_*.zip; do
-            case "$archive" in
-              *.zip) members=$(/usr/bin/zipinfo -1 "$archive") program=pdfconcat.exe ;;
-              *) members=$(/usr/bin/tar -tzf "$archive") program=pdfconcat ;;
-            esac
-            test "$(printf '%s\n' "$members" | LC_ALL=C sort)" = "$(printf '%s\n%s\n' "$expected" "$program" | LC_ALL=C sort)"
           done
           # The delivered source builds without fetching linked module source.
           source_dir=$(/usr/bin/mktemp -d "$RUNNER_TEMP/pdfconcat-source.XXXXXX")
@@ -189,6 +186,21 @@ jobs:
             /usr/bin/otool -l "$staging_dir/pdfconcat" | /usr/bin/grep -E 'minos 15\.0(\.0)?$'
             /bin/rm -rf "$staging_dir"
           done
+      - name: Reproduce all delivered bytes in an independent clean checkout
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          second="$RUNNER_TEMP/pdfconcat-reproducibility"
+          git worktree add --detach "$second" HEAD
+          goreleaser_binary=$(command -v goreleaser)
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            (cd "$second" && "$goreleaser_binary" release --clean)
+          else
+            (cd "$second" && "$goreleaser_binary" release --snapshot --clean)
+          fi
+          cp "$second/.tools/installers/install.sh" "$second/.tools/installers/install.ps1" "$second/.tools/SOURCE.tar.gz" "$second/dist/"
+          go run ./internal/releasecheck -dir dist -compare "$second/dist"
+          git worktree remove --force "$second"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-files

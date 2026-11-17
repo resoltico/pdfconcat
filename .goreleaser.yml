@@ -94,11 +94,11 @@ sboms:
   - id: cyclonedx
     artifacts: binary
     documents: ["{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}.cdx.json"]
-    cmd: ../.tools/bin/cyclonedx-gomod
+    cmd: python3
     env:
       - GOOS={{ .Os }}
       - GOARCH={{ .Arch }}
-    args: ["bin", "-json", "-licenses", "-noserial", "-notimestamp", "-output", "$document", "$artifact"]
+    args: ["../.github/scripts/sbom-provenance.py", "bin", "-json", "-licenses", "-noserial", "-notimestamp", "-output", "$document", "$artifact"]
 
 checksum:
   name_template: checksums.txt

@@ -176,7 +176,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -215,7 +215,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -255,7 +255,7 @@ It records input SHA-256 hashes, page mappings and uncapped diagnostics. PDF and
 inspect the final result before retrying after a failure. See
 [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v5; results and reports use format v7. Print their schemas with:
+Plans use format v6; results and reports use format v7. Print their schemas with:
 
 ```sh
 pdfconcat schema plan
@@ -392,3 +392,11 @@ Contributor prerequisites, checks and release procedures are in
 [ARCHITECTURE](docs/ARCHITECTURE.md).
 
 Original code and documentation use [AGPL-3.0-only](LICENSE). See [licensing, source and contribution terms](PROJECT-NOTICE.md) and [commercial licensing status](LICENSE-COMMERCIAL.md). Third-party terms remain separate; `pdfconcat licenses` prints the project license and [third-party notices](internal/legal/THIRD_PARTY_NOTICES.md).
+
+Generated body text, divider titles and contents use the authored BCP 47 language
+in plan v6, with deterministic neutral fallback when absent or unmatched. See
+[the language contract](docs/PLAN.md#authored-language-and-plan-version-6).
+Consumed external fonts, including a contents-only font, are protected inputs
+for both output and report destinations. The narrowly patched strict reader can
+admit unreferenced zero-offset classic xref entries with located warnings; see
+[PDF input policy](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).

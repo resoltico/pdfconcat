@@ -494,3 +494,23 @@ cover memory exhaustion or fatal stack overflow. Use operating-system resource
 limits for unusually large or untrusted inputs. [SECURITY](../SECURITY.md) defines
 the trusted-input boundary; [CONTRIBUTING](../CONTRIBUTING.md#scale) describes
 optional measurements.
+
+## Narrow classic-xref input tolerance
+
+Original sources may contain an in-use classic xref entry for a positive object
+number whose literal offset is zero. The modified strict reader accepts it only
+when no original effective live object or effective trailer references that
+object number, including references with another generation. It retains a
+revision tombstone so an older definition cannot return. Each admitted entry
+produces `source_xref_entry_ignored` with original xref/object evidence and
+consuming items. Original bytes and hashes are unchanged; assembly repeats the
+gate after rereading and checking the digest.
+
+An exceptional hybrid/xref-stream chain is refused because the original-reference
+proof is limited to exclusively classic revisions. Ordinary valid stream/hybrid
+inputs keep their existing support. Other syntax, encryption, signature, content,
+structure, resource and cancellation safeguards remain. Serialized output uses
+ordinary strict reading with the exception disabled. Synthetic regressions do
+not establish compatibility with every Quartz producer or unavailable real PDFs.
+The source and provenance of the local reader are in
+[`third_party/pdfcpu`](../third_party/pdfcpu/PROVENANCE.md).

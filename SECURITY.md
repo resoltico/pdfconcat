@@ -117,3 +117,9 @@ universal network-filesystem guarantee. A backend/output/report failure never
 intentionally rolls back an already-published PDF. See
 [saved-output and report behaviour](docs/CLI.md#reports-and-committed-state)
 for the result fields that record these outcomes.
+
+The source-only zero-offset xref exception is bounded by original typed-reference
+checks and revision tombstones. It does not enable relaxed input parsing or
+runtime repair programs. Exceptional hybrid/xref-stream chains remain refused.
+Original input reservations include every consumed external font and protect
+both publication destinations; undecoded plans keep create-new-only reports.

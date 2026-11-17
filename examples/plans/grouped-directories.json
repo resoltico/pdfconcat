@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "output": "Evidence.pdf",
   "dir": "source",
   "page_defaults": {

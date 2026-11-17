@@ -1,6 +1,6 @@
-# Plan v5
+# Plan v6
 
-A plan is one UTF-8 JSON object with `version: 5`. Use source objects to select
+A plan is one UTF-8 JSON object with `version: 6`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
@@ -13,7 +13,7 @@ packet; its input paths are relative to the directory where you save the plan.
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -71,7 +71,7 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `5` |
+| `version` | Required integer token `6` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
@@ -126,7 +126,7 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "output": "reordered.pdf",
   "items": [
     { "source": "source.pdf", "pages": [[3, 3]] },
@@ -375,7 +375,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
@@ -413,7 +413,7 @@ contents or page-number overlay layout. For example, a generated page can declar
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "items": [{ "page": {
     "size": "A4",
     "text": {
@@ -469,7 +469,7 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 5 is supported; version checks follow the same first-fault order.
+version 6 is supported; version checks follow the same first-fault order.
 
 After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
 `plan_syntax`; supply a JSON plan object.
@@ -491,3 +491,21 @@ counts are `plan_value`; excessive/overflowing counts are `plan_limit`.
 distinguish integer lexemes such as `3` and `3.0`; encoding, duplicate members,
 converted unit bounds, platform paths and aggregate limits also require the
 decoder. Schema validity alone is not a successful check of a packet.
+
+## Authored language and plan version 6
+
+Version 6 uses `metadata.language` as the default shaping language for generated
+body text, divider titles and contents headings/rows. Absent language is neutral;
+private-use or unmatched well-formed tags use the shaping engine's neutral
+language-system fallback. The authored tag and ToUnicode text are preserved.
+Default navigation text such as Contents remains English. Imported source
+language and canonical decimal page labels retain their existing semantics.
+
+Version 5 is refused. Update its version deliberately after reviewing the
+appearance change; there is no migration, alternate parser or locale inference.
+
+The core also bounds aggregate authored text to 64 MiB, independently of JSON
+encoding. Repeated generated-page counts retain one authored text declaration.
+Typed numbering callers begin with `packet.DefaultPageNumbers()` and then set
+effective values; explicit zero starts are refused. Typed contents and group
+titles use `TitlePresent` to distinguish explicit empty text from absence.

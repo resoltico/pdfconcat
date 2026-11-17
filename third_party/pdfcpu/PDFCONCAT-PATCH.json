@@ -1,0 +1,43 @@
+{
+  "module": "github.com/pdfcpu/pdfcpu",
+  "upstream_version": "v0.16.4",
+  "modified": true,
+  "upstream_module_sum": "h1:XW7q98xu3vNAimTSX93fIWnTDA2F0zz8mu88wiXoMjU=",
+  "files": [
+    {
+      "path": "pkg/pdfcpu/model/configuration.go",
+      "sha256": "6547922279b2c651fa28f12a134d3037172625598433b37e7e7c3d7c89d895ee",
+      "upstream_sha256": "920db67316d4480ec627c6a71a97aa89c3d05a92a48019bbca48edd1cd3e487f"
+    },
+    {
+      "path": "pkg/pdfcpu/model/xreftable.go",
+      "sha256": "ef6877de11f9548c0302b5aa5db5da0ac0ba02e17ac1a9f3c8751a6d00a0e455",
+      "upstream_sha256": "05433cb1782d3b88efe95b5e66669b6a84026aae944470b1b27742623904413d"
+    },
+    {
+      "path": "pkg/pdfcpu/model/zero_offset.go",
+      "sha256": "cb036c4f3d97af9fc94549a810eb29c589399f4c6dc1e4a2dca2f9b4ab877c48",
+      "upstream_sha256": null
+    },
+    {
+      "path": "pkg/pdfcpu/read.go",
+      "sha256": "4d2bd0c8644d4f7b6277a1a6433090d9349153e12adbbf9f93c20ffad90f172f",
+      "upstream_sha256": "2677cca296d7d63f603bc141de938f99cabe466b73d5d279fd434f23e00ca64c"
+    },
+    {
+      "path": "pkg/pdfcpu/zero_offset.go",
+      "sha256": "03c7f4ef65034f266ee5780bcded8c9e9e46bd95bbc65b189bdbe2ed1304fb43",
+      "upstream_sha256": null
+    },
+    {
+      "path": "pkg/pdfcpu/zero_offset_test.go",
+      "sha256": "4a90a3c740da6bf16245dbdf4190f9f5e7bdfc599fbb40b8e3231cb0707b0aae",
+      "upstream_sha256": null
+    }
+  ],
+  "modifications_license": "AGPL-3.0-only",
+  "upstream_licenses": [
+    "Apache-2.0",
+    "MIT"
+  ]
+}

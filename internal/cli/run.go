@@ -10,43 +10,45 @@ import (
 	"io"
 	"strings"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/app"
 	"github.com/resoltico/pdfconcat/internal/legal"
 )
 
 // Host supplies process capabilities without coupling the CLI to process globals.
 type Host struct {
-	WorkingDir      func() (string, error)
-	SourceDateEpoch func() (string, bool)
-	ReleaseOverride string
+	BuildMetadata     BuildMetadata
+	InspectionWorkers int
+	WorkingDir        func() (string, error)
+	SourceDateEpoch   func() (string, bool)
+	ReleaseOverride   string
 }
 
-func operationHint(name string) core.Operation {
+func operationHint(name string) app.Operation {
 	if name == "check" {
-		return core.Check
+		return app.Check
 	}
 	if name == "build" {
-		return core.Build
+		return app.Build
 	}
 	return ""
 }
 
-// Run adapts arguments, streams and host capabilities to the shared core.
+// Run adapts arguments, streams and host capabilities to the shared app.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, host Host) int {
 	command, failure := Parse(args)
-	render := func(r core.Result) int {
+	render := func(r app.Result) int {
 		if err := Render(stdout, stderr, r, command.JSON); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		return core.ExitCode(r)
+		return ExitCode(r.Status)
 	}
 	if failure != nil {
 		if command.JSON {
 			return render(*failure)
 		}
 		for _, d := range Summary(*failure).Diagnostics {
-			if _, err := fmt.Fprintln(stderr, diagnosticText(d, failure.Report)); err != nil {
+			if _, err := fmt.Fprintln(stderr, diagnosticText(d, Summary(*failure).Report)); err != nil {
 				return 1
 			}
 		}
@@ -57,7 +59,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if _, err := fmt.Fprintf(stderr, "Run %q for usage.\n", help); err != nil {
 			return 1
 		}
-		return core.ExitCode(*failure)
+		return ExitCode(failure.Status)
 	}
 	query := func(err error) int {
 		if err != nil {
@@ -71,7 +73,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return query(err)
 	}
 	if command.Name == "schema" {
-		data, err := core.Schema(core.SchemaKind(command.Schema))
+		data, err := app.Schema(app.SchemaKind(command.Schema))
 		if err == nil {
 			_, err = stdout.Write(append(data, '\n'))
 		}
@@ -85,7 +87,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return query(err)
 	}
 	if command.Name == "version" {
-		v, err := core.Version(host.ReleaseOverride)
+		v, err := Version(host.BuildMetadata, host.ReleaseOverride)
 		if err == nil {
 			if !command.JSON {
 				_, err = fmt.Fprintf(stdout, "pdfconcat %s (%s, %s, %s)\n", v.Version, v.Commit, v.Go, v.Platform)
@@ -96,38 +98,38 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return query(err)
 	}
 	if host.WorkingDir == nil {
-		return render(core.InvocationFailure(operationHint(command.Name), core.WorkingDirectoryUnavailable, "Cannot determine working directory: no host provider.", ""))
+		return render(InvocationFailure(operationHint(command.Name), WorkingDirectoryUnavailable, "Cannot determine working directory: no host provider.", ""))
 	}
 	cwd, err := host.WorkingDir()
 	if err != nil {
 		message := strings.ToValidUTF8(err.Error(), "�")
 		message = strings.ReplaceAll(message, "\x00", `\x00`)
-		return render(core.InvocationFailure(operationHint(command.Name), core.WorkingDirectoryUnavailable, "Cannot determine working directory: "+message, ""))
+		return render(InvocationFailure(operationHint(command.Name), WorkingDirectoryUnavailable, "Cannot determine working directory: "+message, ""))
 	}
 
-	var input core.Input
+	var input app.Input
 	if command.Plan != "" {
 		if command.Plan == "-" {
-			data, err := readStdin(ctx, stdin, core.MaxPlanBytes)
+			data, err := readStdin(ctx, stdin, app.MaxPlanBytes)
 			if err != nil {
-				kind := core.PlanUnreadable
+				kind := PlanUnreadable
 				if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					kind = core.Interrupted
+					kind = Interrupted
 				}
-				return render(core.InvocationFailure(operationHint(command.Name), kind, strings.ReplaceAll(strings.ToValidUTF8(err.Error(), "�"), "\x00", `\x00`), ""))
+				return render(InvocationFailure(operationHint(command.Name), kind, strings.ReplaceAll(strings.ToValidUTF8(err.Error(), "�"), "\x00", `\x00`), ""))
 			}
-			input = core.PlanBytes{Data: data, Label: "<stdin>", BaseDir: command.BaseDir}
+			input = app.PlanBytes{Data: data, Label: "<stdin>", BaseDir: command.BaseDir}
 		} else {
-			input = core.PlanFile{Path: command.Plan}
+			input = app.PlanFile{Path: command.Plan}
 		}
 	} else {
-		items := make(core.Items, 0, len(command.Operands))
+		items := make(app.Items, 0, len(command.Operands))
 		for _, operand := range command.Operands {
 			ref := fmt.Sprintf("argv:%d", operand.Index)
 			if operand.Blank {
-				items = append(items, core.BlankItem{Ref: ref})
+				items = append(items, app.BlankItem{Ref: ref})
 			} else {
-				items = append(items, core.SourceItem{Ref: ref, Path: operand.Path})
+				items = append(items, app.SourceItem{Ref: ref, Path: operand.Path})
 			}
 		}
 		input = items
@@ -139,10 +141,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			epoch = &value
 		}
 	}
-	request := core.Request{SourceDateEpoch: epoch, Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
+	request := app.Request{InspectionWorkers: host.InspectionWorkers, SourceDateEpoch: epoch, Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
 	if command.FitTo != "" {
-		size, _ := core.ParseSheet(command.FitTo)
+		size, _ := app.ParseSheet(command.FitTo)
 		request.FitTo = &size
 	}
-	return render(core.Execute(ctx, request))
+	return render(app.Execute(ctx, request))
 }

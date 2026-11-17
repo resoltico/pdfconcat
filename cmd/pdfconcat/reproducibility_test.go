@@ -16,7 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	exchange "github.com/resoltico/pdfconcat/internal/wire"
+
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
@@ -24,15 +25,15 @@ import (
 func TestPDFBytesAcrossProcessesAndEffectiveInputs(t *testing.T) {
 	tools := oracle.RequireTools(t)
 	binary := buildBinary(t)
-	font, err := filepath.Abs("../../internal/core/testdata/fonts/source-serif/SourceSerif4-Regular.otf")
+	font, err := filepath.Abs("../../internal/app/testdata/fonts/source-serif/SourceSerif4-Regular.otf")
 	if err != nil {
 		t.Fatal(err)
 	}
 	plans := map[string]string{
-		"generated":     `{"version":5,"fit_to":"A4","items":[{"page":{"text":{"value":"A report"}}}]}`,
-		"cff":           `{"version":5,"fit_to":"A4","items":[{"page":{"text":{"value":"Rīgas office report","font":{"file":` + strconv.Quote(font) + `}}}}]}`,
-		"source":        `{"version":5,"items":[{"source":"SOURCE"}]}`,
-		"tagged-fitted": `{"version":5,"fit_to":"A4","metadata":{"title":"A title","language":"en"},"page_numbers":{"start":9,"mode":"consecutive","position":"top-right"},"items":[{"source":"SOURCE"},{"source":"SOURCE"},{"page":{"text":{"value":"After the annex"}}}]}`,
+		"generated":     `{"version":6,"fit_to":"A4","items":[{"page":{"text":{"value":"A report"}}}]}`,
+		"cff":           `{"version":6,"fit_to":"A4","items":[{"page":{"text":{"value":"Rīgas office report","font":{"file":` + strconv.Quote(font) + `}}}}]}`,
+		"source":        `{"version":6,"items":[{"source":"SOURCE"}]}`,
+		"tagged-fitted": `{"version":6,"fit_to":"A4","metadata":{"title":"A title","language":"en"},"page_numbers":{"start":9,"mode":"consecutive","position":"top-right"},"items":[{"source":"SOURCE"},{"source":"SOURCE"},{"page":{"text":{"value":"After the annex"}}}]}`,
 	}
 	env := []string{}
 	for _, value := range os.Environ() {
@@ -56,7 +57,7 @@ func TestPDFBytesAcrossProcessesAndEffectiveInputs(t *testing.T) {
 		if err != nil || stderr.Len() != 0 {
 			t.Fatalf("build process: %v %s stderr %s", err, raw, stderr.String())
 		}
-		var result core.Result
+		var result exchange.Result
 		if err = json.Unmarshal(raw, &result); err != nil {
 			t.Fatal(err)
 		}

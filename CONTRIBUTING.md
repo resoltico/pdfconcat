@@ -65,7 +65,7 @@ To run only the authored PDF/UA machine fixture and its removed-structure
 negative control with the pinned `verapdf` on `PATH`:
 
 ```sh
-PDFCONCAT_REQUIRE_VERAPDF=1 go test -count=1 ./internal/core/internal/pdf -run '^TestPDFUAMachineFixture$'
+PDFCONCAT_REQUIRE_VERAPDF=1 go test -count=1 ./internal/pdf -run '^TestPDFUAMachineFixture$'
 ```
 
 Machine reports are retained as test artifacts. Passing these tests does not
@@ -121,7 +121,7 @@ is incompatible with the combined linter-tool dependency graph.
 Actionlint uses shellcheck when it is available.
 
 The compiler confines adapters and domain packages beneath
-`internal/core/internal/`. Depguard confines third-party adapters and keeps file,
+`internal/`. Depguard confines third-party adapters and keeps file,
 process and network I/O out of production CLI code. See
 [architecture](docs/ARCHITECTURE.md) for the package graph.
 
@@ -233,13 +233,13 @@ terminal theme.
 ## Permanent corpus
 
 Frozen, fictional producer exports, authored sources and font notices live in
-`internal/core/testdata/corpus` in a source checkout. Authoritative ordinary Go
-case tables are in `internal/core/corpus*_test.go`; no producer or external-network
+`internal/app/testdata/corpus` in a source checkout. Authoritative ordinary Go
+case tables are in `internal/app/corpus*_test.go`; no producer or external-network
 access is needed by tests. A bounded loopback HTTP canary verifies that the CLI
 retains URI annotations without fetching them. This is finite pairwise/higher-order capability coverage,
 not exhaustive arbitrary PDF permutations. Binary archives do not include the
 source-only corpus; these commands and paths refer to a source checkout. See the
-[corpus guide](internal/core/testdata/corpus/README.md)
+[corpus guide](internal/app/testdata/corpus/README.md)
 for asset provenance and producer recipes.
 
 ### Retain investigation output
@@ -248,8 +248,8 @@ Use an unused absolute output directory outside the checkout for retention:
 
 ```sh
 mkdir -p /absolute/fresh/pdfconcat-artifacts
-PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestCorpus' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
-PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/core -run '^TestScale$' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
+PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/app -run '^TestCorpus' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
+PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 go test -count=1 ./internal/app -run '^TestScale$' -artifacts -outputdir /absolute/fresh/pdfconcat-artifacts
 ```
 
 The large scale and staged-build workloads are opt-in; ordinary tests and CI
@@ -286,7 +286,7 @@ Linux/macOS and skips on Windows. Run it when investigating a concrete scale or
 staging question:
 
 ```sh
-go test -c -o /tmp/pdfconcat-scale.test ./internal/core
+go test -c -o /tmp/pdfconcat-scale.test ./internal/app
 PDFCONCAT_SCALE=1 PDFCONCAT_REQUIRE_ORACLE=1 /usr/bin/time -l /tmp/pdfconcat-scale.test -test.run '^TestScale$' -test.v
 ```
 
@@ -388,3 +388,27 @@ create tags or overwrite an existing release. Prerelease tags remain prereleases
 Missing or expired qualified artifacts fail publication rather than trigger an
 untested rebuild. Ad hoc signing, checksums and attestations do not establish
 Apple notarization.
+
+## Foundation contracts and source delivery
+
+Run `go generate ./internal/plan` to regenerate semantic schema fragments and the
+CLI diagnostic registry reference. `go run ./internal/contractgen -check` refuses
+stale generated values; owner tests retain independent semantic and lexical cases.
+Typed requests use `app.Declared` and the core declaration/item/style types. They
+require no JSON exchange. Supply a positive `Request.InspectionWorkers`; the
+process host supplies its GOMAXPROCS-derived default. Prepared plans return owned
+snapshots and font byte views are copies.
+
+Run `python3 .github/scripts/verify-dependency.py`,
+`python3 -m unittest discover -s .github/scripts -p '*_test.py'`, and
+`(cd third_party/pdfcpu && go test ./pkg/pdfcpu -run TestZeroOffsetEntryPolicy -count=1)`
+for the canonical local reader patch. No module-cache editing or post-clone patch
+step is supported. Source capture verifies that vendor contains the same code.
+
+`go run ./internal/releasecheck -dir dist` checks complete configured deliverables
+against the independently required six targets, hashes and archive members.
+`-compare /absolute/second/dist` also compares delivered checksums from another
+clean checkout of the identical commit. Both builds require identical pinned
+tools and effective environment. CI qualifies only the first build's assets and
+native installers consume those bytes; the second build supplies comparison
+evidence. Neither source delivery nor reproducibility authorizes publication.

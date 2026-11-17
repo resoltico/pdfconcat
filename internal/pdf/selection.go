@@ -129,17 +129,11 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		selected.Selection = ranges
 		if selected.UncoveredLocation != nil && selected.UncoveredLocation.Page > 0 {
 			loc := *selected.UncoveredLocation
-			index := loc.Page
-			for _, span := range ranges {
-				count := span.Last - span.First + 1
-				if index <= count {
-					loc.Page = span.First + index - 1
-					break
-				}
-				index -= count
-			}
+			loc.Page = originalSelectionPage(ranges, loc.Page)
 			selected.UncoveredLocation = &loc
 		}
+		selected.AnnotationFittingIssue.Site.Page = originalSelectionPage(ranges, selected.AnnotationFittingIssue.Site.Page)
+		selected.PDF20AppearanceIssue.Site.Page = originalSelectionPage(ranges, selected.PDF20AppearanceIssue.Site.Page)
 		selected.OutlineDepth, err = outlineDepth(c, view)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
@@ -340,4 +334,20 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	}
 	// Omitted pages remain private objects; selection is composition, not redaction.
 	return removed, nil
+}
+
+// originalSelectionPage projects a selected view's location back to its input.
+// Zero remains unknown; the selected ordinal stays separate in the issue facts.
+func originalSelectionPage(ranges []packet.PageRange, page int) int {
+	if page <= 0 {
+		return 0
+	}
+	for _, span := range ranges {
+		count := span.Last - span.First + 1
+		if page <= count {
+			return span.First + page - 1
+		}
+		page -= count
+	}
+	panic("selected location is outside its admitted selection")
 }

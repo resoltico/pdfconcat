@@ -742,3 +742,20 @@ func partRenames(a Assembled, ref string) []packet.FieldRename {
 	}
 	return nil
 }
+
+func TestAnnotationIssueLocationsRetainOriginalPage(t *testing.T) {
+	doc := pdffixture.FitAnnotation("FreeText", "/Contents (Hello world) /DA (/Helv 10 Tf 0 g)", false, 0, 4)
+	// The annotated source page is second, but first in the retained selection.
+	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [7 0 R 3 0 R] >>")
+	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
+	_, views := inspectSelection(t, doc, []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
+	view := views["selected"]
+	for _, issue := range []diag.AnnotationIssue{view.AnnotationFittingIssue, view.PDF20AppearanceIssue} {
+		if !issue.Present() || issue.Site.Page != 2 || issue.Site.Object != 6 {
+			t.Fatalf("lost original location: %+v", issue)
+		}
+	}
+	if view.AnnotationFittingIssue.Page != 1 {
+		t.Fatal("selected ordinal was confused with the original location")
+	}
+}

@@ -6,6 +6,7 @@
 import gzip
 import io
 import os
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ def git(root, *args):
 
 
 def create_archive(root, output):
+    verify = runpy.run_path(str(root / ".github/scripts/verify-dependency.py"))["verify"]
+    verify(root)
     if git(root, "ls-files", "--others", "--exclude-standard", "-z"):
         raise RuntimeError("Untracked source files exist; add intended files to Git's index before packaging.")
     entries = []
@@ -42,6 +45,7 @@ def create_archive(root, output):
             shutil.copyfile(original, target)
             target.chmod(mode)
         subprocess.run(["go", "mod", "vendor", "-o", str(source / "vendor")], cwd=root, check=True)
+        verify(source, source / "vendor")
         for name, _ in entries:
             if (root / name).read_bytes() != (source / name).read_bytes():
                 raise RuntimeError(f"Source changed during capture: {name}")

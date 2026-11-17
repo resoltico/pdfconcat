@@ -11,20 +11,26 @@ import (
 	"strings"
 	"testing"
 
+	exchange "github.com/resoltico/pdfconcat/internal/wire"
+
+	"github.com/resoltico/pdfconcat/internal/app"
 	"github.com/resoltico/pdfconcat/internal/cli"
-	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func validate(t *testing.T, value any) {
 	t.Helper()
 	var document, instance any
-	schemaBytes, err := core.Schema(core.ResultSchema)
+	schemaBytes, err := app.Schema(app.ResultSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(schemaBytes, &document); err != nil {
 		t.Fatal(err)
+	}
+	if r, ok := value.(app.Result); ok {
+		value = exchange.Project(r)
 	}
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -57,6 +63,7 @@ func TestCapsCoalescingAndFullReport(t *testing.T) {
 	}
 	warning := diagnostic(t, "warning", "source_page_labels_removed", "labels", items...)
 	warning.File = "/abs/source.pdf"
+	warning.Identity = diag.FindingIdentity{Kind: "test-source-label-disposition"}
 	r.Diagnostics = append(r.Diagnostics, warning, warning, diagnostic(t, "error", "plan_value", "bad value", "/page/text/size"))
 	full := r.Full()
 	summary := cli.Summary(r)
@@ -72,7 +79,7 @@ func TestCapsCoalescingAndFullReport(t *testing.T) {
 	validate(t, full)
 	validate(t, summary)
 	one := newResult(t, "check")
-	one.Diagnostics = []core.Diagnostic{warning}
+	one.Diagnostics = []app.Diagnostic{warning}
 	capped := cli.Summary(one)
 	if len(capped.Diagnostics[0].Items) != 20 || capped.Diagnostics[0].ItemsOmitted != 80 {
 		t.Fatalf("consumer cap %+v", capped.Diagnostics[0])
@@ -82,12 +89,12 @@ func TestCapsCoalescingAndFullReport(t *testing.T) {
 
 func TestJSONAndTextOutcomes(t *testing.T) {
 	r := newResult(t, "build")
-	r.Diagnostics = []core.Diagnostic{diagnostic(t, "error", "source_unreadable", "not readable")}
+	r.Diagnostics = []app.Diagnostic{diagnostic(t, "error", "source_unreadable", "not readable")}
 	var b bytes.Buffer
 	if err := cli.Render(&b, &b, r, true); err != nil {
 		t.Fatal(err)
 	}
-	var value core.Result
+	var value exchange.Result
 	if err := json.Unmarshal(b.Bytes(), &value); err != nil {
 		t.Fatalf("not one JSON document: %v", err)
 	}
@@ -102,7 +109,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, core.VersionInfo{FormatVersion: 7, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, exchange.Version{FormatVersion: 9, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
@@ -111,10 +118,10 @@ func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
 	r := newResult(t, "build")
 	d := diagnostic(t, "error", "source_unreadable", message, "/items/0", "/items/1")
 	d.File = path
-	d.Location = &core.Location{File: path, Line: 3, Column: 7, Ref: "/items/0"}
-	r.Diagnostics = []core.Diagnostic{d}
-	r.Output = &core.Output{Path: path}
-	r.Report = &core.Report{Path: path}
+	d.Location = &app.Location{File: path, Line: 3, Column: 7, Ref: "/items/0"}
+	r.Diagnostics = []app.Diagnostic{d}
+	r.Output = &app.Output{Path: path}
+	r.Report = &app.Report{Path: path}
 	var text bytes.Buffer
 	if err := cli.Render(&text, &text, r, false); err != nil {
 		t.Fatal(err)
@@ -132,7 +139,7 @@ func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
 	if err := cli.Render(&encoded, &encoded, r, true); err != nil {
 		t.Fatal(err)
 	}
-	var roundtrip core.Result
+	var roundtrip exchange.Result
 	if err := json.Unmarshal(encoded.Bytes(), &roundtrip); err != nil {
 		t.Fatal(err)
 	}
@@ -163,9 +170,9 @@ func TestTextOmissionCounts(t *testing.T) {
 func TestCompositionPreviewCapsRowsWithoutChangingMachineValues(t *testing.T) {
 	r := newResult(t, "check")
 	title := "Rīga Ελληνικά Кириллица\n\x1b"
-	r.Sections = []core.Section{{Item: "/items/0", Title: title}}
+	r.Sections = []app.Section{{Item: "/items/0", Title: title}}
 	for i := range 25 {
-		r.Parts = append(r.Parts, core.Part{Item: fmt.Sprintf("/items/%d", i+1), Kind: "source", Path: fmt.Sprintf("path%d\n.pdf", i), FieldsRenamed: []core.FieldRename{}})
+		r.Parts = append(r.Parts, app.Part{Item: fmt.Sprintf("/items/%d", i+1), Kind: "source", Path: fmt.Sprintf("path%d\n.pdf", i), FieldsRenamed: []app.FieldRename{}})
 	}
 	var text bytes.Buffer
 	if err := cli.Render(&text, &text, r, false); err != nil {
@@ -182,10 +189,10 @@ func TestCompositionPreviewCapsRowsWithoutChangingMachineValues(t *testing.T) {
 		t.Fatal("summary exposed full composition")
 	}
 	var full bytes.Buffer
-	if err := cli.JSON(&full, r.Full()); err != nil {
+	if err := cli.JSON(&full, exchange.Project(r)); err != nil {
 		t.Fatal(err)
 	}
-	var decoded core.Result
+	var decoded exchange.Result
 	if err := json.Unmarshal(full.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
@@ -196,26 +203,23 @@ func TestCompositionPreviewCapsRowsWithoutChangingMachineValues(t *testing.T) {
 	validate(t, cli.Summary(r))
 }
 
-func newResult(t *testing.T, command string) core.Result {
+func newResult(t *testing.T, command string) app.Result {
 	t.Helper()
-	version, err := core.Version("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return core.Result{FormatVersion: version.FormatVersion, Command: command, Status: "ok", Diagnostics: []core.Diagnostic{}}
+	return app.Result{Command: command, Status: "ok", Diagnostics: []app.Diagnostic{}}
+
 }
-func diagnostic(t *testing.T, severity core.Severity, name, message string, items ...string) core.Diagnostic {
+func diagnostic(t *testing.T, severity app.Severity, name, message string, items ...string) app.Diagnostic {
 	t.Helper()
-	var code core.Code
+	var code app.Code
 	if err := code.UnmarshalText([]byte(name)); err != nil {
 		t.Fatal(err)
 	}
-	return core.Diagnostic{Severity: severity, Code: code, Message: message, Items: items}
+	return app.Diagnostic{Severity: severity, Code: code, Message: message, Items: items}
 }
 
 func TestResultStreams(t *testing.T) {
 	r := newResult(t, "check")
-	r.Diagnostics = []core.Diagnostic{diagnostic(t, "error", "source_unreadable", "not readable")}
+	r.Diagnostics = []app.Diagnostic{diagnostic(t, "error", "source_unreadable", "not readable")}
 	var stdout, stderr bytes.Buffer
 	if err := cli.Render(&stdout, &stderr, r, false); err != nil {
 		t.Fatal(err)
@@ -228,7 +232,7 @@ func TestResultStreams(t *testing.T) {
 	if err := cli.Render(&stdout, &stderr, r, true); err != nil {
 		t.Fatal(err)
 	}
-	var decoded core.Result
+	var decoded exchange.Result
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal("not exactly one document", err)
 	}
@@ -241,8 +245,8 @@ func TestPDFDiagnosticDetailsAreSafeAndRemainInJSON(t *testing.T) {
 	r := newResult(t, "check")
 	d := diagnostic(t, "error", "source_invalid", "Source validation failed.")
 	d.Detail = "backend\n\x1b[2Jfailure"
-	d.PDFLocation = &core.PDFLocation{Object: 12, Page: 3, Path: "Pages.Contents\n"}
-	r.Diagnostics = []core.Diagnostic{d}
+	d.PDFLocation = &app.PDFLocation{Object: 12, Page: 3, Path: "Pages.Contents\n"}
+	r.Diagnostics = []app.Diagnostic{d}
 	var stdout, stderr bytes.Buffer
 	if err := cli.Render(&stdout, &stderr, r, false); err != nil {
 		t.Fatal(err)
@@ -255,7 +259,7 @@ func TestPDFDiagnosticDetailsAreSafeAndRemainInJSON(t *testing.T) {
 	if err := cli.Render(&stdout, &stderr, r, true); err != nil {
 		t.Fatal(err)
 	}
-	var decoded core.Result
+	var decoded exchange.Result
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +275,7 @@ func TestCLIAddsSyntaxToCoreRequirements(t *testing.T) {
 		{"output_exists", "--overwrite"}, {"report_exists", "--overwrite"},
 	} {
 		r := newResult(t, "build")
-		r.Diagnostics = []core.Diagnostic{diagnostic(t, "error", tc.code, "Core requirement.")}
+		r.Diagnostics = []app.Diagnostic{diagnostic(t, "error", tc.code, "Core requirement.")}
 		var stdout, stderr bytes.Buffer
 		if err := cli.Render(&stdout, &stderr, r, false); err != nil {
 			t.Fatal(err)
@@ -305,12 +309,12 @@ func TestCapsPreserveTheOutcomeCausingDiagnostic(t *testing.T) {
 func TestOmissionHintsReflectActualReportAvailability(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		report *core.Report
+		report *app.Report
 		want   string
 	}{
 		{"not requested", nil, "use --report for full details"},
-		{"saved", &core.Report{Path: "/chosen/report.json", Written: true}, "see the saved report for uncapped processing details"},
-		{"unavailable", &core.Report{Path: "/chosen/report.json"}, "full report unavailable; resolve the report failure"},
+		{"saved", &app.Report{Path: "/chosen/report.json", Written: true}, "see the saved report for uncapped processing details"},
+		{"unavailable", &app.Report{Path: "/chosen/report.json"}, "full report unavailable; resolve the report failure"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newResult(t, "check")
@@ -321,7 +325,7 @@ func TestOmissionHintsReflectActualReportAvailability(t *testing.T) {
 			}
 			for i := range 25 {
 				r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "source_invalid", fmt.Sprintf("invalid %d", i), items...))
-				r.Parts = append(r.Parts, core.Part{Kind: core.PartSource, Item: fmt.Sprintf("/items/%d", i)})
+				r.Parts = append(r.Parts, app.Part{Kind: app.PartSource, Item: fmt.Sprintf("/items/%d", i)})
 			}
 			r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "report_write_failed", "Report writing or publication reported an error."))
 			var stdout, stderr bytes.Buffer
@@ -351,7 +355,7 @@ func TestPublicationFailuresRemainVisibleWhenPeersAlreadyDetermineOutcome(t *tes
 		r.Diagnostics = append(r.Diagnostics, diagnostic(t, "error", "report_write_failed", "Report publication failed."))
 		full := r.Full()
 		summary := cli.Summary(r)
-		if summary.Diagnostics[0].Code.String() != "report_write_failed" || summary.Diagnostics[1].Message != "earlier 0" || summary.Status != full.Status || core.ExitCode(summary) != core.ExitCode(full) {
+		if summary.Diagnostics[0].Code.String() != "report_write_failed" || summary.Diagnostics[1].Message != "earlier 0" || summary.Status != full.Status || cli.ExitCode(summary.Status) != cli.ExitCode(full.Status) {
 			t.Fatalf("publication or dominant outcome hidden: %+v", summary)
 		}
 	}

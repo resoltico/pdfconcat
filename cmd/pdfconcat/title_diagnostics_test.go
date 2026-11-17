@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	exchange "github.com/resoltico/pdfconcat/internal/wire"
 )
 
 func titlePlan(t *testing.T, sections int, contents, dividers bool, font string) string {
@@ -33,7 +33,7 @@ func titlePlan(t *testing.T, sections int, contents, dividers bool, font string)
 	if font != "" {
 		page["text"] = map[string]any{"font": map[string]any{"file": font}}
 	}
-	data, err := json.Marshal(map[string]any{"version": 5, "page_defaults": page, "items": items})
+	data, err := json.Marshal(map[string]any{"version": 7, "page_defaults": page, "items": items})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestPaintedTitleDiagnosticsRetainDeclarationAndConsumers(t *testing.T) {
 				t.Fatal(err)
 			}
 			validateResult(t, data)
-			var full core.Result
+			var full exchange.Result
 			if err = json.Unmarshal(data, &full); err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +96,7 @@ func TestTitleDiagnosticCapsAndFontOriginInSerializedReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, data)
-	var full core.Result
+	var full exchange.Result
 	if err = json.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestBookmarkOnlyTitleDoesNotRequireGlyphValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateResult(t, data)
-	var full core.Result
+	var full exchange.Result
 	if err = json.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
 	}

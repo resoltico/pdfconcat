@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	exchange "github.com/resoltico/pdfconcat/internal/wire"
 
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
@@ -37,7 +37,7 @@ func TestUsageStreamsBeforeIO(t *testing.T) {
 				t.Fatal(exit, stdout.String(), stderr.String())
 			}
 			if asJSON {
-				var value core.Result
+				var value exchange.Result
 				if err := json.Unmarshal(stdout.Bytes(), &value); err != nil || stderr.Len() != 0 || len(value.Diagnostics) != 1 || !strings.HasPrefix(value.Diagnostics[0].Code.String(), "usage_") {
 					t.Fatalf("JSON usage streams: %q / %q: %v", stdout.String(), stderr.String(), err)
 				}

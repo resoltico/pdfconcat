@@ -8,7 +8,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 
 | Source feature | Behavior |
 | --- | --- |
-| Encryption, including empty passwords | Refuse `source_encrypted`, including recognized password errors before a context is returned |
+| Encryption, including empty passwords | Refuse `source_encrypted` once the reader recognizes encryption, before password validation/key setup/decryption |
 | Signature values, catalog permission structures or document timestamps | Refuse `source_signed`; signatures are not authenticated |
 | Empty unsigned signature fields, including null values | Keep |
 | `NeedsRendering true` | Refuse `source_dynamic_form` |
@@ -139,6 +139,27 @@ twice. Ordinary literal hashes remain supported. A resource dictionary shared
 with an annotation or field is refused because upstream validation can discard
 that other role. These checks do not constitute a general PDF repair detector.
 
+### Narrow classic-xref input tolerance
+
+Original sources may contain an in-use classic xref entry for a positive object
+number whose literal offset is zero. The modified strict reader accepts it only
+when no original effective live object or effective trailer references that
+object number, including references with another generation. It retains a
+revision tombstone so an older definition cannot return. Each admitted entry
+produces `source_xref_entry_ignored` with original xref/object evidence and
+consuming items. Original bytes and hashes are unchanged; assembly repeats the
+gate after rereading and checking the digest.
+
+An exceptional hybrid/xref-stream chain is refused because the original-reference
+proof is limited to exclusively classic revisions. Valid xref-stream and hybrid
+inputs are supported. Other syntax, encryption, signature, content,
+structure, resource and cancellation safeguards remain. Serialized output uses
+ordinary strict reading with the exception disabled. This bounded exception does
+not establish universal producer compatibility.
+The source and provenance of the local reader are in
+[`third_party/pdfcpu`](../third_party/pdfcpu/PROVENANCE.md).
+
+
 ## Selected sources and native construction
 
 ### Selection and inspection
@@ -224,21 +245,44 @@ serialization failures can still produce `assembly_failed`;
 
 ### Fitting
 
-Fitting scales pages proportionally to the chosen paper size, enforces its
-orientation and applies no extra content rotation. Sources with form widgets
-are refused. For sources with numeric local navigation targets, use original
-page sizes instead.
+Fitting compares each page's ordered displayed physical size to the fixed target.
+Within .01 pt per side, the page keeps its actual geometry: no fit Form, box or
+coordinate rewrite, rotation baking, UserUnit deletion, or annotation/structure
+fitting. The interval endpoints use deterministic float64 rounding. Two-decimal
+A4 keeps; integer 595 × 842 pt A4 transforms. A kept CropBox may retain a larger
+MediaBox: the promise concerns displayed frames, not exact printer sheets.
+
+Other pages scale proportionally into zero-origin target MediaBox/CropBox with
+zero rotation and effective UserUnit one. A finite usable affine with supported placement accuracy is required before
+Check succeeds. The same affine handles content, annotations and structure.
+Static widgets may remain on proved kept owners while unrelated pages transform.
+Transformed or unresolved/conflicting widget owners refuse. Partial-selection and
+all general form, security, source and PDF2 compatibility rules still apply.
+
+Before mutation, multiply bound annotation dictionaries refuse when any binding
+transforms, including duplicate bindings on one page. All-keep sharing remains
+subject to existing source policy. Ordinary shared appearance streams/resources
+remain supported. This guard does not clone partial annotation graphs.
+
+Transformed pages omit only their own present non-null BleedBox, TrimBox and
+ArtBox references, with separate original-page/entry warnings describing expected
+default printing bounds. Shared rectangle objects and kept entries are untouched;
+original validation precedes omission. Production-print/imposition fidelity remains
+unsupported. Reports expose actual source and expected output dimensions even on
+later refusal; `output_size` does not mean that publication occurred.
 
 The destination restrictions are:
 
 | Destination | Fitting behavior |
 | --- | --- |
-| Explicit numeric position coordinates: XYZ left/top, FitH/FitBH top, FitV/FitBV left, or FitR rectangle coordinates | Refuse `fit_destination_unsupported` |
+| Explicit numeric position coordinates: XYZ left/top, FitH/FitBH top, FitV/FitBV left, or FitR rectangle coordinates | Refuse `fit_destination_unsupported` only when the retained TARGET page transforms |
 | Whole-page Fit/FitB, null-only position coordinates, or zoom-only XYZ | Supported |
 | Remote destinations, removed catalog actions, or omitted out-of-tree named definitions | Do not trigger the coordinate guard |
 
-The coordinate guard covers retained named definitions, links, outlines and
-chained local GoTo actions. Print-box, bleed and imposition fidelity beyond these
+The coordinate guard covers retained named definitions, including unused ones,
+legacy names, direct/indirect targets, links, outlines and chained local GoTo
+actions. It follows target disposition, never the originating link page. Numeric
+tails targeting kept pages remain unchanged apart from page-reference rebinding. Print-box, bleed and imposition fidelity beyond these
 limits is not guaranteed.
 
 Fitting interprets annotation Rect and appearance BBox opposite corners in
@@ -264,7 +308,7 @@ the original upper-left corner; NoZoom remains a viewer magnification rule.
 FreeText callouts and insets transform, but its default/rich-text style strings
 remain authored. Subsequent appearance regeneration after editing is viewer-dependent.
 
-`fit_annotation_unsupported` refuses these specific selected-page cases:
+`fit_annotation_unsupported` refuses these specific TRANSFORMED selected-page cases:
 
 - FreeText without a usable normal appearance, whose text layout cannot be preserved by coordinate changes alone.
 - A Text icon without a usable normal appearance, whose supplied Rect need not bound its viewer-generated icon and therefore cannot preserve source clipping.
@@ -282,7 +326,7 @@ normal appearance. This exemption does not apply to Text icons or path annotatio
 Interactive regions include Links, activation actions (A), and annotation AA
 pointer/focus triggers E, X, D, U, Fo and Bl. NoView annotations have no on-screen
 hit area. ReadOnly also disables user interaction for non-widget annotations;
-Widgets use field flags and remain unsupported for fitting. ReadOnly does not
+Widgets use field flags; fitting requires proved kept widget ownership. ReadOnly does not
 waive appearance requirements or clipping. Page-lifecycle actions alone do not
 create an interactive area. Appearance clipping still applies to printed artwork. Supply reviewed normal appearances for the
 appearance-related cases, or use original page sizes; crossing interactive regions
@@ -291,10 +335,120 @@ and Circle annotations remain supported without appearances. Text icons, Carets 
 sizes without appearances.
 The guards apply equally in `check` and `build`, before output staging.
 
-Fitted pages have UserUnit 1 so target dimensions describe physical sheets.
-Nonzero output box origins are permitted; target side lengths are the contract.
+Transformed pages have UserUnit 1 and zero-origin target MediaBox/CropBox.
+Kept pages retain their native origins and actual displayed dimensions.
 Explicit generated canvases retain authored layout and overflow checks before
 fitting; inherited canvases use the fit target.
+
+#### Forward fitting accuracy
+
+Finite coefficients and correctly sized target boxes alone do not establish
+paint accuracy. Before Check can accept a transformation, the PDF adapter bounds
+its represented affine's discrepancy from centered placement and floating-point
+evaluation error over the entire visible source rectangle. The supported budget
+is 64 binary64 ULPs at each requested target-axis extent, retaining all but six low
+significand bits of target-coordinate precision. This allows ordinary arithmetic
+rounding, not bit-exact arbitrary affine evaluation.
+
+The uniform dot-product bound includes both multiplications and additions and
+uses maximum absolute coordinates throughout the frame. A corner-only check
+would miss interior cancellation. Subnormal-operation terms are included; an
+unused determinant or inverse is not required. Ill-conditioned mappings that
+cannot meet the bound refuse as `fit_geometry_unsupported` before publication,
+even when the source is blank. Large-origin pages may therefore keep successfully
+but require reviewed rebasing before fitting. Normal nonzero-origin fitting and
+finite extreme scales remain supported when the forward bound is met.
+
+This is an arithmetic admission boundary, not a source-coordinate limit, paper
+match tolerance, rendering repair or verifier slack. Kept pages bypass fitting
+entirely. Native tuples and displayed sizes are still verified exactly before
+serialization and after strict reopening. The bound addresses the fitting map
+within its visible frame; it does not certify arbitrary source operator/resource
+semantics or every renderer's implementation.
+
+#### Source graphics composition under fitting
+
+A page-space affine certificate does not certify subsequent source graphics-state
+execution. Transformed pages also undergo a bounded q/Q/cm observation before
+Check can succeed and again before fitting mutation. The observer tracks intrinsic
+source CTM and actual fitted CTM separately, restores both on Q, and certifies
+geometry-consuming operations. It preserves source programs rather than rewriting
+or rasterizing them. Kept pages do not run this transformation-specific gate.
+
+At consumption, exact fixed-size rational arithmetic compares the represented
+concatenated CTM with intrinsic source execution followed by the outer map. The
+visible frame is pulled back through the intrinsic CTM to bound all relevant local
+coordinates; uniform floating evaluation and propagated source error must fit the
+same 64 target-axis ULP budget. A singular or unbounded local domain cannot be
+certified. This uses an exact domain calculation, not a floating determinant or
+inverse representability proxy. Conservative refusals are possible.
+
+Invoked Forms are checked per incoming state, including their own Matrix and
+implicit clip. An object reference is not a reusable global certificate. Tiling
+and shading pattern matrices, retained appearance N/R/D states, soft-mask group
+Forms and used font matrices/Type3 programs are also observed at their matrix
+boundaries. Shared AP placement comes from the same mapping owner as wrapping.
+Used Type3 fonts are conservatively checked across retained CharProcs rather than
+adding a second glyph decoder. Missing or otherwise malformed resources remain
+subject to existing source policy; this is not a universal PDF resource validator.
+
+The observer uses the existing strict operand/inline-image parsing and decoded
+stream limits. It bounds operands, graphics/recursive depth and repeated invocation
+work, checks cancellation, and preserves original page/object/operator attribution.
+A valid source may keep successfully while refusing fitting when its composition
+accuracy cannot be established. Large cancelling translations that erase a fitting
+offset are one example, not a special-case magnitude rule. Exact native geometry
+checks and independent qpdf/Poppler fidelity controls remain separate safeguards.
+
+#### Effective resources and execution roles
+
+The fitting observer binds selected font objects at both Tf and ExtGState Font,
+including size, and selected pattern objects at scn/SCN. q/Q and Form entry preserve
+those bindings; a child dictionary's same-name alias cannot replace an inherited
+selection. Pattern bindings retain the complete supported graphics state at entry to their
+parent stream; pattern execution installs that state before its own matrix.
+Type3 glyph resource fallback uses the page resource dictionary when the font has
+no Resources entry. Names serve provenance and selection, not late paint lookup.
+
+Resource execution follows paint channels. S/s consumes stroke, f/F/f* consumes
+fill, combined path paints consume both, and sh does not consume selected colour
+patterns. Non-Type3 text uses its rendering mode; invisible text consumes neither.
+Type3 programs execute their own paint operators (except invisible mode), so a
+parent pattern is not scanned merely because text is shown if the glyph replaces
+that colour before painting. Colour resets and q/Q restore each channel.
+
+Hidden annotations do not execute appearance-composition certification; independent
+source, encoding, security and PDF2 checks remain. Later visible annotations are
+still checked. FontMatrix belongs to the Type3 font dictionary in this observer;
+a private same-name key in a Type1 font is not an executable transform. Likewise,
+a Type3 CharProc is a glyph program, not a Form: private Matrix/Resources entries
+in its stream dictionary do not acquire Form meanings. Form, appearance, pattern
+and soft-mask matrix/clip roles retain their own checks. Shared parsing and work
+budgets do not merge these distinct PDF contracts.
+
+These role and state rules follow PDF32000-1:2008 sections8.4,8.7,8.10,9.3 and9.6;
+see [the Adobe-hosted standard](https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf).
+
+#### Text execution context
+
+Type3 rendering certification composes FontMatrix, text scale/rise, current Tm
+and the graphics CTM at each shown character. BT/ET owns the text/line matrices;
+q/Q saves text parameters but does not restore those matrices. Td/TD, T*, quotes,
+TJ adjustments and simple Type3 widths/spacing advance the observed cursor.
+Raw character bytes remain font codes rather than being decoded as Unicode.
+
+The observer does not duplicate other font interpreters. After their strings the
+cursor is unknown; Tm or a known line position can establish it again. A later
+visible Type3 show with an unknown cursor refuses fitting, rather than assuming
+identity. Invisible Type3 text does not execute CharProcs but still advances the
+cursor. Retained CharProcs are conservatively inspected at each known cursor.
+This bounded observation does not change kept-page execution or source bytes.
+
+Type3 codes outside FirstChar..LastChar have known zero glyph width, as defined
+by PDF32000-1:2008 Table112. Character/word spacing and horizontal scale still
+affect their cursor advance. This default requires readable, consistent font
+metrics; missing entries within the declared interval and nonfinite values do
+not become zero. Repeated metrics inspection shares the invocation work budget.
 
 ### Catalog and metadata
 
@@ -422,10 +576,10 @@ header is refused before staging: include its pages, select the whole source,
 or explicitly discard structure. Header associations are never silently removed
 or repaired by importing omitted content. Selection prunes omitted semantic content.
 
-Fitting moves page-owned MCIDs into the new Form namespace, preserves nested
+On transformed pages, fitting moves page-owned MCIDs into the new Form namespace, preserves nested
 Form namespaces and annotation OBJR ownership, and transforms scoped BBox
 attributes, including class attributes. A bounding box without a resolvable page
-scope is refused for fitting; use original sizes or a reviewed source with
+scope refuses when a transformation needs it; use original sizes or a reviewed source with
 explicit page association. Final indexes are rebuilt from retained semantic
 ownership. Generated meaningful text is tagged, and contents links receive
 Link/OBJR associations. Each title/label pair is emitted contiguously in physical
@@ -474,8 +628,15 @@ is not exhaustively validated: a malformed source using an undefined font can be
 accepted and render differently across readers or fitting. Supply a reviewed
 valid source; composition does not reconstruct missing font bindings.
 
-Finite PDF real numbers are serialized to at most twelve fractional digits;
-bitwise numeric round trips are not promised. PDFConcat inspects content
+Decoded finite float64 model reals serialize as non-exponent round-trip decimals,
+with a decimal marker for nonzero integral-valued reals and canonical numeric zero.
+Model scalars and content operands use the same real emitter. Nonfinite output
+scalars refuse. Real syntax is parsed before native integer conversion; oversized
+integer tokens and out-of-range real values refuse rather than becoming zero or
+rounded substitutes. This does not recover
+arbitrary decimal precision already lost during parsing. Exact normalized native
+MediaBox/CropBox, rotation, UserUnit and displayed sizes are verified before writing
+and after strict reopening; the fitting match tolerance is not a verifier epsilon. PDFConcat inspects content
 operators and may rebuild page streams for fitting. Document-level metadata is
 replaced or removed as described under [catalog and metadata](#catalog-and-metadata);
 this does not cover all metadata attached to retained pages or other objects.
@@ -494,3 +655,4 @@ cover memory exhaustion or fatal stack overflow. Use operating-system resource
 limits for unusually large or untrusted inputs. [SECURITY](../SECURITY.md) defines
 the trusted-input boundary; [CONTRIBUTING](../CONTRIBUTING.md#scale) describes
 optional measurements.
+

@@ -1,0 +1,289 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Ervins Strauhmanis
+
+// Package diag defines product diagnostics and outcome classes.
+package diag
+
+import (
+	"errors"
+	"slices"
+	"strings"
+)
+
+// Code is a stable diagnostic identifier.
+type Code struct {
+	name       string
+	definition *Definition
+}
+
+// Definition returns an owned copy of this fixed catalog entry.
+func (c Code) Definition() Definition {
+	if c.definition == nil {
+		panic("unknown diagnostic meaning")
+	}
+	return *c.definition
+}
+
+// String returns the diagnostic wire name.
+func (c Code) String() string { return c.name }
+
+// MarshalText encodes a diagnostic identifier.
+func (c Code) MarshalText() ([]byte, error) { return []byte(c.name), nil }
+
+// UnmarshalText decodes stable identifier syntax. Only catalog constructors can
+// create executable diagnostic meanings; unknown identifiers remain display-only.
+func (c *Code) UnmarshalText(text []byte) error {
+	for _, entry := range registry {
+		if entry.Code.name == string(text) {
+			*c = entry.Code
+			return nil
+		}
+	}
+	name := string(text)
+	if name == "" {
+		return errors.New("empty diagnostic code")
+	}
+	for index, r := range name {
+		if (r < 'a' || r > 'z') && (index == 0 || r < '0' || r > '9') && (index == 0 || r != '_') {
+			return errors.New("invalid diagnostic identifier")
+		}
+	}
+	*c = Code{name: name}
+	return nil
+}
+
+// Entry is one ordered diagnostic definition.
+type Entry struct {
+	Code       Code
+	Definition Definition
+}
+
+var registry []Entry
+
+func define(name string, severity Severity, class Class, description string) Code {
+	code := BoundaryCode(name, Definition{Severity: severity, Class: class, Description: description})
+	registry = append(registry, Entry{Code: code, Definition: Definition{Severity: severity, Class: class, Description: description}})
+	return code
+}
+
+// BoundaryCode constructs a fixed catalog entry owned by an adapter. It does
+// not register interface grammar in the domain catalog or mutate global policy.
+func BoundaryCode(name string, definition Definition) Code {
+	return Code{name: name, definition: &definition}
+}
+
+// Entries returns the ordered registry.
+func Entries() []Entry { return slices.Clone(registry) }
+
+// Severity distinguishes errors from warnings.
+type Severity string
+
+// Class determines an error outcome; warnings have no class.
+type Class string
+
+// Status is the complete execution outcome.
+type Status string
+
+// Diagnostic outcomes and severity values.
+const (
+	Error             Severity = "error"
+	Warning           Severity = "warning"
+	NoClass           Class    = ""
+	Invalid           Class    = "invalid"
+	Failed            Class    = "failed"
+	ClassInterrupted  Class    = "interrupted"
+	OK                Status   = "ok"
+	StatusInvalid     Status   = "invalid"
+	StatusFailed      Status   = "failed"
+	StatusInterrupted Status   = "interrupted"
+)
+
+// Definition is the authoritative meaning and outcome of one code.
+type Definition struct {
+	Severity    Severity
+	Class       Class
+	Description string
+}
+
+// Location identifies a zero-based byte offset and one-based byte line/column.
+type Location struct {
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+	Offset int64  `json:"offset"`
+	Ref    string `json:"pointer"`
+}
+
+// PDFLocation identifies a PDF object, page or dictionary entry when known.
+// Zero page/object numbers mean that attribution is unavailable.
+type PDFLocation struct {
+	Object int    `json:"object,omitzero"`
+	Page   int    `json:"page,omitzero"`
+	Path   string `json:"path,omitempty"`
+}
+
+// Diagnostic is a located error or warning with its consuming plan entries.
+type Diagnostic struct {
+	Identity     FindingIdentity `json:"-"`
+	Severity     Severity        `json:"severity"`
+	Code         Code            `json:"code"`
+	Message      string          `json:"message"`
+	Detail       string          `json:"detail,omitempty"`
+	PDFLocation  *PDFLocation    `json:"pdf_location,omitempty"`
+	File         string          `json:"file,omitempty"`
+	Items        []string        `json:"items,omitempty"`
+	ItemsOmitted int             `json:"items_omitted"`
+	Location     *Location       `json:"location,omitempty"`
+}
+
+// Registry returns a copy so callers cannot change the public code definitions.
+func Registry() map[Code]Definition {
+	values := make(map[Code]Definition, len(registry))
+	for _, entry := range registry {
+		values[entry.Code] = entry.Definition
+	}
+	return values
+}
+
+// Registered diagnostic identifiers. Definitions follow declaration order.
+var (
+	RequestInvalid                      = define("request_invalid", Error, Invalid, "invalid application request envelope")
+	SourceSelectionOutOfRange           = define("source_selection_out_of_range", Error, Invalid, "selected page range exceeds the original source page count")
+	SourceSelectionFormUnsupported      = define("source_selection_form_unsupported", Error, Invalid, "partial page selection of a source with form fields or widgets is unsupported")
+	SourceNavigationRemoved             = define("source_navigation_removed", Warning, NoClass, "navigation to omitted source pages was removed for affected occurrences")
+	SourceOutlineDepthUnsupported       = define("source_outline_depth_unsupported", Error, Invalid, "authored sections and imported bookmarks exceed the supported outline hierarchy")
+	SourceFormUnsupported               = define("source_form_unsupported", Error, Invalid, "nonempty forms require identical resolved DR/DA/Q representations")
+	SourceURIBaseRemoved                = define("source_uri_base_removed", Warning, NoClass, "source URI Base is removed; retained relative actions may resolve differently")
+	OutputRequired                      = define("output_required", Error, Invalid, "build requires an output destination")
+	PlanUnreadable                      = define("plan_unreadable", Error, Failed, "plan file or stdin could not be read")
+	PlanTooLarge                        = define("plan_too_large", Error, Invalid, "plan exceeds 64 MiB")
+	PlanSyntax                          = define("plan_syntax", Error, Invalid, "not one valid JSON object in UTF-8 (incl. trailing data, invalid UTF-8, comments)")
+	PlanVersionUnsupported              = define("plan_version_unsupported", Error, Invalid, "required plan version is missing or unsupported")
+	PlanUnknownMember                   = define("plan_unknown_member", Error, Invalid, "member not defined at that place (case-sensitive)")
+	PlanDuplicateMember                 = define("plan_duplicate_member", Error, Invalid, "member repeated in one object")
+	PlanNull                            = define("plan_null", Error, Invalid, "`null` anywhere")
+	PlanType                            = define("plan_type", Error, Invalid, "wrong JSON type")
+	PlanValue                           = define("plan_value", Error, Invalid, "value outside its grammar or range (length, colour, size, anchor, count, \u2026)")
+	PlanItemShape                       = define("plan_item_shape", Error, Invalid, "an item object without exactly one supported source, page, group or contents shape")
+	PlanLimit                           = define("plan_limit", Error, Invalid, "nesting, entries, count, authored text or total generated pages over the limit")
+	PathInvalid                         = define("path_invalid", Error, Invalid, "empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\\x`)")
+	OutputExists                        = define("output_exists", Error, Invalid, "output exists and replacement was not authorized")
+	ReportExists                        = define("report_exists", Error, Invalid, "report exists and replacement was not authorized, or plan inputs are unknown")
+	OutputNotRegular                    = define("output_not_regular", Error, Invalid, "output exists and is not a regular file (directory, symlink, device)")
+	ReportNotRegular                    = define("report_not_regular", Error, Invalid, "same for the report")
+	OutputIsInput                       = define("output_is_input", Error, Invalid, "output is (or aliases) a plan, font or source file")
+	ReportIsInput                       = define("report_is_input", Error, Invalid, "report is (or aliases) an input")
+	ReportIsOutput                      = define("report_is_output", Error, Invalid, "report and output are the same file")
+	FontUnreadable                      = define("font_unreadable", Error, Failed, "font file could not be read")
+	FontInvalid                         = define("font_invalid", Error, Invalid, "unsupported/damaged static TrueType or CFF1 font, or unsafe PostScript name")
+	FontNotEmbeddable                   = define("font_not_embeddable", Error, Invalid, "`OS/2.fsType` forbids embedding")
+	TextUnsupportedCharacter            = define("text_unsupported_character", Error, Invalid, "character outside the accepted scripts, right-to-left, control or format character")
+	TextGlyphMissing                    = define("text_glyph_missing", Error, Invalid, "the font cannot render a character sequence")
+	TextOverflow                        = define("text_overflow", Error, Invalid, "unusable derived text width, or measured block/ink/word overflow with overflow: error")
+	PageSizeRequired                    = define("page_size_required", Error, Invalid, "`inherit` with no source page to inherit from")
+	PageSizeTooLarge                    = define("page_size_too_large", Error, Invalid, "inherited size above 14,400 pt; give an explicit size")
+	SourceUnreadable                    = define("source_unreadable", Error, Failed, "source file could not be read")
+	SourceChanged                       = define("source_changed", Error, Failed, "source bytes or readability at assembly differ from inspection")
+	SourceStructurePartial              = define("source_structure_partial", Warning, "", "retained source content has incomplete structural coverage")
+	SourceNotPDF                        = define("source_not_pdf", Error, Invalid, "source has no recognizable PDF header")
+	SourceInputInvalid                  = define("source_input_invalid", Error, Invalid, "source input is absent, denied or nonregular")
+	PlanInputInvalid                    = define("plan_input_invalid", Error, Invalid, "plan input is absent, denied or nonregular")
+	FontInputInvalid                    = define("font_input_invalid", Error, Invalid, "font input is absent, denied or nonregular")
+	SourceXRefEntryIgnored              = define("source_xref_entry_ignored", Warning, NoClass, "unreferenced zero-offset classic xref entry ignored without changing original source bytes")
+	SourceInvalid                       = define("source_invalid", Error, Invalid, "PDF parsing or validation failed")
+	SourceUnsupported                   = define("source_unsupported", Error, Invalid, "source structure cannot be composed with the supported fidelity guarantees")
+	SourceProcessingFailed              = define("source_processing_failed", Error, Failed, "unexpected inspection or PDF backend failure, including a recovered panic")
+	SourceValidationNotice              = define("source_validation_notice", Warning, NoClass, "backend compatibility notice; skipped validation does not establish content removal")
+	SourceViewerSettingsRemoved         = define("source_viewer_settings_removed", Warning, NoClass, "source catalog PageLayout, PageMode or ViewerPreferences removed before validation")
+	SourceDamaged                       = define("source_damaged", Error, Invalid, "broken page tree, missing/malformed content streams, or validation changing page order or encoded contents")
+	SourceEncrypted                     = define("source_encrypted", Error, Invalid, "encrypted, including empty-password encryption")
+	SourceSigned                        = define("source_signed", Error, Invalid, "signature value, catalog permission structures (`/Perms`) or document timestamp")
+	SourceDynamicForm                   = define("source_dynamic_form", Error, Invalid, "source requests NeedsRendering true")
+	SourceOptionalContent               = define("source_optional_content", Error, Invalid, "`/OCProperties` present")
+	FitGeometryUnsupported              = define("fit_geometry_unsupported", Error, Invalid, "the required fitting affine lacks finite usable geometry or supported forward-placement accuracy")
+	FitAnnotationOwnershipUnsupported   = define("fit_annotation_ownership_unsupported", Error, Invalid, "a multiply bound annotation dictionary belongs to at least one transformed page")
+	FitPrintBoxOmitted                  = define("fit_print_box_omitted", Warning, NoClass, "fitting omits a page's optional printing box; output defaults apply")
+	FitDestinationUnsupported           = define("fit_destination_unsupported", Error, Invalid, "a retained local destination has numeric position coordinates on a transformed target page")
+	SourceOutputIncompatible            = define("source_output_incompatible", Error, Invalid, "retained annotations lack appearances required by the effective PDF 2.0 output")
+	FitAnnotationUnsupported            = define("fit_annotation_unsupported", Error, Invalid, "fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame")
+	FitFormUnsupported                  = define("fit_form_unsupported", Error, Invalid, "a widget transforms or its page ownership is unresolved or conflicting while other pages transform")
+	AssemblyFailed                      = define("assembly_failed", Error, Failed, "PDF/text backend failed during assembly or shaping (including recovered panics)")
+	OutputWriteFailed                   = define("output_write_failed", Error, Failed, "writing the staged output failed (disk full, permissions)")
+	OutputInvalid                       = define("output_invalid", Error, Failed, "the written output did not validate")
+	OutputPageCountMismatch             = define("output_page_count_mismatch", Error, Failed, "written page count \u2260 expected")
+	OutputPublishFailed                 = define("output_publish_failed", Error, Failed, "the final rename failed (incl. no-replace unsupported and link fallback failed)")
+	ReportWriteFailed                   = define("report_write_failed", Error, Failed, "writing or publishing the report failed")
+	Interrupted                         = define("interrupted", Error, ClassInterrupted, "cancelled by a signal")
+	TextOverflowAllowed                 = define("text_overflow_allowed", Warning, NoClass, "`overflow: allow` and measured text extends past the page or block")
+	FormFieldsRenamed                   = define("form_fields_renamed", Warning, NoClass, "pdfcpu namespaces later nonempty forms even without collisions; build reports actual names")
+	FormAppearanceRegenerationRequested = define("form_appearance_regeneration_requested", Warning, NoClass, "a source requests `NeedAppearances`; viewers may redraw all fields")
+	DestinationsRenamed                 = define("destinations_renamed", Warning, NoClass, "colliding named destinations were renamed for later occurrences")
+	DestinationsDropped                 = define("destinations_dropped", Warning, NoClass, "named destinations whose target is not a page of the same document were omitted")
+	SourceXfaRemoved                    = define("source_xfa_removed", Warning, NoClass, "XFA removed; the static AcroForm remains")
+	SourceStructureOrphaned             = define("source_structure_orphaned", Warning, NoClass, "tree-less source semantic remnants ignored and ownership removed")
+	SourceStructureIndexNormalized      = define("source_structure_index_normalized", Warning, NoClass, "derived structure indexes normalized without changing retained semantics")
+	SourceStructureRemoved              = define("source_structure_removed", Warning, NoClass, "source structure claims or ownership discarded by explicit policy")
+	SourcePageLabelsRemoved             = define("source_page_labels_removed", Warning, NoClass, "page labels removed")
+	SourceOutputIntentsRemoved          = define("source_output_intents_removed", Warning, NoClass, "output intents removed; output makes no PDF/A or PDF/X claim")
+	SourceDocumentActionsRemoved        = define("source_document_actions_removed", Warning, NoClass, "`/OpenAction`, catalog `/AA` or document JavaScript removed")
+	SourceAttachmentsRemoved            = define("source_attachments_removed", Warning, NoClass, "embedded-files name tree or catalog `/AF` removed (page attachments remain)")
+	WorkingDirectoryUnavailable         = define("working_directory_unavailable", Error, Failed, "The process working directory could not be determined")
+	OutputInspectionFailed              = define("output_inspection_failed", Error, Failed, "The output destination could not be inspected")
+	ReportInspectionFailed              = define("report_inspection_failed", Error, Failed, "The report destination could not be inspected")
+)
+
+// New constructs a diagnostic using its fixed registry severity.
+func New(code Code, message string, items ...string) Diagnostic {
+	definition := code.definition
+	if definition == nil {
+		panic("undefined diagnostic: " + code.String())
+	}
+	return Diagnostic{Severity: definition.Severity, Code: code, Message: strings.ToValidUTF8(message, "�"), Items: items}
+}
+
+// diagnosticOutcome defines final-outcome precedence and base ordering together.
+type diagnosticOutcome struct {
+	status   Status
+	priority int
+}
+
+func outcomeOf(d Diagnostic) diagnosticOutcome {
+	if d.Code.definition == nil {
+		panic("unclassified diagnostic identifier: " + d.Code.String())
+	}
+	if d.Severity == Error {
+		switch d.Code.definition.Class {
+		case ClassInterrupted:
+			return diagnosticOutcome{StatusInterrupted, 3}
+		case Failed:
+			return diagnosticOutcome{StatusFailed, 2}
+		case Invalid:
+			return diagnosticOutcome{StatusInvalid, 1}
+		case NoClass:
+		}
+	}
+	return diagnosticOutcome{OK, 0}
+}
+
+// Priority keeps publication failures visible before outcome-ranked diagnostics.
+// Their visibility/publication consequences matter independently of overall
+// cancellation or input failure. Execution emits at most one failure per output
+// publication/report role. Equal priorities retain their original order.
+func Priority(d Diagnostic) int {
+	if d.Severity == Error && (d.Code == ReportWriteFailed || d.Code == OutputPublishFailed) {
+		return 4
+	}
+	return outcomeOf(d).priority
+}
+
+// Outcome gives cancellation precedence over environmental failure over invalid input.
+func Outcome(diagnostics []Diagnostic) Status {
+	outcome := diagnosticOutcome{OK, 0}
+	for _, d := range diagnostics {
+		candidate := outcomeOf(d)
+		if candidate.priority > outcome.priority {
+			outcome = candidate
+		}
+	}
+	return outcome.status
+}

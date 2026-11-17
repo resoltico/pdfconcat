@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Ervins Strauhmanis
+
+package compose
+
+import (
+	"math"
+	"strings"
+	"testing"
+
+	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
+	"github.com/resoltico/pdfconcat/internal/typeset"
+)
+
+func TestNumberingAllPhysicalPlacements(t *testing.T) {
+	font, err := typeset.LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := packet.Size{Width: 300, Height: 400}
+	for _, position := range []packet.NumberPosition{packet.NumberTopLeft, packet.NumberTopCenter, packet.NumberTopRight, packet.NumberBottomLeft, packet.NumberBottomCenter, packet.NumberBottomRight} {
+		footer, err := NewPageNumberLayout(font, packet.PageNumbers{Size: 9, Margin: 24, Position: position, Mode: "physical", Start: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		placed, err := footer.Place(size, 987)
+		if err != nil {
+			t.Fatal(position, err)
+		}
+		ink := placed.InkBounds
+		if ink == nil || !numberFits(placed, size) {
+			t.Fatal("incomplete envelope")
+		}
+		if strings.HasPrefix(string(position), "top-") {
+			if math.Abs(ink.Y+ink.Height-376) > 1e-8 {
+				t.Fatal(position, ink)
+			}
+		} else if math.Abs(ink.Y-24) > 1e-8 {
+			t.Fatal(position, ink)
+		}
+		if strings.HasSuffix(string(position), "-left") && math.Abs(ink.X-24) > 1e-8 {
+			t.Fatal(position, ink)
+		}
+		if strings.HasSuffix(string(position), "-right") && math.Abs(ink.X+ink.Width-276) > 1e-8 {
+			t.Fatal(position, ink)
+		}
+		if strings.HasSuffix(string(position), "-center") && math.Abs(placed.Bounds.X+placed.Bounds.Width/2-150) > 1e-8 {
+			t.Fatal(position, placed.Bounds)
+		}
+	}
+}
+
+func TestTopContentsExclusionOnlyWhenEligible(t *testing.T) {
+	font, err := typeset.LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := packet.Size{Width: 300, Height: 400}
+	fit := packet.Size{Width: 450, Height: 500}
+	numbers := &packet.PageNumbers{Size: 9, Margin: 100, Position: packet.NumberTopLeft, Mode: "physical", Start: 1}
+	for _, enabled := range []bool{true, false} {
+		items := []packet.Item{&packet.ContentsItem{Ref: "toc", Size: size, Title: "Contents", Numbering: &enabled}, &packet.GroupItem{Ref: "section", Title: "A section", Items: []packet.Item{&packet.PageItem{Ref: "body", Count: 1, Style: packet.Defaults()}}}}
+		plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: &fit, PageNumbers: numbers, PageDefaults: packet.Defaults(), Items: items})
+		footer, err := NewPageNumberLayout(font, *numbers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents, ds := PrepareContents(t.Context(), plan, nil, map[packet.Font]*typeset.Font{{}: font}, footer)
+		if len(ds) > 0 {
+			t.Fatal(ds)
+		}
+		heading := paintedBounds(contents.pages[0].Blocks[0].Text)
+		top := heading.Y + heading.Height
+		if enabled {
+			_, limit := footer.Available(size, &fit)
+			if top > limit+1e-8 {
+				t.Fatalf("heading %g crosses exclusion %g", top, limit)
+			}
+		} else if math.Abs(top-364) > 1e-8 {
+			t.Fatal("suppressed overlay reserved space", top)
+		}
+	}
+}
+
+func TestNearTargetCanvasUsesIdentityNumberExclusion(t *testing.T) {
+	font, e := typeset.LoadDefaultFont()
+	if e != nil {
+		t.Fatal(e)
+	}
+	target := packet.Size{Width: 300, Height: 400}
+	for _, position := range []packet.NumberPosition{packet.NumberTopLeft, packet.NumberBottomCenter} {
+		numbers := packet.DefaultPageNumbers()
+		numbers.Position = position
+		footer, e := NewPageNumberLayout(font, *numbers)
+		if e != nil {
+			t.Fatal(e)
+		}
+		canvas := packet.Size{Width: 300.005, Height: 400.009}
+		a, b := footer.Available(canvas, nil)
+		c, d := footer.Available(canvas, &target)
+		if a != c || b != d {
+			t.Fatal("kept canvas exclusion was inverse-scaled", a, b, c, d)
+		}
+		changed := packet.Size{Width: 500, Height: 600}
+		a, b = footer.Available(changed, nil)
+		c, d = footer.Available(changed, &target)
+		if a == c && b == d {
+			t.Fatal("transformed canvas lost inverse exclusion")
+		}
+	}
+}

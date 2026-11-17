@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
+
 package main
 
 import (
@@ -14,5 +15,5 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return runContext(context.Background(), args, stdin, stdout, stderr)
 }
 func runContext(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return cli.Run(ctx, args, stdin, stdout, stderr, cli.Host{WorkingDir: os.Getwd, ReleaseOverride: version})
+	return cli.Run(ctx, args, stdin, stdout, stderr, cli.Host{InspectionWorkers: 1, BuildMetadata: buildMetadata(), WorkingDir: os.Getwd, ReleaseOverride: version})
 }

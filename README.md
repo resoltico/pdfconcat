@@ -94,8 +94,8 @@ Re-run the download-and-install command to update an unchanged installer-managed
 copy. Receiptless executables require the
 [replacement or keep-existing steps](docs/INSTALL.md#existing-executable-without-an-installer-receipt).
 
-The examples below describe the current source. For a published binary, follow
-the documentation at its matching [release tag](https://github.com/resoltico/pdfconcat/releases).
+Use documentation matching the installed executable's
+[release tag](https://github.com/resoltico/pdfconcat/releases).
 
 ### Build from source
 
@@ -142,8 +142,9 @@ pdfconcat build -o separated.pdf cover.pdf --blank appendix.pdf --report separat
 ```
 
 The blank inherits the preceding source page's displayed size. Use `--overwrite`
-only when you intend to replace existing regular output/report files. Input
-files are protected from replacement.
+only when you intend to replace existing regular output/report files. Source
+PDFs, the plan and consumed external fonts are protected from replacement,
+including a font used only by linked contents.
 
 ## Fit page sizes
 
@@ -153,9 +154,11 @@ To place all source pages on portrait A4 sheets:
 pdfconcat build -o packet-a4.pdf --fit-to A4 cover.pdf appendix.pdf
 ```
 
-Fitting preserves proportions and clips source artwork to its original visible
-frame; it does not reflow text. Annotation appearances, interactive hit areas,
-forms and internal destinations can restrict fitting. If fitting is refused,
+Fitting compares displayed dimensions with a .01 pt tolerance per ordered side.
+Matching pages keep their native geometry; other pages are centered proportionally
+on the target. Artwork retains its original visible clipping; text is not reflowed.
+Annotation appearances, interactive hit areas, forms and internal destinations
+can restrict fitting. If fitting is refused,
 follow the diagnostic and [fitting policy](docs/PDF-POLICY.md#fitting); some inputs
 need reviewed appearances or their original page sizes. Omit `--fit-to` to retain
 original sizes.
@@ -176,7 +179,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 5,
+  "version": 7,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -201,8 +204,12 @@ pdfconcat build --plan packet.json --report review-packet.report.json
 
 This adds a linked table of contents and an A4 section title page, starts the
 section on an odd physical page, and adds footer numbers. Section titles also
-create PDF bookmarks. The A4 `page_defaults` style sets the section title page;
-it does not resize source pages. To fit the whole packet, add `"fit_to": "A4"` at the plan's top level.
+create PDF bookmarks. `metadata.language` selects glyph shaping for generated body
+text, divider titles and contents; absent or unmatched tags use deterministic
+neutral shaping. See [authored language](docs/PLAN.md#authored-language).
+
+The A4 `page_defaults` style sets the section title page; it does not resize source
+pages. To fit the whole packet, add `"fit_to": "A4"` at the plan's top level.
 
 Page numbering supports physical or consecutive counting, start offsets,
 per-item suppression and six positions. For example,
@@ -215,7 +222,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 5,
+  "version": 7,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -249,13 +256,18 @@ stdout contains a text summary and stderr contains diagnostics. Options may
 appear between inputs; `--` makes subsequent arguments literal paths. Quote
 paths containing spaces in your shell.
 
-`--report FILE` requests a full JSON assembly report from either command,
-including when processing fails. Rejected command-line arguments produce no report.
-It records input SHA-256 hashes, page mappings and uncapped diagnostics. PDF and report publication are separate operations;
-inspect the final result before retrying after a failure. See
-[results, reports and exit codes](docs/CLI.md#output).
+`--report FILE` requests a full JSON assembly report from either command. When
+destination rules permit, a failed check or build can also save a report. Rejected
+command-line arguments produce no report. Reports record input SHA-256 hashes,
+page mappings and uncapped diagnostics. Their `page_sizes` runs contain selected
+original page ranges, observed source dimensions and expected output dimensions.
+See [source page-size reports](docs/CLI.md#selected-source-page-size-runs).
 
-Plans use format v5; results and reports use format v7. Print their schemas with:
+PDF and report publication are separate operations. A stdout write failure returns
+exit 1 and leaves already-published files saved; inspect publication facts before
+retrying. See [results, reports and exit codes](docs/CLI.md#output).
+
+Plans use format v7; results and reports use format v9. Print their schemas with:
 
 ```sh
 pdfconcat schema plan
@@ -271,7 +283,8 @@ diagnostics and publication facts.
 
 ## PDFConcat or the pdfcpu CLI?
 
-PDFConcat uses [pdfcpu](https://github.com/pdfcpu/pdfcpu) as its PDF engine. Both
+PDFConcat uses [pdfcpu](https://github.com/pdfcpu/pdfcpu) with a
+[documented local patch](third_party/pdfcpu/PROVENANCE.md) as its PDF engine. Both
 tools can merge documents, select pages, insert blanks, generate text, preserve
 bookmarks, resize pages and add page numbers. Their workflows and limits differ.
 
@@ -290,7 +303,7 @@ built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu
 may require several commands. A dash does not rule out an external script, and
 dots do not imply identical defaults or preservation guarantees.
 
-| Task | pdfcpu CLI v0.16.4 | PDFConcat |
+| Task | pdfcpu CLI v0.16.4 | PDFConcat 0.13.0 |
 | --- | :---: | :---: |
 | Merge PDFs in a chosen order | ● | ● |
 | Append PDFs by updating the existing destination [1] | ● | — |
@@ -380,8 +393,9 @@ untagged output. This does not certify PDF/UA. See
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
+- A narrow strict-reader exception admits unreferenced zero-offset classic xref entries with located warnings. It does not establish universal producer compatibility. See [input tolerance](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).
-- Forms and numeric internal destinations restrict fitting. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
+- Fitting checks destination targets, annotation/widget ownership and geometry, and placement accuracy. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
 - Page-number overlays may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#page-numbering).
 - PDF and report publication are separate operations, and a late failure can occur after a file becomes visible. Inspect [publication facts](docs/CLI.md#reports-and-committed-state) before retrying.
 

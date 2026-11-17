@@ -1,77 +1,79 @@
 # Architecture
 
-The application core owns packet vocabulary, document identity, timestamp,
-numbering, structure policy and execution. Frontends acquire host input, submit a
-`core.Request` and present a complete `core.Result`. Plan and result wire contracts
-are documented in [PLAN](PLAN.md) and [CLI](CLI.md).
-
-The [product scope](../README.md#scope-and-boundaries) covers PDF assembly and its
-navigation, separators, simple text inserts, numbering and fitting. The typesetter
-serves declared text pages, dividers, contents and number overlays. Ordinary text pages
-have one styled block; automatic pagination belongs to contents. Source PDF text
-is neither edited nor reflowed.
-
-## Packages and boundaries
+PDFConcat keeps one CLI and two JSON exchanges. No public SDK or additional UI is
+provided. The framework-free packet model lives in `internal/core` (package
+`packet`); its diagnostics and complete factual outcomes live below that package.
 
 | Package | Responsibility |
 | --- | --- |
-| `cmd/pdfconcat` | Signals, standard streams, working directory, environment fallback capture, linker version and process exit |
-| `internal/cli` | Argument grammar, help, stdin acquisition and text/JSON presentation |
-| `internal/legal` | Third-party notices and license texts, embedded for `pdfconcat licenses` and copied into archives |
-| `internal/core` | Admission, inspection, composition, build, result projection and reports |
-| `internal/core/internal/packet` | Sealed items, enums, styles, units, limits and physical layout |
-| `internal/core/internal/plan` | Located plan decoding and the embedded plan schema |
-| `internal/core/internal/compose` | Pure page text, contents pagination and page-number placement |
-| `internal/core/internal/typeset` | Fonts, shaping, wrapping, placement, TrueType pruning and CFF conversion |
-| `internal/core/internal/pdf` | PDF graphs, policy, generation, assembly, canonical serialization and verification |
-| `internal/core/internal/files` | Regular-file reads, destination roles and staged publication |
-| `internal/core/internal/diag` | Ordered code registry, diagnostic vocabulary and outcomes |
-| `internal/core/internal/result` | Complete wire model, normalization and embedded result schema |
-| `internal/pdffixture`, `internal/oracle` | Test-only synthetic inputs and independent PDF observations |
+| `cmd/pdfconcat` | Signals, streams, working directory, environment, GOMAXPROCS and build metadata capture |
+| `internal/cli` | Argument grammar, help, stdin, terminal/JSON rendering, caps and exit mapping |
+| `internal/app` | Acquisition, original input reservation, inspection, composition, digest rechecks and publication ordering |
+| `internal/core` | Typed declarations, semantic validation, owned traversal, layout, vocabulary and domain facts |
+| `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence and complete execution facts |
+| `internal/plan` | Strict, located plan v7 decoding with an explicit native path resolver |
+| `internal/compose` | Measured generated pages, contents and numbering |
+| `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
+| `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
+| `internal/files` | Native path semantics, regular-file acquisition, role checks and staged-file lifecycle |
+| `internal/wire` | Result v9 DTOs, domain projection and schema |
+| `internal/legal` | Embedded license notices |
+| `internal/oracle`, `internal/pdffixture` | Test-only independent observations and synthetic PDFs |
 
-Go's nested `internal/` rule confines domain packages and adapters to the core
-tree. Production CLI code imports core and legal and uses supplied streams and
-host capabilities. It opens no files or network connections and launches no processes.
-Depguard confines pdfcpu to pdf, go-text to typeset, native calls to files,
-and test support to tests. See [contributor checks](../CONTRIBUTING.md).
-
-Allowed production dependencies within the core tree are:
+The production import DAG is checked by
+[`internal/architecture`](../internal/architecture/dependencies_test.go), including
+negative controls for distinct forbidden properties. Depguard also confines
+pdfcpu, shaping and native adapters. Third-party source in `third_party/pdfcpu`
+is a separate module, narrowly outside first-party lint and suppression rules.
+Development artifact generators have their own file I/O and are not product
+runtime adapters.
 
 ```text
-core    -> diag, result, packet, plan, compose, typeset, pdf, files
-plan    -> packet, diag
-result  -> packet, diag
-packet  -> diag
-compose -> packet, typeset, diag
-pdf     -> packet, compose, typeset, files, diag
-files   -> diag
-typeset -> external font and Unicode libraries
-diag    -> standard library
+core    -> standard/value libraries, core/diag
+outcome -> core, core/diag
+plan    -> core
+files   -> core
+compose -> core, typeset
+typeset -> value libraries
+pdf     -> core, compose, typeset, pdfcpu
+wire    -> core, core/outcome
+app     -> core, plan, files, compose, pdf, wire
+cli     -> app, core, wire, legal
+cmd     -> cli
 ```
+
+Core and typeset read no files or process settings. Plan receives native path
+resolution explicitly; relative bases must already be absolute. Only files opens
+product input/output paths. PDF assembly receives the application's reread
+original bytes, checks their inspected digest, and re-applies source admission.
+The application reopens staged output and passes its bytes to strict verification.
 
 ## Frontend contract
 
-`core.Execute(ctx, request)` accepts `Check` or `Build`, an absolute `WorkingDir`,
+`app.Execute(ctx, request)` accepts `Check` or `Build`, an absolute `WorkingDir`,
 and one sealed input variant:
 
 - `PlanFile{Path}` reads a named plan relative to `WorkingDir`.
 - `PlanBytes{Data, Label, BaseDir}` decodes supplied bytes; `Label` supplies display
   provenance, and `BaseDir` resolves relative to `WorkingDir` when supplied.
+- `Declared{Declaration}` supplies all source, page, contents, section, directory,
+  style, metadata, fitting and numbering capabilities without JSON. Core semantic
+  admission clones and validates the declaration before native resolution.
 - `Items` contains `SourceItem{Ref, Path}` and `BlankItem{Ref}` values. Each ref
   must be nonempty and unique within the request.
 
 `Output`, `Report`, `Overwrite` and an optional `FitTo` supply execution overrides.
-`core.ParseSheet` constructs a validated fitting size. The frontend captures the
+`app.ParseSheet` constructs a validated fitting size. The frontend captures the
 raw `SOURCE_DATE_EPOCH` value in `Request.SourceDateEpoch`; core parses it only
 when the plan has no authored timestamp. Core reads no process environment.
 Invalid request metadata returns `request_invalid` before file I/O. Input storage
 must remain stable during execution. The core belongs to this repository's
 internal Go API; the CLI and the plan/result schemas define the external interfaces.
 
-`core.Schema` returns an owned copy of the plan or result schema. `core.Version`
-reads build metadata, and `core.ExitCode` classifies the complete result without
-presentation caps. Frontends translate acquisition failures through
-`core.InvocationFailure`; the CLI owns stdin acquisition before calling Execute.
+`app.Schema` returns an owned copy of the plan or result schema. `cli.Version`
+projects explicit host build metadata, and `cli.ExitCode` maps the complete
+outcome status. The CLI represents invocation failures through
+`cli.InvocationFailure`; the CLI owns stdin acquisition before calling Execute.
 
 ## Vocabulary and declarations
 
@@ -81,16 +83,26 @@ divider, contents or padding. A ref is an opaque item identity: a plan JSON
 Pointer or an `argv:N` operand reference.
 
 Packet enums define their wire values once. A `Setting[T]` stores a value and
-the ref that declared it, so explicit zero/empty settings survive layering.
+an explicit presence bit and independent provenance. Explicit zero/empty values
+therefore override defaults without invented JSON pointers.
 `Font{}` identifies the bundled font. The plan decoder resolves directory scopes
 into absolute paths. Contents uses the root `PageDefaults.Text.Font` setting,
 including its declaration provenance; all its heading, row and label measurements
 use that font. Its other layout rules remain owned by compose, and page-number
 overlays retain the bundled font.
 
-`packet.NewPlan` walks the item tree once, caching item order, section ancestry
-and traversal events. Resolution consumes that traversal after source shapes and
-contents page count are known. Padding has no declared item index.
+`packet.AdmitDeclaration` validates and owns each declaration, then prepares the
+cached item order, section ancestry and traversal events. Snapshots are owned
+copies; mutable declarations are revalidated on every admission. Authored and
+derived divider identities share one namespace. Resolution consumes the prepared
+traversal after source shapes and contents page count are known. Padding has no
+declared item index.
+
+Typed numbering callers start with `packet.DefaultPageNumbers()` and set effective
+values; zero starts are refused. Typed titles use `TitlePresent` to distinguish
+explicit empty text from absence. Typed declarations may contain bare grouping
+containers; JSON requires a numbering, directory, title or alignment grouping shape.
+Both producers share semantic admission and aggregate text/node limits.
 
 ## Execution and projection
 
@@ -98,7 +110,7 @@ contents page count are known. Padding has no declared item index.
 
 1. Admission resolves roles and acquires/decodes a plan or direct items.
 2. Inspection loads fonts and checks text, then inspects distinct sources with
-   at most `GOMAXPROCS` workers. Inspection findings are merged in first-use order;
+   the explicit positive `InspectionWorkers` budget. Inspection findings are merged in first-use order;
    one global structure policy is passed through grouped inspection and assembly
    re-admission. Original source security/page checks precede semantic detachment
    or narrowly validated index normalization. Owner-sensitive coverage retains
@@ -128,11 +140,13 @@ the returned stage outcomes. It preserves readable refused sources' known hashes
 byte counts and page counts. Unknown facts remain null. Report writing records
 its own visibility and any trailing failure.
 
-Per-item inspection facts align with `Plan.Leaves()`; physical facts and rename
-slots align with `Layout.Parts`. Each physical part retains its declared item
-index, or `-1` for padding. Each source occurrence refers to one shared file-fact
-record. Composition passes one typed part sequence to assembly. Fonts and PDF
-assembly remain sequential.
+Inspection owns leaf-associated occurrence facts and derives the shapes consumed
+by core layout. Each physical part retains its declared item index, or `-1` for
+padding. Each source occurrence refers to one shared file-fact record. Composition
+binds generated pages/text to typed owning parts and checks their identities and
+cardinality. Assembly results use `PartIdentity` keys for actual rename facts;
+missing or mismatched required facts fail processing. Fonts and PDF assembly
+remain sequential.
 
 The compose package owns measured geometry. `PageNumberLayout` shares the bundled
 overlay font's digit measurements across exclusion geometry, pre-assembly checks,
@@ -184,3 +198,33 @@ Validation notices are evidence; their message text does not select policy.
 Diagnostic wrappers preserve backend detail and PDF locations. Result coalescing
 merges only equivalent findings and unions their consuming item references.
 See [PDF policy](PDF-POLICY.md) for fidelity and resource limits.
+
+Annotation compatibility observations carry closed issue kinds and typed
+page/subtype/original-site facts. Core owns all fitting and PDF 2.0 refusal
+sentences. The PDF adapter recognizes the local reader's typed missing-appearance
+category; backend error wording cannot select acceptance. Cancellation and other
+technical failures use explicit explanation constructors, with opaque causes
+retained separately as Detail. There is no free-form phase/default renderer.
+
+### Fitting ownership
+
+Core owns each page's keep/transform decision and expected displayed size. The PDF
+adapter binds those decisions to original selected identities and exact native
+geometry, checks destination target dispositions and annotation/widget ownership,
+and rechecks the actual re-admitted pages before mutation. Source metrics come
+from the batched geometry observation. Repeated generated pages share a fitting
+record with an explicit count; wire page-size runs carry expectations rather
+than publication claims.
+
+Kept pages bypass fitting mutation. The adapter owns affine placement and source
+composition accuracy admission, finite round-trip numeric serialization, explicit
+resource-execution roles and exact output geometry verification. It observes
+intrinsic/fitted graphics state per invocation, with bounded repeated work and
+cancellation. Resolved font/pattern selections survive scope changes; text-object
+matrices have their BT/ET lifetime separately from q/Q graphics state. Tiling
+patterns install their parent stream's entry state. Shared appearance placement
+comes from the same owner used by the writer.
+
+See [fitting policy](PDF-POLICY.md#fitting), [forward accuracy](PDF-POLICY.md#forward-fitting-accuracy)
+and [text execution](PDF-POLICY.md#text-execution-context) for the supported
+precision, resource and cursor boundaries.

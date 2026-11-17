@@ -1,0 +1,36 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [4 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R /Rotate 0 /UserUnit 1 /Annots [6 0 R] >>
+endobj
+5 0 obj
+<< /Length 47 >>
+stream
+BT /F1 10 Tf 20 40 Td (Synthetic page 1) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Link /Rect [10 10 30 30] /P 4 0 R /Dest [4 0 R /XYZ 20 30 null] >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000185 00000 n 
+0000000349 00000 n 
+0000000445 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+553
+%%EOF

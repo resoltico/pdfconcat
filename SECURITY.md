@@ -66,6 +66,12 @@ or active scripts embedded in source PDFs, but retained page/annotation actions
 may execute in a PDF viewer. Removing document-level scripts/attachments is not
 sanitization.
 
+Recognized encrypted sources are refused before backend password validation,
+key derivation or decryption. Header/xref/trailer parsing still runs first and
+can fail before that refusal; this does not remove parser/resource risks.
+The backend retains its format-specific cryptographic implementations, but
+PDFConcat supplies no password interface and does not create encrypted output.
+
 Encrypted sources (including empty-password encryption), signature values,
 catalog permission structures, timestamps, dynamic forms, optional content and
 known content-dropping page-tree shapes are refused. Empty
@@ -117,3 +123,20 @@ universal network-filesystem guarantee. A backend/output/report failure never
 intentionally rolls back an already-published PDF. See
 [saved-output and report behaviour](docs/CLI.md#reports-and-committed-state)
 for the result fields that record these outcomes.
+
+The source-only zero-offset xref exception is bounded by original typed-reference
+checks and revision tombstones. It does not enable relaxed input parsing or
+runtime repair programs. Exceptional hybrid/xref-stream chains remain refused.
+Original input reservations include every consumed external font and protect
+both publication destinations; undecoded plans keep create-new-only reports.
+
+Selective fitting never bypasses whole-source admission or PDF2 output checks.
+Only transformed target pages impose numeric-destination guards. A shared annotation
+dictionary refuses when any of its bindings transforms. Widgets require proved
+kept-page ownership when other pages transform; unresolved ownership refuses
+before fitting mutation.
+Kept frames retain source clipping and coordinate systems; transformed optional
+printing boxes are explicitly omitted with located warnings. This is not a
+production-print or redaction guarantee. Native/displayed output geometry is
+verified exactly, using finite round-trip scalar serialization rather than a
+physical-size epsilon. See [fitting](docs/PDF-POLICY.md#fitting).

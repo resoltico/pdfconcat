@@ -1,0 +1,911 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Ervins Strauhmanis
+
+// Package plan decodes strict, located version 7 assembly plans.
+package plan
+
+//go:generate go run ../contractgen -root ../..
+
+import (
+	"bytes"
+	_ "embed"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/diag"
+)
+
+// MaxBytes bounds the original UTF-8 plan, including an optional BOM.
+const MaxBytes = 64 << 20
+
+// Schema is the editor-facing plan v7 JSON Schema.
+//
+//go:embed plan.schema.json
+var Schema []byte
+
+type node struct {
+	Numbering   *bool
+	Ref         packet.Ref
+	Source, Dir string
+	Selection   []packet.PageRange
+	Page        *packet.PageStyle
+	Count       int
+	Contents    *packet.ContentsItem
+	Items       []node
+	Title       string
+	StartOn     packet.StartOn
+	Divider     *packet.PageStyle
+}
+
+type fault struct {
+	code             diag.Code
+	message, pointer string
+	offset           int64
+}
+
+func (e *fault) Error() string { return e.message }
+
+type decoder struct {
+	resolvePath        func(string, string) (string, error)
+	base               string
+	d                  *jsontext.Decoder
+	data               []byte
+	bom                int64
+	entries, generated int
+	pairs, contents    int
+	contentsPointer    string
+	contentsOffset     int64
+}
+
+// Decode charges the original input bytes, including an optional leading BOM.
+// The caller owns file/stream I/O and cancellation; this function reads no files.
+func Decode(data []byte, file, base string, resolvePath func(string, string) (string, error)) (packet.Plan, []diag.Diagnostic) {
+	p := decoder{data: data, base: base, resolvePath: resolvePath}
+	if len(data) > MaxBytes {
+		return packet.Plan{}, []diag.Diagnostic{diag.New(diag.PlanTooLarge, "Plan exceeds 64 MiB.")}
+	}
+	input := data
+	if bytes.HasPrefix(input, []byte{0xef, 0xbb, 0xbf}) {
+		p.bom = 3
+		input = input[3:]
+	}
+	p.d = jsontext.NewDecoder(bytes.NewReader(input))
+	result, err := p.document(base)
+	if err == nil {
+		_, err = p.d.ReadToken()
+		if errors.Is(err, io.EOF) {
+			err = nil
+		} else if err == nil {
+			err = p.fail(diag.PlanSyntax, "Expected one JSON object; trailing data is not allowed.")
+		}
+	}
+	if err != nil {
+		return packet.Plan{}, []diag.Diagnostic{p.diagnostic(err, file)}
+	}
+	return result, nil
+}
+
+func (p *decoder) diagnostic(err error, file string) diag.Diagnostic {
+	f := &fault{code: diag.PlanSyntax, message: err.Error(), pointer: string(p.d.StackPointer()), offset: p.d.InputOffset()}
+	var own *fault
+	var syntax *jsontext.SyntacticError
+	var semantic *json.SemanticError
+	switch {
+	case errors.As(err, &own):
+		f = own
+	case errors.As(err, &syntax):
+		f.offset = syntax.ByteOffset
+		f.pointer = string(syntax.JSONPointer)
+		if errors.Is(err, jsontext.ErrDuplicateName) {
+			f.code = diag.PlanDuplicateMember
+		}
+	case errors.As(err, &semantic):
+		f.code = diag.PlanType
+		f.offset = semantic.ByteOffset
+		f.pointer = string(semantic.JSONPointer)
+	}
+	offset := min(max(f.offset+p.bom, 0), int64(len(p.data)))
+	before := p.data[:offset]
+	line := bytes.Count(before, []byte{'\n'}) + 1
+	last := bytes.LastIndexByte(before, '\n')
+	d := diag.New(f.code, f.message)
+	d.File = file
+	d.Location = &diag.Location{File: file, Ref: f.pointer, Offset: offset, Line: line, Column: int(offset) - last}
+	if f.pointer != "" {
+		d.Items = []string{f.pointer}
+	}
+	return d
+}
+
+func (p *decoder) fail(code diag.Code, message string) error {
+	return &fault{code: code, message: message, pointer: string(p.d.StackPointer()), offset: p.d.InputOffset()}
+}
+
+// start is the next value's first byte, excluding commas, colons and whitespace.
+func (p *decoder) start() int64 {
+	n := p.d.InputOffset() + p.bom
+	for n < int64(len(p.data)) && strings.ContainsRune(" \r\n\t,:", rune(p.data[n])) {
+		n++
+	}
+	return n - p.bom
+}
+
+func (p *decoder) expect(kind jsontext.Kind) error {
+	start := p.start()
+	t, err := p.d.ReadToken()
+	if err != nil {
+		return err
+	}
+	if t.Kind() == 'n' {
+		return &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+	}
+	if t.Kind() != kind {
+		return &fault{code: diag.PlanType, message: fmt.Sprintf("Expected %q, received %q.", kind, t.Kind()), pointer: string(p.d.StackPointer()), offset: start}
+	}
+	return nil
+}
+
+func (p *decoder) object(member func(string) error) error {
+	if err := p.expect('{'); err != nil {
+		return err
+	}
+	for p.d.PeekKind() != '}' {
+		t, err := p.d.ReadToken()
+		if err != nil {
+			return err
+		}
+		if t.Kind() != '"' {
+			return p.fail(diag.PlanType, "Expected an object member.")
+		}
+		if err = member(t.String()); err != nil {
+			return err
+		}
+	}
+	_, err := p.d.ReadToken()
+	return err
+}
+
+func (p *decoder) scalar(target any) error {
+	if p.d.PeekKind() == 'n' {
+		return p.expect('"')
+	}
+	return json.UnmarshalDecode(p.d, target, json.RejectUnknownMembers(true))
+}
+
+func (p *decoder) text() (string, error) {
+	var value string
+	err := p.scalar(&value)
+	return value, err
+}
+func (p *decoder) path() (string, error) {
+	s, err := p.text()
+	if err != nil {
+		return "", err
+	}
+	if _, err = p.resolvePath(p.base, s); err != nil {
+		return "", p.fail(diag.PathInvalid, err.Error())
+	}
+	return s, nil
+}
+func (p *decoder) unknown(name string) error {
+	return p.fail(diag.PlanUnknownMember, fmt.Sprintf("Unknown member %q (names are case-sensitive).", name))
+}
+
+func (p *decoder) document(base string) (packet.Plan, error) {
+	var result packet.Plan
+	var draft packet.Declaration
+	if p.d.PeekKind() == jsontext.KindInvalid {
+		_, err := p.d.ReadToken()
+		if errors.Is(err, io.EOF) {
+			return result, p.fail(diag.PlanSyntax, "Plan is empty; provide a JSON plan object.")
+		}
+		return result, err
+	}
+	var defaults packet.PageStyle
+	var nodes []node
+	var dir string
+	seenVersion, seenItems := false, false
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "$schema":
+			_, err = p.text()
+		case "version":
+			seenVersion = true
+			start := p.start()
+			var token jsontext.Token
+			token, err = p.d.ReadToken()
+			if err == nil {
+				switch {
+				case token.Kind() == 'n':
+					err = &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: "/version", offset: start}
+				case token.Kind() == '0':
+					if token.String() != "7" {
+						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 7.", pointer: "/version", offset: start}
+					}
+				default:
+					err = p.fail(diag.PlanType, "version must be the JSON integer 7.")
+				}
+			}
+		case "metadata":
+			var m packet.Metadata
+			err = p.object(func(key string) error {
+				var target **string
+				switch key {
+				case "title":
+					target = &m.Title
+				case "author":
+					target = &m.Author
+				case "subject":
+					target = &m.Subject
+				case "language":
+					target = &m.Language
+				default:
+					return p.unknown(key)
+				}
+				value, e := p.text()
+				if e != nil {
+					return e
+				}
+				*target = &value
+				if e = packet.ValidateMetadata(m); e != nil {
+					return p.fail(diag.PlanValue, e.Error())
+				}
+				return nil
+			})
+			draft.Metadata = &m
+		case "timestamp":
+			var n int64
+			err = p.scalar(&n)
+			if err == nil && (n < 0 || n > packet.MaxTimestamp) {
+				err = p.fail(diag.PlanValue, "timestamp must be Unix seconds from 0 through 253402300799.")
+			}
+			draft.Timestamp = &n
+		case "structure":
+			var value string
+			value, err = p.text()
+			if err == nil && value != "preserve" && value != "discard" {
+				err = p.fail(diag.PlanValue, "structure must be preserve or discard.")
+			}
+			draft.Structure = packet.StructurePolicy(value)
+		case "output":
+			draft.Output, err = p.path()
+		case "dir":
+			dir, err = p.path()
+		case "fit_to":
+			var size packet.Size
+			size, err = p.size(false)
+			if err == nil {
+				draft.FitTo = &size
+			}
+		case "page_defaults":
+			defaults, err = p.style(false)
+		case "page_numbers":
+			draft.PageNumbers, err = p.pageNumbers()
+		case "items":
+			seenItems = true
+			nodes, err = p.items(0)
+		default:
+			err = p.unknown(name)
+		}
+		return err
+	})
+	if err != nil {
+		return result, err
+	}
+	if !seenVersion {
+		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 7.")
+	}
+	if !seenItems {
+		return result, p.fail(diag.PlanType, "Required member items is missing.")
+	}
+	if draft.Output != "" {
+		draft.Output, _ = p.resolvePath(base, draft.Output)
+	}
+	if defaults.Text.Font.Value.Path != "" {
+		defaults.Text.Font.Value.Path, _ = p.resolvePath(base, defaults.Text.Font.Value.Path)
+	}
+	defaults = defaults.Over(packet.Defaults())
+	scope := base
+	if dir != "" {
+		scope, _ = p.resolvePath(base, dir)
+	}
+	draft.PageDefaults = defaults
+	draft.Items = p.resolveItems(nodes, scope)
+	owned, ds := packet.ValidateDeclaration(draft)
+	if len(ds) > 0 {
+		d := ds[0]
+		ref := ""
+		if len(d.Items) > 0 {
+			ref = d.Items[0]
+		}
+		if ref == "items" && p.contents > 0 {
+			return result, &fault{code: d.Code, message: d.Message, pointer: p.contentsPointer, offset: p.contentsOffset}
+		}
+		return result, &fault{code: d.Code, message: d.Message, pointer: ref, offset: p.d.InputOffset()}
+	}
+	result, ds = packet.AdmitDeclaration(owned)
+	if len(ds) > 0 {
+		return result, p.fail(ds[0].Code, ds[0].Message)
+	}
+	if p.contents > 0 {
+		sections := result.Sections()
+		if len(sections) == 0 {
+			return result, &fault{code: diag.PlanValue, message: "Contents requires at least one titled section.", pointer: p.contentsPointer, offset: p.contentsOffset}
+		}
+	}
+	return result, nil
+}
+
+func (p *decoder) items(depth int) ([]node, error) {
+	if depth > packet.MaxNesting {
+		return nil, p.fail(diag.PlanLimit, "Group nesting exceeds 64.")
+	}
+	if err := p.expect('['); err != nil {
+		return nil, err
+	}
+	var nodes []node
+	for p.d.PeekKind() != ']' {
+		n, err := p.item(depth)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n)
+	}
+	if len(nodes) == 0 {
+		return nil, p.fail(diag.PlanValue, "items must not be empty.")
+	}
+	_, err := p.d.ReadToken()
+	return nodes, err
+}
+
+func (p *decoder) item(depth int) (node, error) {
+	n := node{Count: 1}
+	if p.d.PeekKind() != '{' {
+		err := p.expect('{')
+		var typeFault *fault
+		if errors.As(err, &typeFault) && typeFault.code == diag.PlanType {
+			typeFault.message = `An item must be a source object, page object, contents object, or group object; for example {"source":"source.pdf"}.`
+		}
+		return n, err
+	}
+	seen := map[string]bool{}
+	err := p.object(func(name string) error {
+		seen[name] = true
+		var err error
+		switch name {
+		case "numbering":
+			var value bool
+			err = p.scalar(&value)
+			n.Numbering = &value
+		case "source":
+			n.Source, err = p.path()
+		case "pages":
+			n.Selection, err = p.selection()
+		case "page":
+			var style packet.PageStyle
+			style, err = p.style(false)
+			n.Page = &style
+		case "dir":
+			n.Dir, err = p.path()
+		case "items":
+			n.Items, err = p.items(depth + 1)
+		case "count":
+			n.Count, err = p.count()
+		case "title":
+			n.Title, err = p.title()
+		case "start_on":
+			err = p.enumeration(&n.StartOn)
+		case "divider":
+			var style packet.PageStyle
+			style, err = p.style(true)
+			n.Divider = &style
+		case "contents":
+			start, pointer := p.start(), string(p.d.StackPointer())
+			n.Contents, err = p.contentsStyle()
+			if err == nil {
+				p.contents++
+				if p.contents > 1 {
+					err = &fault{code: diag.PlanValue, message: "A packet may contain at most one contents item.", pointer: pointer, offset: start}
+				} else {
+					p.contentsPointer, p.contentsOffset = pointer, start
+				}
+			}
+		default:
+			err = p.unknown(name)
+		}
+		return err
+	})
+	n.Ref = string(p.d.StackPointer())
+	if err != nil {
+		return n, err
+	}
+	numberingOverride := seen["numbering"]
+	delete(seen, "numbering")
+	source := seen["source"] && len(seen) == 1 || seen["source"] && seen["pages"] && len(seen) == 2
+	page := seen["page"] && (len(seen) == 1 || seen["count"] && len(seen) == 2)
+	contents := seen["contents"] && len(seen) == 1
+	group := seen["items"] && (numberingOverride || seen["dir"] || seen["title"] || seen["start_on"]) && (!seen["divider"] || seen["title"])
+	for _, key := range []string{"source", "pages", "page", "count", "contents"} {
+		group = group && !seen[key]
+	}
+	if !source && !page && !contents && !group {
+		return n, p.fail(diag.PlanItemShape, "An item must be a source item, page item, contents item, or useful group; divider requires a title.")
+	}
+	generated := 0
+	if n.Page != nil {
+		generated = n.Count
+	}
+	if n.Divider != nil {
+		generated++
+	}
+	if message := charge(&p.entries, &p.generated, generated); message != "" {
+		return n, p.fail(diag.PlanLimit, message)
+	}
+	return n, nil
+}
+
+func (p *decoder) title() (string, error) {
+	value, err := p.text()
+	if err != nil {
+		return "", err
+	}
+	if utf8.RuneCountInString(value) > packet.MaxAuthoredFieldRunes {
+		return "", p.fail(diag.PlanLimit, "Title exceeds 10000 characters.")
+	}
+	visible := false
+	for _, r := range value {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+			return "", p.fail(diag.PlanValue, "Titles must be single-line text without control or format characters.")
+		}
+		visible = visible || !unicode.IsSpace(r)
+	}
+	if !visible {
+		return "", p.fail(diag.PlanValue, "Title must not be empty or whitespace-only.")
+	}
+	return value, nil
+}
+
+func (p *decoder) contentsStyle() (*packet.ContentsItem, error) {
+	style := &packet.ContentsItem{Title: "Contents"}
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "title":
+			style.Title, err = p.title()
+		case "size":
+			style.Size, err = p.size(false)
+		default:
+			err = p.unknown(name)
+		}
+		return err
+	})
+	return style, err
+}
+
+func (p *decoder) pageNumbers() (*packet.PageNumbers, error) {
+	numbers := packet.DefaultPageNumbers()
+	err := p.object(func(name string) error {
+		var err error
+		switch name {
+		case "mode":
+			err = p.enumeration(&numbers.Mode)
+			if err == nil && numbers.Mode != "physical" && numbers.Mode != "consecutive" {
+				err = p.fail(diag.PlanValue, "mode must be physical or consecutive.")
+			}
+		case "start":
+			err = p.scalar(&numbers.Start)
+			if err == nil && (numbers.Start < 1 || numbers.Start > packet.MaxPageIndex) {
+				err = p.fail(diag.PlanValue, "start must fit the positive page-index range.")
+			}
+		case "position":
+			err = p.enumeration(&numbers.Position)
+			if err == nil {
+				switch numbers.Position {
+				case "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right":
+				default:
+					err = p.fail(diag.PlanValue, "Unknown page-number position.")
+				}
+			}
+		case "kinds":
+			err = p.expect('[')
+			numbers.Kinds = []packet.PartKind{}
+			for err == nil && p.d.PeekKind() != ']' {
+				var kind string
+				kind, err = p.text()
+				if err != nil {
+					break
+				}
+				switch kind {
+				case "source", "page", "divider", "contents":
+				default:
+					err = p.fail(diag.PlanValue, "kinds must select source, page, divider or contents.")
+				}
+				for _, old := range numbers.Kinds {
+					if string(old) == kind {
+						err = p.fail(diag.PlanValue, "Duplicate page-number kind.")
+					}
+				}
+				numbers.Kinds = append(numbers.Kinds, packet.PartKind(kind))
+			}
+			if err == nil {
+				_, err = p.d.ReadToken()
+			}
+		case "size":
+			numbers.Size, err = p.length(true)
+		case "margin":
+			numbers.Margin, err = p.length(false)
+			if err == nil && numbers.Margin < 0 {
+				err = p.fail(diag.PlanValue, "Page-number margin must not be negative.")
+			}
+		default:
+			err = p.unknown(name)
+		}
+		return err
+	})
+	return numbers, err
+}
+
+func (p *decoder) pageIndex() (int, error) {
+	start := p.start()
+	t, err := p.d.ReadToken()
+	if err != nil {
+		return 0, err
+	}
+	if t.Kind() == 'n' {
+		return 0, &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+	}
+	if t.Kind() != '0' {
+		return 0, p.fail(diag.PlanType, "Source page indexes must be JSON integers.")
+	}
+	if strings.ContainsAny(t.String(), ".eE") {
+		return 0, p.fail(diag.PlanValue, "Source page indexes must use positive integer tokens.")
+	}
+	n, err := strconv.ParseUint(t.String(), 10, 64)
+	if err != nil || n > math.MaxInt {
+		return 0, p.fail(diag.PlanValue, "Source page index is outside the supported positive range.")
+	}
+	if n == 0 {
+		return 0, p.fail(diag.PlanValue, "Source page indexes start at 1.")
+	}
+	return int(n), nil
+}
+
+func (p *decoder) selection() ([]packet.PageRange, error) {
+	if err := p.expect('['); err != nil {
+		return nil, err
+	}
+	var ranges []packet.PageRange
+	for p.d.PeekKind() != ']' {
+		if err := p.expect('['); err != nil {
+			return nil, err
+		}
+		first, err := p.pageIndex()
+		if err != nil {
+			return nil, err
+		}
+		last, err := p.pageIndex()
+		if err != nil {
+			return nil, err
+		}
+		if err = p.expect(']'); err != nil {
+			return nil, err
+		}
+		if first > last {
+			return nil, p.fail(diag.PlanValue, "Source page ranges must be ascending inclusive pairs.")
+		}
+		p.pairs++
+		if p.pairs > packet.MaxSelectionPairs {
+			return nil, p.fail(diag.PlanLimit, "Plan exceeds 100000 source selection pairs.")
+		}
+		if len(ranges) > 0 {
+			previous := &ranges[len(ranges)-1]
+			if first <= previous.Last {
+				return nil, p.fail(diag.PlanValue, "Source page ranges must be ascending and disjoint.")
+			}
+
+		}
+		ranges = append(ranges, packet.PageRange{First: first, Last: last})
+	}
+	if len(ranges) == 0 {
+		return nil, p.fail(diag.PlanValue, "Source pages selection must not be empty.")
+	}
+	_, err := p.d.ReadToken()
+	return ranges, err
+}
+
+func (p *decoder) count() (int, error) {
+	start := p.start()
+	t, err := p.d.ReadToken()
+	if err != nil {
+		return 0, err
+	}
+	if t.Kind() == 'n' {
+		return 0, &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: string(p.d.StackPointer()), offset: start}
+	}
+	if t.Kind() != '0' {
+		return 0, p.fail(diag.PlanType, "count must be a JSON number.")
+	}
+	s := t.String()
+	if strings.ContainsAny(s, ".eE") {
+		return 0, p.fail(diag.PlanValue, "count must use an integer token, such as 3 (not 3.0 or 3e0).")
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n > packet.MaxGeneratedPages {
+		return 0, p.fail(diag.PlanLimit, "count exceeds 100000.")
+	}
+	if n < 1 {
+		return 0, p.fail(diag.PlanValue, "count must be at least 1.")
+	}
+	return int(n), nil
+}
+
+func (p *decoder) resolveItems(nodes []node, base string) []packet.Item {
+	style := func(authored *packet.PageStyle) packet.PageStyle {
+		result := *authored
+		if result.Text.Font.Value.Path != "" {
+			result.Text.Font.Value.Path, _ = p.resolvePath(base, result.Text.Font.Value.Path)
+		}
+		return result
+	}
+	items := make([]packet.Item, 0, len(nodes))
+	for _, n := range nodes {
+		switch {
+		case n.Source != "":
+			path, _ := p.resolvePath(base, n.Source)
+			items = append(items, &packet.SourceItem{Numbering: n.Numbering, Ref: n.Ref, Path: path, Selection: n.Selection})
+		case n.Page != nil:
+			items = append(items, &packet.PageItem{Numbering: n.Numbering, Ref: n.Ref, Style: style(n.Page), Count: n.Count})
+		case n.Contents != nil:
+			item := *n.Contents
+			item.Ref = n.Ref
+			item.Numbering = n.Numbering
+			items = append(items, &item)
+		case n.Items != nil:
+			scope := base
+			if n.Dir != "" {
+				scope, _ = p.resolvePath(base, n.Dir)
+			}
+			group := &packet.GroupItem{Numbering: n.Numbering, Ref: n.Ref, Title: n.Title, StartOn: n.StartOn, Items: p.resolveItems(n.Items, scope)}
+			if n.Divider != nil {
+				divider := style(n.Divider)
+				group.Divider = &divider
+			}
+			items = append(items, group)
+		}
+	}
+	return items
+}
+
+func (p *decoder) size(inherit bool) (packet.Size, error) {
+	s, err := p.text()
+	if err != nil {
+		return packet.Size{}, err
+	}
+	size, err := packet.ParseSize(s, inherit)
+	if err != nil {
+		return packet.Size{}, p.fail(diag.PlanValue, err.Error())
+	}
+	return size, nil
+}
+func (p *decoder) length(positive bool) (float64, error) {
+	var n float64
+	var err error
+	if p.d.PeekKind() == '"' {
+		var s string
+		s, err = p.text()
+		if err != nil {
+			return 0, err
+		}
+		n, err = packet.Length(s)
+	} else {
+		n, err = p.number()
+	}
+	if err != nil {
+		var semantic *json.SemanticError
+		var own *fault
+		if errors.As(err, &own) {
+			return 0, err
+		}
+		if errors.As(err, &semantic) {
+			return 0, err
+		}
+		return 0, p.fail(diag.PlanValue, err.Error())
+	}
+	if n < -packet.MaxSide || n > packet.MaxSide || positive && n < 1 {
+		return 0, p.fail(diag.PlanValue, "Length is outside its point range (positive lengths must be at least 1).")
+	}
+	return n, nil
+}
+
+func (p *decoder) style(titleDivider bool) (packet.PageStyle, error) {
+	var s packet.PageStyle
+	err := p.object(func(name string) error {
+		var err error
+		var from *packet.Ref
+		switch name {
+		case "size":
+			s.Size.Value, err = p.size(true)
+			from = &s.Size.From
+			s.Size.Present = true
+		case "background":
+			from = &s.Background.From
+			s.Background.Present = true
+			var value string
+			value, err = p.text()
+			if err == nil {
+				s.Background.Value, err = packet.ParseColor(value, true)
+				if err != nil {
+					err = p.fail(diag.PlanValue, err.Error())
+				}
+			}
+		case "text":
+			return p.textStyle(&s, titleDivider)
+		default:
+			return p.unknown(name)
+		}
+		if err == nil {
+			*from = string(p.d.StackPointer())
+		}
+		return err
+	})
+	return s, err
+}
+
+func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
+	return p.object(func(name string) error {
+		var err error
+		var from *packet.Ref
+		switch name {
+		case "value":
+			from = &s.Text.Value.From
+			s.Text.Value.Present = true
+			if titleDivider {
+				return &fault{code: diag.PlanValue, message: "Divider text.value is supplied by its section title.", pointer: string(p.d.StackPointer()), offset: p.start()}
+			}
+			s.Text.Value.Value, err = p.text()
+			if err == nil && utf8.RuneCountInString(s.Text.Value.Value) > packet.MaxAuthoredFieldRunes {
+				err = p.fail(diag.PlanLimit, "Text exceeds 10000 characters.")
+			}
+		case "font":
+			from = &s.Text.Font.From
+			s.Text.Font.Present = true
+			s.Text.Font.Value, err = p.font()
+		case "size":
+			from = &s.Text.Size.From
+			s.Text.Size.Present = true
+
+			s.Text.Size.Value, err = p.length(true)
+		case "color":
+			from = &s.Text.Color.From
+			s.Text.Color.Present = true
+			var value string
+			value, err = p.text()
+			if err == nil {
+				var c *packet.Color
+				c, err = packet.ParseColor(value, false)
+				if err == nil {
+					s.Text.Color.Value = *c
+				} else {
+					err = p.fail(diag.PlanValue, err.Error())
+				}
+			}
+		case "x":
+			from = &s.Text.X.From
+			s.Text.X.Present = true
+			s.Text.X.Value, err = p.length(false)
+		case "y":
+			from = &s.Text.Y.From
+			s.Text.Y.Present = true
+			s.Text.Y.Value, err = p.length(false)
+		case "width":
+			from = &s.Text.Width.From
+			s.Text.Width.Present = true
+			s.Text.Width.Value, err = p.length(true)
+		case "leading":
+			from = &s.Text.Leading.From
+			s.Text.Leading.Present = true
+			s.Text.Leading.Value, err = p.number()
+			if err == nil && (s.Text.Leading.Value < 1 || s.Text.Leading.Value > 10) {
+				err = p.fail(diag.PlanValue, "leading must be 1–10.")
+			}
+		case "anchor":
+			from = &s.Text.Anchor.From
+			s.Text.Anchor.Present = true
+			err = p.enumeration(&s.Text.Anchor.Value)
+		case "align":
+			from = &s.Text.Align.From
+			s.Text.Align.Present = true
+			err = p.enumeration(&s.Text.Align.Value)
+		case "overflow":
+			from = &s.Text.Overflow.From
+			s.Text.Overflow.Present = true
+			err = p.enumeration(&s.Text.Overflow.Value)
+		case "wrap":
+			from = &s.Text.Wrap.From
+			s.Text.Wrap.Present = true
+			err = p.enumeration(&s.Text.Wrap.Value)
+		default:
+			return p.unknown(name)
+		}
+		if err == nil {
+			*from = string(p.d.StackPointer())
+		}
+		return err
+	})
+}
+func (p *decoder) enum(values ...string) (string, error) {
+	s, err := p.text()
+	if err != nil {
+		return "", err
+	}
+	for _, v := range values {
+		if s == v {
+			return s, nil
+		}
+	}
+	return "", p.fail(diag.PlanValue, "Expected one of: "+strings.Join(values, ", "))
+}
+func (p *decoder) enumeration(value interface {
+	UnmarshalText([]byte) error
+	Values() []string
+}) error {
+	text, err := p.text()
+	if err != nil {
+		return err
+	}
+	if err = value.UnmarshalText([]byte(text)); err != nil {
+		return p.fail(diag.PlanValue, "Expected one of: "+strings.Join(value.Values(), ", "))
+	}
+	return nil
+}
+func (p *decoder) font() (packet.Font, error) {
+	if p.d.PeekKind() == '"' {
+		_, err := p.enum("default")
+		return packet.Font{}, err
+	}
+	var file string
+	err := p.object(func(name string) error {
+		if name != "file" {
+			return p.unknown(name)
+		}
+		var err error
+		file, err = p.path()
+		return err
+	})
+	if err == nil && file == "" {
+		err = p.fail(diag.PlanType, "font requires a file member.")
+	}
+	return packet.Font{Path: file}, err
+}
+
+func (p *decoder) number() (float64, error) {
+	var n float64
+	err := p.scalar(&n)
+	var semantic *json.SemanticError
+	if errors.As(err, &semantic) && semantic.JSONKind == '0' {
+		return 0, p.fail(diag.PlanValue, "Number is outside the supported finite range.")
+	}
+	return n, err
+}
+
+func charge(entries, generated *int, count int) string {
+	*entries++
+	if *entries > packet.MaxEntries {
+		return "Plan exceeds 100000 authored items."
+	}
+	*generated += count
+	if *generated > packet.MaxGeneratedPages {
+		return "Plan generates more than 100000 pages before contents and padding."
+	}
+	return ""
+}

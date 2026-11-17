@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-17
+
+- Recognized encrypted inputs are refused before password validation, key derivation or decryption; header, xref and trailer parsing still run first.
+- Plans require version 7. Review earlier plans against current language and fitting behavior before updating their version; no migration is provided.
+- Results, reports and JSON version objects require format 9; source page_sizes records original ranges, established source and expected output dimensions, retained through later failures.
+- Rename facts are null when unestablished or inapplicable; an observed empty mapping is an empty array.
+- Fitting keeps native boxes, rotation, UserUnit and clipping when both ordered displayed sides match the target within .01 pt.
+- Transformed pages use zero-origin target frames and omit optional printing boxes with located warnings; numbering, contents and padding use actual expected dimensions.
+- Numeric destinations may target kept pages, and widgets need proved kept owners; multiply bound annotation dictionaries refuse when any binding transforms.
+- Fitting checks forward and invoked graphics/text/pattern compositions before publication; unproved accuracy refuses while kept pages retain native execution.
+- PDF reals retain decimal syntax and round-trip precision in objects and content; oversized integers and nonfinite numbers refuse without zero substitution.
+- Unreferenced zero-offset classic xref entries can be admitted with located warnings and revision tombstones; referenced entries and exceptional hybrid chains remain refused.
+- Output and report destinations protect every effective input, including contents-only external fonts and existing-file aliases, through one shared inventory.
+- Authored language selects generated body, divider and contents glyphs, with explicit neutral fallback for unmatched well-formed tags.
+- Full typed declarations and JSON plans share semantic admission; prepared plans, traversal and font views own mutable data, and inspection takes an explicit worker budget.
+- Core vocabulary and outcomes, I/O orchestration, PDF processing and wire projection have separate owners; the CLI alone maps complete outcomes to process exits.
+- Cancellation and deadlines report interruption consistently; annotation refusals retain original PDF sites and use typed causes rather than backend wording.
+- Generated contract checks reject stale schema/reference values; release checks require all supported targets and compare deliverables from two clean builds.
+- Source delivery retains the modified pdfcpu reader, upstream licenses and exact patch provenance, and verifies that offline vendoring uses the patched source.
+- Stdout write failures, including closed pipes, return exit 1 with a diagnostic when stderr works; already-published PDFs and reports remain saved.
+- CI uses setup-go 7.1.0 and go-diff 1.4.5, including Unicode diff fixes; protected PR and release qualification avoid redundant main-push runs.
+
 ## [0.12.0] - 2026-11-16
 
 - Installers require the complete current receipt inventory. Remove incompatible installations with their matching installer or use a fresh directory; receipts are not converted.
@@ -123,7 +145,7 @@
 - Distinct source paths are inspected concurrently with at most `GOMAXPROCS` workers and findings merged in first-use order. Font preparation and PDF assembly remain sequential; parsing and assembly still have no universal time or memory bound.
 - Updated the PDF engine to pdfcpu v0.16.3 and its selected dependency versions.
 - Source and development-tool builds require Go 1.27.3. Upgrade the Go toolchain before building.
-- Editor-schema source paths are `internal/core/internal/plan/plan.schema.json` and `internal/core/internal/result/result.schema.json`. Update source-tree schema URLs, or obtain matching schemas with `pdfconcat schema plan|result`; binary archives still contain them under `schemas/`.
+- Editor-schema source paths are `internal/plan/plan.schema.json` and `internal/wire/result.schema.json`. Update source-tree schema URLs, or obtain matching schemas with `pdfconcat schema plan|result`; binary archives still contain them under `schemas/`.
 
 ### Removed
 

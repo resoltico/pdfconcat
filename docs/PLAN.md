@@ -1,6 +1,6 @@
-# Plan v5
+# Plan v7
 
-A plan is one UTF-8 JSON object with `version: 5`. Use source objects to select
+A plan is one UTF-8 JSON object with `version: 7`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
@@ -13,7 +13,7 @@ packet; its input paths are relative to the directory where you save the plan.
 
 ```json
 {
-  "version": 5,
+  "version": 7,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -71,12 +71,12 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `5` |
+| `version` | Required integer token `7` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
 | `page_defaults` | Default style for page items and dividers |
-| `fit_to` | Fit every output page onto a paper name or explicit sheet size |
+| `fit_to` | Request a displayed-size target; pages within .01 pt on each ordered side retain their native geometry |
 | `page_numbers` | Optional numbering, labels and overlay placement |
 | `metadata` | Optional authored `title`, `author`, `subject`, `language` |
 | `timestamp` | Optional nonnegative UTC Unix seconds, through 253402300799 |
@@ -126,7 +126,7 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 
 ```json
 {
-  "version": 5,
+  "version": 7,
   "output": "reordered.pdf",
   "items": [
     { "source": "source.pdf", "pages": [[3, 3]] },
@@ -265,6 +265,17 @@ sequences are refused. No language is inferred. Author is one string, including
 any punctuation. Missing fields stay absent; an empty/whitespace title does not
 enable DisplayDocTitle.
 
+### Authored language
+
+`metadata.language` is the default shaping language for generated body text,
+divider titles and contents headings/rows. Absent language is neutral; private-use
+or unmatched well-formed tags use the shaping engine's neutral language-system
+fallback. The authored tag and ToUnicode text are preserved. Default navigation
+text such as Contents remains English. Imported source language and canonical
+decimal page labels retain their meanings.
+
+### Metadata and time
+
 XMP is canonical output metadata. PDF 1.7 also has synchronized Info fields;
 PDF 2.0 uses XMP without compatibility Info. The catalog language is the authored
 default; imported subtrees retain their source language and narrower overrides.
@@ -281,6 +292,8 @@ The same executable and effective declarations/source/font bytes produce the
 same PDF bytes across clocks, worker counts and output/report directories.
 Equivalent resolved source path spellings do not affect PDF identity. Reports
 and cross-toolchain/platform equality are outside this byte guarantee.
+
+### Structure
 
 `structure: "preserve"` is the default. Supported source structure, reading
 order, language, attributes, IDs and annotation relationships are retained per
@@ -375,7 +388,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 5,
+  "version": 7,
   "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
@@ -413,7 +426,7 @@ contents or page-number overlay layout. For example, a generated page can declar
 
 ```json
 {
-  "version": 5,
+  "version": 7,
   "items": [{ "page": {
     "size": "A4",
     "text": {
@@ -469,13 +482,15 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 5 is supported; version checks follow the same first-fault order.
+version 7 is supported; version checks follow the same first-fault order.
 
 After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
 `plan_syntax`; supply a JSON plan object.
 
 Limits: 64 MiB original JSON, 64 group levels, 100,000 authored item nodes
 (including groups), and 100,000 explicit selection pairs across the plan.
+Aggregate authored text is bounded to 64 MiB independently of JSON encoding;
+repeated page counts retain one authored text declaration.
 `count` is 1–100,000. The actual generated-page total is at most 100,000,
 including dividers, contents and automatic padding. Source selections and
 repeated generated runs stay compact; selected source pages have no fixed
@@ -491,3 +506,32 @@ counts are `plan_value`; excessive/overflowing counts are `plan_limit`.
 distinguish integer lexemes such as `3` and `3.0`; encoding, duplicate members,
 converted unit bounds, platform paths and aggregate limits also require the
 decoder. Schema validity alone is not a successful check of a packet.
+
+## Selective fitting and source geometry
+
+`fit_to` compares each page's ordered displayed width and height directly to the
+fixed target, with an inclusive absolute .01 pt tolerance per side. The core
+rounds each interval endpoint once in float64 arithmetic. It never swaps
+orientation or chains matches through earlier pages. Ordinary two-decimal
+595.28 × 841.89 pt A4 keeps its actual dimensions; integer 595 × 842 pt does not.
+Without a target, pages keep their native geometry.
+
+Displayed size uses the validated effective CropBox/MediaBox intersection,
+rotation and UserUnit. Matching pages retain native origins, boxes, rotation,
+UserUnit, clipping and content coordinate systems. They acquire no fitting Form.
+Other assembly policies and explicit overlays still apply. Transformed pages use
+zero-origin target MediaBox/CropBox, zero rotation and effective UserUnit one.
+Their own non-null BleedBox/TrimBox/ArtBox references are omitted with separate
+located warnings; default printing bounds apply. Production-print fidelity is
+unsupported. See [fitting restrictions](PDF-POLICY.md#fitting).
+
+Odd-start padding uses the preceding actual expected displayed frame, including
+near-target kept dimensions, and still obeys generated-page size limits. Ordinary
+authored inherited/default canvases continue to default to `fit_to`. Reports expose
+complete selected source geometry as [page-size runs](CLI.md#selected-source-page-size-runs), without
+adding a blank page or enabling numbering.
+
+Fitting may refuse a finite but ill-conditioned coordinate system before Check
+succeeds. The [forward accuracy boundary](PDF-POLICY.md#forward-fitting-accuracy)
+protects painting as well as declared page geometry. A large-origin page can keep
+its original geometry while requiring reviewed rebasing before transformation.

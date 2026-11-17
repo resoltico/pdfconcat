@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package cli adapts argument grammar, process input and presentation to core.
+// Package cli adapts argument grammar, process input and presentation to app.
 package cli
 
 import (
@@ -9,7 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/app"
+	packet "github.com/resoltico/pdfconcat/internal/core"
 )
 
 // Operand is a source path or a plain generated page at an argv position.
@@ -29,10 +30,10 @@ type option struct{ name, alias, value, description string }
 
 var options = []option{
 	{"--blank", "", "", "Insert one generated page with default style; size comes from a source or --fit-to SIZE."},
-	{"--plan", "", "FILE|-", "Read a plan v5 JSON file or standard input."},
+	{"--plan", "", "FILE|-", "Read a plan v7 JSON file or standard input."},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
-	{"--fit-to", "", "SIZE", "Fit every page onto this sheet; annotation, widget and destination limits apply."},
+	{"--fit-to", "", "SIZE", packet.FittingDescription()},
 	{"--report", "", "FILE", "Write a full JSON report."},
 	{"--overwrite", "", "", "Replace existing output/report files."},
 	{"--json", "", "", "Print one JSON result to standard output."},
@@ -41,11 +42,11 @@ var options = []option{
 
 // Parse returns command intent and an optional complete normalized failure.
 // Token validation and error-format discovery perform no I/O.
-func Parse(args []string) (Command, *core.Result) {
+func Parse(args []string) (Command, *app.Result) {
 	c := Command{}
-	failure := func(kind core.InvocationFaultKind, message string, index int) (Command, *core.Result) {
+	failure := func(kind InvocationFaultKind, message string, index int) (Command, *app.Result) {
 		c.JSON = wantsJSON(args)
-		r := core.InvocationFailure(operationHint(c.Name), kind, message, fmt.Sprintf("argv:%d", index))
+		r := InvocationFailure(operationHint(c.Name), kind, message, fmt.Sprintf("argv:%d", index))
 		return c, &r
 	}
 	for i, arg := range args {
@@ -158,7 +159,7 @@ func Parse(args []string) (Command, *core.Result) {
 			case "--base-dir":
 				c.BaseDir = value
 			case "--fit-to":
-				if _, err := core.ParseSheet(value); err != nil {
+				if _, err := app.ParseSheet(value); err != nil {
 					return failure("usage_invalid_value", err.Error(), i)
 				}
 				c.FitTo = value
@@ -290,9 +291,9 @@ func Help(command string) string {
 	}
 	if command == "build" || command == "check" {
 		b.WriteString("\nPlan contents use resolved labels, or an em dash (—) for unnumbered targets; links retain physical targets.\n")
-		b.WriteString("Fitting refuses widgets and numeric internal destination coordinates.\n")
-		b.WriteString("FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances.\n")
-		b.WriteString("Link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.\n")
+		b.WriteString(packet.FittingNavigationDescription() + "\n")
+		b.WriteString(packet.FittingAppearanceDescription() + "\n")
+		b.WriteString(packet.FittingHitAreaDescription() + "\n")
 		b.WriteString("See https://github.com/resoltico/pdfconcat/blob/main/docs/PDF-POLICY.md#fitting\n")
 	}
 	return b.String()

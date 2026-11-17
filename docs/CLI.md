@@ -1,4 +1,4 @@
-# Command line and result v7
+# Command line and result v9
 
 PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
 selections, sections, navigation and simple text inserts; see the
@@ -88,6 +88,11 @@ per diagnostic. With `--json`, stdout holds exactly one capped JSON result and
 stderr is empty unless writing stdout fails. `schema result` covers results,
 reports and JSON version objects. JSON member order is not a consumer contract.
 
+A stdout write failure, including a closed pipe reader, returns exit 1. A diagnostic
+is written when stderr is available; no diagnostic delivery is guaranteed when
+stderr is also broken. Any PDF or report already published remains saved. Its
+saved processing facts do not imply that the final stdout summary was delivered.
+
 Usage errors print diagnostics and a help hint on stderr, with empty stdout.
 For build, check and version, an exact `--json` before the option delimiter
 selects JSON even when argument parsing fails. A `--` consumed as an option's
@@ -96,7 +101,7 @@ retained.
 
 ```json
 {
-  "format_version": 7,
+  "format_version": 9,
   "command": "build",
   "status": "ok",
   "output": {
@@ -139,7 +144,8 @@ pages. Warnings do not make an outcome invalid.
 | `failed` | 1 | Environment, backend, verification or publication failure |
 | `interrupted` | 130 | Cancelled |
 
-Interrupted takes precedence over failed, then invalid for status and exit.
+Processing status precedence is interrupted, failed, then invalid. If rendering
+succeeds, the exit follows that status.
 Diagnostic presentation keeps output-publication and report-writing failures
 first, then interruption, other failures, invalid-input errors and warnings.
 Stage/first-use order stays stable within each priority group. This keeps bounded
@@ -209,7 +215,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 7,
+  "format_version": 9,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -241,7 +247,9 @@ contents item or padding span:
       },
       "text": null,
       "input_pages": null,
-      "spans": null
+      "spans": null,
+      "page_sizes": null,
+      "fields_renamed": null
     }
   ],
   "page_numbers": null,
@@ -272,8 +280,9 @@ Source parts include path, known byte hash/length and actual
 `fields_renamed` records. Readable refused sources retain byte facts; unestablished
 page counts/ranges remain null. Page items and dividers include `count` and, when
 known, authored `size` and measured `text`. Contents and padding parts include
-their generated size but no text-layout object. Under fitting, the final sheet
-is top-level `fit_to`; generated size/text describe the authored layout.
+their generated size but no text-layout object. Generated size/text describe the
+authored canvas. `fit_to` requests displayed dimensions; near-target pages retain
+their actual dimensions rather than snapping to the nominal target.
 
 Text `bounds` and `ink_bounds` are `[left, bottom, right, top]` in points
 (1/72 inch), measured from the lower-left corner of the authored page before
@@ -292,7 +301,29 @@ Sans or the resolved path of the selected font file.
 Ranges are inclusive and 1-based. Check ranges and rename warnings are predictions.
 Only build records actual field-name mappings. The backend may namespace a later
 nonempty form even without a collision; check does not copy its private prefix
-algorithm. Check's empty mapping arrays mean no actual merge was performed.
+algorithm. Check uses null for unestablished mapping facts; [] means an observed empty mapping.
+
+### Selected source page-size runs
+
+Every part has nullable `page_sizes`. Non-source parts use null and retain the
+existing authored meaning of `size`. Once complete validated selected geometry
+and fit decisions are known, source parts contain nonempty runs:
+
+`[{"source":[2,4],"source_size":{"width":595.28,"height":841.89},"output_size":{"width":595.28,"height":841.89}}]`
+
+`source` is an inclusive original source-page range, not a selected or output
+ordinal. `spans` separately owns physical output mapping. Runs combine only
+adjacent original pages whose source AND output sizes are exactly equal; gaps and
+near-but-distinct dimensions never merge. Dimensions are full-precision positive
+finite physical points (1/72 inch), without generated canvas limits.
+
+`source_size` is the pre-fit displayed frame. `output_size` is the resolved
+EXPECTED displayed size, not evidence of PDF publication. Without fitting, or on
+a kept page, it is the actual source size; on a transformed page it is the target.
+Complete known runs survive later refusals and failures even if counts/spans
+remain unresolved. Unknown/invalid selections or incomplete geometry use null,
+never an empty array or a falsely complete prefix. Standard output may omit parts;
+request the existing full report to inspect all runs.
 
 ```sh
 # Part covering output page 12 (for a successful/published packet).
@@ -317,7 +348,7 @@ limits, generate the plan in batches or with a program that preserves filenames.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 5, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+  jq -n '{version: 7, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -331,7 +362,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 5; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 7; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -365,8 +396,10 @@ Check rename warnings identify known source scopes/definitions as predictions;
 only build reports actual old/new mappings. Generated-layout warnings keep plan
 provenance, and backend notices expose only locations the backend supplies.
 
-Warnings merge their consuming `items` only when their code, file, message,
-detail and both locations are equivalent. Different viewer entries therefore
+Warnings merge their consuming `items` only when their code, stable typed
+cause/parameters, phase and file/site are equivalent. Message rendering and
+opaque backend detail do not define identity; findings without sufficient stable
+identity remain distinct. Different viewer entries therefore
 remain different findings, including when a source is repeated. Full reports
 retain all findings; stdout summaries still apply the documented caps.
 
@@ -377,11 +410,12 @@ status `invalid`; a processing failure selects `failed`.
 
 ## Diagnostic codes
 
-The [diagnostic registry](../internal/core/internal/diag/codes.go) is authoritative.
+The [diagnostic registry](../internal/core/diag/codes.go) is authoritative.
 Warning class is empty (shown as —); warnings never select an error outcome.
 
 <!-- codes -->
 
+<!-- BEGIN GENERATED DIAGNOSTICS -->
 | Code | Severity | Class | Meaning |
 | --- | --- | --- | --- |
 | `request_invalid` | error | invalid | invalid application request envelope |
@@ -391,12 +425,6 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_outline_depth_unsupported` | error | invalid | authored sections and imported bookmarks exceed the supported outline hierarchy |
 | `source_form_unsupported` | error | invalid | nonempty forms require identical resolved DR/DA/Q representations |
 | `source_uri_base_removed` | warning | — | source URI Base is removed; retained relative actions may resolve differently |
-| `usage_unknown_command` | error | invalid | first argument is not a command |
-| `usage_unknown_option` | error | invalid | option not defined for the command |
-| `usage_missing_value` | error | invalid | option needs a value |
-| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
-| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
-| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 | `output_required` | error | invalid | build requires an output destination |
 | `plan_unreadable` | error | failed | plan file or stdin could not be read |
 | `plan_too_large` | error | invalid | plan exceeds 64 MiB |
@@ -408,7 +436,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `plan_type` | error | invalid | wrong JSON type |
 | `plan_value` | error | invalid | value outside its grammar or range (length, colour, size, anchor, count, …) |
 | `plan_item_shape` | error | invalid | an item object without exactly one supported source, page, group or contents shape |
-| `plan_limit` | error | invalid | nesting, entries, count or total generated pages over the limit |
+| `plan_limit` | error | invalid | nesting, entries, count, authored text or total generated pages over the limit |
 | `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
 | `output_exists` | error | invalid | output exists and replacement was not authorized |
 | `report_exists` | error | invalid | report exists and replacement was not authorized, or plan inputs are unknown |
@@ -427,14 +455,15 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
 | `source_unreadable` | error | failed | source file could not be read |
 | `source_changed` | error | failed | source bytes or readability at assembly differ from inspection |
+| `source_structure_partial` | warning | — | retained source content has incomplete structural coverage |
 | `source_not_pdf` | error | invalid | source has no recognizable PDF header |
 | `source_input_invalid` | error | invalid | source input is absent, denied or nonregular |
 | `plan_input_invalid` | error | invalid | plan input is absent, denied or nonregular |
 | `font_input_invalid` | error | invalid | font input is absent, denied or nonregular |
-| `source_structure_partial` | warning | — | retained source content has incomplete structural coverage |
+| `source_xref_entry_ignored` | warning | — | unreferenced zero-offset classic xref entry ignored without changing original source bytes |
 | `source_invalid` | error | invalid | PDF parsing or validation failed |
 | `source_unsupported` | error | invalid | source structure cannot be composed with the supported fidelity guarantees |
-| `source_processing_failed` | error | failed | unexpected PDF backend failure, including a recovered panic |
+| `source_processing_failed` | error | failed | unexpected inspection or PDF backend failure, including a recovered panic |
 | `source_validation_notice` | warning | — | backend compatibility notice; skipped validation does not establish content removal |
 | `source_viewer_settings_removed` | warning | — | source catalog PageLayout, PageMode or ViewerPreferences removed before validation |
 | `source_damaged` | error | invalid | broken page tree, missing/malformed content streams, or validation changing page order or encoded contents |
@@ -442,10 +471,13 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_signed` | error | invalid | signature value, catalog permission structures (`/Perms`) or document timestamp |
 | `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
 | `source_optional_content` | error | invalid | `/OCProperties` present |
-| `fit_destination_unsupported` | error | invalid | fitting internal page destinations with numeric position coordinates is unsupported |
+| `fit_geometry_unsupported` | error | invalid | the required fitting affine lacks finite usable geometry or supported forward-placement accuracy |
+| `fit_annotation_ownership_unsupported` | error | invalid | a multiply bound annotation dictionary belongs to at least one transformed page |
+| `fit_print_box_omitted` | warning | — | fitting omits a page's optional printing box; output defaults apply |
+| `fit_destination_unsupported` | error | invalid | a retained local destination has numeric position coordinates on a transformed target page |
 | `source_output_incompatible` | error | invalid | retained annotations lack appearances required by the effective PDF 2.0 output |
 | `fit_annotation_unsupported` | error | invalid | fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame |
-| `fit_form_unsupported` | error | invalid | `fit_to` with a source that has form widgets |
+| `fit_form_unsupported` | error | invalid | a widget transforms or its page ownership is unresolved or conflicting while other pages transform |
 | `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
 | `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |
 | `output_invalid` | error | failed | the written output did not validate |
@@ -469,3 +501,10 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `working_directory_unavailable` | error | failed | The process working directory could not be determined |
 | `output_inspection_failed` | error | failed | The output destination could not be inspected |
 | `report_inspection_failed` | error | failed | The report destination could not be inspected |
+| `usage_unknown_command` | error | invalid | first argument is not a command |
+| `usage_unknown_option` | error | invalid | option not defined for the command |
+| `usage_missing_value` | error | invalid | option needs a value |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
+| `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
+| `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
+<!-- END GENERATED DIAGNOSTICS -->

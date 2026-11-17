@@ -1,0 +1,389 @@
+{
+  "Assets": [
+    {
+      "Path": "business-report.pdf",
+      "Bytes": 14248,
+      "SHA256": "95b3c6f2b8c1327d2ec5efddf879c8302e002c4a0ac79ac970c975129d8c7423",
+      "Producer": "ReportLab 4.4.9",
+      "Source": "sources/generate_business_sources.py",
+      "Command": [
+        "python3",
+        "sources/generate_business_sources.py",
+        "--output-dir",
+        "FRESH_AUTHORING_DIRECTORY"
+      ],
+      "Pages": 3,
+      "Geometry": [
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ],
+        [
+          0.0,
+          0.0,
+          841.8898,
+          595.2756
+        ],
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ]
+      ],
+      "Metadata": {
+        "/Author": "PDFConcat fixture authors",
+        "/CreationDate": "D:20000101000000+00'00'",
+        "/Creator": "PDFConcat corpus sources / ReportLab 4.4.9",
+        "/Keywords": "",
+        "/ModDate": "D:20000101000000+00'00'",
+        "/Producer": "ReportLab PDF Library - (opensource)",
+        "/Subject": "Fictional corpus material; original content MPL-2.0",
+        "/Title": "Field packet: project evidence report",
+        "/Trapped": "/False"
+      },
+      "Fonts": [
+        "Helvetica                            Type 1            WinAnsi          no  no  no       2  0",
+        "AAAAAA+NotoSans-Regular              TrueType          WinAnsi          yes yes yes     10  0"
+      ],
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
+      "FontNotices": [
+        "NOTICE.txt",
+        "internal/typeset/fontdata/OFL.txt"
+      ],
+      "Admission": {
+        "qpdf_check": true,
+        "metadata_and_decoded_bytes_reviewed": true,
+        "no_private_paths_or_unwanted_actions_or_attachments": true
+      }
+    },
+    {
+      "Path": "approval-form.pdf",
+      "Bytes": 7859,
+      "SHA256": "740f3cd0e3bc051334f679d0a53393279d0c84f729f658559612409bf2714d06",
+      "Producer": "ReportLab 4.4.9 / explicit classic append",
+      "Source": "sources/make_classic_incremental.py",
+      "Command": [
+        "python3",
+        "sources/make_classic_incremental.py",
+        "FRESH_AUTHORING_DIRECTORY/approval-form-base.pdf",
+        "FRESH_OUTPUT.pdf"
+      ],
+      "Pages": 2,
+      "Geometry": [
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ],
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ]
+      ],
+      "Metadata": {
+        "/Author": "PDFConcat fixture authors",
+        "/CreationDate": "D:20000101000000+00'00'",
+        "/Creator": "PDFConcat corpus sources / ReportLab 4.4.9",
+        "/Keywords": "",
+        "/ModDate": "D:20000101000000+00'00'",
+        "/Producer": "ReportLab PDF Library - (opensource)",
+        "/Subject": "Fictional corpus material; original content MPL-2.0",
+        "/Title": "Field packet: review form",
+        "/Trapped": "/False"
+      },
+      "Fonts": [
+        "Helvetica                            Type 1            WinAnsi          no  no  no       2  0",
+        "Helvetica                            Type 1            Custom           no  no  no       4  0"
+      ],
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
+      "FontNotices": [
+        "NOTICE.txt",
+        "internal/typeset/fontdata/OFL.txt"
+      ],
+      "Admission": {
+        "qpdf_check": true,
+        "metadata_and_decoded_bytes_reviewed": true,
+        "no_private_paths_or_unwanted_actions_or_attachments": true
+      },
+      "Revisions": {
+        "Count": 2,
+        "FirstEOF": 7497,
+        "BasePrefixSHA256": "7088507b13e6c2867438f472089136eaeb603a335306311d8387b6f8c42bca68",
+        "LatestVisibleMarker": "FINAL REVISION",
+        "SupersededVisibleMarker": "Supporting page without widgets",
+        "BothRevisionsAudited": true
+      },
+      "Fields": {
+        "reviewer": "Field tester",
+        "approved": "/Yes"
+      }
+    },
+    {
+      "Path": "office-report.pdf",
+      "Bytes": 16818,
+      "SHA256": "9d5fdfbd2e6368e333fe8019ed161bd593e52f24a46614bb6499dd884c8db7f5",
+      "Producer": "LibreOffice 26.8.1.1 (AARCH64)",
+      "Source": "sources/office-report.fodt",
+      "Command": [
+        "sources/export_office_report.txt"
+      ],
+      "Pages": 2,
+      "Geometry": [
+        [
+          0.0,
+          0.0,
+          595.303937007874,
+          841.889763779528
+        ],
+        [
+          0.0,
+          0.0,
+          595.303937007874,
+          841.889763779528
+        ]
+      ],
+      "Metadata": {
+        "/Title": "Fictional office report",
+        "/Author": "PDFConcat fixture authors",
+        "/Creator": "Writer",
+        "/Producer": "LibreOffice 26.8.1.1 (AARCH64)",
+        "/CreationDate": "D:20261016115202+03'00'"
+      },
+      "Fonts": [
+        "BAAAAA+CorpusNotoSans-Regular        TrueType          WinAnsi          yes yes yes     18  0",
+        "CAAAAA+CorpusNotoSans-Regular        TrueType          WinAnsi          yes yes yes     13  0"
+      ],
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
+      "FontNotices": [
+        "NOTICE.txt",
+        "internal/typeset/fontdata/OFL.txt"
+      ],
+      "Admission": {
+        "qpdf_check": true,
+        "metadata_and_decoded_bytes_reviewed": true,
+        "no_private_paths_or_unwanted_actions_or_attachments": true
+      }
+    },
+    {
+      "Path": "technical-note.pdf",
+      "Bytes": 18106,
+      "SHA256": "10e4209fc8c8f99cd988b8b139a327c8b1f4055f996c47285eff798e4dee7adf",
+      "Producer": "Typst 0.15.1 / Libertinus Serif 7.051",
+      "Source": "sources/technical-note.typ",
+      "Command": [
+        "typst",
+        "compile",
+        "--ignore-system-fonts",
+        "--creation-timestamp",
+        "0",
+        "sources/technical-note.typ",
+        "FRESH_OUTPUT.pdf"
+      ],
+      "Pages": 1,
+      "Geometry": [
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ]
+      ],
+      "Metadata": {
+        "/Title": "Packet corpus technical note",
+        "/Author": "PDFConcat fixture authors",
+        "/Creator": "Typst 0.15.1",
+        "/ModDate": "D:19700101000000Z",
+        "/CreationDate": "D:19700101000000Z"
+      },
+      "Fonts": [
+        "KYCGCG+LibertinusSerif-Bold-Identity-H CID Type 0C       Identity-H       yes yes yes     29  0",
+        "VHKCZZ+LibertinusSerif-Regular-Identity-H CID Type 0C       Identity-H       yes yes yes     32  0"
+      ],
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
+      "FontNotices": [
+        "NOTICE.txt",
+        "licenses/Libertinus-OFL-1.1.txt"
+      ],
+      "Admission": {
+        "qpdf_check": true,
+        "metadata_and_decoded_bytes_reviewed": true,
+        "no_private_paths_or_unwanted_actions_or_attachments": true
+      }
+    },
+    {
+      "Path": "scan-invoice.pdf",
+      "Bytes": 81093,
+      "SHA256": "d125307aabbc84919583d2064a5d86f65a29d49d719078207960f631ae102b5e",
+      "Producer": "Pillow 12.3.0 / ReportLab 4.4.9",
+      "Source": "sources/create_scan_sources.py",
+      "Command": [
+        "python3",
+        "sources/create_scan_sources.py",
+        "--output-dir",
+        "FRESH_AUTHORING_DIRECTORY"
+      ],
+      "Pages": 2,
+      "Geometry": [
+        [
+          0.0,
+          0.0,
+          600.0,
+          800.0
+        ],
+        [
+          0.0,
+          0.0,
+          800.0,
+          600.0
+        ]
+      ],
+      "Metadata": {
+        "/Author": "PDFConcat fixture authors",
+        "/CreationDate": "D:20000101000000+00'00'",
+        "/Creator": "PDFConcat corpus sources / Pillow and ReportLab",
+        "/Keywords": "",
+        "/ModDate": "D:20000101000000+00'00'",
+        "/Producer": "ReportLab PDF Library - (opensource)",
+        "/Subject": "Original fictional raster artwork; MPL-2.0",
+        "/Title": "Synthetic invoice and receipt",
+        "/Trapped": "/False"
+      },
+      "Fonts": [
+        "Helvetica                            Type 1            WinAnsi          no  no  no       2  0"
+      ],
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
+      "FontNotices": [
+        "NOTICE.txt",
+        "internal/typeset/fontdata/OFL.txt"
+      ],
+      "Admission": {
+        "qpdf_check": true,
+        "metadata_and_decoded_bytes_reviewed": true,
+        "no_private_paths_or_unwanted_actions_or_attachments": true
+      },
+      "Images": [
+        {
+          "Filter": "['/DCTDecode']",
+          "ColorSpace": "/DeviceRGB",
+          "Width": 600,
+          "Height": 800
+        },
+        {
+          "Filter": "['/FlateDecode']",
+          "ColorSpace": "/DeviceGray",
+          "Width": 800,
+          "Height": 600
+        }
+      ]
+    },
+    {
+      "Path": "business-report-object-streams.pdf",
+      "Bytes": 14446,
+      "SHA256": "8986ad484b5645e08beed88c12b47c9addf6af00b95e542738b78d3a37842f35",
+      "Producer": "qpdf 12.4.2 / ReportLab 4.4.9",
+      "Source": "sources/qpdf_report_encoding.txt",
+      "Command": [
+        "qpdf",
+        "--linearize",
+        "--object-streams=generate",
+        "--stream-data=preserve",
+        "business-report.pdf",
+        "FRESH_OUTPUT.pdf"
+      ],
+      "Pages": 3,
+      "Geometry": [
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ],
+        [
+          0.0,
+          0.0,
+          841.8898,
+          595.2756
+        ],
+        [
+          0.0,
+          0.0,
+          595.2756,
+          841.8898
+        ]
+      ],
+      "Metadata": {
+        "/Author": "PDFConcat fixture authors",
+        "/CreationDate": "D:20000101000000+00'00'",
+        "/Creator": "PDFConcat corpus sources / ReportLab 4.4.9",
+        "/Keywords": "",
+        "/ModDate": "D:20000101000000+00'00'",
+        "/Producer": "ReportLab PDF Library - (opensource)",
+        "/Subject": "Fictional corpus material; original content MPL-2.0",
+        "/Title": "Field packet: project evidence report",
+        "/Trapped": "/False"
+      },
+      "Fonts": [
+        "Helvetica                            Type 1            WinAnsi          no  no  no      16  0",
+        "AAAAAA+NotoSans-Regular              TrueType          WinAnsi          yes yes yes     19  0"
+      ],
+      "ContentLicense": "AGPL-3.0-only; original fictional project content; font-specific notices in NOTICE.txt",
+      "FontNotices": [
+        "NOTICE.txt",
+        "internal/typeset/fontdata/OFL.txt"
+      ],
+      "Admission": {
+        "qpdf_check": true,
+        "metadata_and_decoded_bytes_reviewed": true,
+        "no_private_paths_or_unwanted_actions_or_attachments": true
+      },
+      "Encoding": {
+        "Linearized": true,
+        "ObjectStreams": true,
+        "XRefStreams": true,
+        "CompressedEntries": true
+      }
+    },
+    {
+      "Path": "fonts/Go-Italic.ttf",
+      "Bytes": 157164,
+      "SHA256": "6efef00d080c8fe68bbe2bf08526294c83d52d7b90b16f938953025c0868cc57",
+      "Producer": "Bigelow & Holmes / golang.org/x/image v0.46.0",
+      "Source": "https://github.com/golang/image/blob/v0.46.0/font/gofont/ttfs/Go-Italic.ttf",
+      "License": "licenses/Go-font-license.txt",
+      "Modification": "None; original TTF bytes."
+    },
+    {
+      "Path": "fonts/Go-Mono.ttf",
+      "Bytes": 173248,
+      "SHA256": "8bc66a0154bbf69cd24e5bde41a12ec9495c8a242c5def2255e4a164900f1ed7",
+      "Producer": "Bigelow & Holmes / golang.org/x/image v0.46.0",
+      "Source": "https://github.com/golang/image/blob/v0.46.0/font/gofont/ttfs/Go-Mono.ttf",
+      "License": "licenses/Go-font-license.txt",
+      "Modification": "None; original TTF bytes."
+    }
+  ],
+  "AuthoredSourcesSHA256": {
+    "sources/create_scan_sources.py": "f4247c9828196a45295beabc88eb5d8055ac1314d89db637e3ffa347661da8c8",
+    "sources/export_office_report.txt": "717fb4a20c0378e59feabb37125c8d7a154d9f8074f2a7a88516c5c234aba425",
+    "sources/generate_business_sources.py": "816b2d267ca10497ade3bed5242fd04a897166c1974e1344418c739adfe52c82",
+    "sources/invoice-rgb.jpg": "7cef110905d85e5e39a4a7f07f7aeeaf3807e6b9eb53b7c031262912bb92b69d",
+    "sources/invoice-rgb.png": "b2e07835b749d648ac58b4c90128e2341804e6d89cad18e40475c3fc290a907d",
+    "sources/make_classic_incremental.py": "5869e9239639b35682ae2d430997876aa7ac34a97db4a4b7c4ea2ae666a16ccb",
+    "sources/office-report.fodt": "0fd3eeafa6eac4f0caaf081d52d3f55c0ecd6f8f5ebb79c2684f9fbcd5014afe",
+    "sources/prepare_office_font.py": "4da1ada53e8cd402863c9d8f1a46af4e058158ef18ae2f25be1709f3721c8b0c",
+    "sources/qpdf_report_encoding.txt": "c2468bb404ddcd55af6a456a90ca60fc8d3d696be0d17272a69edc1cf2997be9",
+    "sources/receipt-gray.png": "a9f1ba984904fb543eb587804e7656af44ce7cf8c669ff49128ace44ece62456",
+    "sources/technical-note.typ": "cac9b01d6726a53f0b8b5028a9330ec092e9d673abd9c7a1eccad3d8b071a9e4"
+  },
+  "OriginalContentAuthor": "PDFConcat fixture authors",
+  "OriginalContentLicense": "AGPL-3.0-only",
+  "PrivacyScope": "All final PDF/source metadata and both form revisions reviewed; benign example.invalid links are never followed.",
+  "NotoReuse": "internal/typeset/fontdata/NotoSans-Regular.ttf",
+  "Regeneration": "Explicit reviewed authoring only; no producer/network dependencies in Go tests."
+}

@@ -68,7 +68,7 @@ func TestTextContainsEveryLicense(t *testing.T) {
 
 // The font's own directory keeps the OFL beside the asset; both copies must agree.
 func TestNotoLicenseMatchesFontAsset(t *testing.T) {
-	beside, err := os.ReadFile("../core/internal/typeset/fontdata/OFL.txt")
+	beside, err := os.ReadFile("../typeset/fontdata/OFL.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

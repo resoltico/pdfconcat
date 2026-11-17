@@ -51,7 +51,7 @@ jobs:
   release:
     name: Publish the qualified artifacts
     needs: [source, ci]
-    if: ${{ always() && needs.source.result == 'success' && (needs.ci.result == 'success' || (needs.ci.result == 'skipped' && inputs.qualified_run_id != '')) }}
+    if: ${{ !cancelled() && needs.source.result == 'success' && (needs.ci.result == 'success' || (needs.ci.result == 'skipped' && inputs.qualified_run_id != '')) }}
     # Signing, packaging and all seven native installer jobs ran in reusable CI.
     runs-on: ubuntu-latest
     timeout-minutes: 15

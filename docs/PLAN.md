@@ -540,3 +540,8 @@ near-target kept dimensions, and still obeys generated-page size limits. Ordinar
 authored inherited/default canvases continue to default to `fit_to`. Reports expose
 complete selected source geometry as [page-size runs](CLI.md#selected-source-page-size-runs), without
 adding a blank page or enabling numbering.
+
+Fitting may refuse a finite but ill-conditioned coordinate system before Check
+succeeds. The [forward accuracy boundary](PDF-POLICY.md#forward-fitting-accuracy)
+protects painting as well as declared page geometry. A large-origin page can keep
+its original geometry while requiring reviewed rebasing before transformation.

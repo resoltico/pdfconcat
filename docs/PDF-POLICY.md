@@ -232,7 +232,7 @@ A4 keeps; integer 595 × 842 pt A4 transforms. A kept CropBox may retain a large
 MediaBox: the promise concerns displayed frames, not exact printer sheets.
 
 Other pages scale proportionally into zero-origin target MediaBox/CropBox with
-zero rotation and effective UserUnit one. A finite usable affine is required before
+zero rotation and effective UserUnit one. A finite usable affine with supported placement accuracy is required before
 Check succeeds. The same affine handles content, annotations and structure.
 Static widgets may remain on proved kept owners while unrelated pages transform.
 Transformed or unresolved/conflicting widget owners refuse. Partial-selection and
@@ -544,3 +544,29 @@ ordinary strict reading with the exception disabled. Synthetic regressions do
 not establish compatibility with every Quartz producer or unavailable real PDFs.
 The source and provenance of the local reader are in
 [`third_party/pdfcpu`](../third_party/pdfcpu/PROVENANCE.md).
+
+### Forward fitting accuracy
+
+Finite coefficients and correctly sized target boxes alone do not establish
+paint accuracy. Before Check can accept a transformation, the PDF adapter bounds
+its represented affine's discrepancy from centered placement and floating-point
+evaluation error over the entire visible source rectangle. The supported budget
+is 64 binary64 ULPs at each requested target-axis extent, retaining all but six low
+significand bits of target-coordinate precision. This allows ordinary arithmetic
+rounding, not bit-exact arbitrary affine evaluation.
+
+The uniform dot-product bound includes both multiplications and additions and
+uses maximum absolute coordinates throughout the frame. A corner-only check
+would miss interior cancellation. Subnormal-operation terms are included; an
+unused determinant or inverse is not required. Ill-conditioned mappings that
+cannot meet the bound refuse as `fit_geometry_unsupported` before publication,
+even when the source is blank. Large-origin pages may therefore keep successfully
+but require reviewed rebasing before fitting. Normal nonzero-origin fitting and
+finite extreme scales remain supported when the forward bound is met.
+
+This is an arithmetic admission boundary, not a source-coordinate limit, paper
+match tolerance, rendering repair or new verifier slack. Kept pages bypass fitting
+entirely. Native tuples and displayed sizes are still verified exactly before
+serialization and after strict reopening. The bound addresses the fitting map
+within its visible frame; it does not certify arbitrary source operator/resource
+semantics or every renderer's implementation.

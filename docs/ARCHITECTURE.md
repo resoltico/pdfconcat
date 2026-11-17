@@ -215,3 +215,11 @@ range errors rather than substituting values. Forward fitting checks its actual
 scale, coefficients and mapped frame; it does not require an unused determinant
 to fit in a float64.
 Wire `page_sizes` runs are owner-bound expectations and do not assert publication.
+
+Forward fitting admission also bounds represented centered-placement error and
+uniform dot-product rounding over the entire visible frame, within 64 binary64
+ULPs per target axis. The PDF adapter owns this arithmetic precision boundary;
+it is independent of the core .01pt keep decision and exact native verification.
+Corner residuals alone are insufficient: uniform magnitude bounds cover interior
+cancellation. An ill-conditioned transform refuses rather than publishing a
+correctly sized page with shifted painting. True keep paths do not run this gate.

@@ -465,7 +465,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_signed` | error | invalid | signature value, catalog permission structures (`/Perms`) or document timestamp |
 | `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
 | `source_optional_content` | error | invalid | `/OCProperties` present |
-| `fit_geometry_unsupported` | error | invalid | the required fitting affine cannot be represented with finite usable geometry |
+| `fit_geometry_unsupported` | error | invalid | the required fitting affine lacks finite usable geometry or supported forward-placement accuracy |
 | `fit_annotation_ownership_unsupported` | error | invalid | a multiply bound annotation dictionary belongs to at least one transformed page |
 | `fit_print_box_omitted` | warning | — | fitting omits a page's optional printing box; output defaults apply |
 | `fit_destination_unsupported` | error | invalid | a retained local destination has numeric position coordinates on a transformed target page |

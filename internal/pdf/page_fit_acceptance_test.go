@@ -121,12 +121,21 @@ func TestSelectiveFitIndependentNativeAndRasterWitnesses(t *testing.T) {
 		{"exact-letter", "Letter", true, false}, {"crop-letter", "Letter", true, false}, {"rounded-a4", "A4", true, false},
 		{"integer-a4", "A4", false, true}, {"rotated-letter", "Letter", true, false}, {"unit-letter", "Letter", true, false},
 		{"mixed-to-kept", "100x100", false, false}, {"mixed-to-transform", "100x100", false, true},
-		{"tiny-raw-large-unit", "", true, false}, {"large-origin", "A4", false, false},
+		{"tiny-raw-large-unit", "", true, false}, {"large-origin", "A4", false, true}, {"large-origin", "600x800", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input := readPDF(t, filepath.Join("testdata/page-fit", tc.name+".pdf"))
 			for _, op := range []app.Operation{app.Check, app.Build} {
 				result, source, output := selectiveRequest(t, input, tc.target, op)
+				if tc.name == "large-origin" && tc.target == "A4" {
+					if result.Status != "invalid" || !codePresent(result.Diagnostics, diag.FitGeometryUnsupported) || result.Output.Published {
+						t.Fatal("unsupported accuracy was published", result.Diagnostics)
+					}
+					if len(result.Parts) != 1 || result.Parts[0].PageSizes != nil {
+						t.Fatal("failed fitting admission invented complete expected geometry")
+					}
+					continue
+				}
 				if tc.refuse {
 					if result.Status != "invalid" || !codePresent(result.Diagnostics, diag.FitDestinationUnsupported) {
 						t.Fatal(result.Diagnostics)
@@ -158,12 +167,7 @@ func TestSelectiveFitIndependentNativeAndRasterWitnesses(t *testing.T) {
 						}
 					}
 				}
-				if tc.name == "large-origin" {
-					a4, _ := packet.ParseSize("A4", false)
-					if !reflect.DeepEqual(after[0]["/MediaBox"], []any{float64(0), float64(0), a4.Width, a4.Height}) {
-						t.Fatal("wrong fitted target", after)
-					}
-				}
+
 				if tc.name == "mixed-to-kept" {
 					if !reflect.DeepEqual(nativePageFacts(before[0]), nativePageFacts(after[0])) {
 						t.Fatal("mixed kept geometry changed")

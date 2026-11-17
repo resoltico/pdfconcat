@@ -6,6 +6,7 @@
 - Results and reports require format 9, with selected source page_sizes runs containing original ranges, source dimensions and expected output dimensions, retained through later failures.
 - Rename facts remain null when unestablished or inapplicable; an observed empty mapping is an empty array.
 - Mixed fitting constrains numeric navigation by target-page transformation and allows proved kept widgets; multiply bound annotation dictionaries refuse if any binding transforms.
+- Fitting refuses ill-conditioned forward maps before publication; a uniform output-space error bound protects interior painting even when corners or target boxes appear correct.
 - Finite forward fitting transforms remain supported when an unused determinant would overflow or underflow; actual scale, coefficients and mapped-frame safeguards remain.
 - Transformed pages use zero-origin target frames and omit optional printing boxes with located warnings. Kept pages retain native boxes, rotation, UserUnit and clipping.
 - Numbering, contents exclusions and odd-start padding use actual expected page dimensions; native and displayed geometry are verified before writing and after strict reopening.

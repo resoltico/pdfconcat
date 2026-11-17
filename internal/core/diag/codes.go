@@ -200,7 +200,7 @@ var (
 	SourceSigned                        = define("source_signed", Error, Invalid, "signature value, catalog permission structures (`/Perms`) or document timestamp")
 	SourceDynamicForm                   = define("source_dynamic_form", Error, Invalid, "source requests NeedsRendering true")
 	SourceOptionalContent               = define("source_optional_content", Error, Invalid, "`/OCProperties` present")
-	FitGeometryUnsupported              = define("fit_geometry_unsupported", Error, Invalid, "the required fitting affine cannot be represented with finite usable geometry")
+	FitGeometryUnsupported              = define("fit_geometry_unsupported", Error, Invalid, "the required fitting affine lacks finite usable geometry or supported forward-placement accuracy")
 	FitAnnotationOwnershipUnsupported   = define("fit_annotation_ownership_unsupported", Error, Invalid, "a multiply bound annotation dictionary belongs to at least one transformed page")
 	FitPrintBoxOmitted                  = define("fit_print_box_omitted", Warning, NoClass, "fitting omits a page's optional printing box; output defaults apply")
 	FitDestinationUnsupported           = define("fit_destination_unsupported", Error, Invalid, "a retained local destination has numeric position coordinates on a transformed target page")

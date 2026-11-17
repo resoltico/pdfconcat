@@ -7,7 +7,7 @@ import "fmt"
 
 // FittingAffineCannotBeRepresented explains an unrepresentable required affine.
 func FittingAffineCannotBeRepresented() Explanation {
-	return explain("fit_geometry", "The page requires a fitting transform whose finite geometry cannot be represented; use original page sizes.")
+	return explain("fit_geometry", "The page requires a fitting transform whose finite geometry or supported forward-placement accuracy cannot be established; use original page sizes.")
 }
 
 // FittingAnnotationOwnershipUnsupported explains unsafe shared coordinate ownership.

@@ -37,15 +37,11 @@ func (f Roles) checkReport() []diag.Diagnostic {
 	if f.Report != "" && f.Output != "" && !hasNonregularReport(ds) {
 		same, err := samePathOrFile(f.Report, f.Output)
 		if err != nil {
-			d := diag.New(diag.ReportInspectionFailed, err.Error())
+			d := diag.Report(diag.ReportInspectionFailed, diag.TechnicalFailure("input", err.Error()))
 			d.File = f.Report
 			ds = append(ds, d)
 		}
-		if same {
-			d := diag.New(diag.ReportIsOutput, "Report and output must be different files.")
-			d.File = f.Report
-			ds = append(ds, d)
-		}
+		ds = append(ds, packet.CheckReportSeparation(same, f.Report)...)
 	}
 
 	return ds

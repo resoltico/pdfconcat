@@ -21,7 +21,6 @@ import (
 // build owns the complete staging lifecycle, including abort on every failure.
 type buildOutcome struct {
 	output      outcome.Output
-	renames     [][]packet.FieldRename
 	diagnostics []diag.Diagnostic
 }
 
@@ -34,11 +33,11 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 	}
 	embedded, err := compose.PrepareFonts(pages, assembly.NumberLayout)
 	if err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New(diag.FontInvalid, err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.Report(diag.FontInvalid, diag.TechnicalFailure("input", err.Error())))
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New(diag.Interrupted, err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
 		return out
 	}
 	staged, err := files.Create(j.Output())
@@ -74,7 +73,10 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 	}
 	assembled, err := pdf.Assemble(c, assembly, io.MultiWriter(counter, hash))
 	out.diagnostics = append(out.diagnostics, assembled.Diagnostics...)
-	out.renames = assembled.Renames
+	out.diagnostics = append(out.diagnostics, bindAssemblyFacts(assembly.Parts, assembled, err == nil)...)
+	if hasErrors(out.diagnostics) {
+		return out
+	}
 	if err != nil {
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
@@ -89,7 +91,7 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 		return out
 	}
 	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.New(diag.Interrupted, err.Error()))
+		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
 		return out
 	}
 	published, err := staged.Commit(overwrite)
@@ -113,4 +115,29 @@ func (w *countWriter) Write(data []byte) (int, error) {
 	n, err := w.Writer.Write(data)
 	w.n += int64(n)
 	return n, err
+}
+
+func bindAssemblyFacts(parts []pdf.Part, assembled pdf.Assembled, complete bool) []diag.Diagnostic {
+	expected := make(map[packet.PartIdentity]bool, len(parts))
+	for _, part := range parts {
+		expected[part.Identity()] = true
+	}
+	failure := func() []diag.Diagnostic {
+		return []diag.Diagnostic{diag.Report(diag.AssemblyFailed, diag.AssemblyFactsDoNotMatchTheirOwningParts())}
+	}
+	for key := range assembled.Parts {
+		if !expected[key] {
+			return failure()
+		}
+	}
+	for index, part := range parts {
+		fact, exists := assembled.Parts[part.Identity()]
+		if complete && (!exists || !fact.Known) {
+			return failure()
+		}
+		if exists && fact.Known && part.Kind == packet.PartSource {
+			parts[index].FieldsRenamed = append([]packet.FieldRename{}, fact.Renames...)
+		}
+	}
+	return nil
 }

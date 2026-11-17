@@ -293,3 +293,12 @@ func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts) (packet.L
 	}
 	return packet.Resolve(p, shapes, 0)
 }
+
+func partRenames(a pdf.Assembled) []packet.FieldRename {
+	for key, part := range a.Parts {
+		if key.Ref == "/items/1" {
+			return part.Renames
+		}
+	}
+	return nil
+}

@@ -54,7 +54,7 @@ func silentLibraryBuild(t *testing.T) error {
 	if status := diag.Outcome(ds); status != "ok" {
 		return fmt.Errorf("inspection: %+v", ds)
 	}
-	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: path}, &packet.SourceItem{Path: path, Ref: path}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: "first"}, &packet.SourceItem{Path: path, Ref: "repeat"}}}), map[string]packet.SourceFacts{"first": facts.SourceFacts, "repeat": facts.SourceFacts})
 	if len(ds) > 0 {
 		return fmt.Errorf("layout: %+v", ds)
 	}

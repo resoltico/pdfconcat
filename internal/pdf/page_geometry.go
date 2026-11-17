@@ -32,7 +32,7 @@ func readRectangle(s *model.Context, obj types.Object) (*types.Rectangle, error)
 		return nil, err
 	}
 	if len(a) != 4 {
-		return nil, refuse(diag.SourceInvalid, "A rectangle must contain four coordinates.")
+		return nil, refuse(diag.SourceInvalid, diag.ARectangleMustContainFourCoordinates())
 	}
 	r, err := s.RectForArray(a)
 	if err != nil {
@@ -88,7 +88,7 @@ func inheritedPageAttrs(s *model.Context, node *pageTreeNode, cache map[*pageTre
 				return attrs, err
 			}
 			if math.IsNaN(angle) || math.IsInf(angle, 0) || math.Mod(angle, 90) != 0 {
-				return attrs, refuse(diag.SourceInvalid, "Page rotation must be a finite multiple of 90 degrees.")
+				return attrs, refuse(diag.SourceInvalid, diag.PageRotationMustBeAFiniteMultipleOfDegrees())
 			}
 			attrs.Rotate = int(math.Mod(angle, 360))
 		case "Resources":
@@ -117,8 +117,8 @@ func pageGeometries(c context.Context, s *model.Context) ([]pageGeometry, error)
 		if err := c.Err(); err != nil {
 			return nil, err
 		}
-		invalid := func(message string) error {
-			finding := diag.New(diag.SourceInvalid, message)
+		invalid := func(message diag.Explanation) error {
+			finding := diag.Report(diag.SourceInvalid, message)
 			finding.PDFLocation = &diag.PDFLocation{Object: page.ref.ObjectNumber.Value(), Page: index + 1, Path: "Pages.EffectiveGeometry"}
 			return &policyError{finding: finding}
 		}
@@ -127,11 +127,11 @@ func pageGeometries(c context.Context, s *model.Context) ([]pageGeometry, error)
 			return nil, err
 		}
 		if attrs.MediaBox == nil {
-			return nil, invalid("Page has no effective MediaBox.")
+			return nil, invalid(diag.PageHasNoEffectiveMediaBox())
 		}
 		box := effectivePageBox(&attrs)
 		if !validPhysicalDimension(box.Width()) || !validPhysicalDimension(box.Height()) {
-			return nil, invalid("Page's effective CropBox–MediaBox frame must have finite positive dimensions.")
+			return nil, invalid(diag.PageSEffectiveCropBoxMediaBoxFrameMustHaveFinitePositive())
 		}
 		unit := 1.0
 		value, err := s.Dereference(page.dict["UserUnit"])
@@ -145,17 +145,17 @@ func pageGeometries(c context.Context, s *model.Context) ([]pageGeometry, error)
 		case types.Float:
 			unit = float64(n)
 		default:
-			return nil, invalid("Page UserUnit must be a finite positive number.")
+			return nil, invalid(diag.PageUserUnitMustBeAFinitePositiveNumber())
 		}
 		if !validPhysicalDimension(unit) {
-			return nil, invalid("Page UserUnit must be a finite positive number.")
+			return nil, invalid(diag.PageUserUnitMustBeAFinitePositiveNumber())
 		}
 		width, height := box.Width()*unit, box.Height()*unit
 		if attrs.Rotate%180 != 0 {
 			width, height = height, width
 		}
 		if !validPhysicalDimension(width) || !validPhysicalDimension(height) {
-			return nil, invalid("Page must have finite positive displayed physical dimensions.")
+			return nil, invalid(diag.PageMustHaveFinitePositiveDisplayedPhysicalDimensions())
 		}
 		result = append(result, pageGeometry{pageRef: page, attrs: attrs, box: box, unit: unit, size: packet.Size{Width: width, Height: height}})
 	}

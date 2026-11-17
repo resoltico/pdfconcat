@@ -136,7 +136,7 @@ func pruneStructure(c context.Context, s *model.Context) (err error) {
 		return err
 	}
 	if err = validateTableHeaders(c, s, root); err != nil {
-		return pdfFailure(diag.SourceUnsupported, "The selected structure cannot preserve table header associations. Include the referenced header pages, select the whole source, or explicitly discard structure.", err)
+		return pdfFailure(diag.SourceUnsupported, diag.TheSelectedStructureCannotPreserveTableHeaderAssociationsIncludeThe(), err)
 	}
 	return nil
 }
@@ -605,7 +605,7 @@ func fitStructureAttributes(c context.Context, s *model.Context, root types.Dict
 					return e
 				}
 				if found {
-					return refuse(diag.SourceUnsupported, "A structure bounding box has no page scope; fitting cannot preserve its geometry. Use original page sizes or a reviewed source with explicit page association.")
+					return refuse(diag.SourceUnsupported, diag.AStructureBoundingBoxHasNoPageScopeFittingCannot())
 				}
 			}
 		}

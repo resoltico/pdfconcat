@@ -120,12 +120,12 @@ func decodeDrawingStream(c context.Context, s *model.Context, stream types.Strea
 
 func contentEncodingError(page int, ref types.IndirectRef, err error) error {
 	code := diag.SourceInvalid
-	message := "Page content could not be decoded completely. Obtain a reviewed repair or deliver the original separately."
+	message := diag.PageContentCouldNotBeDecodedCompletelyObtainAReviewed()
 	if errors.Is(err, filter.ErrUnsupportedFilter) {
 		code = diag.SourceUnsupported
-		message = "Page content uses an unsupported encoding. Supply a reviewed, readable PDF or deliver the original separately."
+		message = diag.PageContentUsesAnUnsupportedEncodingSupplyAReviewedReadable()
 	}
-	d := diag.New(code, message)
+	d := diag.Report(code, message)
 	d.Detail = strings.ToValidUTF8(err.Error(), "�")
 	d.PDFLocation = &diag.PDFLocation{Object: ref.ObjectNumber.Value(), Page: page, Path: "Pages.Contents"}
 	return &policyError{finding: d, err: err}
@@ -207,7 +207,7 @@ func validateOutputFormEncoding(c context.Context, s *model.Context) error {
 		if err != nil {
 			failure := contentEncodingError(0, ref, err)
 			finding := diagnostic(failure, diag.SourceInvalid)
-			finding.Message = "Output Form content could not be decoded completely."
+			diag.ApplyExplanation(&finding, diag.OutputFormContentCouldNotBeDecodedCompletely())
 			finding.PDFLocation.Path = "XObject.Form"
 			return &policyError{finding: finding, err: err}
 		}

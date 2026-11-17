@@ -54,7 +54,7 @@ func preparedFooter(t *testing.T) (map[typeset.Digest]typeset.EmbeddedFont, map[
 }
 func footerLayout(count int) packet.Layout {
 	first := int64(1)
-	return packet.Layout{Numbering: []packet.NumberSpan{{Output: [2]int64{1, int64(count)}, Start: &first}}, PageNumbers: &packet.PageNumbers{Size: 9, Margin: 24}, Parts: []packet.Part{{Leaf: packet.Leaf{Ref: "/items/0", Kind: "source"}, FirstPage: 1, LastPage: int64(count)}}}
+	return packet.Layout{Numbering: []packet.NumberSpan{{Output: [2]int64{1, int64(count)}, Start: &first}}, PageNumbers: &packet.PageNumbers{Size: 9, Margin: 24, Mode: "physical", Position: "bottom-center", Start: 1}, Parts: []packet.Part{{Leaf: packet.Leaf{Ref: "/items/0", Kind: "source"}, FirstPage: 1, LastPage: int64(count)}}}
 }
 func writeFooterContext(t *testing.T, s *model.Context, name string) string {
 	t.Helper()

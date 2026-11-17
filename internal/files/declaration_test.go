@@ -9,6 +9,7 @@ import (
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/files"
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
 
 func TestTypedFontDeclarationScopes(t *testing.T) {
@@ -22,7 +23,7 @@ func TestTypedFontDeclarationScopes(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	leaves := d.Plan().Leaves()
+	leaves := pdffixture.Plan(t, d).Leaves()
 	want := []string{filepath.Join(base, "inputs/same.ttf"), filepath.Join(base, "same.ttf"), filepath.Join(base, "inputs/nested/same.ttf")}
 	for index, leaf := range leaves {
 		if leaf.Page.Text.Font.Value.Path != want[index] {

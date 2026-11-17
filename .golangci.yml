@@ -75,6 +75,11 @@ linters:
   exclusions:
     # Central exception registry. Each entry: what, why, and when it can be removed.
     rules:
+      # Core catalog sentences keep named parameters in whole templates; concatenation
+      # suggested by perfsprint would reintroduce the suspended fragment construction.
+      - path: internal/core/diag/(explanation|product).go
+        text: "string-format:"
+        linters: [perfsprint]
       # Development tooling operates on explicitly chosen trusted checkout/artifact paths.
       # These generators inspect inputs; they are not product file-acquisition adapters.
       - path: internal/(contractgen|releasecheck)/main.go

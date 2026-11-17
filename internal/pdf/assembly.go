@@ -19,7 +19,9 @@ type Occurrence struct {
 // Part carries everything required to assemble one physical span.
 type Part struct {
 	packet.Part
-	Occurrence *Occurrence
+	Occurrence    *Occurrence
+	Text          *compose.TextFacts
+	FieldsRenamed []packet.FieldRename
 	// Data contains the acquired, digest-checked original source bytes for this operation.
 	Data      []byte
 	Generated []compose.Page
@@ -40,8 +42,14 @@ type Assembly struct {
 	Fonts        map[typeset.Digest]typeset.EmbeddedFont
 }
 
-// Assembled records actual renames by part index and assembly diagnostics.
+// PartResult reports established assembly facts for one physical span.
+type PartResult struct {
+	Known   bool
+	Renames []packet.FieldRename
+}
+
+// Assembled binds actual facts to owners; absent or unestablished entries are unknown.
 type Assembled struct {
-	Renames     [][]packet.FieldRename
+	Parts       map[packet.PartIdentity]PartResult
 	Diagnostics []diag.Diagnostic
 }

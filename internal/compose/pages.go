@@ -21,10 +21,19 @@ type pageKey struct {
 	filled      bool
 }
 
+// PreparedPart binds measured text and generated pages to their owning span.
+type PreparedPart struct {
+	Owner packet.PartIdentity
+	Pages []Page
+	Text  *TextFacts
+}
+
 // LayOut prepares page-item text and retains its measured facts.
-func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font) ([][]Page, []*TextFacts, []diag.Diagnostic) {
-	pages := make([][]Page, len(layout.Parts))
-	facts := make([]*TextFacts, len(layout.Parts))
+func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font) ([]PreparedPart, []diag.Diagnostic) {
+	prepared := make([]PreparedPart, len(layout.Parts))
+	for index, part := range layout.Parts {
+		prepared[index].Owner = part.Identity()
+	}
 	var ds []diag.Diagnostic
 	type cached struct {
 		page Page
@@ -34,14 +43,14 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 	var shaper typeset.Shaper
 	for i, p := range layout.Parts {
 		if p.Kind == packet.PartPadding {
-			pages[i] = []Page{{Width: p.Size.Width, Height: p.Size.Height}}
+			prepared[i].Pages = []Page{{Width: p.Size.Width, Height: p.Size.Height}}
 			continue
 		}
 		if p.Page == nil {
 			continue
 		}
 		if err := c.Err(); err != nil {
-			ds = append(ds, diag.New(diag.Interrupted, err.Error()))
+			ds = append(ds, diag.Report(diag.Interrupted, diag.TechnicalFailure("pdf", err.Error())))
 			break
 		}
 		style := p.Page
@@ -57,7 +66,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			}
 		}
 		if top-bottom < 1 {
-			ds = append(ds, diag.New(diag.TextOverflow, "Page-number exclusion leaves no usable text height.", p.Ref))
+			ds = append(ds, diag.Report(diag.TextOverflow, diag.PageNumberExclusionLeavesNoUsableTextHeight(), p.Ref))
 			continue
 		}
 		key := pageKey{language: layout.Language, bottom: bottom, top: top, kind: p.Kind, size: p.Size, text: style.Text, filled: style.Background.Value != nil}
@@ -80,7 +89,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 					width = p.Size.Width - 72
 				}
 				if width < 1 {
-					ds = append(ds, diag.New(diag.TextOverflow, "Default margins leave no usable text width; give an explicit width of at least 1 point or a wider page.", p.Ref))
+					ds = append(ds, diag.Report(diag.TextOverflow, diag.DefaultMarginsLeaveNoUsableTextWidthGiveAnExplicit(), p.Ref))
 					continue
 				}
 				params := typeset.Params{Language: typeset.ShapingLanguage(layout.Language), Text: style.Text.Value.Value, Size: style.Text.Size.Value, PageWidth: p.Size.Width, PageHeight: top - bottom, OffsetX: style.Text.X.Value, OffsetY: style.Text.Y.Value, WrapWidth: width, LineSpacing: style.Text.Leading.Value, Anchor: anchor(style.Text.Anchor.Value), Align: alignment(style.Text.Align.Value)}
@@ -97,27 +106,24 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			}
 			cache[key] = value
 		}
-		pages[i] = []Page{value.page}
+		prepared[i].Pages = []Page{value.page}
 		if placed := value.page.Blocks[0].Text; placed != nil {
 			text := &TextFacts{Font: style.Text.Font.Value.String(), FontSize: placed.Size, Bounds: rect(placed.Bounds), Overflow: len(placed.Findings) > 0}
 			if placed.InkBounds != nil {
 				bounds := rect(*placed.InkBounds)
 				text.InkBounds = &bounds
 			}
-			facts[i] = text
+			prepared[i].Text = text
 			if len(placed.Findings) > 0 && value.err == nil {
-				ds = append(ds, diag.New(diag.TextOverflowAllowed, "Measured text extends outside the page or text block.", p.Ref))
+				ds = append(ds, diag.Report(diag.TextOverflowAllowed, diag.MeasuredTextExtendsOutsideThePageOrTextBlock(), p.Ref))
 			}
 		}
 		if value.err != nil {
-			d := Diagnostic(value.err, p.Ref)
-			if origin := style.Text.Width.From; origin != "" {
-				d.Message += " Width from " + origin + "."
-			}
+			d := diagnosticWidth(value.err, p.Ref, style.Text.Width.From)
 			ds = append(ds, d)
 		}
 	}
-	return pages, facts, ds
+	return prepared, ds
 }
 
 func rect(r typeset.Rect) [4]float64 { return [4]float64{r.X, r.Y, r.X + r.Width, r.Y + r.Height} }

@@ -44,7 +44,7 @@ func admit(ctx context.Context, req Request) *admission {
 	if req.Report != "" {
 		path, err := files.Path(req.WorkingDir, req.Report)
 		if err != nil {
-			a.diagnostics = append(a.diagnostics, diag.New(diag.PathInvalid, err.Error()))
+			a.diagnostics = append(a.diagnostics, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error())))
 			return a
 		}
 		a.roles.Report = path
@@ -52,7 +52,7 @@ func admit(ctx context.Context, req Request) *admission {
 	if req.Output != "" {
 		path, err := files.Path(req.WorkingDir, req.Output)
 		if err != nil {
-			a.diagnostics = append(a.diagnostics, diag.New(diag.PathInvalid, err.Error()))
+			a.diagnostics = append(a.diagnostics, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error())))
 			return a
 		}
 		a.roles.Output = path
@@ -67,7 +67,11 @@ func admit(ctx context.Context, req Request) *admission {
 			a.diagnostics = append(a.diagnostics, ds...)
 			return a
 		}
-		prepared := owned.Plan()
+		prepared, ds := packet.AdmitDeclaration(owned)
+		if len(ds) > 0 {
+			a.diagnostics = append(a.diagnostics, ds...)
+			return a
+		}
 		typed = &prepared
 		for _, resource := range prepared.Inputs() {
 			a.roles.Inputs = append(a.roles.Inputs, resource.Path)
@@ -78,7 +82,7 @@ func admit(ctx context.Context, req Request) *admission {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		a.diagnostics = append(a.diagnostics, diag.New(diag.Interrupted, err.Error()))
+		a.diagnostics = append(a.diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
 		return a
 	}
 	var declared packet.Plan
@@ -87,7 +91,7 @@ func admit(ctx context.Context, req Request) *admission {
 	case PlanFile:
 		path, err := files.Path(req.WorkingDir, input.Path)
 		if err != nil {
-			ds = []diag.Diagnostic{diag.New(diag.PathInvalid, err.Error())}
+			ds = []diag.Diagnostic{diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()))}
 			break
 		}
 		data, err := files.Read(ctx, path, MaxPlanBytes)
@@ -107,7 +111,7 @@ func admit(ctx context.Context, req Request) *admission {
 			base, err = files.Path(req.WorkingDir, input.BaseDir)
 		}
 		if err != nil {
-			ds = []diag.Diagnostic{diag.New(diag.PathInvalid, err.Error())}
+			ds = []diag.Diagnostic{diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()))}
 			break
 		}
 		if len(input.Data) > MaxPlanBytes {
@@ -139,7 +143,7 @@ func admit(ctx context.Context, req Request) *admission {
 			digits = digits && r >= '0' && r <= '9'
 		}
 		if e != nil || !digits || n < 0 || n > packet.MaxTimestamp {
-			a.diagnostics = append(a.diagnostics, diag.New(diag.PlanValue, "Effective SOURCE_DATE_EPOCH must be Unix seconds from 0 through 253402300799."))
+			a.diagnostics = append(a.diagnostics, diag.Report(diag.PlanValue, diag.EffectiveSOURCEDATEEPOCHMustBeUnixSecondsFromThrough()))
 		} else {
 			effective.Timestamp = &n
 		}
@@ -165,9 +169,14 @@ func admit(ctx context.Context, req Request) *admission {
 		effective.FitTo = &size
 	}
 	if req.Operation == Build && effective.Output == "" {
-		a.diagnostics = append(a.diagnostics, diag.New(diag.OutputRequired, "An output destination is required for build."))
+		a.diagnostics = append(a.diagnostics, diag.Report(diag.OutputRequired, diag.AnOutputDestinationIsRequiredForBuild()))
 	}
-	declared = effective.Plan()
+	var admissionDS []diag.Diagnostic
+	declared, admissionDS = packet.AdmitDeclaration(effective)
+	a.diagnostics = append(a.diagnostics, admissionDS...)
+	if len(admissionDS) > 0 {
+		return a
+	}
 	a.plan = &declared
 	refusals := a.roles.Check()
 	a.diagnostics = append(a.diagnostics, refusals...)
@@ -194,7 +203,7 @@ func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 			} else if source, ok := item.(SourceItem); ok {
 				ref = source.Ref
 			}
-			ds = append(ds, diag.New(diag.PlanLimit, "Direct items exceed the authored item or generated-page budget.", ref))
+			ds = append(ds, diag.Report(diag.PlanLimit, diag.DirectItemsExceedTheAuthoredItemOrGeneratedPageBudget(), ref))
 			break
 		}
 		if isBlank {
@@ -207,7 +216,7 @@ func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 		} // Request validation seals the variants.
 		path, err := files.Path(base, source.Path)
 		if err != nil {
-			ds = append(ds, diag.New(diag.PathInvalid, err.Error(), source.Ref))
+			ds = append(ds, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()), source.Ref))
 			continue
 		}
 		declared = append(declared, &packet.SourceItem{Ref: source.Ref, Path: path})
@@ -217,5 +226,5 @@ func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 	if len(ds) > 0 {
 		return packet.Plan{}, ds
 	}
-	return owned.Plan(), ds
+	return packet.AdmitDeclaration(owned)
 }

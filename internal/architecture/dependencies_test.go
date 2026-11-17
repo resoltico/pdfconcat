@@ -6,9 +6,11 @@ package architecture_test
 import (
 	"errors"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -89,5 +91,87 @@ func TestForbiddenDependencyControls(t *testing.T) {
 		if allowed(tc[0], tc[1]) == nil {
 			t.Errorf("gate admitted forbidden edge %v", tc)
 		}
+	}
+}
+
+// Product adapters may emit technical evidence but cannot author product text.
+func hasUnownedProductConstructor(source string) bool {
+	file, err := parser.ParseFile(token.NewFileSet(), "adapter.go", source, 0)
+	if err != nil {
+		return true
+	}
+	unowned := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if ok && id.Name == "diag" && sel.Sel.Name == "New" {
+			unowned = true
+		}
+		return true
+	})
+	return unowned
+}
+func TestProductExplanationsAreCoreOwned(t *testing.T) {
+	for _, owner := range []string{"app", "compose", "files", "pdf"} {
+		paths, err := filepath.Glob("../" + owner + "/*.go")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasUnownedProductConstructor(string(data)) {
+				t.Errorf("%s authors product wording outside core", path)
+			}
+		}
+	}
+	if !hasUnownedProductConstructor(`package adapter;func f(){diag.New(code,"unowned product explanation")}`) {
+		t.Fatal("vocabulary gate missed a forbidden construction")
+	}
+	if hasUnownedProductConstructor(`package adapter;func f(){diag.Report(code,diag.ReportAndOutputMustBeDifferentFiles())}`) {
+		t.Fatal("vocabulary gate rejected its owner")
+	}
+}
+
+func TestPlanConstructionHasOneCheckedProductionEntry(t *testing.T) {
+	paths, err := filepath.Glob("../core/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructors := []string{}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || !fn.Name.IsExported() || fn.Type.Results == nil {
+				continue
+			}
+			for _, result := range fn.Type.Results.List {
+				if name, ok := result.Type.(*ast.Ident); ok && name.Name == "Plan" {
+					constructors = append(constructors, fn.Name.Name)
+				}
+			}
+		}
+	}
+	if len(constructors) != 1 || constructors[0] != "AdmitDeclaration" {
+		t.Fatalf("unchecked prepared-state entry exposed: %v", constructors)
 	}
 }

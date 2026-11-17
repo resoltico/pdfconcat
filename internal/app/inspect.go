@@ -79,7 +79,7 @@ dispatch:
 		measured := results[index]
 		out.diagnostics = append(out.diagnostics, measured.diagnostics...)
 		if measured.file != nil && len(measured.views) != len(use.leaves) {
-			out.diagnostics = append(out.diagnostics, diag.New(diag.SourceProcessingFailed, "Source inspection returned inconsistent occurrence ownership."))
+			out.diagnostics = append(out.diagnostics, diag.Report(diag.SourceProcessingFailed, diag.SourceInspectionReturnedInconsistentOccurrenceOwnership()))
 			continue
 		}
 		if measured.file != nil {

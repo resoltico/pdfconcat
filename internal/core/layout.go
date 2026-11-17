@@ -7,6 +7,9 @@ import "github.com/resoltico/pdfconcat/internal/core/diag"
 
 // Resolve maps the cached declaration traversal to physical spans.
 func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Diagnostic) {
+	if !j.admitted {
+		return Layout{}, []diag.Diagnostic{diag.New(diag.SourceProcessingFailed, "Plan has not been admitted.")}
+	}
 	layout := Layout{Language: j.Language(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers()}
 	source := func(leaf Leaf) (SourceFacts, bool) {
 		if leaf.Index < 0 || leaf.Index >= len(facts) {

@@ -333,7 +333,10 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 		}
 		return result, &fault{code: d.Code, message: d.Message, pointer: ref, offset: p.d.InputOffset()}
 	}
-	result = owned.Plan()
+	result, ds = packet.AdmitDeclaration(owned)
+	if len(ds) > 0 {
+		return result, p.fail(ds[0].Code, ds[0].Message)
+	}
 	if p.contents > 0 {
 		sections := result.Sections()
 		if len(sections) == 0 {

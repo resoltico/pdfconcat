@@ -70,11 +70,11 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	if j.PageNumbers() != nil {
 		addBound(j.PageNumbers().First() - 1)
 	}
-	fail := func(message string, item string) (*Contents, []diag.Diagnostic) {
-		return nil, []diag.Diagnostic{diag.New(diag.TextOverflow, message, pointer, item)}
+	fail := func(message diag.Explanation, item string) (*Contents, []diag.Diagnostic) {
+		return nil, []diag.Diagnostic{diag.Report(diag.TextOverflow, message, pointer, item)}
 	}
 	if len(sections) == 0 {
-		return fail("Contents requires at least one authored section.", pointer)
+		return fail(diag.ContentsRequiresAtLeastOneAuthoredSection(), pointer)
 	}
 	size := contents.Size
 	if size == (packet.Size{}) {
@@ -111,7 +111,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		return shaper.Place(font, typeset.Params{Language: typeset.ShapingLanguage(j.Language()), Text: text, Size: fontSize, PageWidth: size.Width, PageHeight: size.Height, WrapWidth: width, LineSpacing: 1.2, Anchor: typeset.AnchorTopLeft, Align: typeset.AlignLeft, Overflow: typeset.OverflowAllow})
 	}
 	if size.Width-72 <= 0 {
-		return fail("Contents margins leave no usable heading width; choose a larger canvas.", pointer)
+		return fail(diag.ContentsMarginsLeaveNoUsableHeadingWidthChooseALarger(), pointer)
 	}
 	dash, err := shape("—", 12, 0)
 	if err != nil {
@@ -126,19 +126,19 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	headingHeight := paintedBounds(heading).Height
 	for _, finding := range heading.Findings {
 		if finding.Kind == typeset.FindingWordTooWide {
-			return fail("Contents heading does not fit its width; shorten it or choose a larger canvas.", pointer)
+			return fail(diag.ContentsHeadingDoesNotFitItsWidthShortenItOr(), pointer)
 		}
 	}
 	headingCheck := clonePlaced(heading)
 	movePlaced(headingCheck, 36, size.Height-36)
 	if headingCheck.InkBounds != nil && headingCheck.InkBounds.X+headingCheck.InkBounds.Width > size.Width-36+1e-6 {
-		return fail("Contents heading ink crosses its right margin; shorten it or choose a larger canvas.", pointer)
+		return fail(diag.ContentsHeadingInkCrossesItsRightMarginShortenItOr(), pointer)
 	}
 	headingTop := top
 	headingBottom := headingTop - headingHeight
 	firstRowTop := headingBottom - 12
 	if firstRowTop <= bottom {
-		return fail("Contents heading and page-number exclusion leave no room for entries; use a larger canvas or reduce page-number size/margin.", pointer)
+		return fail(diag.ContentsHeadingAndPageNumberExclusionLeaveNoRoomFor(), pointer)
 	}
 	addPage := func() {
 		h := clonePlaced(heading)
@@ -149,14 +149,14 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	cursor := firstRowTop
 	for _, section := range sections {
 		if err := c.Err(); err != nil {
-			return nil, []diag.Diagnostic{diag.New(diag.Interrupted, err.Error())}
+			return nil, []diag.Diagnostic{diag.Report(diag.Interrupted, diag.TechnicalFailure("pdf", err.Error()))}
 		}
 		left := 36 + 12*float64(section.Depth)
 		right := size.Width - 36
 		titleRight := right - numberWidth - 12
 		width := titleRight - left
 		if width < 1 {
-			return fail("Contents indentation and number column leave no usable title width; reduce section nesting or choose a larger canvas.", section.Item)
+			return fail(diag.ContentsIndentationAndNumberColumnLeaveNoUsableTitleWidth(), section.Item)
 		}
 		title, e := shape(section.Title, 12, width)
 		if e != nil {
@@ -166,12 +166,12 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 		for _, finding := range title.Findings {
 			if finding.Kind == typeset.FindingWordTooWide {
-				return fail("A contents title has a word wider than its column; shorten it or choose a larger canvas.", section.Item)
+				return fail(diag.AContentsTitleHasAWordWiderThanItsColumn(), section.Item)
 			}
 		}
 		height := paintedBounds(title).Height
 		if height > firstRowTop-bottom+1e-6 {
-			return fail("A whole contents row cannot fit beneath the heading and above the page-number exclusion; shorten the title, use a larger canvas or reduce page-number size/margin.", section.Item)
+			return fail(diag.AWholeContentsRowCannotFitBeneathTheHeadingAnd(), section.Item)
 		}
 		if cursor-height < bottom-1e-6 {
 			addPage()
@@ -179,10 +179,10 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 		movePlaced(title, left, cursor)
 		if title.InkBounds != nil && title.InkBounds.X+title.InkBounds.Width > titleRight+1e-6 {
-			return fail("A contents title's painted ink crosses its number column; shorten it or choose a larger canvas.", section.Item)
+			return fail(diag.AContentsTitleSPaintedInkCrossesItsNumberColumn(), section.Item)
 		}
 		if len(title.Lines) == 0 {
-			return fail("A contents title has no visible row.", section.Item)
+			return fail(diag.AContentsTitleHasNoVisibleRow(), section.Item)
 		}
 		title.Findings = nil
 		page := len(layout.pages) - 1
@@ -191,7 +191,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		rowBottom := math.Min(cursor-height, baseline+digits.Bottom)
 		rowTop := math.Max(cursor, baseline+digits.Top)
 		if rowBottom < bottom-1e-6 || rowTop > firstRowTop+1e-6 {
-			return fail("Contents title and number bounds cannot fit in the available row; use a larger canvas or reduce page-number size/margin.", section.Item)
+			return fail(diag.ContentsTitleAndNumberBoundsCannotFitInTheAvailable(), section.Item)
 		}
 		layout.rows = append(layout.rows, contentsRow{label: section.Title, titleBlock: len(layout.pages[page].Blocks) - 1, section: section.Item, page: page, baseline: baseline, right: right, bounds: typeset.Rect{X: left, Y: rowBottom, Width: right - left, Height: rowTop - rowBottom}})
 		cursor = rowBottom - 6
@@ -238,7 +238,7 @@ func (contents *Contents) Finish(layout packet.Layout) ([]Page, []diag.Diagnosti
 			return pages, nil
 		}
 	}
-	return nil, []diag.Diagnostic{diag.New(diag.AssemblyFailed, "Resolved contents item is missing.", contents.pointer)}
+	return nil, []diag.Diagnostic{diag.Report(diag.AssemblyFailed, diag.ResolvedContentsItemIsMissing(), contents.pointer)}
 }
 
 // Pages returns the prepared page count.

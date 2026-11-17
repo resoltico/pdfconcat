@@ -4,8 +4,6 @@
 package pdf
 
 import (
-	"fmt"
-
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
@@ -23,7 +21,7 @@ func CheckCompatibility(a Assembly) Compatibility {
 	result := Compatibility{version: model.V17}
 	for _, part := range a.Parts {
 		if part.Kind == packet.PartSource && (part.Occurrence == nil || part.Occurrence.File == nil || part.Occurrence.Facts == nil) {
-			d := diag.New(diag.SourceProcessingFailed, "Source occurrence facts are unavailable.", part.Ref)
+			d := diag.Report(diag.SourceProcessingFailed, diag.SourceOccurrenceFactsAreUnavailable(), part.Ref)
 			d.File = part.Source
 			result.Diagnostics = append(result.Diagnostics, d)
 		}
@@ -56,34 +54,34 @@ func CheckCompatibility(a Assembly) Compatibility {
 		}
 		f := p.Occurrence.File
 		selected := p.Occurrence.Facts
-		add := func(code diag.Code, message string) {
-			d := diag.New(code, message, p.Ref)
+		add := func(code diag.Code, message diag.Explanation) {
+			d := diag.Report(code, message, p.Ref)
 			d.File = p.Source
 			result.Diagnostics = append(result.Diagnostics, d)
 		}
 		authoredDepth := authoredDepths[p.Owner]
 		// The backend counts the first native item at depth zero.
 		if authoredDepth+selected.OutlineDepth > model.DefaultResourceLimits().MaxRecursionDepth+1 {
-			add(diag.SourceOutlineDepthUnsupported, "Authored sections and imported bookmarks exceed the PDF backend's supported outline hierarchy; reduce section nesting or source bookmark depth.")
+			add(diag.SourceOutlineDepthUnsupported, diag.AuthoredSectionsAndImportedBookmarksExceedThePDFBackendS())
 		}
 		if a.FitTo != nil && f.HasWidgets {
-			add(diag.FitFormUnsupported, "Fitting source form widgets is unsupported.")
+			add(diag.FitFormUnsupported, diag.FittingSourceFormWidgetsIsUnsupported())
 		}
 		if a.FitTo != nil && selected.AnnotationFittingIssue != "" {
-			add(diag.FitAnnotationUnsupported, fittingAnnotationMessage(selected.AnnotationFittingIssue))
+			add(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(selected.AnnotationFittingIssue))
 		}
 		if a.FitTo != nil && selected.HasCoordinateDestinations {
-			add(diag.FitDestinationUnsupported, "Fitting internal page destinations with numeric position coordinates is unsupported; use the original page sizes.")
+			add(diag.FitDestinationUnsupported, diag.FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported())
 		}
 		if f.HasFields {
 			if defaults != "" && defaults != f.FormDefaultsDigest {
-				add(diag.SourceFormUnsupported, "Nonempty forms require identical resolved DR/DA/Q representations; these differ; assemble separately or flatten with a suitable PDF tool.")
+				add(diag.SourceFormUnsupported, diag.NonemptyFormsRequireIdenticalResolvedDRDAQRepresentationsThese())
 			} else {
 				defaults = f.FormDefaultsDigest
 			}
 		}
 		if result.version >= model.V20 && selected.PDF20AppearanceIssue != "" {
-			add(diag.SourceOutputIncompatible, fmt.Sprintf("%s; source %q requires PDF 2.0 output. Supply complete annotation appearances or assemble the affected source separately.", selected.PDF20AppearanceIssue, versionSource))
+			add(diag.SourceOutputIncompatible, diag.SSourceQRequiresPDFOutputSupplyCompleteAnnotationAppearances(selected.PDF20AppearanceIssue, versionSource))
 		}
 	}
 	return result

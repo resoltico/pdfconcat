@@ -61,7 +61,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 				case nil, types.Name, types.Integer, types.Float:
 					dest.tail = append(dest.tail, value)
 				default:
-					return destination{}, refuse(diag.SourceUnsupported, "Unsupported destination coordinate value.")
+					return destination{}, refuse(diag.SourceUnsupported, diag.UnsupportedDestinationCoordinateValue())
 				}
 			}
 		}
@@ -85,14 +85,14 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return err
 		}
 		if depth > 64 {
-			return refuse(diag.SourceUnsupported, "Destination name tree exceeds depth 64.")
+			return refuse(diag.SourceUnsupported, diag.DestinationNameTreeExceedsDepth())
 		}
 		if o == nil {
 			return nil
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if seen[ref] {
-				return refuse(diag.SourceInvalid, "Destination name tree repeats a node.")
+				return refuse(diag.SourceInvalid, diag.DestinationNameTreeRepeatsANode())
 			}
 			seen[ref] = true
 		}
@@ -105,7 +105,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return err
 		}
 		if len(a)%2 != 0 {
-			return refuse(diag.SourceInvalid, "Odd destination name array.")
+			return refuse(diag.SourceInvalid, diag.OddDestinationNameArray())
 		}
 		arraySite := site.key("Names").anchor(d["Names"], sourceOrigins{})
 		for i := 0; i < len(a); i += 2 {
@@ -118,7 +118,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 				return e
 			}
 			if _, exists := result[name]; exists {
-				return refuse(diag.SourceUnsupported, "Duplicate destination byte-string keys are unsupported.")
+				return refuse(diag.SourceUnsupported, diag.DuplicateDestinationByteStringKeysAreUnsupported())
 			}
 			dest.sites = []sourceSite{arraySite.index(i + 1)}
 			result[name] = dest
@@ -155,7 +155,7 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			return nil, legacySite.name(name).wrap(e)
 		}
 		if existing, ok := result[name]; ok && (existing.page != dest.page || !reflect.DeepEqual(existing.tail, dest.tail)) {
-			return nil, refuse(diag.SourceUnsupported, "The same destination byte name has conflicting name-tree and legacy targets; this combination is unsupported.")
+			return nil, refuse(diag.SourceUnsupported, diag.TheSameDestinationByteNameHasConflictingNameTreeAnd())
 		}
 		dest.sites = []sourceSite{legacySite.name(name)}
 		if existing, ok := result[name]; ok {

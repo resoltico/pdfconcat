@@ -97,7 +97,7 @@ func noteCancellation(c context.Context, r *outcome.Result) {
 				return
 			}
 		}
-		r.Diagnostics = append(r.Diagnostics, diag.New(diag.Interrupted, err.Error()))
+		r.Diagnostics = append(r.Diagnostics, diag.Report(diag.Interrupted, diag.TechnicalFailure("input", err.Error())))
 	}
 }
 
@@ -106,6 +106,6 @@ func invalidRequest(hint Operation) Result {
 		hint = ""
 	}
 	r := outcome.New(string(hint))
-	r.Diagnostics = []Diagnostic{diag.New(diag.RequestInvalid, "Invalid application request.")}
+	r.Diagnostics = []Diagnostic{diag.Report(diag.RequestInvalid, diag.InvalidApplicationRequest())}
 	return r.Full()
 }

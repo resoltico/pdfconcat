@@ -98,9 +98,10 @@ func (s sourceSite) describe() string {
 	return fmt.Sprintf("source object %d %d %s", s.ref.ObjectNumber.Value(), s.ref.GenerationNumber.Value(), s.path)
 }
 func catalogSite(s *model.Context) sourceSite { return sourceSite{ref: *s.Root, path: "Catalog"} }
-func sourceWarning(code diag.Code, message, detail string, site sourceSite) diag.Diagnostic {
-	d := diag.New(code, message)
-	d.Detail = detail
+func sourceWarning(code diag.Code, message, detail diag.Explanation, site sourceSite) diag.Diagnostic {
+	d := diag.Report(code, message)
+	diag.AttachEvidence(&d, detail)
+	d.Identity.Phase = "source_observation"
 	d.PDFLocation = site.location()
 	return d
 }
@@ -115,20 +116,7 @@ type navigationChange struct {
 }
 
 func (n navigationChange) diagnostic() diag.Diagnostic {
-	detail := "The source navigation binding was removed."
-	if n.action {
-		detail = "The action edge was removed with its dependent Next subtree; invalid local target at " + n.target.describe() + "."
-	}
-	if n.name != "" {
-		detail = "Destination definition " + strconv.QuoteToASCII(n.name) + " was omitted."
-	}
-	if n.outline {
-		detail = "The targetless outline leaf was omitted."
-	}
-	if n.targetPage > 0 {
-		detail += fmt.Sprintf(" Target original source page %d is not retained.", n.targetPage)
-	}
-	return sourceWarning(diag.SourceNavigationRemoved, "Navigation targets omitted from this source occurrence were removed.", detail, n.site)
+	return sourceWarning(diag.SourceNavigationRemoved, diag.NavigationTargetsOmittedFromThisSourceOccurrenceWereRemoved(), diag.NavigationEvidence(n.name, int64(n.target.ref.ObjectNumber.Value()), int64(n.target.ref.GenerationNumber.Value()), n.target.path, int64(n.targetPage), n.action, n.outline), n.site)
 }
 func (n navigationChange) key() string {
 	return n.site.describe() + fmt.Sprint("/", n.site.page, "/", n.targetPage, "/", n.name, "/", n.action, "/", n.outline)

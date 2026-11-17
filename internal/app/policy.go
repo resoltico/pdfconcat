@@ -4,8 +4,6 @@
 package app
 
 import (
-	"fmt"
-
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/pdf"
@@ -19,29 +17,30 @@ func resolvePolicies(a pdf.Assembly, predict bool) []diag.Diagnostic {
 			continue
 		}
 		f := p.Occurrence.File
-		add := func(code diag.Code, message string) {
-			d := diag.New(code, message, p.Ref)
+		add := func(code diag.Code, message diag.Explanation) {
+			d := diag.Report(code, message, p.Ref)
 			d.File = p.Source
+			d.Identity.Phase = "source_compatibility"
 			ds = append(ds, d)
 		}
 		if a.Structure != packet.StructureDiscard && p.Occurrence.Facts.HasUncoveredContent {
-			add(diag.SourceStructurePartial, "Retained source content has incomplete structural coverage; preservation does not invent missing semantics.")
+			add(diag.SourceStructurePartial, diag.RetainedSourceContentHasIncompleteStructuralCoveragePreservationDoesNot())
 			ds[len(ds)-1].PDFLocation = p.Occurrence.Facts.UncoveredLocation
 		}
 		if f.HasFields {
 			if predict && i > 0 {
-				add(diag.FormFieldsRenamed, "Predicted: pdfcpu may namespace this later form, including distinct names; build records actual mappings.")
+				add(diag.FormFieldsRenamed, diag.PredictedPdfcpuMayNamespaceThisLaterFormIncludingDistinctNames())
 				ds[len(ds)-1].PDFLocation = f.FieldCollectionLocation
-				ds[len(ds)-1].Detail = "The original Fields collection is a possible rename scope; no actual new name is predicted."
+				diag.AttachEvidence(&ds[len(ds)-1], diag.PredictedFieldScopeEvidence())
 			}
 		}
 		for _, name := range p.Occurrence.Facts.DestNames {
 			if predict && names[name] {
 				for _, location := range p.Occurrence.Facts.DestinationLocations[name] {
-					add(diag.DestinationsRenamed, "Predicted: colliding destination names will be renamed for affected occurrences.")
+					add(diag.DestinationsRenamed, diag.PredictedCollidingDestinationNamesWillBeRenamedForAffectedOccurrences())
 					loc := location
 					ds[len(ds)-1].PDFLocation = &loc
-					ds[len(ds)-1].Detail = fmt.Sprintf("Original destination %q collides; no actual replacement name is predicted.", name)
+					diag.AttachEvidence(&ds[len(ds)-1], diag.DestinationCollisionEvidence(name))
 				}
 			}
 			names[name] = true

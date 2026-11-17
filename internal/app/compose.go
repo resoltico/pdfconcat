@@ -15,7 +15,6 @@ import (
 type composition struct {
 	layout      *packet.Layout
 	assembly    pdf.Assembly
-	texts       []*compose.TextFacts
 	diagnostics []diag.Diagnostic
 }
 
@@ -92,21 +91,18 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 		return out
 	}
 	out.layout = &layout
-	pages, texts, ds := compose.LayOut(c, layout, inspected.fonts)
-	out.texts = texts
+	prepared, ds := compose.LayOut(c, layout, inspected.fonts)
 	out.diagnostics = append(out.diagnostics, ds...)
 	if contents != nil {
 		generated, ds := contents.Finish(layout)
 		out.diagnostics = append(out.diagnostics, ds...)
 		for i, part := range layout.Parts {
 			if part.Kind == packet.PartContents {
-				pages[i] = generated
+				prepared[i].Pages = generated
 			}
 		}
 	}
-	for i, batch := range pages {
-		out.assembly.Parts[i].Generated = batch
-	}
+	out.diagnostics = append(out.diagnostics, bindComposition(out.assembly.Parts, prepared, !hasErrors(out.diagnostics))...)
 	if !hasErrors(out.diagnostics) {
 		out.assembly.Coverage = expectedStructureCoverage(out.assembly)
 	}
@@ -157,4 +153,27 @@ func expectedStructureCoverage(a pdf.Assembly) string {
 		return "partial"
 	}
 	return "complete"
+}
+
+func bindComposition(parts []pdf.Part, prepared []compose.PreparedPart, complete bool) []diag.Diagnostic {
+	failure := func() []diag.Diagnostic {
+		return []diag.Diagnostic{diag.Report(diag.AssemblyFailed, diag.CompositionFactsDoNotMatchTheirOwningParts())}
+	}
+	if len(parts) != len(prepared) {
+		return failure()
+	}
+	for index, part := range parts {
+		fact := prepared[index]
+		if fact.Owner != part.Identity() {
+			return failure()
+		}
+		if complete && part.Page != nil && part.Page.Text.Value.Value != "" && fact.Text == nil {
+			return failure()
+		}
+	}
+	for index, fact := range prepared {
+		parts[index].Generated = fact.Pages
+		parts[index].Text = fact.Text
+	}
+	return nil
 }

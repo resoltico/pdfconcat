@@ -163,7 +163,3 @@ func annotationFittingIssue(c context.Context, s *model.Context, geometries []pa
 	}
 	return "", nil
 }
-
-func fittingAnnotationMessage(issue string) string {
-	return issue + " Supply complete normal appearances and keep interactive hit areas inside the source frame, or use original page sizes."
-}

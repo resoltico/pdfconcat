@@ -1,4 +1,4 @@
-# Command line and result v7
+# Command line and result v8
 
 PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
 selections, sections, navigation and simple text inserts; see the
@@ -96,7 +96,7 @@ retained.
 
 ```json
 {
-  "format_version": 7,
+  "format_version": 8,
   "command": "build",
   "status": "ok",
   "output": {
@@ -209,7 +209,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 7,
+  "format_version": 8,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -472,3 +472,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
 | `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 <!-- END GENERATED DIAGNOSTICS -->
+
+Result format 8 represents unknown or inapplicable `fields_renamed` facts as
+`null`; an observed empty mapping is `[]`. All part facts are bound to their
+resolved owner. Format 7 is unsupported by the current result schema.

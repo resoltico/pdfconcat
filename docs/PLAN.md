@@ -509,3 +509,10 @@ encoding. Repeated generated-page counts retain one authored text declaration.
 Typed numbering callers begin with `packet.DefaultPageNumbers()` and then set
 effective values; explicit zero starts are refused. Typed contents and group
 titles use `TitlePresent` to distinguish explicit empty text from absence.
+
+Typed declarations may contain bare grouping containers. That is a domain tree
+container without a new capability; JSON deliberately requires an explicit
+numbering, directory, title or alignment grouping shape. Both paths use the same
+semantic admission engine. Only `packet.AdmitDeclaration` constructs a production
+plan; normalized mutable declarations are not prepared state and are revalidated
+on every admission. Authored and derived divider identities share one namespace.

@@ -1,24 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v7 and its complete factual outcomes.
+// Package result defines result v8 and its complete factual outcomes.
 package result
 
 import (
 	_ "embed"
+	"encoding/json/v2"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/core/outcome"
 )
 
-// Schema covers result v7, full reports and version objects.
+// Schema covers result v8, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 7
+const WireVersion = 8
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -67,22 +68,22 @@ type Section struct {
 
 // Part is one compact declared or resolved leaf in the complete report.
 type Part struct {
-	Item          string               `json:"item"`
-	InputPages    *int64               `json:"input_pages"`
-	Spans         *[]Span              `json:"spans"`
-	Section       string               `json:"section,omitempty"`
-	Reason        string               `json:"reason,omitempty"`
-	BeforeItem    string               `json:"before_item,omitempty"`
-	Kind          packet.PartKind      `json:"kind"`
-	Path          string               `json:"path,omitempty"`
-	SHA256        string               `json:"sha256,omitempty"`
-	Bytes         *int64               `json:"bytes,omitempty"`
-	Pages         *int64               `json:"pages"`
-	Count         int                  `json:"count,omitzero"`
-	OutputPages   *[2]int64            `json:"output_pages"`
-	Size          *packet.Size         `json:"size,omitempty"`
-	Text          *Text                `json:"text"`
-	FieldsRenamed []packet.FieldRename `json:"fields_renamed,omitzero"`
+	Item          string          `json:"item"`
+	InputPages    *int64          `json:"input_pages"`
+	Spans         *[]Span         `json:"spans"`
+	Section       string          `json:"section,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
+	BeforeItem    string          `json:"before_item,omitempty"`
+	Kind          packet.PartKind `json:"kind"`
+	Path          string          `json:"path,omitempty"`
+	SHA256        string          `json:"sha256,omitempty"`
+	Bytes         *int64          `json:"bytes,omitempty"`
+	Pages         *int64          `json:"pages"`
+	Count         int             `json:"count,omitzero"`
+	OutputPages   *[2]int64       `json:"output_pages"`
+	Size          *packet.Size    `json:"size,omitempty"`
+	Text          *Text           `json:"text"`
+	FieldsRenamed RenameFacts     `json:"fields_renamed"`
 }
 
 // Result is the complete run outcome before stdout caps.
@@ -138,7 +139,7 @@ func Project(input outcome.Result) Result {
 		result.Structure = &Structure{Policy: r.Structure.Policy, Coverage: r.Structure.Coverage}
 	}
 	for _, part := range r.Parts {
-		p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, FieldsRenamed: part.FieldsRenamed}
+		p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, FieldsRenamed: RenameFacts(part.FieldsRenamed)}
 		if part.Text != nil {
 			p.Text = &Text{Font: part.Text.Font, FontSize: part.Text.FontSize, Bounds: part.Text.Bounds, InkBounds: part.Text.InkBounds, Overflow: part.Text.Overflow}
 		}
@@ -155,4 +156,15 @@ func Project(input outcome.Result) Result {
 		result.Sections = append(result.Sections, Section{Item: section.Item, Title: section.Title, Parent: section.Parent, TargetPage: section.TargetPage, OutputPages: section.OutputPages})
 	}
 	return result
+}
+
+// RenameFacts distinguishes unknown/null from an observed empty array in result v8.
+type RenameFacts []packet.FieldRename
+
+// MarshalJSON preserves the factual null/empty distinction across JSON implementations.
+func (r RenameFacts) MarshalJSON() ([]byte, error) {
+	if r == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal([]packet.FieldRename(r))
 }

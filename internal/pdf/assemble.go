@@ -25,7 +25,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	var current *Part
 	defer func() {
 		if value := recover(); value != nil {
-			err = pdfFailure(diag.AssemblyFailed, "The PDF backend failed during assembly.", fmt.Errorf("%v", value))
+			err = pdfFailure(diag.AssemblyFailed, diag.ThePDFBackendFailedDuringAssembly(), fmt.Errorf("%v", value))
 		}
 		if err != nil && current != nil {
 			d := diagnostic(err, diag.AssemblyFailed)
@@ -40,11 +40,13 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	if nameErr != nil {
 		return result, nameErr
 	}
-	result.Renames = make([][]packet.FieldRename, len(a.Parts))
-	for i, part := range a.Parts {
-		if part.Kind == packet.PartSource {
-			result.Renames[i] = []packet.FieldRename{}
+	result.Parts = make(map[packet.PartIdentity]PartResult, len(a.Parts))
+	for _, part := range a.Parts {
+		key := part.Identity()
+		if _, exists := result.Parts[key]; exists {
+			return result, errors.New("duplicate assembly part identity")
 		}
+		result.Parts[key] = PartResult{}
 	}
 	var dest *model.Context
 	allDests := map[string]destination{}
@@ -69,7 +71,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			data := part.Data
 			inspected := part.Occurrence.File
 			if sha256.Sum256(data) != inspected.SHA256 {
-				return result, refuse(diag.SourceChanged, "Source bytes changed after inspection: "+part.Source)
+				return result, refuse(diag.SourceChanged, diag.SourceBytesChangedAfterInspectionS(part.Source))
 			}
 			// Inspection already reported source findings; re-admission enforces the
 			// same policy against the bytes just checked above.
@@ -85,12 +87,14 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			for _, d := range navigationDiagnostics(removed) {
 				d.File = part.Source
 				d.Items = []string{part.Ref}
+				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
 			uri, e := uriBaseWarnings(c, s, origins)
 			for _, d := range uri {
 				d.File = part.Source
 				d.Items = []string{part.Ref}
+				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
 			if e != nil {
@@ -117,7 +121,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		}
 		if a.Structure != packet.StructureDiscard {
 			if err = pruneStructure(c, s); err != nil {
-				return result, pdfFailure(diag.SourceInvalid, "The source structure cannot be preserved.", err)
+				return result, pdfFailure(diag.SourceInvalid, diag.TheSourceStructureCannotBePreserved(), err)
 			}
 		} else {
 			if err = discardStructure(c, s); err != nil {
@@ -138,9 +142,10 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		}
 		for _, rename := range renamed {
 			for _, site := range rename.sites {
-				d := sourceWarning(diag.DestinationsRenamed, "Colliding destination names were renamed for this occurrence.", fmt.Sprintf("Original destination %q is now %q.", rename.from, rename.to), site)
+				d := sourceWarning(diag.DestinationsRenamed, diag.CollidingDestinationNamesWereRenamedForThisOccurrence(), diag.OriginalDestinationQIsNowQ(rename.from, rename.to), site)
 				d.File = part.Source
 				d.Items = []string{part.Ref}
+				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
 		}
@@ -173,19 +178,22 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				return result, err
 			}
 		}
+		renames := []packet.FieldRename{}
 		for _, record := range records {
 			actual, e := qualifiedName(dest, record.dict)
 			if e != nil {
 				return result, e
 			}
 			if actual != record.name {
-				result.Renames[index] = append(result.Renames[index], packet.FieldRename{From: record.name, To: actual})
-				d := sourceWarning(diag.FormFieldsRenamed, "pdfcpu namespaced fields in this occurrence; the report contains the actual mapping.", fmt.Sprintf("Original field %q is now %q.", record.name, actual), record.site)
+				renames = append(renames, packet.FieldRename{From: record.name, To: actual})
+				d := sourceWarning(diag.FormFieldsRenamed, diag.PdfcpuNamespacedFieldsInThisOccurrenceTheReportContainsThe(), diag.OriginalFieldQIsNowQ(record.name, actual), record.site)
 				d.File = part.Source
 				d.Items = []string{part.Ref}
+				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
 		}
+		result.Parts[part.Identity()] = PartResult{Known: true, Renames: renames}
 	}
 	current = nil
 	if dest == nil {
@@ -226,10 +234,10 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	}
 	report, validationErr := validatePreservingPages(c, dest)
 	if validationErr != nil {
-		return result, pdfFailure(diag.AssemblyFailed, "The composed PDF failed final validation.", validationErr)
+		return result, pdfFailure(diag.AssemblyFailed, diag.TheComposedPDFFailedFinalValidation(), validationErr)
 	}
 	if _, repair := validationNotices(report); repair != nil {
-		return result, pdfFailure(diag.AssemblyFailed, "The composed PDF required an unsupported repair.", repair)
+		return result, pdfFailure(diag.AssemblyFailed, diag.TheComposedPDFRequiredAnUnsupportedRepair(), repair)
 	}
 	if err = freeUnreachable(c, dest); err != nil {
 		return result, err
@@ -237,7 +245,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	output := &outputWriter{writer: w}
 	err = serialize(c, dest, output)
 	if output.err != nil {
-		return result, &policyError{finding: diag.New(diag.OutputWriteFailed, output.err.Error()), err: output.err}
+		return result, &policyError{finding: diag.Report(diag.OutputWriteFailed, diag.TechnicalFailure("pdf", output.err.Error())), err: output.err}
 	}
 	return result, err
 }
@@ -300,19 +308,19 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 func verify(c context.Context, data []byte, expected int64, a *Assembly) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
-			err = pdfFailure(diag.OutputInvalid, "The composed PDF could not be verified.", fmt.Errorf("%v", value))
+			err = pdfFailure(diag.OutputInvalid, diag.TheComposedPDFCouldNotBeVerified(), fmt.Errorf("%v", value))
 		}
 	}()
 	s, err := readOutput(c, data)
 	if err != nil {
-		return pdfFailure(diag.OutputInvalid, "The composed PDF failed output verification.", err)
+		return pdfFailure(diag.OutputInvalid, diag.TheComposedPDFFailedOutputVerification(), err)
 	}
 	if int64(s.PageCount) != expected {
-		return refuse(diag.OutputPageCountMismatch, fmt.Sprintf("Expected %d output pages; found %d.", expected, s.PageCount))
+		return refuse(diag.OutputPageCountMismatch, diag.ExpectedDOutputPagesFoundD(expected, int64(s.PageCount)))
 	}
 	if a != nil {
 		if err = verifyDocumentFacts(c, s, *a); err != nil {
-			return pdfFailure(diag.OutputInvalid, "The serialized PDF disagrees with the resolved contract.", err)
+			return pdfFailure(diag.OutputInvalid, diag.TheSerializedPDFDisagreesWithTheResolvedContract(), err)
 		}
 	}
 	return nil

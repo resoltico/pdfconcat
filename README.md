@@ -255,7 +255,7 @@ It records input SHA-256 hashes, page mappings and uncapped diagnostics. PDF and
 inspect the final result before retrying after a failure. See
 [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v6; results and reports use format v7. Print their schemas with:
+Plans use format v6; results and reports use format v8. Print their schemas with:
 
 ```sh
 pdfconcat schema plan

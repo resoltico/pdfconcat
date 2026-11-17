@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"slices"
 
 	"github.com/resoltico/pdfconcat/internal/core/diag"
@@ -30,7 +29,7 @@ func ValidateFontName(font *typeset.Font) error {
 			continue
 		}
 		if _, err := hex.DecodeString(name[index+1 : index+3]); err == nil {
-			return refuse(diag.FontInvalid, fmt.Sprintf("Font PostScript name %q contains a literal hash followed by two hexadecimal digits that the PDF backend may decode again; use a font with a different PostScript name.", name))
+			return refuse(diag.FontInvalid, diag.FontPostScriptNameQContainsALiteralHashFollowedBy(name))
 		}
 	}
 	return nil

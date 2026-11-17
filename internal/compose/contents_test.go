@@ -13,6 +13,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
@@ -25,12 +26,11 @@ func contentsRecipe(t *testing.T, leading, count int, size packet.Size) (packet.
 	style := packet.Defaults()
 	style.Size.Value = packet.Size{Width: 595, Height: 842}
 	style.Size.Present = true
-	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.PageItem{Ref: "cover", Style: style, Count: leading}, &packet.ContentsItem{Ref: "toc", Title: "Contents", Size: size}})
-	jItems := j.Items()
+	items := []packet.Item{&packet.PageItem{Ref: "cover", Style: style, Count: leading}, &packet.ContentsItem{Ref: "toc", Title: "Contents", Size: size}}
 	for i := range count {
-		jItems = append(jItems, &packet.GroupItem{Ref: fmt.Sprintf("section%d", i), Title: fmt.Sprintf("Pielikums Ā ļ ķ Ελληνικά Кириллица %d", i), Items: []packet.Item{&packet.PageItem{Ref: fmt.Sprintf("page%d", i), Style: style, Count: 1}}})
+		items = append(items, &packet.GroupItem{Ref: fmt.Sprintf("section%d", i), Title: fmt.Sprintf("Pielikums Ā ļ ķ Ελληνικά Кириллица %d", i), Items: []packet.Item{&packet.PageItem{Ref: fmt.Sprintf("page%d", i), Style: style, Count: 1}}})
 	}
-	j = packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems)
+	j := pdffixture.Plan(t, packet.Declaration{Items: items})
 	return j, map[packet.Font]*typeset.Font{{}: font}
 }
 
@@ -40,11 +40,11 @@ func TestContentsCountDoesNotReflowAtTargetDigitTransitions(t *testing.T) {
 		for delta := range 2 {
 			j, fonts := contentsRecipe(t, leading+delta, 12, packet.Size{Width: 595, Height: 842})
 			jItems := j.Items()
-			c, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j))
+			c, ds := PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
-			layout, ds := resolvePacket(packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, len(c.pages))
+			layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, len(c.pages))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -93,14 +93,14 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 	{
 		draft := j.Declaration()
 		draft.FitTo = &fit
-		j = draft.Plan()
+		j = pdffixture.Plan(t, draft)
 	}
 	{
 		draft := j.Declaration()
-		draft.PageNumbers = &packet.PageNumbers{Size: 9, Margin: 50 * 72 / 25.4}
-		j = draft.Plan()
+		draft.PageNumbers = &packet.PageNumbers{Size: 9, Margin: 50 * 72 / 25.4, Mode: "physical", Position: "bottom-center", Start: 1}
+		j = pdffixture.Plan(t, draft)
 	}
-	c, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j))
+	c, ds := PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j))
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -122,9 +122,9 @@ func TestContentsMultiplePagesReserveFittedFooterEnvelope(t *testing.T) {
 	{
 		draft := j.Declaration()
 		draft.PageNumbers.Margin = fit.Height
-		j = draft.Plan()
+		j = pdffixture.Plan(t, draft)
 	}
-	if _, ds = PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds = PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("impossible footer space accepted: %+v", ds)
 	}
 }
@@ -133,13 +133,13 @@ func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 1, packet.Size{Width: 109.152, Height: 200})
 	jItems := j.Items()
 	itemAs[*packet.ContentsItem](t, jItems[1]).Title = "ffffff"
-	if _, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds := PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("heading ink margin was ignored: %+v", ds)
 	}
 	j, fonts = contentsRecipe(t, 1, 1, packet.Size{Width: 200, Height: 150})
 	jItems = j.Items()
 	itemAs[*packet.GroupItem](t, jItems[2]).Title = strings.Repeat("Long wrapped title ", 20)
-	if _, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
+	if _, ds := PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j)); len(ds) == 0 || ds[0].Code.String() != "text_overflow" {
 		t.Fatalf("oversized whole row accepted: %+v", ds)
 	}
 	nested := jItems[2]
@@ -147,11 +147,11 @@ func TestContentsRefusesHeadingInkAndWholeRowOverflow(t *testing.T) {
 		nested = &packet.GroupItem{Ref: fmt.Sprintf("ancestor%d", i), Title: "Ancestor", Items: []packet.Item{nested}}
 	}
 	jItems[2] = nested
-	if _, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j)); len(ds) == 0 {
+	if _, ds := PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j)); len(ds) == 0 {
 		t.Fatal("unusable indented column accepted")
 	}
 	jItems = jItems[:1]
-	if c, ds := PrepareContents(t.Context(), packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems), nil, fonts, testFooter(t, j)); c != nil || len(ds) > 0 {
+	if c, ds := PrepareContents(t.Context(), pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems}), nil, fonts, testFooter(t, j)); c != nil || len(ds) > 0 {
 		t.Fatalf("absent contents must mean C=0: %+v %+v", c, ds)
 	}
 }
@@ -192,7 +192,7 @@ func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts, contents 
 func TestContentsLinkBlocksFollowPhysicalReadingOrder(t *testing.T) {
 	j, fonts := contentsRecipe(t, 1, 3, packet.Size{Width: 595, Height: 842})
 	jItems := j.Items()
-	j = packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems)
+	j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems})
 	c, ds := PrepareContents(t.Context(), j, nil, fonts, nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)

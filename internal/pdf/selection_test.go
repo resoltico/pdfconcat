@@ -68,7 +68,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 	for item, f := range occurrences {
 		domain[item] = f.SourceFacts
 	}
-	layout, ds := resolvePacket(packet.NewPlan("", fit, nil, packet.PageStyle{}, parts), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: parts}), domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -390,7 +390,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 	request := []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}}
 	facts, occurrences := inspectSelection(t, doc, request)
 	path := filepath.Join(t.TempDir(), "source.pdf")
-	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts})
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -732,4 +732,13 @@ func TestFitAnnotationCompatibilityUsesSelectedPages(t *testing.T) {
 	if len(ds) != 0 || path == "" {
 		t.Fatalf("unselected unsupported annotation blocked fit: %s %+v", path, ds)
 	}
+}
+
+func partRenames(a Assembled, ref string) []packet.FieldRename {
+	for key, part := range a.Parts {
+		if key.Ref == ref {
+			return part.Renames
+		}
+	}
+	return nil
 }

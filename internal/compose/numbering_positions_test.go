@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
@@ -19,7 +20,7 @@ func TestNumberingAllPhysicalPlacements(t *testing.T) {
 	}
 	size := packet.Size{Width: 300, Height: 400}
 	for _, position := range []packet.NumberPosition{packet.NumberTopLeft, packet.NumberTopCenter, packet.NumberTopRight, packet.NumberBottomLeft, packet.NumberBottomCenter, packet.NumberBottomRight} {
-		footer, err := NewPageNumberLayout(font, packet.PageNumbers{Size: 9, Margin: 24, Position: position})
+		footer, err := NewPageNumberLayout(font, packet.PageNumbers{Size: 9, Margin: 24, Position: position, Mode: "physical", Start: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,10 +58,10 @@ func TestTopContentsExclusionOnlyWhenEligible(t *testing.T) {
 	}
 	size := packet.Size{Width: 300, Height: 400}
 	fit := packet.Size{Width: 450, Height: 500}
-	numbers := &packet.PageNumbers{Size: 9, Margin: 100, Position: packet.NumberTopLeft}
+	numbers := &packet.PageNumbers{Size: 9, Margin: 100, Position: packet.NumberTopLeft, Mode: "physical", Start: 1}
 	for _, enabled := range []bool{true, false} {
 		items := []packet.Item{&packet.ContentsItem{Ref: "toc", Size: size, Title: "Contents", Numbering: &enabled}, &packet.GroupItem{Ref: "section", Title: "A section", Items: []packet.Item{&packet.PageItem{Ref: "body", Count: 1, Style: packet.Defaults()}}}}
-		plan := packet.NewPlan("", &fit, numbers, packet.Defaults(), items)
+		plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: &fit, PageNumbers: numbers, PageDefaults: packet.Defaults(), Items: items})
 		footer, err := NewPageNumberLayout(font, *numbers)
 		if err != nil {
 			t.Fatal(err)

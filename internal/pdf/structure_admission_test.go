@@ -205,10 +205,10 @@ func assembleAdmission(t *testing.T, d *pdffixture.Doc, policy packet.StructureP
 	for _, request := range requests {
 		items = append(items, &packet.SourceItem{Ref: request.Item, Path: source, Selection: request.Pages})
 	}
-	plan := packet.NewPlan("", fit, nil, packet.PageStyle{}, items)
+	plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: items})
 	draft := plan.Declaration()
 	draft.Structure = policy
-	plan = draft.Plan()
+	plan = pdffixture.Plan(t, draft)
 	layout, ds := resolvePacket(plan, domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -400,7 +400,7 @@ func TestStructureAdmissionDiscardKeepsGeneralProtections(t *testing.T) {
 			// Even a forged admission cache cannot waive checks of the actual bytes.
 			facts := SourceFacts{SHA256: sha256.Sum256(d.Bytes()), Version: "1.7"}
 			view := OccurrenceFacts{SourceFacts: packet.SourceFacts{Pages: 1, FirstSize: packet.Size{Width: 300, Height: 400}, LastSize: packet.Size{Width: 300, Height: 400}, Selection: []packet.PageRange{{First: 1, Last: 1}}}}
-			plan := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "bad", Path: path}})
+			plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "bad", Path: path}}})
 			layout, findings := resolvePacket(plan, map[string]packet.SourceFacts{"bad": view.SourceFacts})
 			if len(findings) > 0 {
 				t.Fatal(findings)

@@ -137,14 +137,14 @@ func TestSubsetNamesReserveImportedPrefixesAndDeduplicate(t *testing.T) {
 		if reserve && (!slices.Contains(facts.SubsetPrefixes, "AAAAAA") || !slices.Contains(facts.SubsetPrefixes, "AAAAAB")) {
 			t.Fatalf("prefixes: %v", facts.SubsetPrefixes)
 		}
-		recipe := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: "source"}})
+		recipe := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: "source"}}})
 		generated := map[int][]compose.Page{}
 		for i, page := range append(pages, pages[0]) {
 			style := packet.Defaults()
-			recipe = packet.NewPlan(recipe.Output(), recipe.FitTo(), recipe.PageNumbers(), recipe.PageDefaults(), append(recipe.Items(), &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)}))
+			recipe = pdffixture.Plan(t, packet.Declaration{Output: recipe.Output(), FitTo: recipe.FitTo(), PageNumbers: recipe.PageNumbers(), PageDefaults: recipe.PageDefaults(), Items: append(recipe.Items(), &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})})
 			generated[i+1] = []compose.Page{page}
 		}
-		layout, ds := resolvePacket(packet.NewPlan(recipe.Output(), recipe.FitTo(), recipe.PageNumbers(), recipe.PageDefaults(), recipe.Items()), map[string]packet.SourceFacts{"source": facts.SourceFacts})
+		layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: recipe.Output(), FitTo: recipe.FitTo(), PageNumbers: recipe.PageNumbers(), PageDefaults: recipe.PageDefaults(), Items: recipe.Items()}), map[string]packet.SourceFacts{"source": facts.SourceFacts})
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -265,14 +265,14 @@ func noSubsetFont(t *testing.T, tagged bool) *typeset.Font {
 
 func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset.Digest]typeset.EmbeddedFont) {
 	t.Helper()
-	recipe := packet.NewPlan("", nil, nil, packet.PageStyle{}, nil)
+	recipe := packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: nil}
 	pages := map[int][]compose.Page{}
 	var placements []*typeset.Placed
 	for i, font := range fonts {
 		style := packet.Defaults()
 		style.Size.Value = packet.Size{Width: 300, Height: 200}
 		style.Size.Present = true
-		recipe = packet.NewPlan(recipe.Output(), recipe.FitTo(), recipe.PageNumbers(), recipe.PageDefaults(), append(recipe.Items(), &packet.PageItem{Style: style, Count: 1}))
+		recipe.Items = append(recipe.Items, &packet.PageItem{Style: style, Count: 1})
 		pages[i] = []compose.Page{textPage(t, font, "Ā Ελληνικά Кириллица")}
 		placements = append(placements, pages[i][0].Blocks[0].Text)
 	}
@@ -280,7 +280,7 @@ func assembleFontPages(t *testing.T, fonts []*typeset.Font) (string, map[typeset
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := resolvePacket(packet.NewPlan(recipe.Output(), recipe.FitTo(), recipe.PageNumbers(), recipe.PageDefaults(), recipe.Items()), nil)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: recipe.Output, FitTo: recipe.FitTo, PageNumbers: recipe.PageNumbers, PageDefaults: recipe.PageDefaults, Items: recipe.Items}), nil)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}

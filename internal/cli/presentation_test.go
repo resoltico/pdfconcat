@@ -15,6 +15,7 @@ import (
 
 	"github.com/resoltico/pdfconcat/internal/app"
 	"github.com/resoltico/pdfconcat/internal/cli"
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -62,6 +63,7 @@ func TestCapsCoalescingAndFullReport(t *testing.T) {
 	}
 	warning := diagnostic(t, "warning", "source_page_labels_removed", "labels", items...)
 	warning.File = "/abs/source.pdf"
+	warning.Identity = diag.FindingIdentity{Kind: "test-source-label-disposition"}
 	r.Diagnostics = append(r.Diagnostics, warning, warning, diagnostic(t, "error", "plan_value", "bad value", "/page/text/size"))
 	full := r.Full()
 	summary := cli.Summary(r)
@@ -107,7 +109,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, exchange.Version{FormatVersion: 7, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, exchange.Version{FormatVersion: 8, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {

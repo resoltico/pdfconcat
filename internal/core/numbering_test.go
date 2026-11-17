@@ -10,7 +10,7 @@ func TestResolvedNumberingEligibilityAndOverflow(t *testing.T) {
 	items := []Item{&PageItem{Ref: "cover", Count: 1, Style: Defaults(), Numbering: &no}, &GroupItem{Ref: "group", Title: "Section", Numbering: &no, Items: []Item{&PageItem{Ref: "inherited", Count: 1, Style: Defaults()}, &PageItem{Ref: "override", Count: 2, Style: Defaults(), Numbering: &yes}}}}
 	size := Size{Width: 300, Height: 400}
 	for _, mode := range []NumberingMode{NumberPhysical, NumberConsecutive} {
-		plan := NewPlan("", &size, &PageNumbers{Mode: mode, Start: 9, Size: 9}, Defaults(), items)
+		plan := newPlan("", &size, &PageNumbers{Mode: mode, Start: 9, Size: 9}, Defaults(), items)
 		layout, ds := Resolve(plan, nil, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
@@ -29,7 +29,7 @@ func TestResolvedNumberingEligibilityAndOverflow(t *testing.T) {
 		}
 	}
 	for _, count := range []int{1, 2} {
-		p := NewPlan("", &size, &PageNumbers{Mode: "consecutive", Start: MaxPageIndex, Size: 9}, Defaults(), []Item{&PageItem{Ref: "page", Style: Defaults(), Count: count}, &PageItem{Ref: "skip", Count: 1, Style: Defaults(), Numbering: &no}})
+		p := newPlan("", &size, &PageNumbers{Mode: "consecutive", Start: MaxPageIndex, Size: 9}, Defaults(), []Item{&PageItem{Ref: "page", Style: Defaults(), Count: count}, &PageItem{Ref: "skip", Count: 1, Style: Defaults(), Numbering: &no}})
 		layout, ds := Resolve(p, nil, 0)
 		if (len(ds) > 0) != (count == 2) {
 			t.Fatalf("count %d: %v", count, ds)
@@ -38,7 +38,7 @@ func TestResolvedNumberingEligibilityAndOverflow(t *testing.T) {
 			t.Fatal(layout.LabelAt(1))
 		}
 	}
-	p := NewPlan("", &size, &PageNumbers{Kinds: []PartKind{}, Size: 9}, Defaults(), items)
+	p := newPlan("", &size, &PageNumbers{Kinds: []PartKind{}, Size: 9}, Defaults(), items)
 	layout, ds := Resolve(p, nil, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)

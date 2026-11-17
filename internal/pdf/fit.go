@@ -59,7 +59,7 @@ func fitContext(c context.Context, s *model.Context, size *packet.Size) error {
 		return err
 	}
 	if issue != "" {
-		return refuse(diag.FitAnnotationUnsupported, fittingAnnotationMessage(issue))
+		return refuse(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(issue))
 	}
 	contents, err := capturePageContent(c, s)
 	if err != nil {

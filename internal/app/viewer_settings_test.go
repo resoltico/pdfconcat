@@ -76,7 +76,15 @@ func TestViewerSettingFindingsSurviveCorePlansBuildsAndReports(t *testing.T) {
 				if e = json.Unmarshal(saved, &decoded); e != nil {
 					t.Fatal(e)
 				}
-				if !reflect.DeepEqual(decoded.Diagnostics, r.Diagnostics) {
+				encodedActual, e := json.Marshal(r.Diagnostics)
+				if e != nil {
+					t.Fatal(e)
+				}
+				encodedSaved, e := json.Marshal(decoded.Diagnostics)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if !bytes.Equal(encodedActual, encodedSaved) {
 					t.Fatal("saved report lost findings")
 				}
 				original, e := os.ReadFile(source)

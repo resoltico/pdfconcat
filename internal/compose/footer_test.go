@@ -26,7 +26,7 @@ func checkNumberPlacement(digits *typeset.Digits, size packet.Size, number int64
 	return err
 }
 func TestFooterInkBottomMatchesMarginForEveryDigit(t *testing.T) {
-	digits, err := footerDigits(packet.PageNumbers{Size: 9})
+	digits, err := footerDigits(packet.PageNumbers{Size: 9, Position: "bottom-center", Start: 1, Mode: "physical"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +48,10 @@ func TestFooterPlacementRejectsOverflowAndAcceptsLargeSourceCanvas(t *testing.T)
 		config packet.PageNumbers
 		bad    bool
 	}{
-		{packet.Size{Width: 50000, Height: 50000}, 123, packet.PageNumbers{Size: 9, Margin: 24}, false},
-		{packet.Size{Width: 5, Height: 200}, 1234567890, packet.PageNumbers{Size: 9, Margin: 24}, true},
-		{packet.Size{Width: 200, Height: 20}, 1, packet.PageNumbers{Size: 9, Margin: 24}, true},
-		{packet.Size{Width: 200, Height: 200}, 1, packet.PageNumbers{Size: 100, Margin: 180}, true},
+		{packet.Size{Width: 50000, Height: 50000}, 123, packet.PageNumbers{Size: 9, Margin: 24, Mode: "physical", Position: "bottom-center", Start: 1}, false},
+		{packet.Size{Width: 5, Height: 200}, 1234567890, packet.PageNumbers{Size: 9, Margin: 24, Mode: "physical", Position: "bottom-center", Start: 1}, true},
+		{packet.Size{Width: 200, Height: 20}, 1, packet.PageNumbers{Size: 9, Margin: 24, Mode: "physical", Position: "bottom-center", Start: 1}, true},
+		{packet.Size{Width: 200, Height: 200}, 1, packet.PageNumbers{Size: 100, Margin: 180, Mode: "physical", Position: "bottom-center", Start: 1}, true},
 	} {
 		digits, err := footerDigits(test.config)
 		if err != nil {
@@ -65,7 +65,7 @@ func TestFooterPlacementRejectsOverflowAndAcceptsLargeSourceCanvas(t *testing.T)
 }
 
 func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
-	digits, err := footerDigits(packet.PageNumbers{Size: 9})
+	digits, err := footerDigits(packet.PageNumbers{Size: 9, Position: "bottom-center", Start: 1, Mode: "physical"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
 			t.Fatalf("recommended margin %g did not fit: %v", tc.margin, err)
 		}
 	}
-	tight, err := footerDigits(packet.PageNumbers{Size: 9.1})
+	tight, err := footerDigits(packet.PageNumbers{Size: 9.1, Position: "bottom-center", Start: 1, Mode: "physical"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestFooterAdviceOmitsNumericalBoundsThatFailExactContainment(t *testing.T) 
 		{"lower roundoff", 1.3890784982935154, 300, 200, 0, 0.408, "Increase"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			digits, err := footerDigits(packet.PageNumbers{Size: tc.fontSize})
+			digits, err := footerDigits(packet.PageNumbers{Size: tc.fontSize, Mode: "physical", Position: "bottom-center", Start: 1})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -55,8 +55,8 @@ func project(req Request, a *admission, inspected *inspection, composed *composi
 	}
 	r.Pages = &outcome.Pages{Source: knownCount(layout.SourcePages), Generated: knownCount(layout.GeneratedPages), Total: knownCount(layout.TotalPages)}
 	r.Sections = reportSections(layout.Sections, true)
-	r.Parts = make([]outcome.Part, len(layout.Parts))
-	for i, part := range layout.Parts {
+	r.Parts = make([]outcome.Part, len(composed.assembly.Parts))
+	for i, part := range composed.assembly.Parts {
 		entry := declaredReportPart(part.Leaf)
 		inspectedSource(&entry, part.Index, inspected)
 		entry.Pages = knownCount(int64(part.Pages))
@@ -73,13 +73,10 @@ func project(req Request, a *admission, inspected *inspection, composed *composi
 			size := part.Size
 			entry.Size = &size
 		}
-		if i < len(composed.texts) && composed.texts[i] != nil {
-			text := composed.texts[i]
+		if text := part.Text; text != nil {
 			entry.Text = &outcome.Text{Font: text.Font, FontSize: text.FontSize, Bounds: text.Bounds, InkBounds: text.InkBounds, Overflow: text.Overflow}
 		}
-		if built != nil && i < len(built.renames) && built.renames[i] != nil {
-			entry.FieldsRenamed = built.renames[i]
-		}
+		entry.FieldsRenamed = part.FieldsRenamed
 		r.Parts[i] = entry
 	}
 	return r
@@ -103,7 +100,6 @@ func declaredReportPart(leaf packet.Leaf) outcome.Part {
 	p := outcome.Part{Item: leaf.Ref, Kind: leaf.Kind, Path: leaf.Source, Section: leaf.Owner}
 	switch leaf.Kind {
 	case packet.PartSource:
-		p.FieldsRenamed = []packet.FieldRename{}
 	case packet.PartPage, packet.PartDivider:
 		p.Count = leaf.Count
 	case packet.PartContents, packet.PartPadding:

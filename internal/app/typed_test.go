@@ -88,3 +88,31 @@ func TestWorkerCountsAndConcurrentRequestsAgree(t *testing.T) {
 		t.Fatalf("worker budgets changed output: %+v %+v", first.result.Diagnostics, second.result.Diagnostics)
 	}
 }
+
+func TestTypedDerivedIdentityCollisionRefusesPublication(t *testing.T) {
+	dir := t.TempDir()
+	input := app.Declared{Declaration: packet.Declaration{Items: []packet.Item{&packet.GroupItem{Ref: "section", Title: "Section", Divider: &packet.PageStyle{}, Items: []packet.Item{&packet.PageItem{Ref: "section/divider", Count: 1}}}}}}
+	r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, Input: input, WorkingDir: dir, Output: "must-not-exist.pdf", Report: "refusal.json"})
+	if r.Status != "invalid" || !code(r, "plan_value") {
+		t.Fatal(r)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "must-not-exist.pdf")); !os.IsNotExist(err) {
+		t.Fatalf("invalid identity published: %v", err)
+	}
+	if !r.Report.Written {
+		t.Fatal("refusal report missing")
+	}
+}
+
+func TestBareTypedContainerAndExplicitJSONGroupingGrammar(t *testing.T) {
+	dir := t.TempDir()
+	typed := app.Declared{Declaration: packet.Declaration{PageDefaults: packet.PageStyle{Size: packet.Setting[packet.Size]{Present: true, Value: packet.Size{Width: 300, Height: 400}}}, Items: []packet.Item{&packet.GroupItem{Items: []packet.Item{&packet.PageItem{Count: 1}}}}}}
+	req := app.Request{Operation: app.Check, InspectionWorkers: 1, WorkingDir: dir, Input: typed}
+	if r := app.Execute(t.Context(), req); r.Status != "ok" {
+		t.Fatal(r.Diagnostics)
+	}
+	req.Input = app.PlanBytes{Data: []byte(`{"version":6,"items":[{"items":[{"page":{"size":"300x400"}}]}]}`)}
+	if r := app.Execute(t.Context(), req); r.Status != "invalid" || !code(r, "plan_item_shape") {
+		t.Fatal("JSON-only grouping grammar drifted", r)
+	}
+}

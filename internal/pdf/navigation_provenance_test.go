@@ -241,7 +241,7 @@ func TestNavigationWarningsRepeatOriginalSitesThroughAssemblyAndFitting(t *testi
 		domain[item] = view.SourceFacts
 	}
 	fit := &packet.Size{Width: 300, Height: 400}
-	layout, ds := resolvePacket(packet.NewPlan("", fit, nil, packet.PageStyle{}, parts), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: parts}), domain)
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}

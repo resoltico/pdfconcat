@@ -11,14 +11,18 @@ import (
 // ResolveDeclaration applies native path grammar to an owned validated declaration.
 // A divider's font is declared in the enclosing scope, before its group's dir.
 func ResolveDeclaration(d packet.Declaration, base string) (packet.Declaration, []diag.Diagnostic) {
-	var ds []diag.Diagnostic
+	owned, ds := packet.ValidateDeclaration(d)
+	if len(ds) > 0 {
+		return packet.Declaration{}, ds
+	}
+	d = owned
 	resolve := func(base, path, ref string) string {
 		if path == "" {
 			return ""
 		}
 		p, err := Path(base, path)
 		if err != nil {
-			ds = append(ds, diag.New(diag.PathInvalid, err.Error(), ref))
+			ds = append(ds, diag.Report(diag.PathInvalid, diag.TechnicalFailure("input", err.Error()), ref))
 		}
 		return p
 	}

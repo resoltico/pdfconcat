@@ -25,6 +25,8 @@ func DefaultPageNumbers() *PageNumbers {
 
 // Plan is an ordered declaration with a single derived traversal.
 type Plan struct {
+	admitted     bool
+	declaration  *Declaration
 	metadata     *Metadata
 	timestamp    *int64
 	structure    StructurePolicy
@@ -61,8 +63,8 @@ type event struct {
 	end     bool
 }
 
-// NewPlan derives item order and section ancestry once.
-func NewPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle, items []Item) Plan {
+// newPlan derives item order and section ancestry once.
+func newPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle, items []Item) Plan {
 	if numbers != nil {
 		normalized := *numbers
 		normalized.Kinds = slices.Clone(numbers.Kinds)
@@ -83,7 +85,7 @@ func NewPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle,
 	items = cloneItems(items)
 	fit = copyValue(fit)
 	defaults = copyStyle(defaults)
-	p := Plan{output: output, fitTo: fit, pageNumbers: numbers, pageDefaults: defaults, items: items}
+	p := Plan{admitted: true, output: output, fitTo: fit, pageNumbers: numbers, pageDefaults: defaults, items: items}
 	add := func(l Leaf) {
 		l.Index = len(p.leaves)
 		p.leaves = append(p.leaves, l)
@@ -130,7 +132,7 @@ func NewPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle,
 					if i.Divider != nil {
 						style := *i.Divider
 						style.Text.Value = Setting[string]{Present: true, Value: i.Title, From: i.Ref + "/title"}
-						add(Leaf{NumberingEnabled: choice, Ref: i.Ref + "/divider", Kind: PartDivider, Owner: i.Ref, Page: &style, Count: 1})
+						add(Leaf{NumberingEnabled: choice, Ref: dividerRef(i.Ref), Kind: PartDivider, Owner: i.Ref, Page: &style, Count: 1})
 					}
 				}
 				walk(i.Items, childOwner, childDepth, choice)
@@ -249,5 +251,22 @@ func (p Plan) PageDefaults() PageStyle { return copyStyle(p.pageDefaults) }
 
 // Declaration returns an owned mutable recipe, with no shared traversal state.
 func (p Plan) Declaration() Declaration {
+	if p.declaration != nil {
+		return cloneDeclaration(*p.declaration)
+	}
 	return Declaration{Metadata: p.Metadata(), Timestamp: p.Timestamp(), Structure: p.Structure(), Output: p.Output(), FitTo: p.FitTo(), PageNumbers: p.PageNumbers(), PageDefaults: p.PageDefaults(), Items: p.Items()}
+}
+
+func dividerRef(ref Ref) Ref { return ref + "/divider" }
+
+// PartIdentity binds facts to one physical span, including generated padding.
+type PartIdentity struct {
+	Ref       Ref
+	Kind      PartKind
+	FirstPage int64
+}
+
+// Identity returns the stable identity within a resolved assembly.
+func (p Part) Identity() PartIdentity {
+	return PartIdentity{Ref: p.Ref, Kind: p.Kind, FirstPage: p.FirstPage}
 }

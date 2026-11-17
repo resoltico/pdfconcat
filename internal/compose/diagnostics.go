@@ -12,14 +12,15 @@ import (
 )
 
 // Diagnostic maps text and placement failures to product diagnostics.
-func Diagnostic(err error, item string) diag.Diagnostic {
+func Diagnostic(err error, item string) diag.Diagnostic { return diagnosticWidth(err, item, "") }
+func diagnosticWidth(err error, item, widthOrigin string) diag.Diagnostic {
 	code := diag.FontInvalid
 	var placement placementError
 	if errors.As(err, &placement) {
-		return diag.New(diag.TextOverflow, err.Error(), item)
+		return diag.Report(diag.TextOverflow, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return diag.New(diag.Interrupted, err.Error(), item)
+		return diag.Report(diag.Interrupted, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
 	}
 	var embedding *typeset.EmbeddingError
 	var text *typeset.TextError
@@ -37,5 +38,5 @@ func Diagnostic(err error, item string) diag.Diagnostic {
 	case errors.As(err, &overflow):
 		code = diag.TextOverflow
 	}
-	return diag.New(code, err.Error(), item)
+	return diag.Report(code, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
 }

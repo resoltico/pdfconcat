@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
 	"github.com/resoltico/pdfconcat/internal/typeset"
 )
 
@@ -32,10 +33,10 @@ func TestCustomContentsMetricsPaginationAndExclusions(t *testing.T) {
 	}
 	{
 		draft := j.Declaration()
-		draft.PageNumbers = &packet.PageNumbers{Size: 10, Margin: 18, Position: packet.NumberTopRight, Kinds: []packet.PartKind{packet.PartContents}}
-		j = draft.Plan()
+		draft.PageNumbers = &packet.PageNumbers{Size: 10, Margin: 18, Position: packet.NumberTopRight, Kinds: []packet.PartKind{packet.PartContents}, Mode: "physical", Start: 1}
+		j = pdffixture.Plan(t, draft)
 	}
-	j = packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), jItems)
+	j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems})
 	fallback, ds := PrepareContents(t.Context(), j, nil, fonts, testFooter(t, j))
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -53,7 +54,7 @@ func TestCustomContentsMetricsPaginationAndExclusions(t *testing.T) {
 	{
 		draft := j.Declaration()
 		draft.PageDefaults = defaults
-		j = draft.Plan()
+		j = pdffixture.Plan(t, draft)
 	}
 	inherited, ds := PrepareContents(t.Context(), j, nil, fonts, testFooter(t, j))
 	if len(ds) > 0 {

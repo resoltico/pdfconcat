@@ -32,7 +32,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 7
+          "const": 8
         },
         "command": {
           "enum": [
@@ -318,7 +318,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 7
+          "const": 8
         },
         "command": {
           "const": "version"
@@ -622,7 +622,10 @@
           ]
         },
         "fields_renamed": {
-          "type": "array",
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "object",
             "additionalProperties": false,

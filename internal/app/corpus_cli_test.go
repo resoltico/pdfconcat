@@ -41,7 +41,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 			if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
 				if slices.Contains(args, "--json") {
 					var version exchange.Version
-					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 7 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
+					if err = json.Unmarshal(raw, &version); err != nil || version.FormatVersion != 8 || version.Command != "version" || version.Version == "" || version.Go == "" || version.Platform == "" {
 						t.Fatalf("installed version facts: %s %v", raw, err)
 					}
 				} else if !bytes.HasPrefix(raw, []byte("pdfconcat ")) || bytes.Count(raw, []byte("\n")) != 1 || !bytes.Contains(raw, []byte("darwin/")) && !bytes.Contains(raw, []byte("linux/")) && !bytes.Contains(raw, []byte("windows/")) {

@@ -124,15 +124,16 @@ type PDFLocation struct {
 
 // Diagnostic is a located error or warning with its consuming plan entries.
 type Diagnostic struct {
-	Severity     Severity     `json:"severity"`
-	Code         Code         `json:"code"`
-	Message      string       `json:"message"`
-	Detail       string       `json:"detail,omitempty"`
-	PDFLocation  *PDFLocation `json:"pdf_location,omitempty"`
-	File         string       `json:"file,omitempty"`
-	Items        []string     `json:"items,omitempty"`
-	ItemsOmitted int          `json:"items_omitted"`
-	Location     *Location    `json:"location,omitempty"`
+	Identity     FindingIdentity `json:"-"`
+	Severity     Severity        `json:"severity"`
+	Code         Code            `json:"code"`
+	Message      string          `json:"message"`
+	Detail       string          `json:"detail,omitempty"`
+	PDFLocation  *PDFLocation    `json:"pdf_location,omitempty"`
+	File         string          `json:"file,omitempty"`
+	Items        []string        `json:"items,omitempty"`
+	ItemsOmitted int             `json:"items_omitted"`
+	Location     *Location       `json:"location,omitempty"`
 }
 
 // Registry returns a copy so callers cannot change the public code definitions.

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Results and reports require format 8: rename facts are null when unestablished or inapplicable, and an observed empty mapping is an empty array.
+- Typed admission rejects authored/divider identity collisions; every production plan constructor validates and owns its declarations, including later-mutated snapshots.
+- Part text and actual rename facts are bound to their resolved owners; inconsistent or missing required facts fail processing instead of silently disappearing from reports.
+- Product explanations and named parameters are core-owned; factual finding identities preserve cause, site and phase independently of rendered wording.
+
 - Plans require version 6: authored language now selects generated body, divider and contents glyphs. Review appearance before updating version 5 plans; no migration is provided.
 - Unreferenced zero-offset classic xref entries can be admitted with located warnings and revision tombstones; referenced entries and exceptional hybrid chains remain refused.
 - Both output and report destinations protect contents-only external fonts, including existing-file aliases, through a shared effective-input inventory.

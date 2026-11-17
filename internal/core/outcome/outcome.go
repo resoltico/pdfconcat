@@ -124,7 +124,8 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 	output := make([]diag.Diagnostic, 0, len(input))
 	type findingKey struct {
 		code                        diag.Code
-		file, message, detail       string
+		file                        string
+		identity                    diag.FindingIdentity
 		location                    diag.Location
 		pdfLocation                 diag.PDFLocation
 		hasLocation, hasPDFLocation bool
@@ -134,11 +135,11 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 	for _, d := range input {
 		d.Items = slices.Clone(d.Items)
 		d.ItemsOmitted = 0
-		if d.Severity != "warning" || d.File == "" {
+		if d.Severity != "warning" || d.File == "" || d.Identity.Kind == "" {
 			output = append(output, d)
 			continue
 		}
-		key := findingKey{code: d.Code, file: d.File, message: d.Message, detail: d.Detail}
+		key := findingKey{code: d.Code, file: d.File, identity: d.Identity}
 		if d.Location != nil {
 			key.location = *d.Location
 			key.hasLocation = true

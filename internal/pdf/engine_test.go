@@ -138,7 +138,7 @@ func TestEncryptedSources(t *testing.T) {
 func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (string, pdf.Assembled, []diag.Diagnostic) {
 	t.Helper()
 	dir := t.TempDir()
-	j := packet.NewPlan("", fit, nil, packet.PageStyle{}, nil)
+	j := packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: nil}
 	facts := map[string]pdf.SourceFacts{}
 	domain := map[string]packet.SourceFacts{}
 	var warnings []diag.Diagnostic
@@ -154,9 +154,9 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 		warnings = append(warnings, ds...)
 		facts[path] = f
 		domain[fmt.Sprintf("/items/%d", i)] = f.SourceFacts
-		j = packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), append(j.Items(), &packet.SourceItem{Ref: fmt.Sprintf("/items/%d", i), Path: path}))
+		j.Items = append(j.Items, &packet.SourceItem{Ref: fmt.Sprintf("/items/%d", i), Path: path})
 	}
-	layout, ds := resolvePacket(packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output, FitTo: j.FitTo, PageNumbers: j.PageNumbers, PageDefaults: j.PageDefaults, Items: j.Items}), domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -228,7 +228,7 @@ func TestMergedDestinationsOutlinesAndForms(t *testing.T) {
 			if findings := doc.Verify(exp); len(findings) > 0 {
 				t.Fatalf("oracle findings: %+v", findings)
 			}
-			if tc.name == "forms" && (len(a.Renames[1]) == 0 || !codePresent(ds, diag.FormFieldsRenamed)) {
+			if tc.name == "forms" && (len(partRenames(a)) == 0 || !codePresent(ds, diag.FormFieldsRenamed)) {
 				t.Fatalf("missing actual form mappings %+v %+v", a, ds)
 			}
 			if strings.Contains(tc.name, "repeated") && !codePresent(ds, diag.DestinationsRenamed) {
@@ -328,7 +328,7 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	layout, _ := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: path, Ref: path}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
+	layout, _ := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: path}}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestNarrowFormDefaultsDigest(t *testing.T) {
 				}
 				return
 			}
-			if status := diag.Outcome(ds); status != "ok" || !codePresent(ds, diag.FormFieldsRenamed) || len(a.Renames[1]) != 1 || a.Renames[1][0].From != "TWO" || !strings.HasSuffix(a.Renames[1][0].To, ".TWO") {
+			if status := diag.Outcome(ds); status != "ok" || !codePresent(ds, diag.FormFieldsRenamed) || len(partRenames(a)) != 1 || partRenames(a)[0].From != "TWO" || !strings.HasSuffix(partRenames(a)[0].To, ".TWO") {
 				t.Fatalf("actual distinct-name mapping %+v %+v", a, ds)
 			}
 		})
@@ -478,7 +478,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		t.Fatal(ds)
 	}
 	font := defaultFont(t)
-	j := packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Path: source, Ref: "source"}})
+	j := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: source, Ref: "source"}}})
 	pages := map[int][]compose.Page{}
 	var placements []*typeset.Placed
 	for i, text := range []string{"Ā ļ ķ", "Ελληνικά", "Кириллица ā"} {
@@ -488,13 +488,13 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		style := packet.Defaults()
 		style.Size.Value = packet.Size{Width: 300, Height: 200}
 		style.Size.Present = true
-		j = packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), append(j.Items(), &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)}))
+		j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: append(j.Items(), &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})})
 	}
 	fonts, err := typeset.PrepareFonts(placements)
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := resolvePacket(packet.NewPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), map[string]packet.SourceFacts{"source": facts.SourceFacts})
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: j.Items()}), map[string]packet.SourceFacts{"source": facts.SourceFacts})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}

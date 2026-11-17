@@ -146,10 +146,10 @@ func applyStructureNormalization(c context.Context, s *model.Context, n *structu
 		for _, key := range keys {
 			entry := entries[key]
 			if _, drop := n.stale[key]; drop {
-				d := diag.New(diag.SourceStructureIndexNormalized, "An unclaimed stale ParentTree entry is omitted; retained semantic ownership is unchanged.")
+				d := diag.Report(diag.SourceStructureIndexNormalized, diag.AnUnclaimedStaleParentTreeEntryIsOmittedRetainedSemanticOwnership())
 				loc := entry.location
 				d.PDFLocation = &loc
-				d.Detail = fmt.Sprintf("Key %d, target %s: no source object claims this key; forward hierarchy and all live reverse bindings were validated.", key, entry.value)
+				diag.AttachEvidence(&d, diag.StaleStructureIndexEvidence(int64(key), fmt.Sprint(entry.value)))
 				ds = append(ds, d)
 				continue
 			}
@@ -190,9 +190,9 @@ func applyStructureNormalization(c context.Context, s *model.Context, n *structu
 		if r, ok := cat["StructTreeRoot"].(types.IndirectRef); ok {
 			loc.Object = r.ObjectNumber.Value()
 		}
-		d := diag.New(diag.SourceStructureIndexNormalized, "An absent IDTree is derived from unique validated structure IDs; retained semantics are unchanged.")
+		d := diag.Report(diag.SourceStructureIndexNormalized, diag.AnAbsentIDTreeIsDerivedFromUniqueValidatedStructureIDs())
 		d.PDFLocation = &loc
-		d.Detail = fmt.Sprintf("Indexed %d existing structure IDs; no ID or content was invented.", len(n.ids))
+		diag.AttachEvidence(&d, diag.DerivedStructureIDsEvidence(int64(len(n.ids))))
 		ds = append(ds, d)
 	}
 	return ds, nil

@@ -181,7 +181,7 @@ func TestWarningFormRequestAndActualRenameSourceSites(t *testing.T) {
 		domain[item] = v[0].SourceFacts
 		items = append(items, &packet.SourceItem{Ref: item, Path: path})
 	}
-	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, items), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: items}), domain)
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}
@@ -189,10 +189,10 @@ func TestWarningFormRequestAndActualRenameSourceSites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(assembled.Renames[0]) != 0 || len(assembled.Renames[1]) != 1 {
-		t.Fatalf("actual mappings: %+v", assembled.Renames)
+	if len(partRenames(assembled, "form-0")) != 0 || len(partRenames(assembled, "form-1")) != 1 {
+		t.Fatalf("actual mappings: %+v", assembled.Parts)
 	}
-	rename := assembled.Renames[1][0]
+	rename := partRenames(assembled, "form-1")[0]
 	if rename.From != "SECOND" || rename.To == rename.From {
 		t.Fatalf("actual mapping: %+v", rename)
 	}

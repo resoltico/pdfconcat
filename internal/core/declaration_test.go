@@ -21,7 +21,7 @@ func TestTypedDeclarationValidationAndOwnership(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	p := d.Plan()
+	p := preparePlan(d)
 	source.Selection[0].Last = 99
 	page.Style.Text.Value.Value = "changed"
 	group.Items = nil
@@ -60,7 +60,7 @@ func TestTypedDeclarationValidationAndOwnership(t *testing.T) {
 	cycle.Items = []Item{cycle}
 	cases = append(cases, Declaration{Items: []Item{cycle}})
 	for i, input := range cases {
-		if _, ds := ValidateDeclaration(input); len(ds) == 0 {
+		if _, ds := AdmitDeclaration(input); len(ds) == 0 {
 			t.Errorf("accepted invalid declaration %d", i)
 		}
 	}
@@ -111,5 +111,44 @@ func TestTypedAggregateTextBudget(t *testing.T) {
 	}
 	if _, ds := ValidateDeclaration(Declaration{Items: items}); len(ds) != 1 || ds[0].Code != diag.PlanLimit {
 		t.Fatalf("aggregate authored text budget bypassed: %+v", ds)
+	}
+}
+
+func TestAdmissionRejectsAllIdentityCollisions(t *testing.T) {
+	for _, items := range [][]Item{
+		{&GroupItem{Ref: "section", Title: "Section", Divider: &PageStyle{}, Items: []Item{&PageItem{Ref: "section/divider", Count: 1}}}},
+		{&PageItem{Ref: "section/divider", Count: 1}, &GroupItem{Ref: "section", Title: "Section", Divider: &PageStyle{}, Items: []Item{&PageItem{Count: 1}}}},
+		{&GroupItem{Ref: "outer", Items: []Item{&GroupItem{Ref: "nested", Title: "Nested", Divider: &PageStyle{}, Items: []Item{&PageItem{Ref: "nested/divider", Count: 1}}}}}},
+		{&PageItem{Ref: "item/1/divider", Count: 1}, &GroupItem{Title: "Automatic", Divider: &PageStyle{}, Items: []Item{&PageItem{Count: 1}}}},
+	} {
+		if _, ds := AdmitDeclaration(Declaration{Items: items}); len(ds) == 0 {
+			t.Fatalf("colliding physical identity admitted: %#v", items)
+		}
+	}
+}
+func TestEveryPreparedConstructionRevalidatesAndOwns(t *testing.T) {
+	d, ds := ValidateDeclaration(Declaration{Items: []Item{&PageItem{Count: 1}}})
+	if len(ds) > 0 {
+		t.Fatal(ds)
+	}
+	page, ok := d.Items[0].(*PageItem)
+	if !ok {
+		t.Fatal("expected admitted page declaration")
+	}
+	page.Count = -9
+	if _, ds = AdmitDeclaration(d); len(ds) == 0 {
+		t.Fatal("post-validation mutation bypassed admission")
+	}
+	page.Count = 1
+	p, ds := AdmitDeclaration(d)
+	if len(ds) > 0 {
+		t.Fatal(ds)
+	}
+	page.Count = -10
+	if p.Leaves()[0].Count != 1 {
+		t.Fatal("admitted storage aliases input")
+	}
+	if _, ds = Resolve(Plan{}, nil, 0); len(ds) == 0 || diag.Outcome(ds) != diag.StatusFailed {
+		t.Fatal("zero prepared state was plausible")
 	}
 }

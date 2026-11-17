@@ -62,3 +62,13 @@ func CheckDestination(f DestinationFacts) []diag.Diagnostic {
 	}
 	return ds
 }
+
+// CheckReportSeparation owns the product rule after native identity observation.
+func CheckReportSeparation(same bool, path string) []diag.Diagnostic {
+	if !same {
+		return nil
+	}
+	d := diag.Report(diag.ReportIsOutput, diag.ReportAndOutputMustBeDifferentFiles())
+	d.File = path
+	return []diag.Diagnostic{d}
+}

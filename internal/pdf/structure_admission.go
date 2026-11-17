@@ -90,7 +90,7 @@ func originalSignatureChecks(c context.Context, s *model.Context) error {
 			}
 		}
 		if signed {
-			err := refuse(diag.SourceSigned, "The source declares a signature or timestamp whose assurance composition cannot preserve. Deliver the original separately.")
+			err := refuse(diag.SourceSigned, diag.TheSourceDeclaresASignatureOrTimestampWhoseAssuranceComposition())
 			return structureAt(err, loc)
 		}
 		return nil
@@ -104,7 +104,7 @@ func objectLocations(c context.Context, s *model.Context, names bool, visit func
 	var walk func(types.Object, diag.PDFLocation, int) error
 	walk = func(o types.Object, loc diag.PDFLocation, depth int) error {
 		if depth > 128 {
-			return structureAt(refuse(diag.SourceUnsupported, "Direct object nesting exceeds 128."), loc)
+			return structureAt(refuse(diag.SourceUnsupported, diag.DirectObjectNestingExceeds()), loc)
 		}
 		switch v := o.(type) {
 		case types.Dict:
@@ -141,7 +141,7 @@ func objectLocations(c context.Context, s *model.Context, names bool, visit func
 			if names {
 				decoded, e := types.DecodeName(string(v))
 				if e == nil && decoded != string(v) {
-					return structureAt(refuse(diag.SourceUnsupported, "Unsupported literal-hash name identity; upstream may decode it twice."), loc)
+					return structureAt(refuse(diag.SourceUnsupported, diag.UnsupportedLiteralHashNameIdentityUpstreamMayDecodeItTwice()), loc)
 				}
 			}
 		}
@@ -285,9 +285,9 @@ func admitSourceStructure(c context.Context, s *model.Context, policy packet.Str
 		if len(locations) == 0 {
 			return nil, nil
 		}
-		d := diag.New(diag.SourceStructureRemoved, "Source structure claims and ownership are discarded by explicit policy.")
+		d := diag.Report(diag.SourceStructureRemoved, diag.SourceStructureClaimsAndOwnershipAreDiscardedByExplicitPolicy())
 		d.PDFLocation = &locations[0]
-		d.Detail = fmt.Sprintf("Detached %d structure claims/ownership entries; page and Form streams are unchanged.", len(locations))
+		diag.AttachEvidence(&d, diag.StructureDiscardEvidence(int64(len(locations))))
 		return []diag.Diagnostic{d}, nil
 	}
 	raw := cat["StructTreeRoot"]
@@ -323,9 +323,9 @@ func admitSourceStructure(c context.Context, s *model.Context, policy packet.Str
 		if witness == nil {
 			witness = &locations[0]
 		}
-		d := diag.New(diag.SourceStructureOrphaned, "No structure hierarchy is supplied; orphan structure claims/ownership are omitted and meaningful source content remains untagged.")
+		d := diag.Report(diag.SourceStructureOrphaned, diag.NoStructureHierarchyIsSuppliedOrphanStructureClaimsOwnershipAre())
 		d.PDFLocation = witness
-		d.Detail = fmt.Sprintf("Detached %d claims/ownership entries without changing page or Form streams.", len(locations))
+		diag.AttachEvidence(&d, diag.OrphanStructureEvidence(int64(len(locations))))
 		return []diag.Diagnostic{d}, nil
 	}
 	root, ok := value.(types.Dict)

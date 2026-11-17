@@ -30,7 +30,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		facts.SHA256 = sha256.Sum256(data)
 		facts.Bytes = int64(len(data))
 		if value := recover(); value != nil {
-			d := diag.New(diag.SourceProcessingFailed, "The PDF backend failed unexpectedly.")
+			d := diag.Report(diag.SourceProcessingFailed, diag.ThePDFBackendFailedUnexpectedly())
 			d.Detail = fmt.Sprint(value)
 			ds = append(ds, d)
 		}
@@ -61,12 +61,12 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		}
 		if !reported {
 			code := diag.SourceStructureOrphaned
-			message := "Unbound marked-content IDs supply no hierarchy; meaningful source content remains untagged."
+			message := diag.UnboundMarkedContentIDsSupplyNoHierarchyMeaningfulSourceContent()
 			if policy == packet.StructureDiscard {
 				code = diag.SourceStructureRemoved
-				message = "Unbound source marked-content IDs are ignored by explicit structure discard; streams are unchanged."
+				message = diag.UnboundSourceMarkedContentIDsAreIgnoredByExplicitStructure()
 			}
-			d := diag.New(code, message)
+			d := diag.Report(code, message)
 			d.PDFLocation = facts.UnboundMCIDLocation
 			ds = append(ds, d)
 		}
@@ -82,7 +82,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 	for index, request := range requests {
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
 		if err == nil && !wholeSelection(ranges, s.PageCount) && (facts.HasFields || facts.HasWidgets) {
-			err = refuse(diag.SourceSelectionFormUnsupported, "Partial selection of sources containing form fields or widgets is unsupported; select the whole source or flatten it with a suitable PDF tool.")
+			err = refuse(diag.SourceSelectionFormUnsupported, diag.PartialSelectionOfSourcesContainingFormFieldsOrWidgetsIs())
 		}
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
@@ -207,12 +207,12 @@ func selectionRanges(ranges []packet.PageRange, count int) ([]packet.PageRange, 
 	normalized := []packet.PageRange{}
 	for _, span := range ranges {
 		if span.First < 1 || span.Last < span.First || span.Last > count {
-			return nil, refuse(diag.SourceSelectionOutOfRange, fmt.Sprintf("Selected range [%d,%d] is outside the source's %d pages.", span.First, span.Last, count))
+			return nil, refuse(diag.SourceSelectionOutOfRange, diag.SelectedRangeDDIsOutsideTheSourceSD(int64(span.First), int64(span.Last), int64(count)))
 		}
 		if len(normalized) > 0 {
 			last := &normalized[len(normalized)-1]
 			if span.First <= last.Last {
-				return nil, refuse(diag.SourceSelectionOutOfRange, "Selected ranges must be ascending and disjoint.")
+				return nil, refuse(diag.SourceSelectionOutOfRange, diag.SelectedRangesMustBeAscendingAndDisjoint())
 			}
 			if span.First == last.Last+1 {
 				last.Last = span.Last

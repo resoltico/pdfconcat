@@ -52,7 +52,7 @@ func uriBaseWarnings(c context.Context, s *model.Context, origins sourceOrigins)
 		}
 		target, parseErr := url.Parse(text)
 		if parseErr == nil && !target.IsAbs() {
-			findings = append(findings, sourceWarning(diag.SourceURIBaseRemoved, "Source URI Base is removed; retained relative URI actions may resolve differently.", "Relative action retained; URI Base at "+baseSite.describe()+" is omitted.", site.key("URI")))
+			findings = append(findings, sourceWarning(diag.SourceURIBaseRemoved, diag.SourceURIBaseIsRemovedRetainedRelativeURIActionsMay(), diag.URIBaseEvidence(int64(baseSite.ref.ObjectNumber.Value()), int64(baseSite.ref.GenerationNumber.Value()), baseSite.path), site.key("URI")))
 		}
 		return nil
 	}, false)

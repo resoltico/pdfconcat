@@ -16,7 +16,7 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
 | `internal/files` | Native path semantics, regular-file acquisition, role checks and staged-file lifecycle |
-| `internal/wire` | Result v7 DTOs, domain projection and schema |
+| `internal/wire` | Result v8 DTOs, domain projection and schema |
 | `internal/legal` | Embedded license notices |
 | `internal/oracle`, `internal/pdffixture` | Test-only independent observations and synthetic PDFs |
 

@@ -17,7 +17,8 @@ func validationNotices(report model.ValidationReport) ([]diag.Diagnostic, error)
 	var ds []diag.Diagnostic
 	var repair error
 	for _, n := range report.Notices() {
-		d := diag.New(diag.SourceValidationNotice, "The PDF validator reported a compatibility notice.")
+		d := diag.Report(diag.SourceValidationNotice, diag.ThePDFValidatorReportedACompatibilityNotice())
+		d.Identity = diag.FindingIdentity{}
 		d.Detail = strings.ToValidUTF8(string(n.Phase)+"/"+string(n.Disposition)+": "+n.Message, "�")
 		location := diag.PDFLocation{Path: strings.ToValidUTF8(n.Path, "�")}
 		if n.ObjectNumber > 0 {
@@ -31,7 +32,7 @@ func validationNotices(report model.ValidationReport) ([]diag.Diagnostic, error)
 		}
 		ds = append(ds, d)
 		if n.Disposition == model.NoticeRepaired && repair == nil {
-			refusal := diag.New(diag.SourceUnsupported, "Sources for which the PDF validator reports repairs are unsupported. Obtain a reviewed repair or deliver the original separately.")
+			refusal := diag.Report(diag.SourceUnsupported, diag.SourcesForWhichThePDFValidatorReportsRepairsAreUnsupported())
 			refusal.Detail, refusal.PDFLocation = d.Detail, d.PDFLocation
 			repair = &policyError{finding: refusal, err: n.Cause}
 		}

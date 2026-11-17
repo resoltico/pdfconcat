@@ -47,10 +47,10 @@ func readOutlineList(c context.Context, s *model.Context, first types.Object) ([
 			}
 			ref, ok := o.(types.IndirectRef)
 			if !ok || seen[ref] {
-				return nil, refuse(diag.SourceInvalid, "Outline nodes must be distinct indirect objects.")
+				return nil, refuse(diag.SourceInvalid, diag.OutlineNodesMustBeDistinctIndirectObjects())
 			}
 			if !liveReference(s, ref) {
-				return nil, refuse(diag.SourceInvalid, "An outline reference is missing, free, or has the wrong object generation.")
+				return nil, refuse(diag.SourceInvalid, diag.AnOutlineReferenceIsMissingFreeOrHasTheWrong())
 			}
 			seen[ref] = true
 			d, err := s.DereferenceDict(ref)

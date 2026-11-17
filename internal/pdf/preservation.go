@@ -28,8 +28,8 @@ type contentStream struct {
 	digest [sha256.Size]byte
 }
 
-func contentFailure(page pageRef, number int, message string) error {
-	d := diag.New(diag.SourceDamaged, message)
+func contentFailure(page pageRef, number int, message diag.Explanation) error {
+	d := diag.Report(diag.SourceDamaged, message)
 	d.PDFLocation = &diag.PDFLocation{Object: page.ref.ObjectNumber.Value(), Page: number, Path: "Pages.Contents"}
 	return &policyError{finding: d}
 }
@@ -53,7 +53,7 @@ func capturePageContent(c context.Context, s *model.Context) (pageContentSnapsho
 			continue // An absent or explicit null Contents represents a blank page.
 		}
 		if ref, indirect := original.(types.IndirectRef); indirect && !liveReference(s, ref) {
-			return nil, contentFailure(page, i+1, "Page Contents references a missing or free object, or the wrong object generation.")
+			return nil, contentFailure(page, i+1, diag.PageContentsReferencesAMissingOrFreeObjectOrThe())
 		}
 		value, err := s.Dereference(original)
 		if err != nil {
@@ -68,7 +68,7 @@ func capturePageContent(c context.Context, s *model.Context) (pageContentSnapsho
 		case types.Array:
 			entries = value // An empty array contains no streams to preserve.
 		default:
-			return nil, contentFailure(page, i+1, "Page Contents must resolve to a stream or an array of existing streams.")
+			return nil, contentFailure(page, i+1, diag.PageContentsMustResolveToAStreamOrAnArray())
 		}
 		for _, entry := range entries {
 			if err := c.Err(); err != nil {
@@ -76,10 +76,10 @@ func capturePageContent(c context.Context, s *model.Context) (pageContentSnapsho
 			}
 			ref, ok := entry.(types.IndirectRef)
 			if !ok {
-				return nil, contentFailure(page, i+1, "Page content streams must be indirect references to existing streams.")
+				return nil, contentFailure(page, i+1, diag.PageContentStreamsMustBeIndirectReferencesToExistingStreams())
 			}
 			if !liveReference(s, ref) {
-				return nil, contentFailure(page, i+1, "A page content stream references a missing or free object, or the wrong object generation.")
+				return nil, contentFailure(page, i+1, diag.APageContentStreamReferencesAMissingOrFreeObject())
 			}
 			digest, known := digests[ref]
 			if !known {
@@ -89,7 +89,7 @@ func capturePageContent(c context.Context, s *model.Context) (pageContentSnapsho
 				}
 				stream, ok := object.(types.StreamDict)
 				if !ok {
-					return nil, contentFailure(page, i+1, "A page content stream is missing, has the wrong generation, or is not a stream.")
+					return nil, contentFailure(page, i+1, diag.APageContentStreamIsMissingHasTheWrongGeneration())
 				}
 				digest = sha256.Sum256(stream.Raw)
 				digests[ref] = digest
@@ -108,7 +108,7 @@ func (before pageContentSnapshot) verify(c context.Context, s *model.Context) er
 	if !slices.EqualFunc(before, after, func(a, b pageContent) bool {
 		return a.ref == b.ref && slices.Equal(a.streams, b.streams)
 	}) {
-		return refuse(diag.SourceDamaged, "PDF validation changed the page sequence or original encoded content streams.")
+		return refuse(diag.SourceDamaged, diag.PDFValidationChangedThePageSequenceOrOriginalEncodedContent())
 	}
 	return nil
 }

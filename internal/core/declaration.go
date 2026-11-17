@@ -313,6 +313,11 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 					}
 				}
 				if c.Divider != nil {
+					derived := dividerRef(c.Ref)
+					if refs[derived] {
+						refuse(diag.PlanValue, "Authored and derived item identities must be unique.", derived)
+					}
+					refs[derived] = true
 					if c.Divider.Text.Value.Present {
 						refuse(diag.PlanValue, "Divider text is supplied by its section title.", ref)
 					}
@@ -346,8 +351,17 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 	return d, nil
 }
 
-// Plan constructs traversal only from a declaration admitted by the semantic boundary.
-func (d Declaration) Plan() Plan {
+// AdmitDeclaration is the only production plan constructor. Every call validates
+// and owns its input, including declarations previously normalized and then mutated.
+func AdmitDeclaration(input Declaration) (Plan, []diag.Diagnostic) {
+	d, ds := ValidateDeclaration(input)
+	if len(ds) > 0 {
+		return Plan{}, ds
+	}
+	return preparePlan(d), nil
+}
+
+func preparePlan(d Declaration) Plan {
 	items := cloneItems(d.Items)
 	var apply func([]Item)
 	apply = func(items []Item) {
@@ -366,10 +380,12 @@ func (d Declaration) Plan() Plan {
 		}
 	}
 	apply(items)
-	p := NewPlan(d.Output, d.FitTo, d.PageNumbers, d.PageDefaults, items)
+	p := newPlan(d.Output, d.FitTo, d.PageNumbers, d.PageDefaults, items)
 	p.metadata = copyMetadata(d.Metadata)
 	p.timestamp = copyValue(d.Timestamp)
 	p.structure = d.Structure
+	raw := cloneDeclaration(d)
+	p.declaration = &raw
 	return p
 }
 
@@ -403,4 +419,18 @@ func cloneItems(items []Item) []Item {
 		}
 	}
 	return result
+}
+
+func cloneDeclaration(d Declaration) Declaration {
+	d.Metadata = copyMetadata(d.Metadata)
+	d.Timestamp = copyValue(d.Timestamp)
+	d.FitTo = copyValue(d.FitTo)
+	d.PageDefaults = copyStyle(d.PageDefaults)
+	if d.PageNumbers != nil {
+		n := *d.PageNumbers
+		n.Kinds = slices.Clone(n.Kinds)
+		d.PageNumbers = &n
+	}
+	d.Items = cloneItems(d.Items)
+	return d
 }

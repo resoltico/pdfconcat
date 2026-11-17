@@ -191,7 +191,7 @@ var (
 	SourceXRefEntryIgnored              = define("source_xref_entry_ignored", Warning, NoClass, "unreferenced zero-offset classic xref entry ignored without changing original source bytes")
 	SourceInvalid                       = define("source_invalid", Error, Invalid, "PDF parsing or validation failed")
 	SourceUnsupported                   = define("source_unsupported", Error, Invalid, "source structure cannot be composed with the supported fidelity guarantees")
-	SourceProcessingFailed              = define("source_processing_failed", Error, Failed, "unexpected PDF backend failure, including a recovered panic")
+	SourceProcessingFailed              = define("source_processing_failed", Error, Failed, "unexpected inspection or PDF backend failure, including a recovered panic")
 	SourceValidationNotice              = define("source_validation_notice", Warning, NoClass, "backend compatibility notice; skipped validation does not establish content removal")
 	SourceViewerSettingsRemoved         = define("source_viewer_settings_removed", Warning, NoClass, "source catalog PageLayout, PageMode or ViewerPreferences removed before validation")
 	SourceDamaged                       = define("source_damaged", Error, Invalid, "broken page tree, missing/malformed content streams, or validation changing page order or encoded contents")

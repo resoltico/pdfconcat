@@ -430,7 +430,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_xref_entry_ignored` | warning | — | unreferenced zero-offset classic xref entry ignored without changing original source bytes |
 | `source_invalid` | error | invalid | PDF parsing or validation failed |
 | `source_unsupported` | error | invalid | source structure cannot be composed with the supported fidelity guarantees |
-| `source_processing_failed` | error | failed | unexpected PDF backend failure, including a recovered panic |
+| `source_processing_failed` | error | failed | unexpected inspection or PDF backend failure, including a recovered panic |
 | `source_validation_notice` | warning | — | backend compatibility notice; skipped validation does not establish content removal |
 | `source_viewer_settings_removed` | warning | — | source catalog PageLayout, PageMode or ViewerPreferences removed before validation |
 | `source_damaged` | error | invalid | broken page tree, missing/malformed content streams, or validation changing page order or encoded contents |

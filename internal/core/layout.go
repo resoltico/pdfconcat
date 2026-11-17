@@ -16,6 +16,11 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 	}
 	var ds []diag.Diagnostic
 	leaves := j.Leaves()
+	for _, leaf := range leaves {
+		if leaf.Kind == PartSource && (leaf.Index < 0 || leaf.Index >= len(facts)) {
+			return layout, []diag.Diagnostic{diag.New(diag.SourceProcessingFailed, "Source inspection facts are unavailable.", leaf.Ref)}
+		}
+	}
 	var sourceSize, physicalSize Size
 	for _, leaf := range leaves {
 		if leaf.Kind == PartSource {
@@ -55,8 +60,12 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 		p := Part{Leaf: leaf, FirstPage: layout.TotalPages + 1}
 		if leaf.Kind == PartSource {
 			f, ok := source(leaf)
-			if !ok || f.Pages < 1 {
-				add(diag.SourceInvalid, "Source page facts are unavailable.", leaf.Ref)
+			if !ok {
+				add(diag.SourceProcessingFailed, "Source inspection facts are unavailable.", leaf.Ref)
+				return
+			}
+			if f.Pages < 1 {
+				add(diag.SourceInvalid, "A source must contain at least one retained page.", leaf.Ref)
 				return
 			}
 			p.Pages = f.Pages
@@ -78,7 +87,7 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 				selected += int64(span.Last-span.First) + 1
 			}
 			if selected != int64(p.Pages) {
-				add(diag.SourceInvalid, "Selected source ranges and page count disagree.", leaf.Ref)
+				add(diag.SourceProcessingFailed, "Selected source ranges and page count disagree.", leaf.Ref)
 				return
 			}
 			sourceSize, physicalSize = f.LastSize, f.LastSize

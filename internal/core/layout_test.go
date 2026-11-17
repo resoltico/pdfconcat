@@ -271,7 +271,7 @@ func TestLayoutLimitsAndNoInventedPartialSequence(t *testing.T) {
 		}
 	}
 	layout, ds := resolvePacket(packet.NewPlan("", nil, nil, packet.PageStyle{}, []packet.Item{&packet.SourceItem{Ref: "source", Path: "input"}}), map[string]packet.SourceFacts{"source": {Pages: 3, Selection: []packet.PageRange{{First: 1, Last: 2}}}}, 0)
-	if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || layout.TotalPages != 0 {
+	if len(ds) != 1 || ds[0].Code != diag.SourceProcessingFailed || layout.TotalPages != 0 {
 		t.Fatalf("inconsistent occurrence facts: %+v %+v", layout, ds)
 	}
 }
@@ -291,4 +291,12 @@ func resolvePacket(p packet.Plan, facts map[string]packet.SourceFacts, contents 
 		shapes[i] = facts[item.Ref]
 	}
 	return packet.Resolve(p, shapes, contents)
+}
+
+func TestMissingInspectionFactsAreNotMalformedDeclarations(t *testing.T) {
+	plan := packet.NewPlan("", nil, nil, packet.Defaults(), []packet.Item{&packet.SourceItem{Ref: "source", Path: "source.pdf"}})
+	_, ds := packet.Resolve(plan, nil, 0)
+	if len(ds) != 1 || ds[0].Code != diag.SourceProcessingFailed || diag.Outcome(ds) != diag.StatusFailed {
+		t.Fatalf("missing inspection data became invalid input: %+v", ds)
+	}
 }

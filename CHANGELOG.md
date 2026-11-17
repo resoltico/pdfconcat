@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Stdout write failures, including closed pipes, return exit 1 with a diagnostic when stderr works; already-published PDFs and reports remain saved.
 - Plans require version 7: fitting keeps native geometry within .01 pt per ordered displayed side. Review version 5/6 plans before changing their version; no migration is provided.
 - Results and reports require format 9, with selected source page_sizes runs containing original ranges, source dimensions and expected output dimensions, retained through later failures.
 - Rename facts remain null when unestablished or inapplicable; an observed empty mapping is an empty array.

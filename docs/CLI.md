@@ -88,6 +88,11 @@ per diagnostic. With `--json`, stdout holds exactly one capped JSON result and
 stderr is empty unless writing stdout fails. `schema result` covers results,
 reports and JSON version objects. JSON member order is not a consumer contract.
 
+A stdout write failure, including a closed pipe reader, returns exit 1. A diagnostic
+is written when stderr is available; no diagnostic delivery is guaranteed when
+stderr is also broken. Any PDF or report already published remains saved. Its
+saved processing facts do not imply that the final stdout summary was delivered.
+
 Usage errors print diagnostics and a help hint on stderr, with empty stdout.
 For build, check and version, an exact `--json` before the option delimiter
 selects JSON even when argument parsing fails. A `--` consumed as an option's
@@ -139,7 +144,8 @@ pages. Warnings do not make an outcome invalid.
 | `failed` | 1 | Environment, backend, verification or publication failure |
 | `interrupted` | 130 | Cancelled |
 
-Interrupted takes precedence over failed, then invalid for status and exit.
+Processing status precedence is interrupted, failed, then invalid. If rendering
+succeeds, the exit follows that status.
 Diagnostic presentation keeps output-publication and report-writing failures
 first, then interruption, other failures, invalid-input errors and warnings.
 Stage/first-use order stays stable within each priority group. This keeps bounded

@@ -18,6 +18,8 @@ import (
 var version string
 
 func main() {
+	// Let CLI write-error handlers receive EPIPE on stdout instead of terminating.
+	signal.Ignore(syscall.SIGPIPE)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	go func() { <-ctx.Done(); stop() }()
 	code := cli.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, cli.Host{BuildMetadata: buildMetadata(), InspectionWorkers: runtime.GOMAXPROCS(0), SourceDateEpoch: func() (string, bool) { return os.LookupEnv("SOURCE_DATE_EPOCH") }, WorkingDir: os.Getwd, ReleaseOverride: version})

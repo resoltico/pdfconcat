@@ -65,18 +65,25 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 	hash := sha256.New()
 	counter := &countWriter{Writer: staged}
 	assembly.Fonts = embedded
-	// Acquire originals again at assembly, preserving identity and digest checks.
+	// Acquire each original resource again at assembly. Repeated occurrences share
+	// immutable input bytes; their PDF graphs and digest/admission gates remain independent.
+	acquired := map[string][]byte{}
 	for index := range assembly.Parts {
 		part := &assembly.Parts[index]
 		if part.Source == "" {
 			continue
 		}
-		data, e := files.Read(c, part.Source, 0)
-		if e != nil {
-			d := ioDiagnostic(diag.SourceChanged, e, part.Source)
-			d.Items = []string{part.Ref}
-			out.diagnostics = append(out.diagnostics, d)
-			return out
+		data, known := acquired[part.Source]
+		if !known {
+			var e error
+			data, e = files.Read(c, part.Source, 0)
+			if e != nil {
+				d := ioDiagnostic(diag.SourceChanged, e, part.Source)
+				d.Items = []string{part.Ref}
+				out.diagnostics = append(out.diagnostics, d)
+				return out
+			}
+			acquired[part.Source] = data
 		}
 		part.Data = data
 	}

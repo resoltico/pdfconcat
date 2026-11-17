@@ -24,7 +24,7 @@ type linkedPackage struct {
 	ImportPath string
 	Dir        string
 	EmbedFiles []string
-	Module     *struct{ Path, Dir string }
+	Module     *struct{ Path string }
 }
 
 // linkedThirdPartyPackages lists the non-PDFConcat packages linked into the
@@ -114,6 +114,7 @@ func TestNoticesBundleNestedPackageLicenses(t *testing.T) {
 	}
 	checked := map[string]bool{}
 	for _, p := range linkedThirdPartyPackages(t) {
+		moduleRoot := linkedModuleDirectory(t, p)
 		for dir := p.Dir; ; dir = filepath.Dir(dir) {
 			files, err := os.ReadDir(dir)
 			if err != nil {
@@ -136,7 +137,7 @@ func TestNoticesBundleNestedPackageLicenses(t *testing.T) {
 					t.Errorf("license file of linked package %s is not bundled: %s", p.ImportPath, path)
 				}
 			}
-			if dir == p.Module.Dir || filepath.Dir(dir) == dir {
+			if dir == moduleRoot || filepath.Dir(dir) == dir {
 				break
 			}
 		}
@@ -170,6 +171,36 @@ func TestNoticesNameDependencyEmbeddedAssets(t *testing.T) {
 			if !strings.Contains(notices, stem) {
 				t.Errorf("%s embeds %s, which THIRD_PARTY_NOTICES.md does not name", p.ImportPath, file)
 			}
+		}
+	}
+}
+
+// Go's vendor-mode package metadata may omit Module.Dir. Derive the physical
+// module boundary from the package directory and its authoritative import suffix;
+// this also handles a local replacement whose path differs from the module name.
+func linkedModuleDirectory(t *testing.T, p linkedPackage) string {
+	t.Helper()
+	suffix, ok := strings.CutPrefix(p.ImportPath, p.Module.Path)
+	if !ok || suffix != "" && !strings.HasPrefix(suffix, "/") {
+		t.Fatalf("inconsistent linked module/package identity: %s / %s", p.Module.Path, p.ImportPath)
+	}
+	root := p.Dir
+	for _, part := range strings.Split(strings.TrimPrefix(suffix, "/"), "/") {
+		if part != "" {
+			root = filepath.Dir(root)
+		}
+	}
+	return root
+}
+func TestLinkedLicenseWalkStopsAtPhysicalModuleBoundary(t *testing.T) {
+	for _, tc := range []struct{ dir, want string }{
+		{"cache/dependency@v1/pkg/child", "cache/dependency@v1"},
+		{"source/third_party/dependency/pkg/child", "source/third_party/dependency"},
+		{"source/vendor/example.test/dependency/pkg/child", "source/vendor/example.test/dependency"},
+	} {
+		p := linkedPackage{ImportPath: "example.test/dependency/pkg/child", Dir: filepath.FromSlash(tc.dir), Module: &struct{ Path string }{Path: "example.test/dependency"}}
+		if got := linkedModuleDirectory(t, p); got != filepath.FromSlash(tc.want) {
+			t.Fatalf("license walk escaped module: %s != %s", got, tc.want)
 		}
 	}
 }

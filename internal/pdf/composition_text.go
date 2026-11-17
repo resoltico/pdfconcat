@@ -137,6 +137,9 @@ func (a *compositionInspector) showText(args []types.Object, state compositionSt
 				if err != nil {
 					return err
 				}
+				if a.remaining < 0 {
+					return a.failure(owner, "Content.TextWorkBudget")
+				}
 				if !known || state.font == nil {
 					text.known = false
 					continue
@@ -158,21 +161,52 @@ func (a *compositionInspector) type3Advance(font types.Dict, code int) (float64,
 	if err != nil {
 		return 0, false, err
 	}
+	last, err := a.pdf.DereferenceInteger(font["LastChar"])
+	if err != nil {
+		return 0, false, err
+	}
 	widths, err := a.pdf.DereferenceArray(font["Widths"])
 	if err != nil {
 		return 0, false, err
 	}
-	if first == nil || code < first.Value() || code-first.Value() >= len(widths) {
+	// Unsigned subtraction compares the interval span without signed overflow.
+	// Missing entries inside the interval are not the outside-range zero default.
+	if first == nil || last == nil || last.Value() < first.Value() || len(widths) == 0 ||
+		uint(last.Value())-uint(first.Value()) != uint(len(widths)-1) {
 		return 0, false, nil
 	}
-	width, err := a.pdf.DereferenceNumber(widths[code-first.Value()])
+	value, err := a.pdf.Dereference(font["FontMatrix"])
+	if err != nil || value == nil {
+		return 0, false, err
+	}
+	fm, err := objectMatrix(a.pdf, value)
 	if err != nil {
 		return 0, false, err
 	}
-	fm, err := objectMatrix(a.pdf, font["FontMatrix"])
-	if err != nil {
-		return 0, false, err
+	// Do not certify a default using an unreadable metrics declaration. Charge
+	// repeated metrics inspection to the same invocation budget as glyph work.
+	a.remaining -= int64(len(widths))
+	if a.remaining < 0 {
+		return 0, false, nil
 	}
+	var width float64
+	for i, object := range widths {
+		if err := a.context.Err(); err != nil {
+			return 0, false, err
+		}
+		n, err := a.pdf.DereferenceNumber(object)
+		if err != nil {
+			return 0, false, err
+		}
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return 0, false, nil
+		}
+		if code >= first.Value() && code <= last.Value() && i == code-first.Value() {
+			width = n
+		}
+	}
+	// PDF32000-1:2008 Table112 defines width zero outside FirstChar..LastChar.
+	// FontMatrix contributes only the horizontal component, including rotations.
 	advance := width * fm[0][0]
 	return advance, !math.IsNaN(advance) && !math.IsInf(advance, 0), nil
 }

@@ -648,3 +648,9 @@ visible Type3 show with an unknown cursor refuses fitting, rather than assuming
 identity. Invisible Type3 text does not execute CharProcs but still advances the
 cursor. Retained CharProcs are conservatively inspected at each known cursor.
 This bounded observation does not change kept-page execution or source bytes.
+
+Type3 codes outside FirstChar..LastChar have known zero glyph width, as defined
+by PDF32000-1:2008 Table112. Character/word spacing and horizontal scale still
+affect their cursor advance. This default requires readable, consistent font
+metrics; missing entries within the declared interval and nonfinite values do
+not become zero. Repeated metrics inspection shares the invocation work budget.

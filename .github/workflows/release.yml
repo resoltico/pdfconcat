@@ -122,8 +122,13 @@ jobs:
                   'buildType': 'https://actions.github.io/buildtypes/workflow/v1',
                   'externalParameters': {
                       'workflow': {'ref': e['GITHUB_REF'], 'repository': repository, 'path': '.github/workflows/release.yml'},
-                      'source': {'ref': tag_ref},
                   },
+                  'internalParameters': {'github': {
+                      'event_name': e['GITHUB_EVENT_NAME'],
+                      'repository_id': e['GITHUB_REPOSITORY_ID'],
+                      'repository_owner_id': e['GITHUB_REPOSITORY_OWNER_ID'],
+                      'runner_environment': e['RUNNER_ENVIRONMENT'],
+                  }},
                   'resolvedDependencies': [
                       {'name': 'release-source', 'uri': 'git+' + repository + '@' + tag_ref, 'digest': {'gitCommit': e['SOURCE_SHA']}},
                       {'name': 'release-workflow', 'uri': 'git+' + repository + '@' + e['GITHUB_REF'], 'digest': {'gitCommit': e['WORKFLOW_SHA']}},

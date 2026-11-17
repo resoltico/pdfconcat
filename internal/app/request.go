@@ -16,13 +16,13 @@ import (
 	"github.com/resoltico/pdfconcat/internal/plan"
 )
 
-// Operation is a supported packet use case.
-type Operation string
+// Operation names a core packet use case in the application request.
+type Operation = packet.Operation
 
-// Supported packet operations.
+// Supported packet operations are declared by the core.
 const (
-	Check Operation = "check"
-	Build Operation = "build"
+	Check = packet.Check
+	Build = packet.Build
 )
 
 // MaxPlanBytes bounds a plan including an optional UTF-8 BOM.

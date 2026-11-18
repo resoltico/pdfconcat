@@ -76,39 +76,33 @@ requires standard shell tools, tar and a SHA-256 tool (`sha256sum`, `shasum` or
 `openssl`). `less` is only for your review; the [README quick start](../README.md#install)
 omits it.
 
-On Windows, use Windows PowerShell 5.1 or PowerShell 7. The download commands
-save `install-pdfconcat.ps1` in your home directory, then return to your starting
-location. If you saved a reviewed copy elsewhere, use its full path in the
-examples that reuse the saved installer.
+On Windows, use Windows PowerShell 5.1 or PowerShell 7. Download the
+installer to your home directory and display the saved script for review.
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    $startingLocation = Get-Location
-    Set-Location -LiteralPath $HOME
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-        Get-Content -LiteralPath .\install-pdfconcat.ps1
-        powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1
-        if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
-    } finally {
-        Set-Location -LiteralPath $startingLocation.Path
-    }
+    $installer = Join-Path $HOME 'install-pdfconcat.ps1'
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile $installer
+    Get-Content -LiteralPath $installer
 }
 ```
 
-To review the installer before running it, enter `Set-Location -LiteralPath $HOME`
-and run the download, inspection and child commands separately. Run the child
-command only after a successful download and review. `ByPass` applies only to that
-child session; it does not change persistent policy or override Group Policy.
-Use `pwsh` instead of `powershell` to select PowerShell 7. Managed systems can
-still refuse the program.
+After the download succeeds and you review the script, run it in a child session.
+If you saved it elsewhere, substitute its full path here and in the examples
+that reuse the saved installer.
 
-The Unix `&&` chain and PowerShell script block prevent a failed fetch from
-executing a stale saved installer. An installer failure remains a failure of the
-whole command: Unix returns its nonzero status; PowerShell throws when the child
-reports a nonzero exit. Keep these guards in automation. A bare `curl | sh`
-pipeline can hide a failed download behind a successful empty shell.
+```powershell
+powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1')
+if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+```
+
+Use `pwsh` in place of `powershell` to run the installer under PowerShell 7.
+`ByPass` sets the child session's execution policy. Persistent settings stay
+in place, and Group Policy takes precedence.
+
+Keep the Unix `&&` chain or the equivalent download-success check in automation.
+Make a nonzero installer exit fail the parent command as well.
 
 Supported systems are macOS 15 or later on Apple Silicon and Intel, Linux on
 x86-64 and ARM64, and Windows 10/11 on x64 and ARM64. Linux builds use
@@ -149,24 +143,28 @@ with its version number. The download URL adds the tag's leading `v`.
 version=X.Y.Z
 curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh \
   "https://github.com/resoltico/pdfconcat/releases/download/v${version}/install.sh" &&
+  less ./install-pdfconcat.sh &&
   sh ./install-pdfconcat.sh --version "$version"
 ```
 
+On Windows, set `$version` before downloading and reviewing the pinned installer:
+
 ```powershell
+$version = 'X.Y.Z'
 & {
     $ErrorActionPreference = 'Stop'
-    $version = 'X.Y.Z'
     $uri = "https://github.com/resoltico/pdfconcat/releases/download/v${version}/install.ps1"
-    $startingLocation = Get-Location
-    Set-Location -LiteralPath $HOME
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-        powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version $version
-        if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
-    } finally {
-        Set-Location -LiteralPath $startingLocation.Path
-    }
+    $installer = Join-Path $HOME 'install-pdfconcat.ps1'
+    Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $installer
+    Get-Content -LiteralPath $installer
 }
+```
+
+Once you have reviewed the successful download, run the pinned installer:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -Version $version
+if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 ```
 
 Re-running these commands with the same pin reinstalls the selected release.
@@ -389,9 +387,14 @@ or mirror. A candidate is executed as the current user only after checksum
 verification. A receipt prevents accidental replacement/removal of other files;
 it is not protection from a hostile process with your account's permissions.
 
-Published release provenance can be checked with `gh attestation verify <asset>
---repo resoltico/pdfconcat`. That is a separate optional
-verification step; the installer does not claim to authenticate attestations.
+To verify an asset's GitHub build provenance before running or extracting it,
+substitute its local filename in this command. The installer performs its own
+checksum check.
+
+```sh
+gh attestation verify ./install-pdfconcat.sh --repo resoltico/pdfconcat \
+  --signer-workflow resoltico/pdfconcat/.github/workflows/release.yml
+```
 
 The scripts do not disable Gatekeeper, SmartScreen or managed-device policy.
 Mac executables are ad hoc signed, without Developer ID or notarization; Windows

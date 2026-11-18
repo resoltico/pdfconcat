@@ -35,14 +35,14 @@ User edits and unrelated files remain outside installer ownership. `NoModifyPath
 also suppresses uninstall PATH cleanup; shared Windows directories may retain an
 entry rather than breaking other programs.
 Because the checksums come from the same release as the archive, a match detects
-a damaged download, not a compromised release or repository. Release archives,
-`checksums.txt` and both installers carry GitHub build-provenance attestations
-from the release workflow; `gh attestation verify` checks them. Per-executable
-CycloneDX SBOMs list the linked modules for dependency and license audits.
+a damaged download, not a compromised release or repository. The release workflow
+attests the archives, SBOMs, checksum manifest and both installers.
+Per-executable CycloneDX SBOMs list the linked modules for dependency and license
+audits. See the [asset verification command](docs/INSTALL.md#trust-and-verification).
 
-Tag builds stage the final signed binary archives, source archive, installers,
-SBOMs and checksums once.
-All seven native installer jobs qualify that set before the publisher can run.
+Tag builds create the asset set once. All seven native installer jobs qualify
+that set, including the archives containing ad hoc-signed Darwin executables,
+before the publisher can run.
 The publisher checks the same downloaded bytes and manifest, attests them, then
 creates the release without rebuilding or re-signing. Branch CI uses snapshot
 versions; it does not publish. GoReleaser's direct publisher is disabled.
@@ -117,7 +117,8 @@ has already been saved; do not blindly retry a result with `output.published: tr
 
 Files use ordinary umask permissions; replacements retain their old mode. No
 private ACL or recovery-copy guarantee is made. Temporary files are siblings of
-the target. Without overwrite, native no-replace rename has a hard-link fallback;
+the target during publication. Large source snapshots spill to private files in
+the operating system's temporary directory. Without overwrite, native no-replace rename has a hard-link fallback;
 with overwrite, publication uses a replacing rename. Some network/share
 filesystems do not support these semantics or directory durability. There is no
 universal network-filesystem guarantee. A backend/output/report failure never

@@ -1,4 +1,4 @@
-# Command line and result v9
+# Command line and result v10
 
 PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
 selections, sections, navigation and simple text inserts; see the
@@ -31,7 +31,8 @@ including the command but excluding the executable.
 | `--blank` | Insert one generated page; size comes from a source or `--fit-to SIZE` |
 | `-o FILE`, `--output FILE` | Output PDF; overrides plan output, relative to cwd |
 | `--base-dir DIR` | Base for stdin plans only |
-| `--fit-to SIZE` | Overrides plan fitting; paper name or dimensions |
+| `--fit-to SIZE` | Replace the plan fitting policy with this target and the CLI tolerance |
+| `--fit-tolerance LENGTH` | Set the absolute per-side tolerance. Requires `--fit-to` in the same invocation |
 | `--report FILE` | Full JSON report, relative to cwd |
 | `--overwrite` | Permit replacement of existing regular output/report files |
 | `--json` | Print one JSON result on stdout; text is the default |
@@ -64,8 +65,10 @@ pdfconcat build --blank --fit-to A4 -o blank.pdf
 ```
 
 `--fit-to` accepts the sheet grammar in [PLAN](PLAN.md#generated-pages-and-layering).
-Fitting centers the effective CropBox–MediaBox intersection on the chosen sheet,
-retaining its artwork clipping, pattern proportions and annotation geometry.
+It replaces the complete policy after plan admission. With no `--fit-tolerance`,
+the replacement uses .01 pt. With neither option, the plan supplies the policy.
+Pages outside the tolerance are centered proportionally on the chosen sheet,
+retaining their artwork clipping, pattern proportions and annotation geometry.
 See [PDF policy](PDF-POLICY.md#fitting) for annotation appearance limits, fitting
 refusals, forms, destination handling and the effective output version.
 
@@ -101,7 +104,7 @@ retained.
 
 ```json
 {
-  "format_version": 9,
+  "format_version": 10,
   "command": "build",
   "status": "ok",
   "output": {
@@ -115,7 +118,7 @@ retained.
     "generated": 1,
     "total": 2
   },
-  "fit_to": null,
+  "fitting": null,
   "diagnostics": [],
   "diagnostics_omitted": 0,
   "report": null,
@@ -134,7 +137,8 @@ This example assumes fully covered source and generated content. The digest is
 illustrative; real digests are lowercase SHA-256 hex.
 `output` is null until a path is known. `published` records actual namespace
 publication; digest/bytes appear only when true. Page counts are null until
-established by the corresponding completed stages. An error never invents zero
+established by the corresponding completed stages. `fitting` contains the admitted
+`target` dimensions and resolved `tolerance` in points, or null. An error never invents zero
 pages. Warnings do not make an outcome invalid.
 
 | Status | Exit | Meaning |
@@ -185,11 +189,11 @@ existing targets must be regular files. Symlink targets, directories and devices
 are refused. Input symlinks to regular files are allowed. Roles are checked again
 before report publication, including an output that did not exist initially.
 
-When the plan could not be decoded, its inputs are unknown. Report publication
-then always uses no-replace, even with `--overwrite`, so it cannot replace an
-input hidden in a malformed plan. Existing-target and known-collision refusals
-use `report_exists`, `report_not_regular`, `report_is_input` or
-`report_is_output`.
+When the plan could not be decoded, its inputs are unknown. Choose a fresh
+report path in that case. Report publication uses no-replace even with
+`--overwrite` to protect inputs that the decoder could not identify.
+Existing-target and known-collision refusals use `report_exists`,
+`report_not_regular`, `report_is_input` or `report_is_output`.
 
 Existing inputs and the output are protected by file identity. Missing inputs
 are protected only by cleaned path spelling; reports are rechecked after PDF
@@ -215,7 +219,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 9,
+  "format_version": 10,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -224,7 +228,7 @@ contents item or padding span:
     "generated": 2,
     "total": 2
   },
-  "fit_to": null,
+  "fitting": null,
   "diagnostics": [],
   "diagnostics_omitted": 0,
   "report": {
@@ -245,6 +249,7 @@ contents item or padding span:
         "width": 100,
         "height": 200
       },
+      "output_size": {"width": 100, "height": 200},
       "text": null,
       "input_pages": null,
       "spans": null,
@@ -272,7 +277,7 @@ nonempty arrays. Divider parts reference their section; padding records
 Complete leaf ranges partition physical pages 1..N once. Nested section ranges
 may overlap. Until the physical page sequence has been resolved, emitted
 counts/spans/ranges and section targets stay null, and no padding is predicted.
-A later text-layout or build failure can retain a complete predicted sequence.
+A later compatibility, numbering, text-layout or build failure can retain a complete predicted sequence.
 A nonnull total means the physical sequence is known; it does not establish
 successful PDF publication.
 
@@ -280,9 +285,10 @@ Source parts include path, known byte hash/length and actual
 `fields_renamed` records. Readable refused sources retain byte facts; unestablished
 page counts/ranges remain null. Page items and dividers include `count` and, when
 known, authored `size` and measured `text`. Contents and padding parts include
-their generated size but no text-layout object. Generated size/text describe the
-authored canvas. `fit_to` requests displayed dimensions; near-target pages retain
-their actual dimensions rather than snapping to the nominal target.
+their authored canvas size but no text-layout object. Generated `output_size`
+records the expected displayed frame after layout resolves. Source parts have
+`output_size: null` and carry their geometry in `page_sizes`. Text bounds stay
+in authored coordinates.
 
 Text `bounds` and `ink_bounds` are `[left, bottom, right, top]` in points
 (1/72 inch), measured from the lower-left corner of the authored page before
@@ -348,7 +354,7 @@ limits, generate the plan in batches or with a program that preserves filenames.
 
 ```sh
 ( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 7, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+  jq -n '{version: 8, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -362,18 +368,18 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 7; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 8; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
 
 ## Diagnostic evidence
 
-Core diagnostics own the condition, explanation and terminology. The CLI adds
-command syntax to text remedies; JSON and reports retain the core explanation.
-`detail`, when present, contains backend evidence rather than a stable product
-message. `pdf_location` can identify a positive `object` number, positive `page`
-number, or dictionary `path`; absent fields mean attribution is unavailable.
+Core diagnostics supply the condition, explanation and applicable remedy.
+The CLI can add command syntax to text output. JSON results and reports retain
+the core explanation. `detail` can carry observations, measurements or phase
+information. `pdf_location` can identify a positive `object` or `page` number,
+or a dictionary `path`. Absent fields mean attribution is unavailable.
 Source-page numbers refer to the original source, including after selection;
 output-page numbers refer to the composed PDF. Source object numbers are captured
 before selection and backend renumbering; they are not output object IDs. Paths
@@ -391,7 +397,8 @@ Navigation warnings identify the changed binding: a retained annotation can lose
 removes its dependent Next subtree. Distinct catalogue entries and destination
 declarations remain distinct findings, including equal legacy/name-tree sites.
 URI Base warnings require an actually retained relative action and a nonempty
-source Base; orphan, selected-out and absolute actions do not establish impact.
+source Base. A build can report the same source site during inspection and during
+assembly. The phase in `detail` distinguishes those observations.
 Check rename warnings identify known source scopes/definitions as predictions;
 only build reports actual old/new mappings. Generated-layout warnings keep plan
 provenance, and backend notices expose only locations the backend supplies.
@@ -504,7 +511,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `usage_unknown_command` | error | invalid | first argument is not a command |
 | `usage_unknown_option` | error | invalid | option not defined for the command |
 | `usage_missing_value` | error | invalid | option needs a value |
-| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `schema` name, …) |
+| `usage_invalid_value` | error | invalid | option value not allowed (`--fit-to`, `--fit-tolerance`, `schema` name, …) |
 | `usage_conflict` | error | invalid | `--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option |
 | `usage_missing_input` | error | invalid | neither `--plan` nor PDF or `--blank` operands |
 <!-- END GENERATED DIAGNOSTICS -->

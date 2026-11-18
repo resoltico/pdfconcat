@@ -138,9 +138,9 @@ func profilePlan(p corpusProfile) map[string]any {
 		inner["divider"] = map[string]any{}
 	}
 	items = append(items, outer)
-	plan := map[string]any{"version": 7, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": items}
+	plan := map[string]any{"version": 8, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": items}
 	if p.Factors[3] {
-		plan["fit_to"] = "A5"
+		plan["fitting"] = map[string]any{"target": "A5"}
 	}
 	if p.Factors[4] {
 		plan["page_numbers"] = map[string]any{}

@@ -5,6 +5,7 @@ package packet
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 )
@@ -36,37 +37,29 @@ func resolveNumbering(layout *Layout) error {
 		return nil
 	}
 	n := *layout.PageNumbers
-	next := n.First()
-	if next < 1 || next > MaxPageIndex {
+	start := n.First()
+	if start < 1 || start > MaxPageIndex {
 		return errors.New("page-number start exceeds the supported page-index range")
 	}
-	exhausted := false
+	consecutive := n.Mode == "consecutive"
+	numbered := int64(0)
 	for _, p := range layout.Parts {
 		span := NumberSpan{Output: [2]int64{p.FirstPage, p.LastPage}}
 		if n.Eligible(p.Kind, p.NumberingEnabled) {
-			if n.Mode == "consecutive" && exhausted {
-				return errors.New("consecutive page numbering overflows")
+			offset := p.FirstPage - 1
+			if consecutive {
+				offset = numbered
 			}
-			first := next
-			if n.Mode != "consecutive" {
-				if p.FirstPage-1 > MaxPageIndex-n.First() {
-					return errors.New("physical page numbering overflows")
-				}
-				first = n.First() + (p.FirstPage - 1)
+			additional := p.LastPage - p.FirstPage
+			limit := MaxPageIndex - start
+			if offset+additional > limit {
+				firstOffending := p.FirstPage + max(0, limit+1-offset)
+				return fmt.Errorf("page numbering exceeds the limit at physical page %d. Set page_numbers.start to at most %d in %s mode",
+					firstOffending, largestNumberingStart(layout.Parts, n), n.Mode)
 			}
-			count := p.LastPage - p.FirstPage
-			if count > MaxPageIndex-first {
-				return errors.New("page numbering overflows")
-			}
+			first := start + offset
 			span.Start = &first
-			if n.Mode == "consecutive" {
-				next = first + count
-				if next < MaxPageIndex {
-					next++
-				} else {
-					exhausted = true
-				}
-			}
+			numbered += additional + 1
 		}
 		if len(layout.Numbering) > 0 {
 			last := &layout.Numbering[len(layout.Numbering)-1]
@@ -83,6 +76,20 @@ func resolveNumbering(layout *Layout) error {
 		layout.Numbering = append(layout.Numbering, span)
 	}
 	return nil
+}
+
+func largestNumberingStart(parts []Part, n PageNumbers) int64 {
+	var numbered, last int64
+	for _, part := range parts {
+		if n.Eligible(part.Kind, part.NumberingEnabled) {
+			last = part.LastPage
+			numbered += part.LastPage - part.FirstPage + 1
+		}
+	}
+	if n.Mode == "consecutive" {
+		last = numbered
+	}
+	return MaxPageIndex - (last - 1)
 }
 
 // NumberAt returns the single resolved numeric mapping used by all consumers.

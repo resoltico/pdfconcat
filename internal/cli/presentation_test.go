@@ -109,7 +109,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, exchange.Version{FormatVersion: 9, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, exchange.Version{FormatVersion: 10, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
@@ -272,7 +272,7 @@ func TestPDFDiagnosticDetailsAreSafeAndRemainInJSON(t *testing.T) {
 func TestCLIAddsSyntaxToCoreRequirements(t *testing.T) {
 	for _, tc := range []struct{ code, hint string }{
 		{"output_required", "-o FILE"}, {"page_size_required", "--fit-to SIZE"},
-		{"output_exists", "--overwrite"}, {"report_exists", "--overwrite"},
+		{"output_exists", ""}, {"report_exists", ""},
 	} {
 		r := newResult(t, "build")
 		r.Diagnostics = []app.Diagnostic{diagnostic(t, "error", tc.code, "Core requirement.")}
@@ -280,8 +280,8 @@ func TestCLIAddsSyntaxToCoreRequirements(t *testing.T) {
 		if err := cli.Render(&stdout, &stderr, r, false); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(stderr.String(), tc.hint) {
-			t.Fatalf("missing CLI hint: %q", stderr.String())
+		if (tc.hint == "" && strings.Contains(stderr.String(), "--overwrite")) || !strings.Contains(stderr.String(), tc.hint) {
+			t.Fatalf("unexpected CLI hint: %q", stderr.String())
 		}
 		if r.Diagnostics[0].Message != "Core requirement." {
 			t.Fatal("renderer changed core diagnostics")

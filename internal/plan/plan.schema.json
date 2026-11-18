@@ -104,7 +104,7 @@
                 "properties": {
                   "size": {
                     "$ref": "#/$defs/sheetSize",
-                    "description": "Defaults to fit_to, otherwise A4; explicit size is authored before fitting."
+                    "description": "Defaults to fitting.target, otherwise A4; explicit size is authored before fitting."
                   },
                   "title": {
                     "$ref": "#/$defs/title",
@@ -396,7 +396,7 @@
   "$id": "https://github.com/resoltico/pdfconcat/blob/main/internal/plan/plan.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A packet of selected PDF pages, generated pages and titled sections (plan format version 7). The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
+  "description": "A packet of selected PDF pages, generated pages and titled sections. The decoder additionally enforces: no duplicate members, no null, valid UTF-8, unit-converted length and size bounds, at most one contents item with at least one titled section, ascending/disjoint source ranges, and the aggregate limits in docs/PLAN.md. Lexical integer tokens, platform paths and aggregate limits require the decoder; standard JSON Schema treats 3.0 and 3e0 as integers.",
   "properties": {
     "$schema": {
       "description": "Ignored by PDFConcat; for editors.",
@@ -407,9 +407,23 @@
       "minLength": 1,
       "type": "string"
     },
-    "fit_to": {
-      "$ref": "#/$defs/sheetSize",
-      "description": "Scale every output page proportionally, centred, onto this sheet. Refuses form widgets and internal destinations with numeric position coordinates. Paper names are portrait. --fit-to overrides it."
+    "fitting": {
+      "additionalProperties": false,
+      "description": "Fit pages outside the absolute tolerance on either ordered displayed side of the target. Matching pages keep their native geometry. Fitting refuses numeric local destinations only on transformed targets, and widgets on transformed or unproved owners. Transformed FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances. On transformed pages, link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/sheetSize"
+        },
+        "tolerance": {
+          "$ref": "#/$defs/nonnegativeLength",
+          "default": 0.01,
+          "description": "Absolute tolerance in points from 0 through 14400. Defaults to 0.01 pt when omitted. Zero requires exact dimensions."
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
     },
     "items": {
       "$ref": "#/$defs/items"
@@ -523,7 +537,7 @@
       "type": "integer"
     },
     "version": {
-      "const": 7,
+      "const": 8,
       "description": "Plan format version."
     }
   },

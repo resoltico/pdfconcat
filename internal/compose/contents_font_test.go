@@ -36,7 +36,7 @@ func TestCustomContentsMetricsPaginationAndExclusions(t *testing.T) {
 		draft.PageNumbers = &packet.PageNumbers{Size: 10, Margin: 18, Position: packet.NumberTopRight, Kinds: []packet.PartKind{packet.PartContents}, Mode: "physical", Start: 1}
 		j = pdffixture.Plan(t, draft)
 	}
-	j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems})
+	j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), Fitting: j.Fitting(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems})
 	fallback, ds := PrepareContents(t.Context(), j, nil, fonts, testFooter(t, j))
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -110,5 +110,73 @@ func TestCustomContentsMetricsPaginationAndExclusions(t *testing.T) {
 	}
 	if seenRows != len(j.Sections()) {
 		t.Fatalf("missing contents rows: %d", seenRows)
+	}
+}
+
+// These synthetic fonts share identical metrics and differ only in the dash's
+// outline position. The field replay independently checks the raster and links.
+func TestContentsDashInkStaysInItsOwnLink(t *testing.T) {
+	bundled, err := typeset.LoadDefaultFont()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variant := range []string{"control", "lowered"} {
+		t.Run(variant, func(t *testing.T) {
+			data, err := os.ReadFile("testdata/row-label-" + variant + ".ttf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			font, err := typeset.LoadFont(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := packet.Font{Path: "row-label.ttf"}
+			faces := map[packet.Font]*typeset.Font{{}: bundled, key: font}
+			size := packet.Size{Width: 300, Height: 192}
+			style := packet.Defaults()
+			style.Size = packet.Setting[packet.Size]{Present: true, Value: size}
+			style.Text.Font = packet.Setting[packet.Font]{Present: true, Value: key}
+			numbers := packet.DefaultPageNumbers()
+			numbers.Kinds = []packet.PartKind{packet.PartContents}
+			plan := pdffixture.Plan(t, packet.Declaration{
+				PageDefaults: style, PageNumbers: numbers,
+				Items: []packet.Item{
+					&packet.ContentsItem{Title: "Index", Size: size},
+					&packet.GroupItem{Title: "Annex", Items: []packet.Item{&packet.PageItem{Count: 1}}},
+					&packet.GroupItem{Title: "Following", Items: []packet.Item{&packet.PageItem{Count: 1}}},
+				},
+			})
+			contents, findings := PrepareContents(t.Context(), plan, nil, faces, testFooter(t, plan))
+			if len(findings) > 0 {
+				t.Fatal(findings)
+			}
+			layout, findings := packet.Resolve(plan, nil, contents.Pages())
+			if len(findings) > 0 {
+				t.Fatal(findings)
+			}
+			pages, findings := contents.Finish(layout)
+			if len(findings) > 0 {
+				t.Fatal(findings)
+			}
+			row := 0
+			for _, p := range pages {
+				for i, link := range p.Links {
+					if link.TargetPage != layout.Sections[row].Target || layout.LabelAt(link.TargetPage) != "—" {
+						t.Fatalf("unexpected contents target: %+v", link)
+					}
+					ink := p.Blocks[2+2*i].Text.InkBounds
+					const epsilon = 1e-6
+					if ink == nil || ink.X < link.Rect.X-epsilon || ink.Y < link.Rect.Y-epsilon ||
+						ink.X+ink.Width > link.Rect.X+link.Rect.Width+epsilon ||
+						ink.Y+ink.Height > link.Rect.Y+link.Rect.Height+epsilon {
+						t.Fatalf("dash ink %+v escapes its link %+v", ink, link.Rect)
+					}
+					row++
+				}
+			}
+			if row != 2 {
+				t.Fatalf("expected two labelled links, got %d", row)
+			}
+		})
 	}
 }

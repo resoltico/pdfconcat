@@ -37,7 +37,7 @@ type Assembly struct {
 	Structure    packet.StructurePolicy
 	Parts        []Part
 	Sections     []packet.Section
-	FitTo        *packet.Size
+	Fitting      *packet.FitPolicy
 	NumberLayout *compose.PageNumberLayout
 	Fonts        map[typeset.Digest]typeset.EmbeddedFont
 }

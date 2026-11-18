@@ -98,7 +98,8 @@ func TestStructureAdmissionDiscardPrecedesSemanticValidation(t *testing.T) {
 			case "owner":
 				d.Objs[2] = bytes.Replace(d.Objs[2], []byte("/StructParents 0"), []byte("/StructParents (abandoned)"), 1)
 			}
-			_, _, ds := Inspect(t.Context(), d.Bytes(), packet.StructurePreserve, []SelectionRequest{{Item: "retained"}})
+			broad := &packet.FitPolicy{Target: packet.Size{Width: 600, Height: 800}, Tolerance: packet.MaxSide}
+			_, _, ds := Inspect(t.Context(), d.Bytes(), packet.StructurePreserve, []SelectionRequest{{Item: "retained", Fitting: broad}})
 			if status := diag.Outcome(ds); status != "invalid" {
 				t.Fatalf("preserve accepted malformed hierarchy: %+v", ds)
 			}
@@ -143,14 +144,14 @@ func TestStructureAdmissionDiscardPrecedesSemanticValidation(t *testing.T) {
 
 // assembleAdmission exercises actual-byte re-admission, repeated selected
 // occurrences and a new output root supplied by generated or tagged content.
-func assembleAdmission(t *testing.T, d *pdffixture.Doc, policy packet.StructurePolicy, selected int, fit *packet.Size, companion string) (string, *model.Context) {
+func assembleAdmission(t *testing.T, d *pdffixture.Doc, policy packet.StructurePolicy, selected int, fit *packet.FitPolicy, companion string) (string, *model.Context) {
 	t.Helper()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.pdf")
 	if err := d.WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	requests := []SelectionRequest{{Item: "first", Pages: []packet.PageRange{{First: selected, Last: selected}}, FitTo: fit}, {Item: "repeat", Pages: []packet.PageRange{{First: selected, Last: selected}}, FitTo: fit}}
+	requests := []SelectionRequest{{Item: "first", Pages: []packet.PageRange{{First: selected, Last: selected}}, Fitting: fit}, {Item: "repeat", Pages: []packet.PageRange{{First: selected, Last: selected}}, Fitting: fit}}
 	file, slots, ds := Inspect(t.Context(), d.Bytes(), policy, requests)
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
@@ -193,7 +194,7 @@ func assembleAdmission(t *testing.T, d *pdffixture.Doc, policy packet.StructureP
 		if err := doc.WriteFile(path); err != nil {
 			t.Fatal(err)
 		}
-		f, v, findings := Inspect(t.Context(), doc.Bytes(), policy, []SelectionRequest{{Item: "tagged", FitTo: fit}})
+		f, v, findings := Inspect(t.Context(), doc.Bytes(), policy, []SelectionRequest{{Item: "tagged", Fitting: fit}})
 		if status := diag.Outcome(findings); status != "ok" {
 			t.Fatal(findings)
 		}
@@ -205,7 +206,7 @@ func assembleAdmission(t *testing.T, d *pdffixture.Doc, policy packet.StructureP
 	for _, request := range requests {
 		items = append(items, &packet.SourceItem{Ref: request.Item, Path: source, Selection: request.Pages})
 	}
-	plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: items})
+	plan := pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: items})
 	draft := plan.Declaration()
 	draft.Structure = policy
 	plan = pdffixture.Plan(t, draft)
@@ -256,11 +257,11 @@ func TestStructureAdmissionOrphansAcrossPoliciesSelectionAndFitting(t *testing.T
 						if content != "meaningful" {
 							page = 2
 						}
-						var fit *packet.Size
+						var fit *packet.FitPolicy
 						if fitted {
-							fit = &packet.Size{Width: 300, Height: 400}
+							fit = packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})
 						}
-						_, slots, ds := Inspect(t.Context(), d.Bytes(), policy, []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: page, Last: page}}, FitTo: fit}})
+						_, slots, ds := Inspect(t.Context(), d.Bytes(), policy, []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: page, Last: page}}, Fitting: fit}})
 						if status := diag.Outcome(ds); status != "ok" {
 							t.Fatal(ds)
 						}
@@ -304,9 +305,9 @@ func TestStructureAdmissionPreservesVisibleContentAndNavigation(t *testing.T) {
 		for _, fitted := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/fit=%v", policy, fitted), func(t *testing.T) {
 				d := orphanAdmissionFixture("")
-				var fit *packet.Size
+				var fit *packet.FitPolicy
 				if fitted {
-					fit = &packet.Size{Width: 300, Height: 400}
+					fit = packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})
 				}
 				output, _ := assembleAdmission(t, d, policy, 1, fit, "generated")
 				source := filepath.Join(t.TempDir(), "original.pdf")
@@ -388,7 +389,8 @@ func TestStructureAdmissionDiscardKeepsGeneralProtections(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d := tc.doc()
-			_, _, ds := Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []SelectionRequest{{Item: "bad"}})
+			broad := &packet.FitPolicy{Target: packet.Size{Width: 600, Height: 800}, Tolerance: packet.MaxSide}
+			_, _, ds := Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []SelectionRequest{{Item: "bad", Fitting: broad}})
 			finding := admissionError(t, ds)
 			if finding.Code != tc.code {
 				t.Fatalf("discard bypassed/general failure changed: %+v", finding)
@@ -406,7 +408,7 @@ func TestStructureAdmissionDiscardKeepsGeneralProtections(t *testing.T) {
 			// geometry owner so this control reaches actual-byte re-admission.
 			facts.SHA256 = sha256.Sum256(d.Bytes())
 			view := facts.OccurrenceFacts
-			plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "bad", Path: path}}})
+			plan := pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "bad", Path: path}}})
 			layout, findings := resolvePacket(plan, map[string]packet.SourceFacts{"bad": view.SourceFacts})
 			if len(findings) > 0 {
 				t.Fatal(findings)
@@ -466,14 +468,14 @@ func TestStructureAdmissionDiscardKeepsFormBoundaries(t *testing.T) {
 	if got := admissionError(t, ds); got.Code != diag.SourceSelectionFormUnsupported {
 		t.Fatalf("discard bypassed partial form protection: %+v", got)
 	}
-	f, views, ds := Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []SelectionRequest{{Item: "whole", FitTo: &packet.Size{Width: 300, Height: 400}}})
+	f, views, ds := Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []SelectionRequest{{Item: "whole", Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})}})
 	if admissionError(t, ds).Code != diag.FitFormUnsupported {
 		t.Fatal(ds)
 	}
 	if !f.HasWidgets || !f.HasFields {
 		t.Fatal("tag cleanup removed form identity")
 	}
-	a := Assembly{Structure: packet.StructureDiscard, FitTo: &packet.Size{Width: 300, Height: 400}, Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Ref: "whole", Kind: packet.PartSource, Source: "source.pdf"}}, Occurrence: &Occurrence{File: &f, Facts: views[0]}}}}
+	a := Assembly{Structure: packet.StructureDiscard, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}), Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Ref: "whole", Kind: packet.PartSource, Source: "source.pdf"}}, Occurrence: &Occurrence{File: &f, Facts: views[0]}}}}
 	findings := CheckCompatibility(a).Diagnostics
 	if got := admissionError(t, findings); got.Code != diag.FitFormUnsupported {
 		t.Fatalf("discard bypassed form fitting protection: %+v", got)
@@ -495,7 +497,8 @@ func TestStructureAdmissionDiscardKeepsEncryptionBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, ds := Inspect(t.Context(), data, packet.StructureDiscard, []SelectionRequest{{Item: "encrypted"}})
+			broad := &packet.FitPolicy{Target: packet.Size{Width: 600, Height: 800}, Tolerance: packet.MaxSide}
+			_, _, ds := Inspect(t.Context(), data, packet.StructureDiscard, []SelectionRequest{{Item: "encrypted", Fitting: broad}})
 			if got := admissionError(t, ds); got.Code != diag.SourceEncrypted {
 				t.Fatalf("discard bypassed encryption: %+v", got)
 			}

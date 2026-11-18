@@ -11,12 +11,12 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/app` | Acquisition, original input reservation, inspection, composition, digest rechecks and publication ordering |
 | `internal/core` | Typed declarations, semantic validation, owned traversal, layout, vocabulary and domain facts |
 | `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence and complete execution facts |
-| `internal/plan` | Strict, located plan v7 decoding with an explicit native path resolver |
+| `internal/plan` | Strict, located plan v8 decoding with an explicit native path resolver |
 | `internal/compose` | Measured generated pages, contents and numbering |
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
 | `internal/files` | Native path semantics, regular-file acquisition, role checks and staged-file lifecycle |
-| `internal/wire` | Result v9 DTOs, domain projection and schema |
+| `internal/wire` | Result v10 DTOs, domain projection and schema |
 | `internal/legal` | Embedded license notices |
 | `internal/oracle`, `internal/pdffixture` | Test-only independent observations and synthetic PDFs |
 
@@ -212,9 +212,10 @@ Core owns each page's keep/transform decision and expected displayed size. The P
 adapter binds those decisions to original selected identities and exact native
 geometry, checks destination target dispositions and annotation/widget ownership,
 and rechecks the actual re-admitted pages before mutation. Source metrics come
-from the batched geometry observation. Repeated generated pages share a fitting
-record with an explicit count; wire page-size runs carry expectations rather
-than publication claims.
+from the batched geometry observation, which binds each occurrence to the complete
+effective fitting policy. Repeated generated pages share a fitting record with
+an explicit count. The result projects expected frames for generated parts and
+page-size runs for source pages. Publication is a separate fact.
 
 Kept pages bypass fitting mutation. The adapter owns affine placement and source
 composition accuracy admission, finite round-trip numeric serialization, explicit

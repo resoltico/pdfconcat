@@ -17,6 +17,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/cli"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
+	"github.com/resoltico/pdfconcat/internal/plan"
 )
 
 func schema(data []byte, values map[string]any) ([]byte, error) {
@@ -62,6 +63,13 @@ func generated(root string) (map[string][]byte, error) {
 		"$defs/page/properties/text/properties/wrap/enum":     packet.Wrap("").Values(),
 		"$defs/page/properties/text/properties/overflow/enum": packet.Overflow("").Values(),
 	}
+	values["properties/version/const"] = plan.Version
+	values["properties/fitting/description"] = strings.Join([]string{
+		packet.FittingDescription(), packet.FittingNavigationDescription(),
+		packet.FittingAppearanceDescription(), packet.FittingHitAreaDescription(),
+	}, " ")
+	values["properties/fitting/properties/tolerance/default"] = packet.DefaultFitTolerance
+	values["properties/fitting/properties/tolerance/description"] = packet.FitToleranceDescription()
 	numbers := packet.DefaultPageNumbers()
 	values["properties/page_numbers/properties/mode/default"] = numbers.Mode
 	values["properties/page_numbers/properties/position/default"] = numbers.Position

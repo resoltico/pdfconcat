@@ -82,7 +82,7 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 
 		placed, e := numberLayout.Place(viewport.size, label)
 		if e != nil {
-			diagnostic := compose.Diagnostic(e, "")
+			diagnostic := compose.PageNumberDiagnostic(e, int64(page))
 			diagnostic.File, diagnostic.Items = part.Source, []string{part.Ref, "/page_numbers"}
 			return &policyError{finding: diagnostic, err: e}
 		}

@@ -130,26 +130,30 @@ unchanged.
 ## Update and choose a release
 
 Repeat the latest download-and-install command to update an unchanged managed
-copy. Keep the saved installer for offline uninstall. To pin both installer and
-payload to version 0.13.0:
+copy. Keep the saved installer for offline uninstall. To pin the installer and
+payload together, choose a stable tag from
+[Releases](https://github.com/resoltico/pdfconcat/releases) and replace `X.Y.Z`
+with its version number. The download URL adds the tag's leading `v`.
 
 ```sh
-curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/download/v0.13.0/install.sh &&
-  sh ./install-pdfconcat.sh --version 0.13.0
+version=X.Y.Z
+curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh \
+  "https://github.com/resoltico/pdfconcat/releases/download/v${version}/install.sh" &&
+  sh ./install-pdfconcat.sh --version "$version"
 ```
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/download/v0.13.0/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version 0.13.0
+    $version = 'X.Y.Z'
+    $uri = "https://github.com/resoltico/pdfconcat/releases/download/v${version}/install.ps1"
+    Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version $version
     if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 }
 ```
 
-Replace both `0.13.0` values together to choose another published stable release.
-Re-running a pinned command reinstalls that release; it does not select future
-latest releases.
+Re-running these commands with the same pin reinstalls the selected release.
 
 When no version is supplied, the installer resolves latest once to a stable
 `vX.Y.Z` tag, then downloads both archive and `checksums.txt` from that release.
@@ -402,7 +406,7 @@ conflicting installation using the method that installed it.
 
 ## Archive names
 
-The current archive convention is unversioned; choose the release tag first:
+Choose the release tag first because the archive names are unversioned.
 
 | System | Archive |
 |---|---|

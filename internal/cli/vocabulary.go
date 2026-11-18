@@ -9,7 +9,7 @@ var (
 	usageUnknownCommand = diag.BoundaryCode("usage_unknown_command", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "first argument is not a command"})
 	usageUnknownOption  = diag.BoundaryCode("usage_unknown_option", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "option not defined for the command"})
 	usageMissingValue   = diag.BoundaryCode("usage_missing_value", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "option needs a value"})
-	usageInvalidValue   = diag.BoundaryCode("usage_invalid_value", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "option value not allowed (`--fit-to`, `schema` name, \u2026)"})
+	usageInvalidValue   = diag.BoundaryCode("usage_invalid_value", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "option value not allowed (`--fit-to`, `--fit-tolerance`, `schema` name, \u2026)"})
 	usageConflict       = diag.BoundaryCode("usage_conflict", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "`--plan` with PDF or `--blank` operands; `--base-dir` without `--plan -`; repeated single-use option"})
 	usageMissingInput   = diag.BoundaryCode("usage_missing_input", diag.Definition{Severity: diag.Error, Class: diag.Invalid, Description: "neither `--plan` nor PDF or `--blank` operands"})
 )

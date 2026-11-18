@@ -285,9 +285,9 @@ func TestCorpusTypography(t *testing.T) {
 				if tc.allow {
 					text["overflow"] = "allow"
 				}
-				plan := map[string]any{"version": 7, "output": "packet.pdf", "items": []any{corpusStyledPage(tc.value, tc.size, text)}}
+				plan := map[string]any{"version": 8, "output": "packet.pdf", "items": []any{corpusStyledPage(tc.value, tc.size, text)}}
 				if tc.fit {
-					plan["fit_to"] = "A4"
+					plan["fitting"] = map[string]any{"target": "A4"}
 				}
 				path := filepath.Join(dir, "plan.json")
 				corpusJSON(t, path, plan)
@@ -386,7 +386,7 @@ func TestCorpusJustificationPaletteAndFit(t *testing.T) {
 		if err := pdffixture.Plain("SOURCE").WriteFile(filepath.Join(dir, "source.pdf")); err != nil {
 			t.Fatal(err)
 		}
-		_, r := corpusRecipe(t, dir, map[string]any{"fit_to": "A4", "items": []any{corpusSource("source.pdf"), map[string]any{"page": map[string]any{"text": map[string]any{"value": "INHERITED", "size": 18}}}, corpusStyledPage("EXPLICIT", "400x300pt", map[string]any{"width": 250})}})
+		_, r := corpusRecipe(t, dir, map[string]any{"fitting": map[string]any{"target": "A4"}, "items": []any{corpusSource("source.pdf"), map[string]any{"page": map[string]any{"text": map[string]any{"value": "INHERITED", "size": 18}}}, corpusStyledPage("EXPLICIT", "400x300pt", map[string]any{"width": 250})}})
 		if !nearCorpus(r.Parts[1].Size.Width, 595.27559, .002) || !nearCorpus(r.Parts[1].Size.Height, 841.88976, .002) || *r.Parts[2].Size != (app.Size{Width: 400, Height: 300}) {
 			t.Fatal("authored versus inherited canvas", r.Parts)
 		}

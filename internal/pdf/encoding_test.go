@@ -231,7 +231,7 @@ func TestOutputVerifiesFittedFormEncoding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := fitToForTest(t.Context(), s, &packet.Size{Width: 300, Height: 500}); err != nil {
+			if err := fitToForTest(t.Context(), s, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500})); err != nil {
 				t.Fatal(err)
 			}
 			page, _, attrs, err := s.PageDict(t.Context(), 1, false)

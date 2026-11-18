@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package result defines result v9 and its complete factual outcomes.
+// Package result defines result JSON and its complete factual outcomes.
 package result
 
 import (
@@ -13,13 +13,13 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/outcome"
 )
 
-// Schema covers result v9, full reports and version objects.
+// Schema covers results, full reports and version objects.
 //
 //go:embed result.schema.json
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 9
+const WireVersion = 10
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -89,9 +89,16 @@ type Part struct {
 	Count         int             `json:"count,omitzero"`
 	OutputPages   *[2]int64       `json:"output_pages"`
 	Size          *packet.Size    `json:"size,omitempty"`
+	OutputSize    *packet.Size    `json:"output_size"`
 	Text          *Text           `json:"text"`
 	PageSizes     *[]PageSizeRun  `json:"page_sizes"`
 	FieldsRenamed RenameFacts     `json:"fields_renamed"`
+}
+
+// Fitting is the effective policy in canonical physical points.
+type Fitting struct {
+	Target    packet.Size `json:"target"`
+	Tolerance float64     `json:"tolerance"`
 }
 
 // Result is the complete run outcome before stdout caps.
@@ -105,7 +112,7 @@ type Result struct {
 	Status             diag.Status          `json:"status"`
 	Output             *Output              `json:"output"`
 	Pages              *Pages               `json:"pages"`
-	FitTo              *packet.Size         `json:"fit_to"`
+	Fitting            *Fitting             `json:"fitting"`
 	PageNumbers        *packet.PageNumbers  `json:"page_numbers"`
 	Diagnostics        []diag.Diagnostic    `json:"diagnostics"`
 	DiagnosticsOmitted int                  `json:"diagnostics_omitted"`
@@ -133,7 +140,10 @@ type Version struct {
 // Project serializes domain facts without making a wire DTO the execution state.
 func Project(input outcome.Result) Result {
 	r := input.Full()
-	result := Result{FormatVersion: WireVersion, Metadata: r.Metadata, Timestamp: r.Timestamp, Numbering: r.Numbering, Command: r.Command, Status: r.Status, FitTo: r.FitTo, PageNumbers: r.PageNumbers, Diagnostics: r.Diagnostics, Parts: []Part{}, Sections: []Section{}}
+	result := Result{FormatVersion: WireVersion, Metadata: r.Metadata, Timestamp: r.Timestamp, Numbering: r.Numbering, Command: r.Command, Status: r.Status, PageNumbers: r.PageNumbers, Diagnostics: r.Diagnostics, Parts: []Part{}, Sections: []Section{}}
+	if r.Fitting != nil {
+		result.Fitting = &Fitting{Target: r.Fitting.Target, Tolerance: r.Fitting.Tolerance}
+	}
 	if r.Output != nil {
 		result.Output = &Output{Path: r.Output.Path, Published: r.Output.Published, SHA256: r.Output.SHA256, Bytes: r.Output.Bytes}
 	}
@@ -147,7 +157,7 @@ func Project(input outcome.Result) Result {
 		result.Structure = &Structure{Policy: r.Structure.Policy, Coverage: r.Structure.Coverage}
 	}
 	for _, part := range r.Parts {
-		p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, FieldsRenamed: RenameFacts(part.FieldsRenamed)}
+		p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, OutputSize: part.OutputSize, FieldsRenamed: RenameFacts(part.FieldsRenamed)}
 		if part.PageSizes != nil {
 			runs := make([]PageSizeRun, len(*part.PageSizes))
 			for i, r := range *part.PageSizes {
@@ -173,7 +183,7 @@ func Project(input outcome.Result) Result {
 	return result
 }
 
-// RenameFacts distinguishes unknown/null from an observed empty array in result v9.
+// RenameFacts distinguishes unknown/null from an observed empty array.
 type RenameFacts []packet.FieldRename
 
 // MarshalJSON preserves the factual null/empty distinction across JSON implementations.

@@ -45,7 +45,8 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata(), Timestamp: j.Timestamp(), Structure: j.Structure(), Parts: assemblyParts(layout, inspected), Sections: layout.Sections, FitTo: j.FitTo(), NumberLayout: numberLayout}
+	out.layout = &layout
+	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata(), Timestamp: j.Timestamp(), Structure: j.Structure(), Parts: assemblyParts(layout, inspected), Sections: layout.Sections, Fitting: layout.Fitting, NumberLayout: numberLayout}
 	out.diagnostics = append(out.diagnostics, resolvePolicies(out.assembly, operation == Check)...)
 	if hasErrors(out.diagnostics) {
 		return out
@@ -57,18 +58,19 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 			}
 			var err error
 			mappingIndex := 0
+			physicalPage := part.FirstPage
 			for offset := range part.Pages {
+				physicalPage = part.FirstPage + int64(offset)
 				if err = c.Err(); err != nil {
 					break
 				}
-				size := part.Size
+				size := part.OutputSize
 				if part.Kind == packet.PartSource {
-					number := part.FirstPage + int64(offset)
-					for mappingIndex+1 < len(part.Mapping) && number >= part.Mapping[mappingIndex+1].OutputFirst {
+					for mappingIndex+1 < len(part.Mapping) && physicalPage >= part.Mapping[mappingIndex+1].OutputFirst {
 						mappingIndex++
 					}
 					span := part.Mapping[mappingIndex]
-					original := span.SourceFirst + int(number-span.OutputFirst)
+					original := span.SourceFirst + int(physicalPage-span.OutputFirst)
 					var known bool
 					size, known = packet.ExpectedPageSize(inspected.byLeaf[part.Index].occurrence.Facts.PageSizes, original)
 					if !known {
@@ -76,20 +78,12 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 						break
 					}
 				}
-				if part.Kind != packet.PartSource {
-					fit, e := packet.DecideFit(size, j.FitTo())
-					if e != nil {
-						err = e
-						break
-					}
-					size = fit.Output
-				}
-				if err = numberLayout.Check(size, numberForPage(layout.Numbering, part.FirstPage+int64(offset))); err != nil {
+				if err = numberLayout.Check(size, numberForPage(layout.Numbering, physicalPage)); err != nil {
 					break
 				}
 			}
 			if err != nil {
-				d := compose.Diagnostic(err, "")
+				d := compose.PageNumberDiagnostic(err, physicalPage)
 				d.Items = []string{part.Ref, "/page_numbers"}
 				if part.Kind == packet.PartSource {
 					d.File = part.Source
@@ -102,7 +96,6 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	out.layout = &layout
 	prepared, ds := compose.LayOut(c, layout, inspected.fonts)
 	out.diagnostics = append(out.diagnostics, ds...)
 	if contents != nil {

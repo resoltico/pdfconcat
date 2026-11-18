@@ -10,7 +10,8 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 	if !j.admitted {
 		return Layout{}, []diag.Diagnostic{diag.New(diag.SourceProcessingFailed, "Plan has not been admitted.")}
 	}
-	layout := Layout{Language: j.Language(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers()}
+	fitPolicy := j.Fitting()
+	layout := Layout{Language: j.Language(), Fitting: fitPolicy, PageNumbers: j.PageNumbers()}
 	source := func(leaf Leaf) (SourceFacts, bool) {
 		if leaf.Index < 0 || leaf.Index >= len(facts) {
 			return SourceFacts{}, false
@@ -94,7 +95,7 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 				return
 			}
 			sourceSize = f.LastSize
-			fit, err := DecideFit(f.LastSize, j.FitTo())
+			fit, err := DecideFit(f.LastSize, fitPolicy)
 			if err != nil {
 				add(diag.SourceProcessingFailed, err.Error(), leaf.Ref)
 				return
@@ -105,13 +106,7 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 			switch leaf.Kind {
 			case PartContents:
 				p.Pages = contentsCount
-				p.Size = leaf.Contents.Size
-				if p.Size == (Size{}) {
-					p.Size, _ = ParseSize("A4", false)
-					if j.FitTo() != nil {
-						p.Size = *j.FitTo()
-					}
-				}
+				p.Size = j.ContentsCanvas(leaf.Contents.Size)
 			case PartPadding:
 				p.Pages, p.Size = 1, physicalSize
 				p.Reason, p.BeforeItem = "odd_start", leaf.Ref
@@ -119,8 +114,8 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 				p.Size = leaf.Page.Size.Value
 				if p.Size == (Size{}) {
 					p.Size = sourceSize
-					if j.FitTo() != nil {
-						p.Size = *j.FitTo()
+					if fitPolicy != nil {
+						p.Size = fitPolicy.Target
 					}
 				}
 			}
@@ -131,12 +126,13 @@ func Resolve(j Plan, facts []SourceFacts, contentsCount int) (Layout, []diag.Dia
 				add(diag.PlanLimit, "Generated pages exceed 100000 or the contents page count is unavailable.", leaf.Ref)
 				return
 			}
-			fit, err := DecideFit(p.Size, j.FitTo())
+			fit, err := DecideFit(p.Size, fitPolicy)
 			if err != nil {
 				add(diag.SourceProcessingFailed, err.Error(), leaf.Ref)
 				return
 			}
-			physicalSize = fit.Output
+			p.OutputSize = fit.Output
+			physicalSize = p.OutputSize
 		}
 		if int64(p.Pages) > MaxPageIndex-layout.TotalPages {
 			add(diag.PlanLimit, "Packet exceeds the supported page-index range.", leaf.Ref)

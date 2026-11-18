@@ -77,7 +77,7 @@ func TestHelpAndVersionForms(t *testing.T) {
 		}
 	}
 	help := cli.Help("build")
-	for _, option := range []string{"--plan", "--output", "--base-dir", "--fit-to", "--report", "--overwrite", "--json", "--help"} {
+	for _, option := range []string{"--plan", "--output", "--base-dir", "--fit-to", "--fit-tolerance", "--report", "--overwrite", "--json", "--help"} {
 		if !strings.Contains(help, option) {
 			t.Fatalf("help omits %s", option)
 		}
@@ -103,6 +103,11 @@ func TestUsageJSONSelectionAndFirstFailure(t *testing.T) {
 		{[]string{"check", "--report", "--", "--bad", "--json"}, true, "usage_unknown_option", "argv:3"},
 		{[]string{"check", "--base-dir", "--", "--bad", "--json"}, true, "usage_unknown_option", "argv:3"},
 		{[]string{"check", "--fit-to", "--", "--json", "--blank"}, true, "usage_invalid_value", "argv:2"},
+		{[]string{"check", "--fit-tolerance", "--json", "--blank"}, true, "usage_missing_value", "argv:1"},
+		{[]string{"check", "--fit-tolerance=--json", "--blank"}, false, "usage_invalid_value", "argv:1"},
+		{[]string{"check", "--fit-tolerance", "--", "--json", "--blank"}, true, "usage_invalid_value", "argv:2"},
+		{[]string{"check", "--fit-tolerance=1pt", "--plan=p.json", "--json"}, true, "usage_conflict", "argv:1"},
+		{[]string{"check", "--fit-to=A4", "--fit-tolerance=1pt", "--fit-tolerance=0"}, false, "usage_conflict", "argv:3"},
 		{[]string{"check", "--output=--", "--bad", "--json"}, true, "usage_unknown_option", "argv:2"},
 		{[]string{"check", "--bad", "--output", "--", "--", "--json"}, false, "usage_unknown_option", "argv:1"},
 		{[]string{"version", "--output", "--", "--json"}, false, "usage_unknown_option", "argv:1"},

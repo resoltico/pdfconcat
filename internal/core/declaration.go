@@ -22,7 +22,7 @@ type Declaration struct {
 	Timestamp    *int64
 	Structure    StructurePolicy
 	Output, Dir  string
-	FitTo        *Size
+	Fitting      *FitPolicy
 	PageNumbers  *PageNumbers
 	PageDefaults PageStyle
 	Items        []Item
@@ -101,7 +101,6 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 	}
 	d.Metadata = copyMetadata(d.Metadata)
 	d.Timestamp = copyValue(d.Timestamp)
-	d.FitTo = copyValue(d.FitTo)
 	if d.Timestamp != nil && (*d.Timestamp < 0 || *d.Timestamp > MaxTimestamp) {
 		return fail(diag.PlanValue, "Timestamp is outside the supported UTC range.", "timestamp")
 	}
@@ -111,8 +110,12 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 	if d.Structure != StructurePreserve && d.Structure != StructureDiscard {
 		return fail(diag.PlanValue, "Structure must be preserve or discard.", "structure")
 	}
-	if d.FitTo != nil && !validSize(*d.FitTo, false) {
-		return fail(diag.PlanValue, "Fitting requires finite page sides from 1 through 14400 points.", "fit_to")
+	if d.Fitting != nil {
+		policy, err := d.Fitting.Normalize()
+		if err != nil {
+			return fail(diag.PlanValue, err.Error(), "fitting")
+		}
+		d.Fitting = &policy
 	}
 	d.PageDefaults = copyStyle(d.PageDefaults.Over(Defaults()))
 	if err := validateStyle(d.PageDefaults); err != nil {
@@ -380,7 +383,7 @@ func preparePlan(d Declaration) Plan {
 		}
 	}
 	apply(items)
-	p := newPlan(d.Output, d.FitTo, d.PageNumbers, d.PageDefaults, items)
+	p := newPlan(d.Output, d.Fitting, d.PageNumbers, d.PageDefaults, items)
 	p.metadata = copyMetadata(d.Metadata)
 	p.timestamp = copyValue(d.Timestamp)
 	p.structure = d.Structure
@@ -424,7 +427,7 @@ func cloneItems(items []Item) []Item {
 func cloneDeclaration(d Declaration) Declaration {
 	d.Metadata = copyMetadata(d.Metadata)
 	d.Timestamp = copyValue(d.Timestamp)
-	d.FitTo = copyValue(d.FitTo)
+	d.Fitting = copyValue(d.Fitting)
 	d.PageDefaults = copyStyle(d.PageDefaults)
 	if d.PageNumbers != nil {
 		n := *d.PageNumbers

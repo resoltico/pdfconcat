@@ -16,9 +16,9 @@ import (
 
 // SelectionRequest identifies one occurrence in a grouped source inspection.
 type SelectionRequest struct {
-	Item  string
-	Pages []packet.PageRange
-	FitTo *packet.Size
+	Item    string
+	Pages   []packet.PageRange
+	Fitting *packet.FitPolicy
 }
 
 // Inspect reads and validates a whole source once. Each ephemeral view
@@ -75,7 +75,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		}
 	}
 	if len(requests) == 0 {
-		uri, e := uriBaseWarnings(c, s, origins)
+		uri, e := uriBaseWarnings(c, s, origins, false)
 		ds = append(ds, uri...)
 		if e != nil {
 			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
@@ -110,7 +110,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 		}
-		uri, e := uriBaseWarnings(c, view, origins)
+		uri, e := uriBaseWarnings(c, view, origins, false)
 		for _, d := range uri {
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
@@ -128,7 +128,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 			continue
 		}
-		selected, _, err := observe(c, view, origins, request.FitTo, geometries)
+		selected, _, err := observe(c, view, origins, request.Fitting, geometries)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
@@ -171,21 +171,20 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			root, e := structureRoot(view)
 			if e == nil && root != nil {
 				e = pruneStructure(c, view)
-				if e == nil && request.FitTo != nil {
+				if e == nil && request.Fitting != nil {
 					e = fitContext(c, view, selectedFacts.fitting, origins)
 				}
-				if e == nil && request.FitTo != nil {
+				if e == nil && request.Fitting != nil {
 					root, e = structureRoot(view)
 					if e == nil {
-						cat, err := view.Catalog()
-						if err != nil {
-							e = err
-						} else {
-							e = combineStructure(c, view, []structurePart{{root: root, catalog: cat}})
+						var part structurePart
+						part, e = captureStructurePart(view, root)
+						if e == nil {
+							e = combineStructure(c, view, []structurePart{part})
 						}
 					}
 				}
-				if e == nil && request.FitTo != nil {
+				if e == nil && request.Fitting != nil {
 					e = validateStructure(c, view)
 				}
 			}

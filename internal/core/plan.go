@@ -31,7 +31,7 @@ type Plan struct {
 	timestamp    *int64
 	structure    StructurePolicy
 	output       string
-	fitTo        *Size
+	fitting      *FitPolicy
 	pageNumbers  *PageNumbers
 	pageDefaults PageStyle
 	items        []Item
@@ -64,7 +64,7 @@ type event struct {
 }
 
 // newPlan derives item order and section ancestry once.
-func newPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle, items []Item) Plan {
+func newPlan(output string, fit *FitPolicy, numbers *PageNumbers, defaults PageStyle, items []Item) Plan {
 	if numbers != nil {
 		normalized := *numbers
 		normalized.Kinds = slices.Clone(numbers.Kinds)
@@ -85,7 +85,7 @@ func newPlan(output string, fit *Size, numbers *PageNumbers, defaults PageStyle,
 	items = cloneItems(items)
 	fit = copyValue(fit)
 	defaults = copyStyle(defaults)
-	p := Plan{admitted: true, output: output, fitTo: fit, pageNumbers: numbers, pageDefaults: defaults, items: items}
+	p := Plan{admitted: true, output: output, fitting: fit, pageNumbers: numbers, pageDefaults: defaults, items: items}
 	add := func(l Leaf) {
 		l.Index = len(p.leaves)
 		p.leaves = append(p.leaves, l)
@@ -191,7 +191,7 @@ type Part struct {
 	Leaf
 	Pages               int
 	FirstPage, LastPage int64
-	Size                Size
+	Size, OutputSize    Size
 	Mapping             []SourceMapping
 	Reason              string
 	BeforeItem          Ref
@@ -209,7 +209,7 @@ type Section struct {
 // Layout is the authoritative sequence, section hierarchy and totals.
 type Layout struct {
 	Language                                string
-	FitTo                                   *Size
+	Fitting                                 *FitPolicy
 	Numbering                               []NumberSpan
 	Parts                                   []Part
 	Sections                                []Section
@@ -235,8 +235,20 @@ func (p Plan) Structure() StructurePolicy { return p.structure }
 // Output is the resolved output destination.
 func (p Plan) Output() string { return p.output }
 
-// FitTo returns an owned fitting canvas.
-func (p Plan) FitTo() *Size { return copyValue(p.fitTo) }
+// ContentsCanvas resolves the authored contents canvas for pagination and layout.
+func (p Plan) ContentsCanvas(size Size) Size {
+	if size != (Size{}) {
+		return size
+	}
+	if p.fitting != nil {
+		return p.fitting.Target
+	}
+	a4, _ := ParseSize("A4", false)
+	return a4
+}
+
+// Fitting returns an owned fitting policy.
+func (p Plan) Fitting() *FitPolicy { return copyValue(p.fitting) }
 
 // PageNumbers returns an owned numbering snapshot, preserving absent/empty kinds.
 func (p Plan) PageNumbers() *PageNumbers {
@@ -255,7 +267,7 @@ func (p Plan) Declaration() Declaration {
 	if p.declaration != nil {
 		return cloneDeclaration(*p.declaration)
 	}
-	return Declaration{Metadata: p.Metadata(), Timestamp: p.Timestamp(), Structure: p.Structure(), Output: p.Output(), FitTo: p.FitTo(), PageNumbers: p.PageNumbers(), PageDefaults: p.PageDefaults(), Items: p.Items()}
+	return Declaration{Metadata: p.Metadata(), Timestamp: p.Timestamp(), Structure: p.Structure(), Output: p.Output(), Fitting: p.Fitting(), PageNumbers: p.PageNumbers(), PageDefaults: p.PageDefaults(), Items: p.Items()}
 }
 
 func dividerRef(ref Ref) Ref { return ref + "/divider" }

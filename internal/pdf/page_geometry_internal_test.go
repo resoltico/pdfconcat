@@ -68,7 +68,7 @@ func TestFitChecksGeometryBeforeMutatingAnyPage(t *testing.T) {
 			}
 			contents := []types.Object{pages[0].dict["Contents"], pages[1].dict["Contents"], pages[2].dict["Contents"]}
 			pages[1].dict["UserUnit"] = types.Float(unit)
-			err = fitToForTest(t.Context(), s, &packet.Size{Width: 300, Height: 500})
+			err = fitToForTest(t.Context(), s, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 			if err == nil || diagnostic(err, diag.AssemblyFailed).Code != diag.SourceInvalid {
 				t.Fatalf("invalid unit %g: %v", unit, err)
 			}

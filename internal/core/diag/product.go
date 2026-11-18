@@ -253,9 +253,27 @@ func InvalidApplicationRequest() Explanation {
 	return explain("InvalidApplicationRequest", "Invalid application request.")
 }
 
-// MeasuredTextExtendsOutsideThePageOrTextBlock renders the core-owned explanation.
-func MeasuredTextExtendsOutsideThePageOrTextBlock() Explanation {
-	return explain("MeasuredTextExtendsOutsideThePageOrTextBlock", "Measured text extends outside the page or text block.")
+// AllowedGlyphInkOutsideSheet reports ink clipped by a physical sheet edge.
+func AllowedGlyphInkOutsideSheet(axis string, start, end, limit float64) Explanation {
+	return Explanation{text: fmt.Sprintf("Glyph ink crosses a physical page edge and can be clipped. Ink spans %s %g to %g pt on a sheet spanning 0 to %g pt.", axis, start, end, limit)}
+}
+
+// AllowedTextOutsideArea reports measured bounds beyond the available text area.
+func AllowedTextOutsideArea(subject, axis string, start, end, lower, upper float64) Explanation {
+	return Explanation{text: fmt.Sprintf("%s exceeds the available text area. Its %s bounds span %g to %g pt, with %g to %g pt available.", subject, axis, start, end, lower, upper)}
+}
+
+// AllowedTextExceedsWrapWidth reports a line wider than its wrap box.
+func AllowedTextExceedsWrapWidth(measurement string) Explanation {
+	return Explanation{text: "Text exceeds the configured wrap width.", detail: measurement}
+}
+
+// PageNumberPlacementFailure reports the physical sheet independently of its label.
+func PageNumberPlacementFailure(page int64, reason string) Explanation {
+	if page == 0 {
+		return Explanation{text: "Page-number placement failed. " + reason}
+	}
+	return Explanation{text: fmt.Sprintf("Page-number placement failed on physical page %d. %s", page, reason)}
 }
 
 // NavigationTargetsOmittedFromThisSourceOccurrenceWereRemoved renders the core-owned explanation.
@@ -704,6 +722,10 @@ func DerivedStructureIDsEvidence(ids int64) Explanation {
 }
 
 // URIBaseEvidence records the original removed base site as typed facts.
-func URIBaseEvidence(object, generation int64, path string) Explanation {
-	return explain("uri_base_removed", fmt.Sprintf("Relative action retained; URI Base at source object %d %d %s is omitted.", object, generation, path), strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10), path)
+func URIBaseEvidence(object, generation int64, path string, assembly bool) Explanation {
+	stage := "Inspection"
+	if assembly {
+		stage = "Assembly"
+	}
+	return explain("uri_base_removed", fmt.Sprintf("%s found a retained relative action. URI Base at source object %d %d %s is omitted.", stage, object, generation, path), strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10), path)
 }

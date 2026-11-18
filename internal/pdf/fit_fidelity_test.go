@@ -47,7 +47,7 @@ func fitOutput(t *testing.T, doc *pdffixture.Doc, target packet.Size, repeats in
 	for i := range docs {
 		docs[i] = doc
 	}
-	path, _, ds := assembleDocs(t, docs, &target)
+	path, _, ds := assembleDocs(t, docs, packet.DefaultFitPolicy(target))
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
@@ -406,7 +406,7 @@ func TestFitMissingAppearanceNoRotatePath(t *testing.T) {
 				t.Fatal(err)
 			}
 			if rotation != 0 {
-				_, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+				_, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 				if !codePresent(ds, diag.FitAnnotationUnsupported) {
 					t.Fatal(ds)
 				}
@@ -441,7 +441,7 @@ func TestFitAppearanceInheritsPageResourcesWithoutNameCollision(t *testing.T) {
 
 func TestFitResourceOwnershipDuringMerge(t *testing.T) {
 	shared := pdffixture.Pages("shared font", 2)
-	path, _, ds := assembleDocs(t, []*pdffixture.Doc{pdffixture.Plain("preceding"), shared, shared}, &packet.Size{Width: 300, Height: 500})
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{pdffixture.Plain("preceding"), shared, shared}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}

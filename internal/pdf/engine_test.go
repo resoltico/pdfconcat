@@ -135,10 +135,10 @@ func TestEncryptedSources(t *testing.T) {
 	}
 }
 
-func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (string, pdf.Assembled, []diag.Diagnostic) {
+func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.FitPolicy) (string, pdf.Assembled, []diag.Diagnostic) {
 	t.Helper()
 	dir := t.TempDir()
-	j := packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: nil}
+	j := packet.Declaration{Output: "", Fitting: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: nil}
 	facts := map[string]pdf.SourceFacts{}
 	domain := map[string]packet.SourceFacts{}
 	var warnings []diag.Diagnostic
@@ -156,7 +156,7 @@ func assembleDocs(t *testing.T, docs []*pdffixture.Doc, fit *packet.Size) (strin
 		domain[fmt.Sprintf("/items/%d", i)] = f.SourceFacts
 		j.Items = append(j.Items, &packet.SourceItem{Ref: fmt.Sprintf("/items/%d", i), Path: path})
 	}
-	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output, FitTo: j.FitTo, PageNumbers: j.PageNumbers, PageDefaults: j.PageDefaults, Items: j.Items}), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output, Fitting: j.Fitting, PageNumbers: j.PageNumbers, PageDefaults: j.PageDefaults, Items: j.Items}), domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -328,7 +328,7 @@ func TestChangedSourceAndCancellation(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	layout, _ := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: path}}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
+	layout, _ := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: path}}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
 	if err := pdffixture.Plain("B").WriteFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		t.Fatal(ds)
 	}
 	font := defaultFont(t)
-	j := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: source, Ref: "source"}}})
+	j := pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: source, Ref: "source"}}})
 	pages := map[int][]compose.Page{}
 	var placements []*typeset.Placed
 	for i, text := range []string{"Ā ļ ķ", "Ελληνικά", "Кириллица ā"} {
@@ -488,13 +488,13 @@ func TestFontObjectsDeduplicateAcrossDistinctItems(t *testing.T) {
 		style := packet.Defaults()
 		style.Size.Value = packet.Size{Width: 300, Height: 200}
 		style.Size.Present = true
-		j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: append(j.Items(), &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})})
+		j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), Fitting: j.Fitting(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: append(j.Items(), &packet.PageItem{Style: style, Count: 1, Ref: fmt.Sprintf("page%d", i)})})
 	}
 	fonts, err := typeset.PrepareFonts(placements)
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: j.Items()}), map[string]packet.SourceFacts{"source": facts.SourceFacts})
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: j.Output(), Fitting: j.Fitting(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: j.Items()}), map[string]packet.SourceFacts{"source": facts.SourceFacts})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -566,11 +566,11 @@ func TestFitPhysicalGeometryAndPixels(t *testing.T) {
 		}
 	}
 	target := packet.Size{Width: 300, Height: 500}
-	a, _, ds := assembleDocs(t, []*pdffixture.Doc{source}, &target)
+	a, _, ds := assembleDocs(t, []*pdffixture.Doc{source}, packet.DefaultFitPolicy(target))
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
-	b, _, ds := assembleDocs(t, []*pdffixture.Doc{reference}, &target)
+	b, _, ds := assembleDocs(t, []*pdffixture.Doc{reference}, packet.DefaultFitPolicy(target))
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
@@ -634,7 +634,7 @@ func TestFitPhysicalGeometryAndPixels(t *testing.T) {
 			t.Fatalf("UserUnit normalization changed physical pixels on page %d", page)
 		}
 	}
-	_, _, ds = assembleDocs(t, []*pdffixture.Doc{pdffixture.Form("widget")}, &target)
+	_, _, ds = assembleDocs(t, []*pdffixture.Doc{pdffixture.Form("widget")}, packet.DefaultFitPolicy(target))
 	if !codePresent(ds, diag.FitFormUnsupported) {
 		t.Fatalf("fitted widget not refused: %+v", ds)
 	}

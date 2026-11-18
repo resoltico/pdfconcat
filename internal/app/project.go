@@ -35,7 +35,7 @@ func project(req Request, a *admission, inspected *inspection, composed *composi
 	r.Metadata = a.plan.Metadata()
 	r.Timestamp = a.plan.Timestamp()
 	r.Structure = &outcome.Structure{Policy: a.plan.Structure()}
-	r.FitTo = a.plan.FitTo()
+	r.Fitting = a.plan.Fitting()
 	r.PageNumbers = a.plan.PageNumbers()
 	r.Pages = &outcome.Pages{}
 	r.Sections = reportSections(a.plan.Sections(), false)
@@ -70,8 +70,8 @@ func project(req Request, a *admission, inspected *inspection, composed *composi
 			}
 			entry.Spans = &spans
 		} else {
-			size := part.Size
-			entry.Size = &size
+			entry.Size = &part.Size
+			entry.OutputSize = &part.OutputSize
 		}
 		if text := part.Text; text != nil {
 			entry.Text = &outcome.Text{Font: text.Font, FontSize: text.FontSize, Bounds: text.Bounds, InkBounds: text.InkBounds, Overflow: text.Overflow}

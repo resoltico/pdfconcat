@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/app"
+	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
@@ -59,15 +60,15 @@ func TestEverySourcePageRequiresPositivePhysicalFrame(t *testing.T) {
 						}
 						req := app.Request{InspectionWorkers: 1, Operation: op, WorkingDir: dir, Output: output, Overwrite: true, Input: app.Items{app.SourceItem{Path: source, Ref: "argv:1"}}}
 						if fit {
-							sheet, _ := app.ParseSheet("300x500pt")
-							req.FitTo = &sheet
+							sheet, _ := packet.ParseSize("300x500pt", false)
+							req.Fitting = packet.DefaultFitPolicy(sheet)
 						}
 						if selected {
 							good := 1
 							if tc.bad == 0 {
 								good = 2
 							}
-							plan := map[string]any{"version": 7, "items": []any{map[string]any{"source": source, "pages": [][2]int{{good, good}}}}}
+							plan := map[string]any{"version": 8, "items": []any{map[string]any{"source": source, "pages": [][2]int{{good, good}}}}}
 							data, err := json.Marshal(plan)
 							if err != nil {
 								t.Fatal(err)

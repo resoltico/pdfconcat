@@ -92,11 +92,10 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
-			uri, e := uriBaseWarnings(c, s, origins)
+			uri, e := uriBaseWarnings(c, s, origins, true)
 			for _, d := range uri {
 				d.File = part.Source
 				d.Items = []string{part.Ref}
-				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
 			if e != nil {
@@ -142,7 +141,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			if e != nil {
 				return result, e
 			}
-			plans, e = planFitting(geometries, a.FitTo, part.Repeat, origins)
+			plans, e = planFitting(geometries, a.Fitting, part.Repeat, origins)
 			if e != nil {
 				return result, e
 			}
@@ -178,11 +177,11 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			if e != nil {
 				return result, e
 			}
-			cat, e := s.Catalog()
+			structure, e := captureStructurePart(s, root)
 			if e != nil {
 				return result, e
 			}
-			structures = append(structures, structurePart{root: root, catalog: cat})
+			structures = append(structures, structure)
 		}
 		records, e := fields(c, s)
 		if e != nil {

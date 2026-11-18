@@ -28,7 +28,7 @@ func TestViewerSettingFindingsSurviveCorePlansBuildsAndReports(t *testing.T) {
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := json.Marshal(map[string]any{"version": 7, "items": []any{map[string]any{"source": source}, map[string]any{"source": source}}})
+	plan, err := json.Marshal(map[string]any{"version": 8, "items": []any{map[string]any{"source": source}, map[string]any{"source": source}}})
 	if err != nil {
 		t.Fatal(err)
 	}

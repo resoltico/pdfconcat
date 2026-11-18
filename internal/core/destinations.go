@@ -3,7 +3,11 @@
 
 package packet
 
-import "github.com/resoltico/pdfconcat/internal/core/diag"
+import (
+	"fmt"
+
+	"github.com/resoltico/pdfconcat/internal/core/diag"
+)
 
 // DestinationRole is a product publication role, independent of native identity.
 type DestinationRole uint8
@@ -21,10 +25,10 @@ func MayReplace(role DestinationRole, overwrite, inputsKnown bool) bool {
 
 // DestinationFacts are observations supplied by the native identity adapter.
 type DestinationFacts struct {
-	Role                                             DestinationRole
-	Path                                             string
-	Exists, Regular, Overwrite, InputsKnown          bool
-	AliasedInput, InspectionFailure, IdentityFailure string
+	Role                                                            DestinationRole
+	Path                                                            string
+	Exists, Regular, Overwrite, InputsKnown                         bool
+	InvalidParent, AliasedInput, InspectionFailure, IdentityFailure string
 }
 
 // CheckDestination applies product refusal rules to explicit observed facts.
@@ -32,9 +36,9 @@ func CheckDestination(f DestinationFacts) []diag.Diagnostic {
 	if f.Path == "" {
 		return nil
 	}
-	exists, notRegular, isInput, inspection := diag.OutputExists, diag.OutputNotRegular, diag.OutputIsInput, diag.OutputInspectionFailed
+	exists, notRegular, isInput, inspection, parentInvalid := diag.OutputExists, diag.OutputNotRegular, diag.OutputIsInput, diag.OutputInspectionFailed, diag.OutputParentInvalid
 	if f.Role == ReportDestination {
-		exists, notRegular, isInput, inspection = diag.ReportExists, diag.ReportNotRegular, diag.ReportIsInput, diag.ReportInspectionFailed
+		exists, notRegular, isInput, inspection, parentInvalid = diag.ReportExists, diag.ReportNotRegular, diag.ReportIsInput, diag.ReportInspectionFailed, diag.ReportParentInvalid
 	}
 	var ds []diag.Diagnostic
 	add := func(code diag.Code, message string) {
@@ -45,12 +49,14 @@ func CheckDestination(f DestinationFacts) []diag.Diagnostic {
 	switch {
 	case f.Exists && !f.Regular:
 		add(notRegular, "Destination must be a regular file. Choose a different path.")
+	case f.InvalidParent != "":
+		add(parentInvalid, fmt.Sprintf("Destination parent %q must be an existing directory. Choose an existing directory or create it.", f.InvalidParent))
 	case !f.Exists && f.InspectionFailure != "":
 		add(inspection, "Cannot inspect destination: "+f.InspectionFailure)
 	case f.IdentityFailure != "":
 		add(inspection, f.IdentityFailure)
 	case f.AliasedInput != "":
-		add(isInput, "Destination aliases an input: "+f.AliasedInput)
+		add(isInput, fmt.Sprintf("Destination must use a distinct file from input %q. Choose a different filename or directory.", f.AliasedInput))
 	case f.Exists && f.Role == ReportDestination && !f.InputsKnown:
 		add(exists, "Report destination exists and the plan inputs are unknown. Choose a new report path.")
 	case f.Exists && !MayReplace(f.Role, f.Overwrite, f.InputsKnown):

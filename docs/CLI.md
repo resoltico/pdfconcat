@@ -20,8 +20,9 @@ Each `ITEM` is a PDF path or `--blank`. Items retain their supplied order and ma
 contain only blanks when `--fit-to` supplies their size. A plan cannot be combined
 with these direct items.
 
-`COMMAND --help`, `-h`, root `--help` and `--version` are also accepted. Help is
-plain text. Options interleave with operands; `--` ends option parsing. A path
+`pdfconcat COMMAND --help` (or `-h`) and `pdfconcat help COMMAND` show the same
+command topic. Bare `help` and root `--help` list commands. `--version` is also
+accepted. Help is plain text. Options interleave with operands; `--` ends option parsing. A path
 such as `./--blank` is always a source. Operand pointers are `argv:N`, zero-based
 including the command but excluding the executable.
 
@@ -49,8 +50,8 @@ options or operands.
 
 ## Build, check and fitting
 
-`build` needs output from `-o` or the plan. `check` does not need an output path;
-when one is provided it also checks its role/existence. Both load and validate
+`build` needs output from `-o` or the plan. `check` does not need an output path.
+When specified, it checks the destination's role, existence and parent directory. Both load and validate
 fonts, inspect every distinct source, resolve sizes/ranges and lay out text.
 `check` writes no PDF but may write its requested report. Passing check predicts
 assembly; merge, pruning, fitting, I/O or publication can still fail later.
@@ -185,8 +186,8 @@ Use `--report FILE` to request a full JSON report, including when `check` or
 `build` fails. Reporting happens after application execution; argv rejection or
 failure to establish a valid working directory produces no report. Report
 targets are checked against known plan/font/source inputs and the output;
-existing targets must be regular files. Symlink targets, directories and devices
-are refused. Input symlinks to regular files are allowed. Roles are checked again
+the parent of each destination must exist and be a directory. Existing targets
+must be regular files. Symlink targets, directories and devices are refused. Input symlinks to regular files are allowed. Roles are checked again
 before report publication, including an output that did not exist initially.
 
 When the plan could not be decoded, its inputs are unknown. Choose a fresh
@@ -195,9 +196,16 @@ report path in that case. Report publication uses no-replace even with
 Existing-target and known-collision refusals use `report_exists`,
 `report_not_regular`, `report_is_input` or `report_is_output`.
 
-Existing inputs and the output are protected by file identity. Missing inputs
-are protected only by cleaned path spelling; reports are rechecked after PDF
-publication.
+Existing files are compared by native identity, including hard links. If either
+name is absent, PDFConcat compares their resolved parent directories and checks
+leaf spellings conservatively. Names in the same directory that differ only in
+case, canonical Unicode form, or ignorable or format characters can be refused
+even on a filesystem that distinguishes them. Windows and recognized FAT and
+SMB volumes also account for DOS spelling and potential short-name aliases when
+checking reports or publishing a PDF. For a short-name conflict, choose
+different extensions or directories. Reports are rechecked after
+PDF publication. A destination can still fail to write after its parent passes
+preflight.
 
 Large source PDFs use private snapshots in the operating system's temporary
 directory during inspection and assembly. Allow space for concurrent source
@@ -408,8 +416,10 @@ URI Base warnings require an actually retained relative action and a nonempty
 source Base. A build can report the same source site during inspection and during
 assembly. The phase in `detail` distinguishes those observations.
 Check rename warnings identify known source scopes/definitions as predictions;
-only build reports actual old/new mappings. Generated-layout warnings keep plan
-provenance, and backend notices expose only locations the backend supplies.
+only build reports actual old/new mappings. Layout findings include a structured
+plan location when a specific authored value is implicated. Each finding lists
+distinct consuming items in first-seen order. Backend notices expose only
+locations the backend supplies.
 
 Warnings merge their consuming `items` only when their code, stable typed
 cause/parameters, phase and file/site are equivalent. Message rendering and
@@ -455,6 +465,8 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `path_invalid` | error | invalid | empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\x`) |
 | `output_exists` | error | invalid | output exists and replacement was not authorized |
 | `report_exists` | error | invalid | report exists and replacement was not authorized, or plan inputs are unknown |
+| `output_parent_invalid` | error | invalid | output parent is absent or is not a directory |
+| `report_parent_invalid` | error | invalid | report parent is absent or is not a directory |
 | `output_not_regular` | error | invalid | output exists and is not a regular file (directory, symlink, device) |
 | `report_not_regular` | error | invalid | same for the report |
 | `output_is_input` | error | invalid | output is (or aliases) a plan, font or source file |

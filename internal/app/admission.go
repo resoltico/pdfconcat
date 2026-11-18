@@ -19,6 +19,7 @@ import (
 
 type admission struct {
 	plan          *packet.Plan
+	locations     map[string]diag.Location
 	roles         files.Roles
 	diagnostics   []diag.Diagnostic
 	reportRefused bool
@@ -102,7 +103,7 @@ func admit(ctx context.Context, req Request) *admission {
 			ds = []diag.Diagnostic{ioDiagnostic(code, err, path)}
 			break
 		}
-		declared, ds = plan.Decode(data, path, filepath.Dir(path), files.Path, overrides)
+		declared, a.locations, ds = plan.DecodeLocated(data, path, filepath.Dir(path), files.Path, overrides)
 	case PlanBytes:
 		base := req.WorkingDir
 		var err error
@@ -117,7 +118,7 @@ func admit(ctx context.Context, req Request) *admission {
 			ds = []diag.Diagnostic{ioDiagnostic(diag.PlanTooLarge, files.ErrTooLarge, input.Label)}
 			break
 		}
-		declared, ds = plan.Decode(slices.Clone(input.Data), input.Label, base, files.Path, overrides)
+		declared, a.locations, ds = plan.DecodeLocated(slices.Clone(input.Data), input.Label, base, files.Path, overrides)
 	case Declared:
 		declared = *typed
 	case Items:

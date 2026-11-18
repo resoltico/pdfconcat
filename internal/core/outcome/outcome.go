@@ -156,9 +156,9 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 	groups := map[findingKey]int{}
 	seen := map[findingKey]map[string]bool{}
 	for _, d := range input {
-		d.Items = slices.Clone(d.Items)
 		d.ItemsOmitted = 0
-		if d.Severity != "warning" || d.File == "" || d.Identity.Kind == "" {
+		if d.Severity != "warning" || d.File == "" || d.Identity.Kind == "" || d.AuthoredRef != "" {
+			d.Items = distinctItems(d.Items)
 			output = append(output, d)
 			continue
 		}
@@ -190,4 +190,19 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 		return diag.Priority(b) - diag.Priority(a)
 	})
 	return output
+}
+
+func distinctItems(input []string) []string {
+	if len(input) < 2 {
+		return slices.Clone(input)
+	}
+	items := make([]string, 0, len(input))
+	seen := make(map[string]bool, len(input))
+	for _, item := range input {
+		if !seen[item] {
+			seen[item] = true
+			items = append(items, item)
+		}
+	}
+	return items
 }

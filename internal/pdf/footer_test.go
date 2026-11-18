@@ -490,3 +490,50 @@ func footerParts(layout packet.Layout) []Part {
 	}
 	return parts
 }
+
+func TestPhysicalPageNumberContrastsWithLightAndDarkArtwork(t *testing.T) {
+	tools := oracle.RequireTools(t)
+	prepared, names := preparedFooter(t)
+	for _, color := range []struct {
+		name, gray string
+		dark       bool
+	}{{"light", "1", false}, {"dark", "0", true}} {
+		t.Run(color.name, func(t *testing.T) {
+			fixture := pdffixture.EncodedPages("footer background", []pdffixture.EncodedStream{
+				{Data: []byte(color.gray + " g 0 0 612 70 re f\n")},
+			})
+			s, _, _, err := readSource(t.Context(), fixture.Bytes(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline := footerRaster(t, writeFooterContext(t, s, "unmarked"))
+			layout := footerLayout(1)
+			if err = applyPageNumbers(t.Context(), s, footerParts(layout), prepared, names, footerForLayout(t, layout), layout.Numbering); err != nil {
+				t.Fatal(err)
+			}
+			path := writeFooterContext(t, s, "numbered")
+			numbered := footerRaster(t, path)
+			box := baseline.Bounds()
+			if box != numbered.Bounds() {
+				t.Fatal("page-number overlay changed the canvas")
+			}
+			marked := 0
+			for y := box.Max.Y - 75; y < box.Max.Y-45; y++ {
+				for x := box.Dx()/2 - 18; x <= box.Dx()/2+18; x++ {
+					before, _, _, _ := baseline.At(x, y).RGBA()
+					after, _, _, _ := numbered.At(x, y).RGBA()
+					if color.dark && before == 0 && after > 32000 || !color.dark && before == 65535 && after < 32000 {
+						marked++
+					}
+				}
+			}
+			if marked < 4 {
+				t.Fatalf("number has insufficient visible pixels against %s artwork: %d", color.name, marked)
+			}
+			raw, err := exec.CommandContext(t.Context(), tools.PDFToText, path, "-").Output()
+			if err != nil || strings.TrimSpace(string(raw)) != "1" {
+				t.Fatalf("number did not extract exactly once: %q, %v", raw, err)
+			}
+		})
+	}
+}

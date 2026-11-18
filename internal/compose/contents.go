@@ -113,7 +113,11 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		return shaper.Place(font, typeset.Params{Language: typeset.ShapingLanguage(j.Language()), Text: text, Size: fontSize, PageWidth: size.Width, PageHeight: size.Height, WrapWidth: width, LineSpacing: 1.2, Anchor: typeset.AnchorTopLeft, Align: typeset.AlignLeft, Overflow: typeset.OverflowAllow})
 	}
 	if size.Width-72 <= 0 {
-		return fail(diag.ContentsMarginsLeaveNoUsableHeadingWidthChooseALarger(), pointer)
+		d := diag.Report(diag.TextOverflow, diag.ContentsMarginsLeaveNoUsableHeadingWidthChooseALarger(), pointer)
+		if contents.Size != (packet.Size{}) {
+			d.AuthoredRef = pointer + "/contents/size"
+		}
+		return nil, []diag.Diagnostic{d}
 	}
 	dash, err := shape("—", 12, 0)
 	if err != nil {

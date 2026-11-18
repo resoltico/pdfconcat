@@ -67,12 +67,27 @@ type decoder struct {
 	pairs, contents    int
 	contentsPointer    string
 	contentsOffset     int64
+	locations          map[string]diag.Location
+	file               string
+	locatedThrough     int64
+	line, lastNewline  int
 }
 
 // Decode charges the original input bytes, including an optional leading BOM.
 // The caller owns file/stream I/O and cancellation; this function reads no files.
 func Decode(data []byte, file, base string, resolvePath func(string, string) (string, error), overrides ...packet.PlanOverrides) (packet.Plan, []diag.Diagnostic) {
-	p := decoder{data: data, base: base, resolvePath: resolvePath}
+	return decode(data, file, base, resolvePath, nil, overrides...)
+}
+
+// DecodeLocated also retains byte positions for authored settings used in layout diagnostics.
+func DecodeLocated(data []byte, file, base string, resolvePath func(string, string) (string, error), overrides ...packet.PlanOverrides) (packet.Plan, map[string]diag.Location, []diag.Diagnostic) {
+	locations := make(map[string]diag.Location)
+	decoded, ds := decode(data, file, base, resolvePath, locations, overrides...)
+	return decoded, locations, ds
+}
+
+func decode(data []byte, file, base string, resolvePath func(string, string) (string, error), locations map[string]diag.Location, overrides ...packet.PlanOverrides) (packet.Plan, []diag.Diagnostic) {
+	p := decoder{data: data, file: file, base: base, resolvePath: resolvePath, locations: locations, line: 1, lastNewline: -1}
 	if len(data) > MaxBytes {
 		return packet.Plan{}, []diag.Diagnostic{diag.New(diag.PlanTooLarge, "Plan exceeds 64 MiB.")}
 	}
@@ -95,6 +110,21 @@ func Decode(data []byte, file, base string, resolvePath func(string, string) (st
 		return packet.Plan{}, []diag.Diagnostic{p.diagnostic(err, file)}
 	}
 	return result, nil
+}
+
+func (p *decoder) recordLocation(start int64) {
+	if p.locations == nil {
+		return
+	}
+	offset := start + p.bom
+	next := p.data[p.locatedThrough:offset]
+	p.line += bytes.Count(next, []byte{'\n'})
+	if last := bytes.LastIndexByte(next, '\n'); last >= 0 {
+		p.lastNewline = int(p.locatedThrough) + last
+	}
+	p.locatedThrough = offset
+	ref := string(p.d.StackPointer())
+	p.locations[ref] = diag.Location{File: p.file, Ref: ref, Offset: offset, Line: p.line, Column: int(offset) - p.lastNewline}
 }
 
 func (p *decoder) diagnostic(err error, file string) diag.Diagnostic {
@@ -472,7 +502,11 @@ func (p *decoder) contentsStyle() (*packet.ContentsItem, error) {
 		case "title":
 			style.Title, err = p.title()
 		case "size":
+			start := p.start()
 			style.Size, err = p.size(false)
+			if err == nil {
+				p.recordLocation(start)
+			}
 		default:
 			err = p.unknown(name)
 		}
@@ -766,7 +800,11 @@ func (p *decoder) style(titleDivider bool) (packet.PageStyle, error) {
 		var from *packet.Ref
 		switch name {
 		case "size":
+			start := p.start()
 			s.Size.Value, err = p.size(true)
+			if err == nil {
+				p.recordLocation(start)
+			}
 			from = &s.Size.From
 			s.Size.Present = true
 		case "background":
@@ -842,7 +880,11 @@ func (p *decoder) textStyle(s *packet.PageStyle, titleDivider bool) error {
 		case "width":
 			from = &s.Text.Width.From
 			s.Text.Width.Present = true
+			start := p.start()
 			s.Text.Width.Value, err = p.length(true)
+			if err == nil {
+				p.recordLocation(start)
+			}
 		case "leading":
 			from = &s.Text.Leading.From
 			s.Text.Leading.Present = true

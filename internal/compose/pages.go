@@ -84,7 +84,11 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 					width = p.Size.Width - 72
 				}
 				if width < 1 {
-					ds = append(ds, diag.Report(diag.TextOverflow, diag.DefaultMarginsLeaveNoUsableTextWidthGiveAnExplicit(), p.Ref))
+					d := diag.Report(diag.TextOverflow, diag.DefaultMarginsLeaveNoUsableTextWidthGiveAnExplicit(), p.Ref)
+					if style.Size.Value == p.Size {
+						d.AuthoredRef = style.Size.From
+					}
+					ds = append(ds, d)
 					continue
 				}
 				params := typeset.Params{Language: typeset.ShapingLanguage(layout.Language), Text: style.Text.Value.Value, Size: style.Text.Size.Value, PageWidth: p.Size.Width, PageHeight: top - bottom, OffsetX: style.Text.X.Value, OffsetY: style.Text.Y.Value, WrapWidth: width, LineSpacing: style.Text.Leading.Value, Anchor: anchor(style.Text.Anchor.Value), Align: alignment(style.Text.Align.Value)}
@@ -110,7 +114,14 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			}
 			prepared[i].Text = text
 			if len(placed.Findings) > 0 && value.err == nil {
-				ds = append(ds, diag.Report(diag.TextOverflowAllowed, allowedTextOverflow(placed, p.Size, bottom, top), p.Ref))
+				d := diag.Report(diag.TextOverflowAllowed, allowedTextOverflow(placed, p.Size, bottom, top), p.Ref)
+				for _, finding := range placed.Findings {
+					if finding.Kind == typeset.FindingWordTooWide {
+						d.AuthoredRef = style.Text.Width.From
+						break
+					}
+				}
+				ds = append(ds, d)
 			}
 		}
 		if value.err != nil {

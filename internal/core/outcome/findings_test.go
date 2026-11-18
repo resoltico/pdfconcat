@@ -88,3 +88,20 @@ func TestFindingIdentityUsesTypedFactsAndPhaseNotWording(t *testing.T) {
 		t.Fatalf("wording or typed facts controlled identity incorrectly: %+v", full.Diagnostics)
 	}
 }
+
+func TestDistinctConsumersPrecedeSummaryCap(t *testing.T) {
+	r := outcome.New("check")
+	items := []string{"first", "second", "first", "third"}
+	for range outcome.SummaryLimit {
+		items = append(items, "second")
+	}
+	r.Diagnostics = []diag.Diagnostic{diag.Report(diag.PlanValue, diag.EffectiveSOURCEDATEEPOCHMustBeUnixSecondsFromThrough(), items...)}
+	full := r.Full()
+	summary, omitted := full.CappedDiagnostics()
+	if omitted != 0 || summary[0].ItemsOmitted != 0 || !reflect.DeepEqual(summary[0].Items, []string{"first", "second", "third"}) {
+		t.Fatalf("duplicate consumers reached the summary: %+v", summary)
+	}
+	if !reflect.DeepEqual(r.Diagnostics[0].Items, items) || len(r.Diagnostics[0].Items) <= outcome.SummaryLimit {
+		t.Fatal("normalization mutated the uncapped input")
+	}
+}

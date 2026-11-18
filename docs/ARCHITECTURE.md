@@ -122,6 +122,8 @@ Both producers share semantic admission and aggregate text/node limits.
    re-admission. Original source security/page checks precede semantic detachment
    or narrowly validated index normalization. Owner-sensitive coverage retains
    an uncovered-content witness.
+   Composition identifies any implicated authored setting by ref. Projection binds
+   that ref to source coordinates from plan decoding, when available.
    Final results apply the shared [diagnostic priority](CLI.md#output), preserving
    stage/first-use order within peers.
 3. Composition prepares contents, resolves physical layout, checks compatibility
@@ -155,9 +157,10 @@ cardinality. Assembly results use `PartIdentity` keys for actual rename facts;
 missing or mismatched required facts fail processing. Fonts and PDF assembly
 remain sequential.
 
-The compose package owns measured geometry. `PageNumberLayout` shares the bundled
-overlay font's digit measurements across exclusion geometry, pre-assembly checks,
-font preparation and PDF painting. Contents measures its inherited font separately
+The compose package owns measured geometry. `PageNumberLayout` shares digit
+measurements across exclusion geometry, pre-assembly checks, font preparation
+and PDF painting. The same physical stroke width expands the measured ink
+envelope and drives PDF painting. Contents measures its inherited font separately
 for heading, row and label placement; the resolved label mapping is shared by
 contents, PageLabels, reports and overlay painting. Generated blocks carry semantic
 roles and link associations to the PDF adapter.

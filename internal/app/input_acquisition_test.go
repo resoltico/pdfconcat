@@ -44,8 +44,29 @@ func TestInitialSourceAcquisitionIsInvalid(t *testing.T) {
 		}
 		t.Log("native permission denial not available; absent/nonregular paths still exercised")
 	}
+	deniedDir := filepath.Join(dir, "denied-directory")
+	if err := os.Mkdir(deniedDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	deniedChild := filepath.Join(deniedDir, "source.pdf")
+	if err := pdffixture.Plain("inaccessible source").WriteFile(deniedChild); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(deniedDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(deniedDir, 0700); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := os.Stat(deniedChild); os.IsPermission(err) {
+		cases = append(cases, deniedChild)
+	} else {
+		t.Log("directory search permission denial unavailable")
+	}
 	for _, path := range cases {
-		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.Items{app.SourceItem{Ref: "input", Path: path}}, WorkingDir: dir})
+		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.Items{app.SourceItem{Ref: "input", Path: path}}, WorkingDir: dir, Output: filepath.Join(dir, "prospective.pdf")})
 		if r.Status != "invalid" || cli.ExitCode(r.Status) != 2 || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code.String() != "source_input_invalid" || r.Diagnostics[0].File != path {
 			t.Fatalf("initial acquisition: %+v", r)
 		}

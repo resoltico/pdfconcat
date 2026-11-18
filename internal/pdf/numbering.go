@@ -125,7 +125,7 @@ func applyPageNumbers(c context.Context, s *model.Context, parts []Part, prepare
 		doc.content = fmt.Appendf(doc.content, "%s %s %s %s %s %s cm\n", number(m[0]), number(m[1]), number(m[2]), number(m[3]), number(m[4]), number(m[5]))
 		doc.content = append(doc.content, "/Artifact BMC\n"...)
 		doc.appendColor(packet.Color{})
-		doc.appendText(placed, 0)
+		doc.appendText(placed, 0, numberLayout.StrokeWidth())
 		doc.content = append(doc.content, "EMC\nQ\n"...)
 		overlay, e := addStream(s, doc.content, nil)
 		if e != nil {

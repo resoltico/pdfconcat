@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Choose distinct PDF and report names, including when the files are absent. Check and build refuse known aliases and destinations whose parent is missing or is not a directory.
+- Layout errors can point to the responsible authored setting by file and byte location. Diagnostic previews count each consuming item once.
+- Painted page numbers have a thin white outline for dark backgrounds. Margins and text clearance account for the outline.
+- Use either a command's `--help` flag or `help COMMAND` to see the same help topic.
+
 - Diagnose temporary source storage failures separately from bad or changed inputs. Clean spills through the original directory if it moves.
 - Use less memory when checking or building image-heavy packets. Large source snapshots need writable temporary storage during inspection and assembly. [CLI](docs/CLI.md#reports-and-committed-state)
 - Reuse inspection of identical page selections and reduce processing for large generated packets, numbering and authored plans.

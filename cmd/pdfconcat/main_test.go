@@ -252,50 +252,45 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 	}
 	report := filepath.Join(dir, "safe-report.json")
 	badOutput := filepath.Join(dir, "missing-parent", "output.pdf")
-	r, exit, _ := invokeJSON(t, []string{"build", "-o", badOutput, source, "--report", report}, "")
-	if exit != 1 || r.Output.Published || !r.Report.Written || !hasDiagnostic(r, "output_write_failed") {
-		t.Fatalf("failed build report: %+v %d", r, exit)
+	for _, command := range []string{"check", "build"} {
+		r, exit, _ := invokeJSON(t, []string{command, "-o", badOutput, source, "--report", report, "--overwrite"}, "")
+		if exit != 2 || r.Output.Published || !r.Report.Written || !hasDiagnostic(r, "output_parent_invalid") {
+			t.Fatalf("invalid output parent: %+v %d", r, exit)
+		}
+		data, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validateResult(t, data)
 	}
-	data, err := os.ReadFile(report)
-	if err != nil {
-		t.Fatal(err)
-	}
-	validateResult(t, data)
 	out := filepath.Join(dir, "output.pdf")
 	badReport := filepath.Join(dir, "missing-parent", "report.json")
-	r, exit, _ = invokeJSON(t, []string{"build", "-o", out, source, "--report", badReport}, "")
-	if exit != 1 || !r.Output.Published || r.Report.Written || !hasDiagnostic(r, "report_write_failed") {
-		t.Fatalf("late report failure: %+v %d", r, exit)
-	}
-	pdfBytes, err := os.ReadFile(out)
-	if err != nil || !bytes.HasPrefix(pdfBytes, []byte("%PDF-")) {
-		t.Fatalf("late report failure lost PDF: %v", err)
+	r, exit, _ := invokeJSON(t, []string{"build", "-o", out, source, "--report", badReport}, "")
+	if exit != 2 || r.Output.Published || r.Report.Written || !hasDiagnostic(r, "report_parent_invalid") {
+		t.Fatalf("invalid report parent: %+v %d", r, exit)
 	}
 }
 
-func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
+func TestInitiallyAbsentReportAliasRefusedBeforePublication(t *testing.T) {
 	dir := t.TempDir()
-	realDir := filepath.Join(dir, "realDir")
-	alias := filepath.Join(dir, "alias")
-	if err := os.Mkdir(realDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(realDir, alias); err != nil {
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(dir, alias); err != nil {
 		t.Skipf("directory symlinks unavailable: %v", err)
 	}
 	source := filepath.Join(dir, "source.pdf")
 	if err := pdffixture.Plain("source").WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	out := filepath.Join(realDir, "packet.pdf")
+	out := filepath.Join(dir, "packet.pdf")
 	report := filepath.Join(alias, "packet.pdf")
-	r, exit, _ := invokeJSON(t, []string{"build", "-o", out, source, "--report", report, "--overwrite"}, "")
-	if exit != 2 || !r.Output.Published || r.Report.Written || !hasDiagnostic(r, "report_is_output") || hasDiagnostic(r, "report_write_failed") {
-		t.Fatalf("late alias outcome: %+v %d", r, exit)
-	}
-	data, err := os.ReadFile(out)
-	if err != nil || !bytes.HasPrefix(data, []byte("%PDF-")) {
-		t.Fatalf("report overwrote PDF: %v", err)
+	for _, command := range []string{"check", "build"} {
+		r, exit, _ := invokeJSON(t, []string{command, "-o", out, source, "--report", report, "--overwrite"}, "")
+		if exit != 2 || r.Output.Published || r.Report.Written || len(r.Diagnostics) != 1 || !hasDiagnostic(r, "report_is_output") {
+			t.Fatalf("%s collision: %+v %d", command, r, exit)
+		}
+		if _, err := os.Stat(out); !os.IsNotExist(err) {
+			t.Fatalf("%s created the protected name: %v", command, err)
+		}
 	}
 }
 
@@ -576,6 +571,49 @@ func TestInitialPlanSyntaxNamedFileAndStdin(t *testing.T) {
 					t.Fatalf("text outcome: %d %q %q", code, stdout.String(), stderr.String())
 				}
 			})
+		}
+	}
+}
+
+func TestLayoutDiagnosticsLocateEffectiveAuthoredValues(t *testing.T) {
+	input := "\ufeff{\r\n" +
+		"  \"version\": 8,\r\n" +
+		"  \"page_defaults\": {\"size\": \"A4\", \"text\": {\"width\": 40}},\r\n" +
+		"  \"items\": [\r\n" +
+		"    {\"page\": {\"text\": {\"value\": \"āRepeatedTokenWithoutSpaces\"}}},\r\n" +
+		"    {\"page\": {\"text\": {\"value\": \"āRepeatedTokenWithoutSpaces\", \"width\": 20}}},\r\n" +
+		"    {\"page\": {\"text\": {\"value\": \"A\", \"width\": 60, \"y\": 800}}}\r\n" +
+		"  ]\r\n}"
+	file := filepath.Join(t.TempDir(), "authored.json")
+	if err := os.WriteFile(file, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, planPath := range []string{file, "-"} {
+		r, exit, _ := invokeJSON(t, []string{"check", "--plan", planPath}, input)
+		if exit != 2 || len(r.Diagnostics) != 3 {
+			t.Fatalf("%s: %+v", planPath, r.Diagnostics)
+		}
+		label := file
+		if planPath == "-" {
+			label = "<stdin>"
+		}
+		for i, want := range []struct {
+			ref, token   string
+			line, column int
+		}{
+			{"/page_defaults/text/width", "40}", 3, 53},
+			{"/items/1/page/text/width", "20}", 6, 74},
+		} {
+			d := r.Diagnostics[i]
+			loc := d.Location
+			if d.Code.String() != "text_overflow" || d.File != label || loc == nil || loc.File != label ||
+				loc.Ref != want.ref || loc.Line != want.line || loc.Column != want.column ||
+				loc.Offset != int64(strings.Index(input, want.token)) {
+				t.Errorf("%s diagnostic %d: %+v, location %+v", planPath, i, d, loc)
+			}
+		}
+		if d := r.Diagnostics[2]; d.Location != nil || strings.Contains(d.Message, "using width") {
+			t.Errorf("unrelated vertical overflow attributed to width: %+v", d)
 		}
 	}
 }

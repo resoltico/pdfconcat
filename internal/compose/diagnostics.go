@@ -46,6 +46,23 @@ func diagnosticWidth(err error, item, widthOrigin string, page int64) diag.Diagn
 		code = diag.AssemblyFailed
 	case errors.As(err, &overflow):
 		code = diag.TextOverflow
+		if widthOrigin != "" && implicatedWidth(overflow) {
+			d := diag.Report(code, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
+			d.AuthoredRef = widthOrigin
+			return d
+		}
 	}
-	return diag.Report(code, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
+	return diag.Report(code, diag.GeneratedTextFailure(err.Error(), ""), item)
+}
+
+func implicatedWidth(overflow *typeset.OverflowError) bool {
+	if overflow.FixedWidthExceedsPage() {
+		return true
+	}
+	for _, finding := range overflow.Findings {
+		if finding.Kind == typeset.FindingWordTooWide {
+			return true
+		}
+	}
+	return false
 }

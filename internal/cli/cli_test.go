@@ -137,11 +137,14 @@ func TestUsageJSONSelectionAndFirstFailure(t *testing.T) {
 	}
 }
 
-func TestHelpAcceptsItsOwnHelpFlags(t *testing.T) {
-	for _, args := range [][]string{{"help", "--help"}, {"help", "-h"}} {
-		command, failure := cli.Parse(args)
-		if failure != nil || !command.Help || command.Name != "" {
-			t.Fatalf("%v: %+v %+v", args, command, failure)
+func TestHelpTopicsMatchCommandFlags(t *testing.T) {
+	for _, name := range []string{"build", "check", "schema", "version", "licenses", "help"} {
+		for _, args := range [][]string{{"help", name}, {name, "--help"}, {name, "-h"}} {
+			command, failure := cli.Parse(args)
+			if failure != nil || !command.Help || command.Name != name ||
+				!strings.HasPrefix(cli.Help(command.Name), "Usage: pdfconcat "+name) {
+				t.Fatalf("%v: %+v %+v", args, command, failure)
+			}
 		}
 	}
 }

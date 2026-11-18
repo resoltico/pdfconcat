@@ -6,13 +6,17 @@ package pdf
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/compose"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
@@ -32,6 +36,72 @@ func fitToForTest(c context.Context, s *model.Context, target *packet.FitPolicy)
 		return err
 	}
 	return fitContext(c, s, plans, origins)
+}
+
+func TestGeneratedFittingVerifiesResolvedOutputSize(t *testing.T) {
+	authored := packet.Size{Width: 599.5, Height: 799.5}
+	target := packet.Size{Width: 600, Height: 800}
+	assembly := Assembly{
+		Fitting: &packet.FitPolicy{Target: target, Tolerance: 1},
+		Parts: []Part{{
+			Part: packet.Part{
+				Leaf:  packet.Leaf{Kind: packet.PartPage, Ref: "generated", Count: 1},
+				Pages: 1, FirstPage: 1, LastPage: 1, Size: authored, OutputSize: authored,
+			},
+			Repeat:    1,
+			Generated: []compose.Page{{Width: authored.Width, Height: authored.Height}},
+		}},
+	}
+	var output bytes.Buffer
+	if _, err := Assemble(t.Context(), assembly, &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyAssembly(t.Context(), output.Bytes(), 1, assembly); err != nil {
+		t.Fatal(err)
+	}
+
+	const mismatch = "geometry differs from its resolved expectation"
+	requireRefusal := func(t *testing.T, err error, code diag.Code) {
+		t.Helper()
+		cause := errors.Unwrap(err)
+		if cause == nil || Diagnostic(err).Code != code || !strings.Contains(cause.Error(), mismatch) {
+			t.Fatalf("expected a geometry refusal, got %v (cause %v)", err, cause)
+		}
+	}
+	const changedWidth = 599.75
+	t.Run("serialized frame within matching allowance", func(t *testing.T) {
+		s, err := readOutput(t.Context(), output.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages, err := rawPages(t.Context(), s)
+		if err != nil || len(pages) != 1 {
+			t.Fatalf("expected one generated page, got %d: %v", len(pages), err)
+		}
+		box := types.NewRectangle(0, 0, changedWidth, authored.Height)
+		pages[0].dict["MediaBox"] = box.Array()
+		pages[0].dict["CropBox"] = box.Array()
+		if err := verifyPlannedGeometry(t.Context(), s, assembly); err == nil || !strings.Contains(err.Error(), mismatch) {
+			t.Fatalf("expected an in-memory geometry refusal, got %v", err)
+		}
+		var changed bytes.Buffer
+		if err := serialize(t.Context(), s, &changed); err != nil {
+			t.Fatal(err)
+		}
+		requireRefusal(t, VerifyAssembly(t.Context(), changed.Bytes(), 1, assembly), diag.OutputInvalid)
+	})
+	t.Run("changed resolved frame", func(t *testing.T) {
+		changed := assembly
+		changed.Parts = slices.Clone(assembly.Parts)
+		changed.Parts[0].OutputSize.Width = changedWidth
+		requireRefusal(t, VerifyAssembly(t.Context(), output.Bytes(), 1, changed), diag.OutputInvalid)
+		var refused bytes.Buffer
+		_, err := Assemble(t.Context(), changed, &refused)
+		requireRefusal(t, err, diag.AssemblyFailed)
+		if refused.Len() != 0 {
+			t.Fatalf("assembly wrote %d bytes before refusing", refused.Len())
+		}
+	})
 }
 
 func TestFittingFactsBindPolicyNativeGeometryAndCompleteRuns(t *testing.T) {

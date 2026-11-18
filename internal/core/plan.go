@@ -205,27 +205,6 @@ func (p Plan) Sources() iter.Seq[Leaf] {
 	}
 }
 
-// WithOverrides applies adapter-supplied canonical values to the admitted plan.
-// Structural facts and input ownership do not change.
-func (p Plan) WithOverrides(output string, fit *FitPolicy, timestamp *int64) Plan {
-	p.output = output
-	if fit != nil {
-		p.fitting = copyValue(fit)
-	}
-	if p.timestamp == nil {
-		p.timestamp = copyValue(timestamp)
-	}
-	if p.metadata == nil {
-		p.metadata = &Metadata{}
-	}
-	if p.declaration != nil {
-		updated := *p.declaration
-		updated.Output, updated.Fitting, updated.Timestamp, updated.Metadata = p.output, p.fitting, p.timestamp, p.metadata
-		p.declaration = &updated
-	}
-	return p
-}
-
 // Sections returns the declared section ancestry in preorder.
 func (p Plan) Sections() []Section { return append([]Section(nil), p.sections...) }
 

@@ -71,7 +71,7 @@ type decoder struct {
 
 // Decode charges the original input bytes, including an optional leading BOM.
 // The caller owns file/stream I/O and cancellation; this function reads no files.
-func Decode(data []byte, file, base string, resolvePath func(string, string) (string, error)) (packet.Plan, []diag.Diagnostic) {
+func Decode(data []byte, file, base string, resolvePath func(string, string) (string, error), overrides ...packet.PlanOverrides) (packet.Plan, []diag.Diagnostic) {
 	p := decoder{data: data, base: base, resolvePath: resolvePath}
 	if len(data) > MaxBytes {
 		return packet.Plan{}, []diag.Diagnostic{diag.New(diag.PlanTooLarge, "Plan exceeds 64 MiB.")}
@@ -82,7 +82,7 @@ func Decode(data []byte, file, base string, resolvePath func(string, string) (st
 		input = input[3:]
 	}
 	p.d = jsontext.NewDecoder(bytes.NewReader(input))
-	result, err := p.document(base)
+	result, err := p.document(base, overrides)
 	if err == nil {
 		_, err = p.d.ReadToken()
 		if errors.Is(err, io.EOF) {
@@ -203,7 +203,7 @@ func (p *decoder) unknown(name string) error {
 	return p.fail(diag.PlanUnknownMember, fmt.Sprintf("Unknown member %q (names are case-sensitive).", name))
 }
 
-func (p *decoder) document(base string) (packet.Plan, error) {
+func (p *decoder) document(base string, overrides []packet.PlanOverrides) (packet.Plan, error) {
 	var result packet.Plan
 	var draft packet.Declaration
 	if p.d.PeekKind() == jsontext.KindInvalid {
@@ -320,7 +320,7 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 	}
 	draft.PageDefaults = defaults
 	draft.Items = p.resolveItems(nodes, scope)
-	result, ds := packet.AdmitDeclaration(draft)
+	result, ds := packet.AdmitDeclaration(draft, overrides...)
 	if len(ds) > 0 {
 		d := ds[0]
 		ref := ""

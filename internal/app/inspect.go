@@ -6,7 +6,6 @@ package app
 import (
 	"context"
 	"io"
-	"os"
 	"sync"
 
 	"github.com/resoltico/pdfconcat/internal/compose"
@@ -81,12 +80,9 @@ func inspect(ctx context.Context, p packet.Plan, workerCount int) *inspection {
 	}
 dispatch:
 	for index, use := range uses {
-		weight := 1
-		if info, err := os.Stat(use.path); err == nil {
-			// Allow space for object dictionaries and expanded streams as well as
-			// the encoded file. Oversized estimates run alone.
-			weight = int(min(int64(workUnits), 1+info.Size()/(2<<20)))
-		}
+		// Allow space for object dictionaries and expanded streams as well as
+		// the encoded file. Oversized estimates run alone.
+		weight := int(min(int64(workUnits), 1+files.SizeHint(use.path)/(2<<20)))
 		for held := range weight {
 			select {
 			case permits <- struct{}{}:

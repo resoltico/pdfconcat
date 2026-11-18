@@ -65,10 +65,10 @@ and one sealed input variant:
 - `Items` contains `SourceItem{Ref, Path}` and `BlankItem{Ref}` values. Each ref
   must be nonempty and unique within the request.
 
-`Output`, `Report`, `Overwrite` and an optional `FitTo` supply execution overrides.
-`app.ParseSheet` constructs a validated fitting size. The frontend captures the
-raw `SOURCE_DATE_EPOCH` value in `Request.SourceDateEpoch`; core parses it only
-when the plan has no authored timestamp. Core reads no process environment.
+`Output`, `Report`, `Overwrite` and an optional `Fitting` configure execution.
+The frontend captures `SOURCE_DATE_EPOCH` in `Request.SourceDateEpoch`. The
+application interprets it as a timestamp fallback. Core validates the authored
+declaration before applying checked execution overrides and freezing traversal.
 Invalid request metadata returns `request_invalid` before file I/O. Input storage
 must remain stable during execution. The core belongs to this repository's
 internal Go API; the CLI and the plan/result schemas define the external interfaces.

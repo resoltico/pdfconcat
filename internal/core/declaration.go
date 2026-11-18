@@ -354,12 +354,44 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 	return d, nil
 }
 
-// AdmitDeclaration is the only production plan constructor. Every call validates
-// and owns its input, including declarations previously normalized and then mutated.
-func AdmitDeclaration(input Declaration) (Plan, []diag.Diagnostic) {
+// PlanOverrides supplies execution values after full authored validation.
+type PlanOverrides struct {
+	Output            string
+	Fitting           *FitPolicy
+	TimestampFallback *int64
+}
+
+// AdmitDeclaration is the production plan constructor. It validates and owns
+// the authored declaration before applying any execution options or deriving
+// the immutable traversal.
+func AdmitDeclaration(input Declaration, overrides ...PlanOverrides) (Plan, []diag.Diagnostic) {
 	d, ds := ValidateDeclaration(input)
 	if len(ds) > 0 {
 		return Plan{}, ds
+	}
+	for _, config := range overrides {
+		if config.Output != "" {
+			if !utf8.ValidString(config.Output) || strings.ContainsRune(config.Output, 0) {
+				return Plan{}, []diag.Diagnostic{diag.New(diag.PathInvalid, "Paths must be valid UTF-8 without NUL.", "paths")}
+			}
+			d.Output = config.Output
+		}
+		if config.Fitting != nil {
+			policy, err := config.Fitting.Normalize()
+			if err != nil {
+				return Plan{}, []diag.Diagnostic{diag.New(diag.PlanValue, err.Error(), "fitting")}
+			}
+			d.Fitting = &policy
+		}
+		if d.Timestamp == nil && config.TimestampFallback != nil {
+			if timestamp := *config.TimestampFallback; timestamp < 0 || timestamp > MaxTimestamp {
+				return Plan{}, []diag.Diagnostic{diag.New(diag.PlanValue, "Timestamp is outside the supported UTC range.", "timestamp")}
+			}
+			d.Timestamp = copyValue(config.TimestampFallback)
+		}
+		if d.Metadata == nil {
+			d.Metadata = &Metadata{}
+		}
 	}
 	return preparePlan(d), nil
 }

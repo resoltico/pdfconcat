@@ -31,6 +31,16 @@ func Read(c context.Context, path string, limit int64) ([]byte, error) {
 	return readStream(c, f, limit)
 }
 
+// SizeHint estimates scheduling weight. Admission checks the actual file
+// descriptor separately and owns diagnostics about its readability.
+func SizeHint(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return 0
+	}
+	return info.Size()
+}
+
 // OpenRegular opens a named regular input for a bounded or seekable reader.
 func OpenRegular(c context.Context, path string, limit int64) (*os.File, error) {
 	if err := c.Err(); err != nil {

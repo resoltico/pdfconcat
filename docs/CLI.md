@@ -199,6 +199,12 @@ Existing inputs and the output are protected by file identity. Missing inputs
 are protected only by cleaned path spelling; reports are rechecked after PDF
 publication.
 
+Large source PDFs use private snapshots in the operating system's temporary
+directory during inspection and assembly. Allow space for concurrent source
+inspections and the largest individual assembly source. Snapshot creation or
+writing failures identify the input and the failed stage. PDF assembly verifies
+the bytes staged at the destination before publishing them.
+
 Output/report files use ordinary umask permissions; replacements keep the old
 mode. Publication writes and syncs a sibling temporary file first. Its bounded
 name is independent of the destination basename, so staging does not reduce the

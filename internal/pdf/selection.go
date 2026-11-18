@@ -4,9 +4,12 @@
 package pdf
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
+	"strconv"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -24,17 +27,22 @@ type SelectionRequest struct {
 // Inspect reads and validates a whole source once. Each ephemeral view
 // owns its containers; stream bytes stay immutable and shared during inspection.
 func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
+	return InspectReader(c, bytes.NewReader(data), sha256.Sum256(data), int64(len(data)), policy, requests)
+}
+
+// InspectReader admits a seekable snapshot with its acquisition facts.
+func InspectReader(c context.Context, reader io.ReadSeeker, digest [32]byte, size int64, policy packet.StructurePolicy, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
 	occurrences = make([]*OccurrenceFacts, len(requests))
 	defer func() {
-		facts.SHA256 = sha256.Sum256(data)
-		facts.Bytes = int64(len(data))
+		facts.SHA256 = digest
+		facts.Bytes = size
 		if value := recover(); value != nil {
 			d := diag.Report(diag.SourceProcessingFailed, diag.ThePDFBackendFailedUnexpectedly())
 			d.Detail = fmt.Sprint(value)
 			ds = append(ds, d)
 		}
 	}()
-	s, origins, findings, err := readSource(c, data, policy)
+	s, origins, findings, err := readSourceReader(c, reader, policy)
 	ds = append(ds, findings...)
 	if err != nil {
 		if s != nil && s.XRefTable != nil {
@@ -81,123 +89,150 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
 		}
 	}
+	type analysisKey struct {
+		ranges string
+		fitted bool
+		policy packet.FitPolicy
+	}
+	type analysis struct {
+		facts    *OccurrenceFacts
+		findings []diag.Diagnostic
+	}
+	cache := make(map[analysisKey]analysis)
 	for index, request := range requests {
+		if err := c.Err(); err != nil {
+			return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
+		}
 		ranges, err := selectionRanges(request.Pages, s.PageCount)
 		if err == nil && !wholeSelection(ranges, s.PageCount) && (facts.HasFields || facts.HasWidgets) {
 			err = refuse(diag.SourceSelectionFormUnsupported, diag.PartialSelectionOfSourcesContainingFormFieldsOrWidgetsIs())
 		}
+		var key analysisKey
+		var fitting *packet.FitPolicy
+		if err == nil && request.Fitting != nil {
+			normalized, e := request.Fitting.Normalize()
+			err = e
+			if err == nil {
+				fitting = &normalized
+				key.fitted, key.policy = true, normalized
+			}
+		}
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 			continue
 		}
-		view, err := selectionView(c, s)
-		if err != nil {
-			d := diagnostic(err, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
+		var encoded []byte
+		for _, span := range ranges {
+			encoded = strconv.AppendInt(encoded, int64(span.First), 10)
+			encoded = append(encoded, '-')
+			encoded = strconv.AppendInt(encoded, int64(span.Last), 10)
+			encoded = append(encoded, ',')
 		}
-		removed, err := projectSelection(c, view, ranges, origins)
-		if err != nil {
-			d := diagnostic(err, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
+		key.ranges = string(encoded)
+		analyzed, known := cache[key]
+		if !known {
+			analyzed.facts, analyzed.findings = analyzeSelection(c, s, origins, ranges, fitting, policy)
+			cache[key] = analyzed
 		}
-		for _, d := range navigationDiagnostics(removed) {
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-		}
-		uri, e := uriBaseWarnings(c, view, origins, false)
-		for _, d := range uri {
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-		}
-		if e != nil {
-			d := diagnostic(e, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
-		}
-		geometries, e := pageGeometries(c, view)
-		if e != nil {
-			d := diagnostic(e, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
-		}
-		selected, _, err := observe(c, view, origins, request.Fitting, geometries)
-		if err != nil {
-			d := diagnostic(err, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
-		}
-		selected.Selection = ranges
-		if selected.UncoveredLocation != nil && selected.UncoveredLocation.Page > 0 {
-			loc := *selected.UncoveredLocation
-			loc.Page = originalSelectionPage(ranges, loc.Page)
-			selected.UncoveredLocation = &loc
-		}
-		selected.PDF20AppearanceIssue.Site.Page = originalSelectionPage(ranges, selected.PDF20AppearanceIssue.Site.Page)
-		selected.OutlineDepth, err = outlineDepth(c, view)
-		if err != nil {
-			d := diagnostic(err, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
-		}
-
-		// Publish complete metric knowledge before any later compatibility/rehearsal refusal.
-		selectedFacts := selected.OccurrenceFacts
-		occurrences[index] = &selectedFacts
-		selectedFacts.fitFindings, e = fittingFindings(c, view, geometries, selectedFacts.fitting, origins)
-		if e != nil {
-			d := diagnostic(e, diag.SourceInvalid)
-			d.Items = []string{request.Item}
-			ds = append(ds, d)
-			continue
-		}
-		for _, finding := range selectedFacts.fitFindings {
+		occurrences[index] = analyzed.facts
+		for _, finding := range analyzed.findings {
 			finding.Items = []string{request.Item}
 			ds = append(ds, finding)
 		}
-		if diag.Outcome(selectedFacts.fitFindings) != "ok" {
-			continue
-		}
-		if policy != packet.StructureDiscard {
-			root, e := structureRoot(view)
-			if e == nil && root != nil {
-				e = pruneStructure(c, view)
-				if e == nil && request.Fitting != nil {
-					e = fitContext(c, view, selectedFacts.fitting, origins)
-				}
-				if e == nil && request.Fitting != nil {
-					root, e = structureRoot(view)
-					if e == nil {
-						var part structurePart
-						part, e = captureStructurePart(view, root)
-						if e == nil {
-							e = combineStructure(c, view, []structurePart{part})
-						}
-					}
-				}
-				if e == nil && request.Fitting != nil {
-					e = validateStructure(c, view)
-				}
-			}
-			if e != nil {
-				d := diagnostic(e, diag.SourceInvalid)
-				d.Items = []string{request.Item}
-				ds = append(ds, d)
-				continue
-			}
-		}
-
 	}
 	return facts, occurrences, ds
+}
+
+func analyzeSelection(c context.Context, s *model.Context, origins sourceOrigins, ranges []packet.PageRange, fitting *packet.FitPolicy, policy packet.StructurePolicy) (facts *OccurrenceFacts, ds []diag.Diagnostic) {
+	view, err := selectionView(c, s)
+	if err != nil {
+		d := diagnostic(err, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+	removed, err := projectSelection(c, view, ranges, origins)
+	if err != nil {
+		d := diagnostic(err, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+	ds = append(ds, navigationDiagnostics(removed)...)
+	uri, e := uriBaseWarnings(c, view, origins, false)
+	ds = append(ds, uri...)
+	if e != nil {
+		d := diagnostic(e, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+	geometries, e := pageGeometries(c, view)
+	if e != nil {
+		d := diagnostic(e, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+	selected, _, err := observe(c, view, origins, fitting, geometries)
+	if err != nil {
+		d := diagnostic(err, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+	selected.Selection = ranges
+	if selected.UncoveredLocation != nil && selected.UncoveredLocation.Page > 0 {
+		loc := *selected.UncoveredLocation
+		loc.Page = originalSelectionPage(ranges, loc.Page)
+		selected.UncoveredLocation = &loc
+	}
+	selected.PDF20AppearanceIssue.Site.Page = originalSelectionPage(ranges, selected.PDF20AppearanceIssue.Site.Page)
+	selected.OutlineDepth, err = outlineDepth(c, view)
+	if err != nil {
+		d := diagnostic(err, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+
+	// Publish complete metric knowledge before any later compatibility/rehearsal refusal.
+	selectedFacts := selected.OccurrenceFacts
+	facts = &selectedFacts
+	selectedFacts.fitFindings, e = fittingFindings(c, view, geometries, selectedFacts.fitting, origins)
+	if e != nil {
+		d := diagnostic(e, diag.SourceInvalid)
+		ds = append(ds, d)
+		return facts, ds
+	}
+	ds = append(ds, selectedFacts.fitFindings...)
+	if diag.Outcome(selectedFacts.fitFindings) != "ok" {
+		return facts, ds
+	}
+	if policy != packet.StructureDiscard {
+		root, e := structureRoot(view)
+		if e == nil && root != nil {
+			e = pruneStructure(c, view)
+			if e == nil && fitting != nil {
+				e = fitContext(c, view, selectedFacts.fitting, origins)
+			}
+			if e == nil && fitting != nil {
+				root, e = structureRoot(view)
+				if e == nil {
+					var part structurePart
+					part, e = captureStructurePart(view, root)
+					if e == nil {
+						e = combineStructure(c, view, []structurePart{part})
+					}
+				}
+			}
+			if e == nil && fitting != nil {
+				e = validateStructure(c, view)
+			}
+		}
+		if e != nil {
+			d := diagnostic(e, diag.SourceInvalid)
+			ds = append(ds, d)
+			return facts, ds
+		}
+	}
+	return facts, ds
 }
 
 func selectionRanges(ranges []packet.PageRange, count int) ([]packet.PageRange, error) {

@@ -701,10 +701,13 @@ func testAssembly(t *testing.T, layout packet.Layout, files map[string]SourceFac
 		a.Parts[i] = Part{Part: part, Repeat: 1}
 		switch part.Kind {
 		case packet.PartSource:
-			a.Parts[i].Data, _ = os.ReadFile(part.Source)
+			data, err := os.ReadFile(part.Source)
+			if err == nil {
+				a.Parts[i].Input = pdffixture.SourceInput(data)
+			}
 			view := views[part.Ref]
 			if fit != nil {
-				_, slots, ds := Inspect(t.Context(), a.Parts[i].Data, "", []SelectionRequest{{Item: part.Ref, Pages: view.Selection, Fitting: fit}})
+				_, slots, ds := Inspect(t.Context(), data, "", []SelectionRequest{{Item: part.Ref, Pages: view.Selection, Fitting: fit}})
 				if len(slots) != 1 || slots[0] == nil {
 					t.Fatalf("fixture fitting admission: %+v", ds)
 				}
@@ -772,5 +775,28 @@ func TestAnnotationIssueLocationsRetainOriginalPage(t *testing.T) {
 	}
 	if view.AnnotationFittingIssue.Page != 1 {
 		t.Fatal("selected ordinal was confused with the original location")
+	}
+}
+
+func TestInspectionSharesOnlyEquivalentSelectionAnalysis(t *testing.T) {
+	doc := pdffixture.Pages("Selection cache", 3)
+	ranges := func(a, b int) []packet.PageRange {
+		return []packet.PageRange{{First: a, Last: b}}
+	}
+	policy := packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 420})
+	different := *policy
+	different.Tolerance = 1
+	requests := []SelectionRequest{
+		{Item: "all", Fitting: policy},
+		{Item: "adjacent", Pages: append(ranges(1, 1), ranges(2, 3)...), Fitting: policy},
+		{Item: "fitting", Pages: ranges(1, 3), Fitting: &different},
+		{Item: "partial", Pages: ranges(1, 2), Fitting: policy},
+	}
+	_, views, findings := Inspect(t.Context(), doc.Bytes(), packet.StructurePreserve, requests)
+	if diag.Outcome(findings) != diag.OK {
+		t.Fatal(findings)
+	}
+	if views[0] == nil || views[0] != views[1] || views[0] == views[2] || views[0] == views[3] || views[3].Pages != 2 {
+		t.Fatal("selection analysis did not follow normalized ranges and fitting policy")
 	}
 }

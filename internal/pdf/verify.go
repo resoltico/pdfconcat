@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -16,12 +17,16 @@ import (
 // readOutput checks serialized output without source normalization. Catalog
 // policy is checked before validation, which may otherwise alter the document.
 func readOutput(c context.Context, data []byte) (*model.Context, error) {
+	return readOutputReader(c, bytes.NewReader(data))
+}
+
+func readOutputReader(c context.Context, reader io.ReadSeeker) (*model.Context, error) {
 	conf, err := configuration()
 	if err != nil {
 		return nil, err
 	}
 	conf.ValidationMode = model.ValidationStrict
-	s, err := api.ReadContext(c, bytes.NewReader(data), conf)
+	s, err := api.ReadContext(c, reader, conf)
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +64,14 @@ func readOutput(c context.Context, data []byte) (*model.Context, error) {
 	if form["XFA"] != nil {
 		return nil, errors.New("XFA remains in output")
 	}
-	if err = checkDocument(c, s); err != nil {
+	pages, err := rawPages(c, s)
+	if err != nil {
 		return nil, err
 	}
-	report, err := validatePreservingPages(c, s)
+	if err = checkDocument(c, s, pages); err != nil {
+		return nil, err
+	}
+	observed, report, err := validateObservedPages(c, s, pages)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +79,7 @@ func readOutput(c context.Context, data []byte) (*model.Context, error) {
 		return nil, repair
 	}
 
-	if err := validateContentEncoding(c, s); err != nil {
+	if err := validateObservedEncoding(c, s, observed); err != nil {
 		return nil, err
 	}
 	if err := validateOutputFormEncoding(c, s); err != nil {

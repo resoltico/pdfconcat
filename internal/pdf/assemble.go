@@ -4,8 +4,8 @@
 package pdf
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -70,14 +70,8 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		var s *model.Context
 		var origins sourceOrigins
 		if part.Source != "" {
-			data := part.Data
 			inspected := part.Occurrence.File
-			if sha256.Sum256(data) != inspected.SHA256 {
-				return result, refuse(diag.SourceChanged, diag.SourceBytesChangedAfterInspectionS(part.Source))
-			}
-			// Inspection already reported source findings; re-admission enforces the
-			// same policy against the bytes just checked above.
-			s, origins, _, err = readSource(c, data, a.Structure)
+			s, origins, err = admitSnapshot(c, part, a.Structure)
 			if err != nil {
 				return result, err
 			}
@@ -129,24 +123,28 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				return result, err
 			}
 		}
-		var plans fittingPlan
 		if part.Source != "" {
-			plans = part.Occurrence.Facts.fitting
+			err = fitContext(c, s, part.Occurrence.Facts.fitting, origins)
 		} else {
-			geometries, e := pageGeometries(c, s)
+			pages, e := rawPages(c, s)
 			if e != nil {
 				return result, e
 			}
-			origins, e = sourceOriginsFor(c, s)
+			geometries, e := geometriesForPages(c, s, pages)
 			if e != nil {
 				return result, e
 			}
-			plans, e = planFitting(geometries, a.Fitting, part.Repeat, origins)
+			origins, e = sourceOriginsForPages(c, s, pages)
 			if e != nil {
 				return result, e
 			}
+			plans, e := planFitting(geometries, a.Fitting, part.Repeat, origins)
+			if e != nil {
+				return result, e
+			}
+			err = fitGeometries(c, s, geometries, plans, origins)
 		}
-		if err = fitContext(c, s, plans, origins); err != nil {
+		if err != nil {
 			return result, err
 		}
 		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage, origins)
@@ -324,13 +322,13 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 }
 
 // verify owns reopening, panic classification and the serialized output checks.
-func verify(c context.Context, data []byte, expected int64, a *Assembly) (err error) {
+func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.OutputInvalid, diag.TheComposedPDFCouldNotBeVerified(), fmt.Errorf("%v", value))
 		}
 	}()
-	s, err := readOutput(c, data)
+	s, err := readOutputReader(c, reader)
 	if err != nil {
 		return pdfFailure(diag.OutputInvalid, diag.TheComposedPDFFailedOutputVerification(), err)
 	}
@@ -348,10 +346,35 @@ func verify(c context.Context, data []byte, expected int64, a *Assembly) (err er
 	return nil
 }
 
+func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) (*model.Context, sourceOrigins, error) {
+	changed := func() error {
+		return refuse(diag.SourceChanged, diag.SourceBytesChangedAfterInspectionS(part.Source))
+	}
+	if part.Input == nil {
+		return nil, sourceOrigins{}, changed()
+	}
+	reader, digest, err := part.Input.Open(c)
+	if err != nil {
+		return nil, sourceOrigins{}, pdfFailure(diag.SourceChanged, diag.PDFProcessingFailure(err.Error()), err)
+	}
+	defer func() { _ = reader.Close() }()
+	if digest != part.Occurrence.File.SHA256 {
+		return nil, sourceOrigins{}, changed()
+	}
+	// Re-admission is the fallback for mutable backend graphs. The acquired
+	// bytes are fixed, and the compiled selection facts retain original sites.
+	s, origins, _, err := readSourceReader(c, reader, policy)
+	if err == nil {
+		// The read stage materializes lazy parsed objects before returning.
+		s.Read.RS = nil
+	}
+	return s, origins, err
+}
+
 // Diagnostic preserves typed product failures at the application boundary.
 func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, diag.AssemblyFailed) }
 
 // Verify checks serialized page count and catalog policy without authored expectations.
 func Verify(c context.Context, data []byte, expected int64) error {
-	return verify(c, data, expected, nil)
+	return verify(c, bytes.NewReader(data), expected, nil)
 }

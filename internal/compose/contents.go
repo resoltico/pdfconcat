@@ -34,7 +34,11 @@ type Contents struct {
 // PrepareContents wraps titles with a conservative fixed digit column, before
 // any parity or section target is known. There is no pagination fixed point.
 func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFacts, fonts map[packet.Font]*typeset.Font, numberLayout *PageNumberLayout) (*Contents, []diag.Diagnostic) {
+	if !j.HasContents() {
+		return nil, nil
+	}
 	leaves, sections := j.Leaves(), j.Sections()
+	numbers := j.PageNumbers()
 	var contents *packet.ContentsItem
 	pointer := ""
 	bound := int64(0)
@@ -47,7 +51,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 	}
 	for _, leaf := range leaves {
-		if j.PageNumbers() != nil && j.PageNumbers().Eligible(leaf.Kind, leaf.NumberingEnabled) {
+		if numbers != nil && numbers.Eligible(leaf.Kind, leaf.NumberingEnabled) {
 			anyEligible = true
 		}
 		switch leaf.Kind {
@@ -67,8 +71,8 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	}
 	addBound(int64(len(sections)))
 	addBound(int64(j.OddStarts()))
-	if j.PageNumbers() != nil {
-		addBound(j.PageNumbers().First() - 1)
+	if numbers != nil {
+		addBound(numbers.First() - 1)
 	}
 	fail := func(message diag.Explanation, item string) (*Contents, []diag.Diagnostic) {
 		return nil, []diag.Diagnostic{diag.Report(diag.TextOverflow, message, pointer, item)}
@@ -83,14 +87,14 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
 	}
 	numberWidth := float64(len(strconv.FormatInt(max(bound, 1), 10))) * digits.CellWidth
-	if j.PageNumbers() != nil && !anyEligible {
+	if numbers != nil && !anyEligible {
 		numberWidth = 0
 	}
 	bottom, top := 36.0, size.Height-36
 	eligible := false
 	for _, leaf := range leaves {
-		if leaf.Kind == packet.PartContents && j.PageNumbers() != nil {
-			eligible = j.PageNumbers().Eligible(leaf.Kind, leaf.NumberingEnabled)
+		if leaf.Kind == packet.PartContents && numbers != nil {
+			eligible = numbers.Eligible(leaf.Kind, leaf.NumberingEnabled)
 		}
 	}
 	if numberLayout != nil && eligible {
@@ -119,7 +123,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	dashBounds := paintedBounds(dash)
 	numberWidth = math.Max(numberWidth, dashBounds.Width)
 	labelBottom, labelTop := digits.Bottom, digits.Top
-	if j.PageNumbers() != nil {
+	if numbers != nil {
 		dashBaseline := dash.Lines[0].Baseline
 		labelBottom = math.Min(labelBottom, dashBounds.Y-dashBaseline)
 		labelTop = math.Max(labelTop, dashBounds.Y+dashBounds.Height-dashBaseline)

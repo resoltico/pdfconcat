@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
+
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 
 	"os/exec"
@@ -263,10 +265,13 @@ func testAssembly(t *testing.T, layout packet.Layout, files map[string]pdf.Sourc
 		a.Parts[i] = pdf.Part{Part: part, Generated: pages[i], Repeat: 1}
 		switch part.Kind {
 		case packet.PartSource:
-			a.Parts[i].Data, _ = os.ReadFile(part.Source)
+			data, err := os.ReadFile(part.Source)
+			if err == nil {
+				a.Parts[i].Input = pdffixture.SourceInput(data)
+			}
 			view := views[part.Ref]
 			if fit != nil {
-				_, slots, ds := pdf.Inspect(t.Context(), a.Parts[i].Data, "", []pdf.SelectionRequest{{Item: part.Ref, Pages: view.Selection, Fitting: fit}})
+				_, slots, ds := pdf.Inspect(t.Context(), data, "", []pdf.SelectionRequest{{Item: part.Ref, Pages: view.Selection, Fitting: fit}})
 				if len(slots) != 1 || slots[0] == nil {
 					t.Fatalf("fixture fitting admission: %+v", ds)
 				}

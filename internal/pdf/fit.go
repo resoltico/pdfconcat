@@ -54,7 +54,12 @@ func fitContext(c context.Context, s *model.Context, plans fittingPlan, origins 
 	if err != nil {
 		return err
 	}
-	if err = bindFitting(geometries, plans); err != nil {
+	return fitGeometries(c, s, geometries, plans, origins)
+}
+
+// fitGeometries consumes geometry tracked in the current graph revision.
+func fitGeometries(c context.Context, s *model.Context, geometries []pageGeometry, plans fittingPlan, origins sourceOrigins) error {
+	if err := bindFitting(geometries, plans); err != nil {
 		return err
 	}
 	findings, e := fittingFindings(c, s, geometries, plans, origins)

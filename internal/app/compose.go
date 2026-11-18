@@ -23,9 +23,9 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	out := &composition{}
 	shapes := inspected.sourceFacts()
 	var numberLayout *compose.PageNumberLayout
-	if j.PageNumbers() != nil {
+	if numbers := j.PageNumbers(); numbers != nil {
 		var err error
-		numberLayout, err = compose.NewPageNumberLayout(inspected.fonts[packet.Font{}], *j.PageNumbers())
+		numberLayout, err = compose.NewPageNumberLayout(inspected.fonts[packet.Font{}], *numbers)
 		if err != nil {
 			out.diagnostics = append(out.diagnostics, compose.Diagnostic(err, "/page_numbers"))
 			return out
@@ -51,7 +51,7 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	if j.PageNumbers() != nil {
+	if numberLayout != nil {
 		for _, part := range layout.Parts {
 			if _, ok := packet.NumberAt(layout.Numbering, part.FirstPage); !ok {
 				continue
@@ -96,7 +96,7 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	prepared, ds := compose.LayOut(c, layout, inspected.fonts)
+	prepared, ds := compose.LayOut(c, layout, inspected.fonts, numberLayout)
 	out.diagnostics = append(out.diagnostics, ds...)
 	if contents != nil {
 		generated, ds := contents.Finish(layout)

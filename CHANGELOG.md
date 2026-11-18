@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Use less memory when checking or building image-heavy packets. Large source snapshots need writable temporary storage during inspection and assembly. [CLI](docs/CLI.md#reports-and-committed-state)
+- Reuse inspection of identical page selections and reduce processing for large generated packets, numbering and authored plans.
+- Stream full JSON reports to staging and avoid building full report records for ordinary CLI summaries.
+
 ## [0.14.0] - 2026-11-18
 
 - Use plan version 8 and replace root `fit_to` with `fitting.target`. Update result, report and version JSON readers to format 10. [Plan](docs/PLAN.md#selective-fitting-and-source-geometry)

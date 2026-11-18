@@ -24,7 +24,7 @@ func TestLayoutCancellationOwnsInterruptionSentence(t *testing.T) {
 		}
 		defer cancel()
 		layout := packet.Layout{Parts: []packet.Part{{Leaf: packet.Leaf{Ref: "page", Kind: packet.PartPage, Page: &packet.PageStyle{}}}}}
-		_, ds := LayOut(ctx, layout, nil)
+		_, ds := LayOut(ctx, layout, nil, nil)
 		ds = append(ds, Diagnostic(ctx.Err(), "page"))
 		for _, d := range ds {
 			if d.Code != diag.Interrupted || d.Message != "The operation was interrupted: "+ctx.Err().Error()+"." || d.Detail != ctx.Err().Error() {

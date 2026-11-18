@@ -4,10 +4,12 @@
 package pdf
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -114,6 +116,10 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 }
 
 func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
+	return readSourceReader(c, bytes.NewReader(data), policy)
+}
+
+func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.SourceProcessingFailed, diag.ThePDFBackendFailedUnexpectedly(), fmt.Errorf("%v", value))
@@ -122,8 +128,25 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 	// pdfcpu v0.16.4 scans the whole file, including displaced headers.
 	// Recognition is deliberately weaker than parsing: a truncated recognizable
 	// header is malformed PDF, not a different input format.
-	if !bytes.Contains(data, []byte("%PDF-")) {
-		return nil, origins, nil, refuse(diag.SourceNotPDF, diag.TheSourceIsNotAPDFNoRecognizablePDFHeader())
+	// Most inputs start with the header. For displaced or truncated headers
+	// use streaming recognition with overlap, then let pdfcpu parse the file.
+	buffered := bufio.NewReaderSize(contentReader{context: c, reader: reader}, 4<<10)
+	header := []byte("%PDF-")
+	for {
+		chunk, readErr := buffered.Peek(buffered.Size())
+		if bytes.Contains(chunk, header) {
+			break
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil, origins, nil, refuse(diag.SourceNotPDF, diag.TheSourceIsNotAPDFNoRecognizablePDFHeader())
+		}
+		if readErr != nil {
+			return nil, origins, nil, readErr
+		}
+		_, _ = buffered.Discard(len(chunk) - len(header) + 1)
+	}
+	if _, err = reader.Seek(0, io.SeekStart); err != nil {
+		return nil, origins, nil, err
 	}
 	conf, err := configuration()
 	if err != nil {
@@ -131,7 +154,7 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 	}
 	conf.ValidationMode = model.ValidationStrict
 	conf.ZeroOffsetPolicy = model.AdmitUnreferencedZeroOffsets
-	s, err = api.ReadContext(c, bytes.NewReader(data), conf)
+	s, err = api.ReadContext(c, reader, conf)
 	if errors.Is(err, pdfcpu.ErrEncrypted) || errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) || s != nil && s.Encrypt != nil {
 		return s, origins, ds, refuse(diag.SourceEncrypted, diag.EncryptedSourcesAreUnsupportedIncludingPDFsThatOpenWithoutA())
 	}
@@ -157,7 +180,11 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 	if e != nil {
 		return s, origins, ds, pdfFailure(diag.SourceInvalid, diag.TheDeclaredSourceStructureCannotBePreservedUseStructureDiscard(), e)
 	}
-	if err = checkDocument(c, s); err != nil {
+	pages, err = rawPages(c, s)
+	if err != nil {
+		return s, origins, ds, err
+	}
+	if err = checkDocument(c, s, pages); err != nil {
 		return s, origins, ds, err
 	}
 	origins, err = sourceOriginsFor(c, s)
@@ -192,7 +219,7 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 	// producer differences while page/content preservation is checked directly.
 	s.Configuration.ValidationMode = model.ValidationRelaxed
 	s.XRefTable.ValidationMode = model.ValidationRelaxed
-	report, err := validatePreservingPages(c, s)
+	observed, report, err := validateObservedPages(c, s, pages)
 	findings, repair := validationNotices(report)
 	ds = append(ds, findings...)
 	if err != nil {
@@ -207,7 +234,7 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 	if err = validateStructure(c, s); err != nil {
 		return s, origins, ds, pdfFailure(diag.SourceInvalid, diag.TheSourceStructureIsMalformedOrUnsupported(), err)
 	}
-	if err = validateContentEncoding(c, s); err != nil {
+	if err = validateObservedEncoding(c, s, observed); err != nil {
 		return s, origins, ds, err
 	}
 
@@ -216,13 +243,9 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 
 // checkDocument enforces structural and fidelity safeguards on original source
 // graphs and serialized output alike. Viewer normalization is not part of it.
-func checkDocument(c context.Context, s *model.Context) error {
-	pages, err := rawPages(c, s)
-	if err != nil {
-		return err
-	}
+func checkDocument(c context.Context, s *model.Context, pages []pageRef) error {
 	s.PageCount = len(pages)
-	if err = walkObjects(c, s, func(d types.Dict) error {
+	if err := walkObjects(c, s, func(d types.Dict) error {
 		if resource, ok := d["Resources"]; ok {
 			resourceDict, e := s.DereferenceDict(resource)
 			if e != nil {
@@ -308,7 +331,7 @@ func checkDocument(c context.Context, s *model.Context) error {
 	if rendering == types.Boolean(true) {
 		return refuse(diag.SourceDynamicForm, diag.TheSourceRequestsDynamicRenderingWhoseGeneratedAppearanceCompositionCannot())
 	}
-	if _, err = fields(c, s); err != nil {
+	if _, err := fields(c, s); err != nil {
 		return err
 	}
 	return nil
@@ -320,9 +343,9 @@ type pageTreeNode struct {
 }
 
 type pageRef struct {
-	ref  types.IndirectRef
-	dict types.Dict
-	node *pageTreeNode
+	ref    types.IndirectRef
+	dict   types.Dict
+	parent *pageTreeNode
 }
 
 // rawPages rejects content-replacing tree repair before pdfcpu validation runs.
@@ -331,8 +354,9 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	visited := map[types.IndirectRef]bool{}
-	var pages []pageRef
+	capacity := min(max(s.PageCount, 0), 100_000)
+	visited := make(map[types.IndirectRef]bool, capacity)
+	pages := make([]pageRef, 0, capacity)
 	var walk func(types.Object, int, *pageTreeNode) (int, error)
 	walk = func(o types.Object, depth int, parent *pageTreeNode) (int, error) {
 		if err := c.Err(); err != nil {
@@ -357,7 +381,6 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 		if err != nil {
 			return 0, err
 		}
-		node := &pageTreeNode{dict: d, parent: parent}
 		switch typ {
 		case types.Name("Page"):
 			kids, err := s.Dereference(d["Kids"])
@@ -367,9 +390,10 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			if kids != nil {
 				return 0, refuse(diag.SourceDamaged, diag.APageHasNonNullKidsReadersMayDropIts())
 			}
-			pages = append(pages, pageRef{ref: ref, dict: d, node: node})
+			pages = append(pages, pageRef{ref: ref, dict: d, parent: parent})
 			return 1, nil
 		case types.Name("Pages"):
+			node := &pageTreeNode{dict: d, parent: parent}
 			kids, err := s.DereferenceArray(d["Kids"])
 			if err != nil || len(kids) == 0 {
 				return 0, refuse(diag.SourceDamaged, diag.PagesRequiresNonemptyKids())

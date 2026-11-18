@@ -4,175 +4,255 @@
 package pdf
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"slices"
+	"strconv"
 
 	pdffont "github.com/pdfcpu/pdfcpu/pkg/pdfcpu/font"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
-// serialize writes the reachable, unencrypted object graph with canonical object
-// numbering. It uses public backend objects, but deliberately does not invoke the
-// backend writer: that writer invents dates and changes trailer IDs. Ordinary
-// xref tables avoid object-stream allocation and compression-order dependencies.
+// serialize writes a reachable, unencrypted graph with canonical object
+// numbering. Discovery validates objects and freezes PDF 2.0 font metrics
+// before any write, without retaining a second graph of remapped objects.
 func serialize(c context.Context, s *model.Context, w io.Writer) error {
 	if s.Encrypt != nil {
 		return errors.New("cannot serialize encrypted output")
 	}
-	type identity struct{ number, generation int }
-	ids := map[identity]int{}
-	var objects []types.Object
-	var pending []types.IndirectRef
-	var convert func(types.Object, int) (types.Object, error)
-	convert = func(o types.Object, depth int) (types.Object, error) {
-		if err := c.Err(); err != nil {
-			return nil, err
-		}
-		if depth > 256 {
-			return nil, errors.New("output direct-object nesting exceeds 256")
-		}
-		switch v := o.(type) {
-		case types.IndirectRef:
-			key := identity{v.ObjectNumber.Value(), v.GenerationNumber.Value()}
-			n, found := ids[key]
-			if !found {
-				n = len(objects) + 1
-				ids[key] = n
-				objects = append(objects, nil)
-				pending = append(pending, v)
-			}
-			return *types.NewIndirectRef(n, 0), nil
-		case types.Dict:
-			if s.PDF20() {
-				if typ, e := nameValue(s, v["Type"]); e != nil {
-					return nil, e
-				} else if typ == "Font" {
-					if _, e = pdffont.EnsureCoreFontMetrics(s.XRefTable, v); e != nil {
-						return nil, e
-					}
-				}
-			}
-			keys := make([]string, 0, len(v))
-			for k := range v {
-				keys = append(keys, k)
-			}
-			slices.Sort(keys)
-			d := types.Dict{}
-			for _, k := range keys {
-				x, err := convert(v[k], depth+1)
-				if err != nil {
-					return nil, err
-				}
-				d[k] = x
-			}
-			return d, nil
-		case types.StreamDict:
-			d := clonedDirectDict(v.Dict)
-			d["Length"] = types.Integer(len(v.Raw))
-			x, err := convert(d, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			dict, ok := x.(types.Dict)
-			if !ok {
-				return nil, errors.New("invalid converted stream dictionary")
-			}
-			v.Dict = dict
-			return v, nil
-		case types.Array:
-			a := make(types.Array, len(v))
-			for i, x := range v {
-				y, err := convert(x, depth+1)
-				if err != nil {
-					return nil, err
-				}
-				a[i] = y
-			}
-			return a, nil
-		case types.Float:
-			if math.IsNaN(v.Value()) || math.IsInf(v.Value(), 0) {
-				return nil, errors.New("nonfinite output PDF scalar")
-			}
-			return v, nil
-		case nil, types.Name, types.Integer, types.Boolean, types.StringLiteral, types.HexLiteral:
-			return o, nil
-		default:
-			return nil, fmt.Errorf("unsupported output object %T", o)
-		}
-	}
-	root, err := convert(*s.Root, 0)
-	if err != nil {
-		return err
-	}
-	trailer := types.Dict{"Root": root}
+	e := encoder{ctx: c, source: s, ids: make(map[types.IndirectRef]int)}
+	e.reference(*s.Root)
 	if s.Info != nil {
-		info, e := convert(*s.Info, 0)
-		if e != nil {
-			return e
-		}
-		trailer["Info"] = info
+		e.reference(*s.Info)
 	}
-	// Queue indirect objects so long legal reference chains cannot exhaust the
-	// call stack. Array order and sorted dictionary keys determine allocation.
-	for i := 0; i < len(pending); {
-		value, e := s.Dereference(pending[i])
-		if e != nil {
-			return e
+	next := 0
+	for next < len(e.order) {
+		ref := e.order[next]
+		next++
+		value, err := s.Dereference(ref)
+		if err != nil {
+			return err
 		}
 		if value == nil {
-			return fmt.Errorf("dangling output object %d", pending[i].ObjectNumber.Value())
+			return fmt.Errorf("dangling output object %d", ref.ObjectNumber.Value())
 		}
-		objects[i], e = convert(value, 0)
-		if e != nil {
-			return e
+		if err := e.object(value, 0); err != nil {
+			return err
 		}
-		i++
 	}
-	trailer["Size"] = types.Integer(len(objects) + 1)
+
 	out := &generatedOutput{writer: w, context: c}
-	write := func(text string) error { _, e := io.WriteString(out, text); return e }
-	if err = write("%PDF-" + s.XRefTable.Version().String() + "\n%\xe2\xe3\xcf\xd3\n"); err != nil {
-		return err
-	}
-	offsets := make([]int64, len(objects))
-	for i, o := range objects {
-		offsets[i] = out.n
-		if err = write(fmt.Sprintf("%d 0 obj\n", i+1)); err != nil {
+	e.sink = bufio.NewWriterSize(out, 64<<10)
+	e.text("%PDF-" + s.XRefTable.Version().String() + "\n%\xe2\xe3\xcf\xd3\n")
+	offsets := make([]int64, len(e.order))
+	for i, ref := range e.order {
+		if err := c.Err(); err != nil {
 			return err
 		}
-		if stream, ok := o.(types.StreamDict); ok {
-			if err = write(stream.PDFString() + "\nstream\n"); err != nil {
-				return err
-			}
-			if _, err = out.Write(stream.Raw); err != nil {
-				return err
-			}
-			if err = write("\nendstream"); err != nil {
-				return err
-			}
-		} else if err = write(o.PDFString()); err != nil {
+		offsets[i] = out.n + int64(e.sink.Buffered())
+		e.integer(int64(i + 1))
+		e.text(" 0 obj\n")
+		value, err := s.Dereference(ref)
+		if err != nil {
 			return err
 		}
-		if err = write("\nendobj\n"); err != nil {
+		if err := e.object(value, 0); err != nil {
 			return err
 		}
+		e.text("\nendobj\n")
+		if e.err != nil {
+			return e.err
+		}
 	}
-	start := out.n
-	if err = write(fmt.Sprintf("xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)); err != nil {
-		return err
-	}
+	start := out.n + int64(e.sink.Buffered())
+	e.text("xref\n0 ")
+	e.integer(int64(len(offsets) + 1))
+	e.text("\n0000000000 65535 f \n")
 	for _, offset := range offsets {
 		if offset > 9999999999 {
 			return errors.New("output exceeds classic xref offset range")
 		}
-		if err = write(fmt.Sprintf("%010d 00000 n \n", offset)); err != nil {
+		var scratch [20]byte
+		value := strconv.AppendInt(scratch[:0], offset, 10)
+		e.text("0000000000"[:10-len(value)])
+		e.bytes(value)
+		e.text(" 00000 n \n")
+	}
+	e.text("trailer\n<<")
+	if s.Info != nil {
+		e.text("/Info ")
+		e.reference(*s.Info)
+	}
+	e.text("/Root ")
+	e.reference(*s.Root)
+	e.text("/Size ")
+	e.integer(int64(len(offsets) + 1))
+	e.text(">>\nstartxref\n")
+	e.integer(start)
+	e.text("\n%%EOF\n")
+	if e.err != nil {
+		return e.err
+	}
+	if err := c.Err(); err != nil {
+		return err
+	}
+	return e.sink.Flush()
+}
+
+type encoder struct {
+	ctx    context.Context
+	source *model.Context
+	ids    map[types.IndirectRef]int
+	order  []types.IndirectRef
+	sink   *bufio.Writer
+	err    error
+}
+
+func (e *encoder) text(s string) {
+	if e.sink != nil && e.err == nil {
+		_, e.err = e.sink.WriteString(s)
+	}
+}
+
+func (e *encoder) bytes(b []byte) {
+	if e.sink != nil && e.err == nil {
+		_, e.err = e.sink.Write(b)
+	}
+}
+
+func (e *encoder) integer(n int64) {
+	if e.sink != nil {
+		var scratch [20]byte
+		e.bytes(strconv.AppendInt(scratch[:0], n, 10))
+	}
+}
+
+func (e *encoder) reference(ref types.IndirectRef) {
+	n := e.ids[ref]
+	if e.sink == nil {
+		if n == 0 {
+			e.order = append(e.order, ref)
+			e.ids[ref] = len(e.order)
+		}
+		return
+	}
+	if n == 0 && e.err == nil {
+		e.err = fmt.Errorf("unindexed output reference %d", ref.ObjectNumber.Value())
+		return
+	}
+	e.integer(int64(n))
+	e.text(" 0 R")
+}
+
+// Dictionaries put spaces before atoms whose first byte is not a delimiter.
+// Arrays retain the established byte format, including spaces before strings.
+func (e *encoder) object(value types.Object, depth int) error {
+	if err := e.ctx.Err(); err != nil {
+		return err
+	}
+	if depth > 256 {
+		return errors.New("output direct-object nesting exceeds 256")
+	}
+	switch v := value.(type) {
+	case nil:
+		e.text("null")
+	case types.IndirectRef:
+		e.reference(v)
+	case types.Integer:
+		e.integer(int64(v))
+	case types.Float:
+		if math.IsNaN(v.Value()) || math.IsInf(v.Value(), 0) {
+			return errors.New("nonfinite output PDF scalar")
+		}
+		if e.sink != nil {
+			e.text(v.PDFString())
+		}
+	case types.Dict:
+		return e.dict(v, depth, nil)
+	case types.StreamDict:
+		if depth != 0 {
+			return errors.New("output stream must be an indirect object")
+		}
+		n := len(v.Raw)
+		if err := e.dict(v.Dict, depth+1, &n); err != nil {
+			return err
+		}
+		e.text("\nstream\n")
+		e.bytes(v.Raw)
+		e.text("\nendstream")
+	case types.Array:
+		e.text("[")
+		for i, entry := range v {
+			if i > 0 {
+				switch entry.(type) {
+				case types.Dict, types.Array, types.Name:
+				default:
+					e.text(" ")
+				}
+			}
+			if err := e.object(entry, depth+1); err != nil {
+				return err
+			}
+		}
+		e.text("]")
+	case types.Name, types.Boolean, types.StringLiteral, types.HexLiteral:
+		if e.sink != nil {
+			e.text(v.PDFString())
+		}
+	default:
+		return fmt.Errorf("unsupported output object %T", value)
+	}
+	return e.err
+}
+
+func (e *encoder) dict(dict types.Dict, depth int, streamLength *int) error {
+	if depth > 256 {
+		return errors.New("output direct-object nesting exceeds 256")
+	}
+	if e.sink == nil && e.source.PDF20() {
+		typ, err := nameValue(e.source, dict["Type"])
+		if err != nil {
+			return err
+		}
+		if typ == "Font" {
+			if _, err := pdffont.EnsureCoreFontMetrics(e.source.XRefTable, dict); err != nil {
+				return err
+			}
+		}
+	}
+	var inline [12]string
+	keys := inline[:0]
+	for key := range dict {
+		keys = append(keys, key)
+	}
+	if _, exists := dict["Length"]; !exists && streamLength != nil {
+		keys = append(keys, "Length")
+	}
+	slices.Sort(keys)
+	e.text("<<")
+	for _, key := range keys {
+		value := dict[key]
+		if key == "Length" && streamLength != nil {
+			value = types.Integer(*streamLength)
+		}
+		if e.sink != nil {
+			e.text("/")
+			e.text(types.EncodeName(key))
+			switch value.(type) {
+			case types.Dict, types.Array, types.Name, types.StringLiteral, types.HexLiteral:
+			default:
+				e.text(" ")
+			}
+		}
+		if err := e.object(value, depth+1); err != nil {
 			return err
 		}
 	}
-	return write(fmt.Sprintf("trailer\n%s\nstartxref\n%d\n%%%%EOF\n", trailer.PDFString(), start))
+	e.text(">>")
+	return e.err
 }

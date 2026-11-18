@@ -180,7 +180,7 @@ func TestLeadingSourceRetainsInheritedAndExplicitLanguage(t *testing.T) {
 				}
 				page := int64(len(parts) + 1)
 				parts = append(parts, Part{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"},
-					Pages: 1, FirstPage: page, LastPage: page}, Data: data, Occurrence: &Occurrence{File: &facts, Facts: slots[0]}})
+					Pages: 1, FirstPage: page, LastPage: page}, Input: pdffixture.SourceInput(data), Occurrence: &Occurrence{File: &facts, Facts: slots[0]}})
 				authored := "ja-JP"
 				var out bytes.Buffer
 				if _, err := Assemble(t.Context(), Assembly{Parts: parts, Metadata: &packet.Metadata{Language: &authored}}, &out); err != nil {

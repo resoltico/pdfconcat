@@ -7,10 +7,10 @@ provided. The framework-free packet model lives in `internal/core` (package
 | Package | Responsibility |
 | --- | --- |
 | `cmd/pdfconcat` | Signals, streams, working directory, environment, GOMAXPROCS and build metadata capture |
-| `internal/cli` | Argument grammar, help, stdin, terminal/JSON rendering, caps and exit mapping |
+| `internal/cli` | Argument grammar, help, stdin, terminal/JSON rendering and exit mapping |
 | `internal/app` | Acquisition, original input reservation, inspection, composition, digest rechecks and publication ordering |
 | `internal/core` | Typed declarations, semantic validation, owned traversal, layout, vocabulary and domain facts |
-| `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence and complete execution facts |
+| `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence, summary caps and complete execution facts |
 | `internal/plan` | Strict, located plan v8 decoding with an explicit native path resolver |
 | `internal/compose` | Measured generated pages, contents and numbering |
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
@@ -44,9 +44,12 @@ cmd     -> cli
 
 Core and typeset read no files or process settings. Plan receives native path
 resolution explicitly; relative bases must already be absolute. Only files opens
-product input/output paths. PDF assembly receives the application's reread
-original bytes, checks their inspected digest, and re-applies source admission.
-The application reopens staged output and passes its bytes to strict verification.
+product input/output paths. The application acquires immutable source snapshots
+and schedules inspection by estimated parser work and the host worker count.
+The estimate governs scheduling and the PDF backend enforces its own per-input
+limits. Assembly rechecks source digests and independently admits mutable
+graphs. Its serializer discovers references before encoding to the staged sink.
+The application gives strict verification a fresh reader on the staged file.
 
 ## Frontend contract
 
@@ -69,6 +72,10 @@ when the plan has no authored timestamp. Core reads no process environment.
 Invalid request metadata returns `request_invalid` before file I/O. Input storage
 must remain stable during execution. The core belongs to this repository's
 internal Go API; the CLI and the plan/result schemas define the external interfaces.
+
+Request detail controls the returned result records. The CLI asks for a summary
+or bounded text preview. If requested, the full report projects its records
+incrementally while retaining the complete diagnostics and publication facts.
 
 `app.Schema` returns an owned copy of the plan or result schema. `cli.Version`
 projects explicit host build metadata, and `cli.ExitCode` maps the complete

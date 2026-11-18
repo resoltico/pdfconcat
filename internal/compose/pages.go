@@ -29,7 +29,7 @@ type PreparedPart struct {
 }
 
 // LayOut prepares page-item text and retains its measured facts.
-func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font) ([]PreparedPart, []diag.Diagnostic) {
+func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*typeset.Font, numberLayout *PageNumberLayout) ([]PreparedPart, []diag.Diagnostic) {
 	prepared := make([]PreparedPart, len(layout.Parts))
 	for index, part := range layout.Parts {
 		prepared[index].Owner = part.Identity()
@@ -55,13 +55,8 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 		}
 		style := p.Page
 		bottom, top := 0.0, p.Size.Height
-		if style.Text.Value.Value != "" && layout.PageNumbers != nil {
+		if style.Text.Value.Value != "" && numberLayout != nil {
 			if _, eligible := packet.NumberAt(layout.Numbering, p.FirstPage); eligible {
-				numberLayout, err := NewPageNumberLayout(fonts[packet.Font{}], *layout.PageNumbers)
-				if err != nil {
-					ds = append(ds, Diagnostic(err, p.Ref))
-					continue
-				}
 				bottom, top = numberLayout.Available(p.Size, p.OutputSize)
 			}
 		}

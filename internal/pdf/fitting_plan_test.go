@@ -111,7 +111,7 @@ func TestFittingFactsBindPolicyNativeGeometryAndCompleteRuns(t *testing.T) {
 	if diag.Outcome(ds) != "ok" || len(views) != 1 || views[0] == nil {
 		t.Fatal(ds)
 	}
-	a := Assembly{Fitting: &policy, Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Data: data}}}
+	a := Assembly{Fitting: &policy, Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Input: pdffixture.SourceInput(data)}}}
 	var output bytes.Buffer
 	if _, err := Assemble(t.Context(), a, &output); err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestChangedPreparedSelectionCannotReuseSameSizedPageOwner(t *testing.T) {
 	// The frames match exactly, but page two has a retained numeric self-target.
 	// It must never inherit page one's earlier coordinate/ownership admission.
 	views[0].Selection[0] = packet.PageRange{First: 2, Last: 2}
-	a := Assembly{Fitting: packet.DefaultFitPolicy(target), Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Data: d.Bytes()}}}
+	a := Assembly{Fitting: packet.DefaultFitPolicy(target), Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Input: pdffixture.SourceInput(d.Bytes())}}}
 	var output bytes.Buffer
 	_, err := Assemble(t.Context(), a, &output)
 	if err == nil || Diagnostic(err).Code != diag.SourceProcessingFailed || output.Len() != 0 {

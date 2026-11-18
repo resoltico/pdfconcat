@@ -24,7 +24,7 @@ type buildOutcome struct {
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j packet.Plan, composition *composition, overwrite bool) buildOutcome {
+func build(c context.Context, j packet.Plan, composition *composition, roles files.Roles) buildOutcome {
 	out := buildOutcome{output: outcome.Output{Path: j.Output()}}
 	layout, assembly := composition.layout, composition.assembly
 	var pages []compose.Page
@@ -49,28 +49,8 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 	hash := sha256.New()
 	counter := &countWriter{Writer: staged}
 	assembly.Fonts = embedded
-	// Acquire each original resource again at assembly. Repeated occurrences share
-	// immutable input bytes; their PDF graphs and digest/admission gates remain independent.
-	acquired := map[string][]byte{}
-	for index := range assembly.Parts {
-		part := &assembly.Parts[index]
-		if part.Source == "" {
-			continue
-		}
-		data, known := acquired[part.Source]
-		if !known {
-			var e error
-			data, e = files.Read(c, part.Source, 0)
-			if e != nil {
-				d := ioDiagnostic(diag.SourceChanged, e, part.Source)
-				d.Items = []string{part.Ref}
-				out.diagnostics = append(out.diagnostics, d)
-				return out
-			}
-			acquired[part.Source] = data
-		}
-		part.Data = data
-	}
+	sources := assemblySources(assembly.Parts)
+	defer sources.close()
 	assembled, err := pdf.Assemble(c, assembly, io.MultiWriter(counter, hash))
 	out.diagnostics = append(out.diagnostics, assembled.Diagnostics...)
 	out.diagnostics = append(out.diagnostics, bindAssemblyFacts(assembly.Parts, assembled, err == nil)...)
@@ -81,20 +61,30 @@ func build(c context.Context, j packet.Plan, composition *composition, overwrite
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
 	}
-	data, readErr := files.Read(c, staged.Path(), 0)
+	reader, readErr := files.OpenRegular(c, staged.Path(), 0)
 	if readErr != nil {
 		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputInvalid, readErr, j.Output()))
 		return out
 	}
-	if err = pdf.VerifyAssembly(c, data, layout.TotalPages, assembly); err != nil {
+	err = pdf.VerifyAssemblyReader(c, reader, layout.TotalPages, assembly)
+	closeErr := reader.Close()
+	if err != nil {
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
+		return out
+	}
+	if closeErr != nil {
+		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputInvalid, closeErr, j.Output()))
 		return out
 	}
 	if err = c.Err(); err != nil {
 		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
 		return out
 	}
-	published, err := staged.Commit(overwrite)
+	if ds := roles.CheckOutput(); hasErrors(ds) {
+		out.diagnostics = append(out.diagnostics, ds...)
+		return out
+	}
+	published, err := staged.Commit(roles.Overwrite)
 	out.output.Published = published
 	if published {
 		out.output.SHA256 = hex.EncodeToString(hash.Sum(nil))

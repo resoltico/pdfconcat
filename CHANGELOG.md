@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Plans require version 8. Replace root `fit_to` with `fitting.target` and update result, report and version JSON consumers to format 10. [Plan reference](docs/PLAN.md#selective-fitting-and-source-geometry)
+- Plans require version 8. Replace root `fit_to` with `fitting.target` and update result, report and version JSON consumers to format 10. [Plan](docs/PLAN.md#selective-fitting-and-source-geometry)
 - Choose an absolute fitting tolerance in points or physical units. It defaults to .01 pt. Zero requires exact dimensions, and 1 pt keeps integer-rounded A4.
 - `--fit-to` replaces the plan policy after validation. Use `--fit-tolerance` in the same invocation to change the replacement's .01 pt default.
 - Reports include expected generated `output_size` after layout resolves and retain geometry and counts on later refusals. Source geometry remains in exact `page_sizes` runs.

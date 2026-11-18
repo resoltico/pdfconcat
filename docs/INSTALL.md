@@ -31,7 +31,7 @@ sh ./install-pdfconcat.sh --install-dir "$HOME/.local/bin" --replace-unmanaged
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -InstallDir "$env:LOCALAPPDATA\Programs\PDFConcat" -ReplaceUnmanaged
+powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -InstallDir "$env:LOCALAPPDATA\Programs\PDFConcat" -ReplaceUnmanaged
 if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 ```
 
@@ -76,20 +76,30 @@ requires standard shell tools, tar and a SHA-256 tool (`sha256sum`, `shasum` or
 `openssl`). `less` is only for your review; the [README quick start](../README.md#install)
 omits it.
 
-On Windows, use Windows PowerShell 5.1 or PowerShell 7:
+On Windows, use Windows PowerShell 5.1 or PowerShell 7. The download commands
+save `install-pdfconcat.ps1` in your home directory, then return to your starting
+location. If you saved a reviewed copy elsewhere, use its full path in the
+examples that reuse the saved installer.
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-    Get-Content .\install-pdfconcat.ps1
-    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1
-    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+    $startingLocation = Get-Location
+    Set-Location -LiteralPath $HOME
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+        Get-Content -LiteralPath .\install-pdfconcat.ps1
+        powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1
+        if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+    } finally {
+        Set-Location -LiteralPath $startingLocation.Path
+    }
 }
 ```
 
-To pause for review, stop after the download, inspect the saved file, and run the
-child command only after a successful download. `ByPass` applies only to that
+To review the installer before running it, enter `Set-Location -LiteralPath $HOME`
+and run the download, inspection and child commands separately. Run the child
+command only after a successful download and review. `ByPass` applies only to that
 child session; it does not change persistent policy or override Group Policy.
 Use `pwsh` instead of `powershell` to select PowerShell 7. Managed systems can
 still refuse the program.
@@ -147,9 +157,15 @@ curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh \
     $ErrorActionPreference = 'Stop'
     $version = 'X.Y.Z'
     $uri = "https://github.com/resoltico/pdfconcat/releases/download/v${version}/install.ps1"
-    Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-    powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version $version
-    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+    $startingLocation = Get-Location
+    Set-Location -LiteralPath $HOME
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
+        powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Version $version
+        if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+    } finally {
+        Set-Location -LiteralPath $startingLocation.Path
+    }
 }
 ```
 
@@ -223,7 +239,7 @@ sh ./install-pdfconcat.sh --install-dir "$HOME/my tools" --no-modify-path
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -InstallDir "$env:LOCALAPPDATA\My Tools" -NoModifyPath
+powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -InstallDir "$env:LOCALAPPDATA\My Tools" -NoModifyPath
 if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 ```
 
@@ -291,13 +307,13 @@ sh ./install-pdfconcat.sh --uninstall
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Uninstall
+powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -Uninstall
 if ($LASTEXITCODE -ne 0) { throw "Uninstall failed ($LASTEXITCODE)." }
 ```
 
 Pass the same custom install directory used for installation, for example
 `sh ./install-pdfconcat.sh --uninstall --install-dir '/absolute/my tools'` or
-`powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1 -Uninstall -InstallDir 'C:\My Tools'`.
+`powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -Uninstall -InstallDir 'C:\My Tools'`.
 Removal does not need a download of the program. An offline saved copy of the installer can be
 run with the same uninstall option.
 

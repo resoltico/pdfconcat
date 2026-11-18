@@ -169,10 +169,8 @@ func Parse(args []string) (Command, *app.Result) {
 				}
 				fitting.Target = size
 			case "--fit-tolerance":
-				points, err := packet.Length(value)
-				if err == nil {
-					fitting.Tolerance, err = packet.NormalizeFitTolerance(points)
-				}
+				var err error
+				fitting.Tolerance, err = packet.ParseFitToleranceLength(value)
 				if err != nil {
 					return failure("usage_invalid_value", err.Error(), i)
 				}
@@ -310,6 +308,7 @@ func Help(command string) string {
 	}
 	if command == "build" || command == "check" {
 		b.WriteString("\nPlan contents use resolved labels, or an em dash (—) for unnumbered targets; links retain physical targets.\n")
+		b.WriteString("Custom sheet sizes use WIDTHxHEIGHT[unit]. Sizes and tolerances accept pt, mm, cm or in. For example, --fit-to 210x297mm --fit-tolerance 0.5mm.\n")
 		b.WriteString(packet.FittingNavigationDescription() + "\n")
 		b.WriteString(packet.FittingAppearanceDescription() + "\n")
 		b.WriteString(packet.FittingHitAreaDescription() + "\n")

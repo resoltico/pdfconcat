@@ -177,7 +177,7 @@ func bottomNumberOverflow(digits *typeset.Digits, size packet.Size, number int64
 	if len(advice) == 0 {
 		advice = append(advice, "The measured footer bounds or physical viewport are invalid.")
 	}
-	return placementError(fmt.Sprintf("Physical page %d cannot contain its page number at size %g pt and margin %g pt. %s", number, placed.Size, margin, strings.Join(advice, " ")))
+	return placementError(fmt.Sprintf("Page number %d at size %g pt and margin %g pt cannot fit. %s", number, placed.Size, margin, strings.Join(advice, " ")))
 }
 
 // Available returns the generated canvas interval left by the selected physical

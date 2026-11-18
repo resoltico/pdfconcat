@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -50,6 +51,12 @@ func TestEveryDocumentedJSONBlock(t *testing.T) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if filepath.Base(path) == "PLAN.md" {
+			row := "| `version` | Required integer token `" + strconv.Itoa(plan.Version) + "` |"
+			if !strings.Contains(string(data), row) {
+				t.Fatalf("plan member table must declare %q", row)
+			}
 		}
 		chunks := strings.Split(string(data), "```json\n")
 		for i, chunk := range chunks[1:] {

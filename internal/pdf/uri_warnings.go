@@ -12,7 +12,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 )
 
-func uriBaseWarnings(c context.Context, s *model.Context, origins sourceOrigins) ([]diag.Diagnostic, error) {
+func uriBaseWarnings(c context.Context, s *model.Context, origins sourceOrigins, assembly bool) ([]diag.Diagnostic, error) {
 	cat, e := s.Catalog()
 	if e != nil {
 		return nil, e
@@ -52,7 +52,11 @@ func uriBaseWarnings(c context.Context, s *model.Context, origins sourceOrigins)
 		}
 		target, parseErr := url.Parse(text)
 		if parseErr == nil && !target.IsAbs() {
-			findings = append(findings, sourceWarning(diag.SourceURIBaseRemoved, diag.SourceURIBaseIsRemovedRetainedRelativeURIActionsMay(), diag.URIBaseEvidence(int64(baseSite.ref.ObjectNumber.Value()), int64(baseSite.ref.GenerationNumber.Value()), baseSite.path), site.key("URI")))
+			warning := sourceWarning(diag.SourceURIBaseRemoved, diag.SourceURIBaseIsRemovedRetainedRelativeURIActionsMay(), diag.URIBaseEvidence(int64(baseSite.ref.ObjectNumber.Value()), int64(baseSite.ref.GenerationNumber.Value()), baseSite.path, assembly), site.key("URI"))
+			if assembly {
+				warning.Identity.Phase = "assembly"
+			}
+			findings = append(findings, warning)
 		}
 		return nil
 	}, false)

@@ -173,9 +173,23 @@ func fitStructure(c context.Context, s *model.Context, page types.IndirectRef, f
 
 // structurePart remains a backend graph; no object identities escape to core.
 type structurePart struct {
-	catalog  types.Dict
 	root     types.Dict
 	language types.Object
+}
+
+// captureStructurePart detaches the catalog language from its mutable catalog
+// and object table before this context becomes the destination or is remapped.
+func captureStructurePart(s *model.Context, root types.Dict) (structurePart, error) {
+	part := structurePart{root: root}
+	if root == nil {
+		return part, nil
+	}
+	catalog, err := s.Catalog()
+	if err != nil {
+		return part, err
+	}
+	part.language, err = s.Dereference(catalog["Lang"])
+	return part, err
 }
 
 // combineStructure gives every source occurrence its own subtree and namespace.
@@ -244,9 +258,6 @@ func combineStructure(c context.Context, s *model.Context, parts []structurePart
 		}
 		namespaces = append(namespaces, ns...)
 		wrapper := types.Dict{"Type": types.Name("StructElem"), "S": types.Name("Part"), "P": *documentRef, "K": part.root["K"]}
-		if part.catalog != nil {
-			part.language = part.catalog["Lang"]
-		}
 		if part.language != nil {
 			wrapper["Lang"] = part.language
 		}

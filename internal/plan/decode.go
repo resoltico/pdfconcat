@@ -694,15 +694,9 @@ func (p *decoder) fitting() (*packet.FitPolicy, error) {
 			policy.Target = size
 			return err
 		case "tolerance":
-			points, err := p.length(false)
-			if err != nil {
-				return err
-			}
-			policy.Tolerance, err = packet.NormalizeFitTolerance(points)
-			if err != nil {
-				return p.fail(diag.PlanValue, err.Error())
-			}
-			return nil
+			var err error
+			policy.Tolerance, err = p.fitTolerance()
+			return err
 		default:
 			return p.unknown(name)
 		}
@@ -711,6 +705,31 @@ func (p *decoder) fitting() (*packet.FitPolicy, error) {
 		err = p.fail(diag.PlanType, "Fitting requires a target member.")
 	}
 	return policy, err
+}
+
+func (p *decoder) fitTolerance() (float64, error) {
+	var points float64
+	var err error
+	switch p.d.PeekKind() {
+	case '"':
+		length, readErr := p.text()
+		if readErr != nil {
+			return 0, readErr
+		}
+		points, err = packet.ParseFitToleranceLength(length)
+	case '0':
+		token, readErr := p.d.ReadToken()
+		if readErr != nil {
+			return 0, readErr
+		}
+		points, err = packet.ParseFitToleranceNumber(token.String())
+	default:
+		return p.number()
+	}
+	if err != nil {
+		return 0, p.fail(diag.PlanValue, err.Error())
+	}
+	return points, nil
 }
 
 func (p *decoder) size(inherit bool) (packet.Size, error) {

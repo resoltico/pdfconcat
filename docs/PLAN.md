@@ -71,7 +71,7 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `7` |
+| `version` | Required integer token `8` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
@@ -512,7 +512,7 @@ decoder. Schema validity alone is not a successful check of a packet.
 Set `"fitting": {"target": "A4", "tolerance": "1pt"}` to keep integer-rounded
 595 × 842 pt A4 sheets. The object requires `target`. Omitted `tolerance`
 defaults to .01 pt and keeps ordinary two-decimal 595.28 × 841.89 pt A4.
-Tolerance accepts a nonnegative length through 14,400 pt. Numeric `0` and
+Tolerance accepts a nonnegative length through 14,400 pt. Decimal units are converted to physical points before binary64 rounding. Numeric `0` and
 `"0pt"` both require exact dimensions.
 
 Each ordered displayed side must fall within the fixed target's inclusive

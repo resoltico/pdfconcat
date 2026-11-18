@@ -116,7 +116,14 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
 	}
 	layout.dash = dash
-	numberWidth = math.Max(numberWidth, paintedBounds(dash).Width)
+	dashBounds := paintedBounds(dash)
+	numberWidth = math.Max(numberWidth, dashBounds.Width)
+	labelBottom, labelTop := digits.Bottom, digits.Top
+	if j.PageNumbers() != nil {
+		dashBaseline := dash.Lines[0].Baseline
+		labelBottom = math.Min(labelBottom, dashBounds.Y-dashBaseline)
+		labelTop = math.Max(labelTop, dashBounds.Y+dashBounds.Height-dashBaseline)
+	}
 	heading, err := shape(contents.Title, 18, size.Width-72)
 	if err != nil {
 		return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
@@ -167,7 +174,15 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 				return fail(diag.AContentsTitleHasAWordWiderThanItsColumn(), section.Item)
 			}
 		}
-		height := paintedBounds(title).Height
+		if len(title.Lines) == 0 {
+			return fail(diag.AContentsTitleHasNoVisibleRow(), section.Item)
+		}
+		bounds := paintedBounds(title)
+		titleBottom := bounds.Y - title.Lines[0].Baseline
+		titleTop := titleBottom + bounds.Height
+		rowBottom := math.Min(titleBottom, labelBottom)
+		rowTop := math.Max(titleTop, labelTop)
+		height := rowTop - rowBottom
 		if height > firstRowTop-bottom+1e-6 {
 			return fail(diag.AWholeContentsRowCannotFitBeneathTheHeadingAnd(), section.Item)
 		}
@@ -175,24 +190,15 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 			addPage()
 			cursor = firstRowTop
 		}
-		movePlaced(title, left, cursor)
+		movePlaced(title, left, cursor-(rowTop-titleTop))
 		if title.InkBounds != nil && title.InkBounds.X+title.InkBounds.Width > titleRight+1e-6 {
 			return fail(diag.AContentsTitleSPaintedInkCrossesItsNumberColumn(), section.Item)
-		}
-		if len(title.Lines) == 0 {
-			return fail(diag.AContentsTitleHasNoVisibleRow(), section.Item)
 		}
 		title.Findings = nil
 		page := len(layout.pages) - 1
 		layout.pages[page].Blocks = append(layout.pages[page].Blocks, TextBlock{Role: RoleContents, Text: title})
-		baseline := title.Lines[0].Baseline
-		rowBottom := math.Min(cursor-height, baseline+digits.Bottom)
-		rowTop := math.Max(cursor, baseline+digits.Top)
-		if rowBottom < bottom-1e-6 || rowTop > firstRowTop+1e-6 {
-			return fail(diag.ContentsTitleAndNumberBoundsCannotFitInTheAvailable(), section.Item)
-		}
-		layout.rows = append(layout.rows, contentsRow{label: section.Title, titleBlock: len(layout.pages[page].Blocks) - 1, section: section.Item, page: page, baseline: baseline, right: right, bounds: typeset.Rect{X: left, Y: rowBottom, Width: right - left, Height: rowTop - rowBottom}})
-		cursor = rowBottom - 6
+		layout.rows = append(layout.rows, contentsRow{label: section.Title, titleBlock: len(layout.pages[page].Blocks) - 1, section: section.Item, page: page, baseline: title.Lines[0].Baseline, right: right, bounds: typeset.Rect{X: left, Y: cursor - height, Width: right - left, Height: height}})
+		cursor -= height + 6
 	}
 	return layout, nil
 }

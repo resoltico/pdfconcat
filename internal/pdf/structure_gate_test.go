@@ -11,6 +11,7 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+	"github.com/resoltico/pdfconcat/internal/compose"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
@@ -144,5 +145,102 @@ func TestNestedTaggedFormsRetainStreamOwnership(t *testing.T) {
 	}
 	if len(ownership) != 1 {
 		t.Fatalf("outer fitting Form acquired false semantic ownership: %v", ownership)
+	}
+}
+
+func TestLeadingSourceRetainsInheritedAndExplicitLanguage(t *testing.T) {
+	for _, indirect := range []bool{false, true} {
+		input := pdffixture.Tagged("language")
+		lang := "(lv-LV)"
+		if indirect {
+			lang = "10 0 R"
+		}
+		input.Objs[0] = bytes.Replace(input.Objs[0], []byte("/Lang (en)"), []byte("/Lang "+lang), 1)
+		program := "/P <</MCID 0>> BDC BT /F1 12 Tf 40 700 Td (Inherited) Tj ET EMC /Span <</MCID 1>> BDC BT /F1 12 Tf 40 680 Td (Explicit) Tj ET EMC"
+		input.Objs[3] = []byte(fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(program), program))
+		input.Objs[6] = bytes.Replace(input.Objs[6], []byte("/K 0"), []byte("/K [0 9 0 R]"), 1)
+		input.Objs[7] = []byte("<< /Nums [0 [7 0 R 9 0 R]] >>")
+		input.Objs = append(input.Objs, []byte("<< /Type /StructElem /S /Span /P 7 0 R /Pg 3 0 R /K 1 /Lang (lt-LT) >>"))
+		if indirect {
+			input.Objs = append(input.Objs, []byte("(lv-LV)"))
+		}
+		data := input.Bytes()
+		facts, slots, findings := Inspect(t.Context(), data, "", []SelectionRequest{{Item: "source"}})
+		if len(findings) > 0 || len(slots) != 1 || slots[0] == nil {
+			t.Fatal(findings)
+		}
+		for _, generatedFirst := range []bool{false, true} {
+			t.Run(fmt.Sprintf("indirect=%v/generated-first=%v", indirect, generatedFirst), func(t *testing.T) {
+				var parts []Part
+				size := packet.Size{Width: 612, Height: 792}
+				if generatedFirst {
+					parts = append(parts, Part{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartPage, Ref: "cover"},
+						Pages: 1, FirstPage: 1, LastPage: 1, Size: size, OutputSize: size},
+						Generated: []compose.Page{{Width: size.Width, Height: size.Height}}, Repeat: 1})
+				}
+				page := int64(len(parts) + 1)
+				parts = append(parts, Part{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"},
+					Pages: 1, FirstPage: page, LastPage: page}, Data: data, Occurrence: &Occurrence{File: &facts, Facts: slots[0]}})
+				authored := "ja-JP"
+				var out bytes.Buffer
+				if _, err := Assemble(t.Context(), Assembly{Parts: parts, Metadata: &packet.Metadata{Language: &authored}}, &out); err != nil {
+					t.Fatal(err)
+				}
+				doc, err := readOutput(t.Context(), out.Bytes())
+				if err != nil {
+					t.Fatal(err)
+				}
+				catalog, err := doc.Catalog()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if lang, err := textValue(doc, catalog["Lang"]); err != nil || lang != authored {
+					t.Fatalf("output catalog language is %q: %v", lang, err)
+				}
+				root, err := structureRoot(doc)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tree, err := numberTree(t.Context(), doc, root["ParentTree"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				pages, err := rawPages(t.Context(), doc)
+				if err != nil || int(page) > len(pages) {
+					t.Fatalf("missing source output page %d: %v", page, err)
+				}
+				index, err := doc.DereferenceInteger(pages[page-1].dict["StructParents"])
+				if err != nil || index == nil {
+					t.Fatalf("missing marked-content owner: %v", err)
+				}
+				parents, err := doc.DereferenceArray(tree[index.Value()])
+				if err != nil || len(parents) != 2 {
+					t.Fatalf("invalid page ownership: %v %v", parents, err)
+				}
+				for i, want := range []string{"lv-LV", "lt-LT"} {
+					elem, err := doc.DereferenceDict(parents[i])
+					if err != nil {
+						t.Fatal(err)
+					}
+					var inherited string
+					for depth := 0; depth < 8 && elem != nil; depth++ {
+						inherited, err = textValue(doc, elem["Lang"])
+						if err != nil {
+							t.Fatal(err)
+						}
+						if inherited != "" {
+							break
+						}
+						elem, err = doc.DereferenceDict(elem["P"])
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					if inherited != want {
+						t.Fatalf("MCID %d inherited %q, want %q", i, inherited, want)
+					}
+				}
+			})
+		}
 	}
 }

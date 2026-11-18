@@ -75,7 +75,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 		}
 	}
 	if len(requests) == 0 {
-		uri, e := uriBaseWarnings(c, s, origins)
+		uri, e := uriBaseWarnings(c, s, origins, false)
 		ds = append(ds, uri...)
 		if e != nil {
 			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
@@ -110,7 +110,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
 		}
-		uri, e := uriBaseWarnings(c, view, origins)
+		uri, e := uriBaseWarnings(c, view, origins, false)
 		for _, d := range uri {
 			d.Items = []string{request.Item}
 			ds = append(ds, d)
@@ -177,11 +177,10 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 				if e == nil && request.Fitting != nil {
 					root, e = structureRoot(view)
 					if e == nil {
-						cat, err := view.Catalog()
-						if err != nil {
-							e = err
-						} else {
-							e = combineStructure(c, view, []structurePart{{root: root, catalog: cat}})
+						var part structurePart
+						part, e = captureStructurePart(view, root)
+						if e == nil {
+							e = combineStructure(c, view, []structurePart{part})
 						}
 					}
 				}

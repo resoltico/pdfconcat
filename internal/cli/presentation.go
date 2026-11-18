@@ -122,8 +122,6 @@ func diagnosticText(d app.Diagnostic, report *result.Report) string {
 		b.WriteString(" Use -o FILE or plan output.")
 	case "page_size_required":
 		b.WriteString(" Use --fit-to SIZE or an explicit plan page size.")
-	case "output_exists", "report_exists":
-		b.WriteString(" --overwrite requests replacement when permitted.")
 	}
 	file := d.File
 	if d.Location != nil && d.Location.File != "" {

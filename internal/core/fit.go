@@ -27,7 +27,7 @@ func DefaultFitPolicy(target Size) *FitPolicy {
 // NormalizeFitTolerance validates the physical length and canonicalizes signed zero.
 func NormalizeFitTolerance(points float64) (float64, error) {
 	if !finite(points) || points < 0 || points > MaxSide {
-		return 0, fmt.Errorf("fitting tolerance must be from 0 through %g points", MaxSide)
+		return 0, fitToleranceRangeError()
 	}
 	return math.Abs(points), nil
 }

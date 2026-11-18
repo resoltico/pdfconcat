@@ -13,12 +13,18 @@ import (
 
 // Diagnostic maps text and placement failures to product diagnostics.
 func Diagnostic(err error, item string) diag.Diagnostic { return diagnosticWidth(err, item, "") }
-func diagnosticWidth(err error, item, widthOrigin string) diag.Diagnostic {
-	code := diag.FontInvalid
+
+// PageNumberDiagnostic distinguishes physical overlay placement from body layout.
+func PageNumberDiagnostic(err error, page int64) diag.Diagnostic {
 	var placement placementError
 	if errors.As(err, &placement) {
-		return diag.Report(diag.TextOverflow, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
+		return diag.Report(diag.TextOverflow, diag.PageNumberPlacementFailure(page, err.Error()))
 	}
+	return Diagnostic(err, "")
+}
+
+func diagnosticWidth(err error, item, widthOrigin string) diag.Diagnostic {
+	code := diag.FontInvalid
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error()), item)
 	}

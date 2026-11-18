@@ -42,23 +42,19 @@ func CheckDestination(f DestinationFacts) []diag.Diagnostic {
 		d.File = f.Path
 		ds = append(ds, d)
 	}
-	if f.Exists {
-		if !f.Regular {
-			add(notRegular, "Destination must be a regular file; symlinks, directories and devices are refused.")
-		}
-		if !MayReplace(f.Role, f.Overwrite, f.InputsKnown) {
-			add(exists, "Destination exists; authorize replacement or choose a new path. Reports with unknown inputs require a new path.")
-		}
-	} else if f.InspectionFailure != "" {
+	switch {
+	case f.Exists && !f.Regular:
+		add(notRegular, "Destination must be a regular file. Choose a different path.")
+	case !f.Exists && f.InspectionFailure != "":
 		add(inspection, "Cannot inspect destination: "+f.InspectionFailure)
-	}
-	if f.Exists && !f.Regular {
-		return ds
-	}
-	if f.IdentityFailure != "" {
+	case f.IdentityFailure != "":
 		add(inspection, f.IdentityFailure)
-	} else if f.AliasedInput != "" {
+	case f.AliasedInput != "":
 		add(isInput, "Destination aliases an input: "+f.AliasedInput)
+	case f.Exists && f.Role == ReportDestination && !f.InputsKnown:
+		add(exists, "Report destination exists and the plan inputs are unknown. Choose a new report path.")
+	case f.Exists && !MayReplace(f.Role, f.Overwrite, f.InputsKnown):
+		add(exists, "Destination exists. Choose a new path or use --overwrite to authorize replacement.")
 	}
 	return ds
 }

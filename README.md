@@ -34,8 +34,9 @@ navigate it or prepare its presentation:
 - Blanks and odd-page starts separate material and control physical page order.
 - Sections, bookmarks, title dividers, linked contents, selective page numbering and authored metadata
   identify material and help readers navigate the combined document.
-- Fitting gives the assembled pages a common sheet size. It transforms source
-  presentation and has additional [compatibility limits](docs/PDF-POLICY.md#fitting).
+- Fitting moves pages outside the absolute tolerance onto the target sheet.
+  Matching pages keep their native frames. Transformed pages have additional
+  [compatibility limits](docs/PDF-POLICY.md#fitting).
 - Simple text pages supply covers, separators, explanatory notes and other
   inserts. They support custom fonts, colors, backgrounds, positioning,
   alignment, wrapping and overflow controls.

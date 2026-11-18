@@ -7,6 +7,11 @@
 - `--fit-to` replaces the plan policy after validation. Use `--fit-tolerance` in the same invocation to change the replacement's .01 pt default.
 - Reports include expected generated `output_size` after layout resolves and retain geometry and counts on later refusals. Source geometry remains in exact `page_sizes` runs.
 
+- Equivalent decimal fitting lengths resolve to the same point tolerance. Negative nonzero tolerances are refused even when they would round to zero.
+- Imported tagged pages retain their source language when their PDF starts the packet.
+- Generated blanks accept any page number that fits the sheet. Contents rows reserve space for custom-font unnumbered labels and keep them in their own links.
+- Fitting help shows metric syntax. Publication, URI Base and text and numbering diagnostics identify the applicable stage, placement problem or usable remedy.
+
 ## [0.13.0] - 2026-11-17
 
 - Recognized encrypted inputs are refused before password validation, key derivation or decryption; header, xref and trailer parsing still run first.

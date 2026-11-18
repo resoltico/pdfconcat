@@ -3,7 +3,11 @@
 
 package packet
 
-import "testing"
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestResolvedNumberingEligibilityAndOverflow(t *testing.T) {
 	yes, no := true, false
@@ -36,6 +40,23 @@ func TestResolvedNumberingEligibilityAndOverflow(t *testing.T) {
 		}
 		if count == 1 && layout.LabelAt(1) != "9223372036854775807" {
 			t.Fatal(layout.LabelAt(1))
+		}
+	}
+	for _, tc := range []struct {
+		mode   NumberingMode
+		offset int64
+	}{{NumberPhysical, 3}, {NumberConsecutive, 1}} {
+		p := newPlan("", DefaultFitPolicy(size), &PageNumbers{Mode: tc.mode, Start: MaxPageIndex, Size: 9}, Defaults(), items)
+		_, ds := Resolve(p, nil, 0)
+		if len(ds) != 1 {
+			t.Fatal(ds)
+		}
+		offending := "physical page 3"
+		if tc.mode == NumberConsecutive {
+			offending = "physical page 4"
+		}
+		if !strings.Contains(ds[0].Message, offending) || !strings.Contains(ds[0].Message, "at most "+strconv.FormatInt(MaxPageIndex-tc.offset, 10)) {
+			t.Fatal(ds)
 		}
 	}
 	p := newPlan("", DefaultFitPolicy(size), &PageNumbers{Kinds: []PartKind{}, Size: 9}, Defaults(), items)

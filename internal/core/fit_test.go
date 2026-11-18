@@ -5,6 +5,8 @@ package packet
 
 import (
 	"math"
+	"math/big"
+	"strings"
 	"testing"
 )
 
@@ -145,5 +147,54 @@ func TestFitPolicyAdmissionOwnsCanonicalCopy(t *testing.T) {
 		if _, ds := AdmitDeclaration(draft); len(ds) != 1 {
 			t.Fatalf("admitted invalid target %+v: %+v", size, ds)
 		}
+	}
+}
+
+func TestAuthoredFitToleranceRoundsPhysicalUnitsOnce(t *testing.T) {
+	for _, tc := range []struct {
+		length string
+		points float64
+	}{
+		{"1in", 72}, {"25.4mm", 72}, {"2.54cm", 72}, {"72pt", 72},
+		{"0.01in", .72}, {"0.254mm", .72}, {"0.72pt", .72},
+		{"-0pt", 0}, {"-0.00mm", 0},
+	} {
+		got, err := ParseFitToleranceLength(tc.length)
+		if err != nil || got != tc.points || math.Signbit(got) {
+			t.Fatalf("%s = %.17g, %v; want %g", tc.length, got, err, tc.points)
+		}
+	}
+	for _, width := range []float64{73, math.Nextafter(73, math.Inf(1))} {
+		tolerance, err := ParseFitToleranceLength("25.4mm")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := DecideFit(Size{Width: width, Height: 100}, &FitPolicy{Target: Size{Width: 1, Height: 100}, Tolerance: tolerance})
+		if err != nil || d.Transform != (width > 73) {
+			t.Fatalf("width %.17g: %+v %v", width, d, err)
+		}
+	}
+}
+
+func TestLongFitToleranceKeepsBinary64TieDirection(t *testing.T) {
+	// Divide the exact midpoint at 72 by the inch ratio. Its decimal expansion
+	// repeats, so inputs on opposite sides can agree through the cutoff.
+	midpoint := new(big.Rat).SetFloat64(math.Nextafter(72, math.Inf(1)))
+	midpoint.Add(midpoint, big.NewRat(72, 1))
+	midpoint.Quo(midpoint, big.NewRat(144, 1))
+	decimal := midpoint.FloatString(1200)
+	below := decimal[:len(decimal)-1] + "0in"
+	above := decimal[:len(decimal)-1] + "9in"
+	for _, tc := range []struct {
+		text string
+		want float64
+	}{{below, 72}, {above, math.Nextafter(72, math.Inf(1))}} {
+		got, err := ParseFitToleranceLength(tc.text)
+		if err != nil || got != tc.want {
+			t.Fatalf("late midpoint distinction: got %.17g, %v; want %.17g", got, err, tc.want)
+		}
+	}
+	if _, err := ParseFitToleranceLength("-0." + strings.Repeat("0", 4000) + "1mm"); err == nil {
+		t.Fatal("accepted a negative nonzero length")
 	}
 }

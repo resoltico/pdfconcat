@@ -227,6 +227,14 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 					if !hasDiagnostic(r, "report_exists") || hasDiagnostic(r, "report_write_failed") {
 						t.Fatalf("refusal misclassified: %+v", r.Diagnostics)
 					}
+					if overwrite && !unreadable {
+						var stdout, stderr bytes.Buffer
+						code := run(args, strings.NewReader(""), &stdout, &stderr)
+						if code != 2 || !strings.Contains(stderr.String(), "Choose a new report path") ||
+							strings.Contains(stderr.String(), "--overwrite") {
+							t.Fatal(stderr.String())
+						}
+					}
 				} else {
 					data, err := os.ReadFile(report)
 					if err != nil {

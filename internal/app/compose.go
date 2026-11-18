@@ -58,18 +58,19 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 			}
 			var err error
 			mappingIndex := 0
+			physicalPage := part.FirstPage
 			for offset := range part.Pages {
+				physicalPage = part.FirstPage + int64(offset)
 				if err = c.Err(); err != nil {
 					break
 				}
 				size := part.OutputSize
 				if part.Kind == packet.PartSource {
-					number := part.FirstPage + int64(offset)
-					for mappingIndex+1 < len(part.Mapping) && number >= part.Mapping[mappingIndex+1].OutputFirst {
+					for mappingIndex+1 < len(part.Mapping) && physicalPage >= part.Mapping[mappingIndex+1].OutputFirst {
 						mappingIndex++
 					}
 					span := part.Mapping[mappingIndex]
-					original := span.SourceFirst + int(number-span.OutputFirst)
+					original := span.SourceFirst + int(physicalPage-span.OutputFirst)
 					var known bool
 					size, known = packet.ExpectedPageSize(inspected.byLeaf[part.Index].occurrence.Facts.PageSizes, original)
 					if !known {
@@ -77,12 +78,12 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 						break
 					}
 				}
-				if err = numberLayout.Check(size, numberForPage(layout.Numbering, part.FirstPage+int64(offset))); err != nil {
+				if err = numberLayout.Check(size, numberForPage(layout.Numbering, physicalPage)); err != nil {
 					break
 				}
 			}
 			if err != nil {
-				d := compose.Diagnostic(err, "")
+				d := compose.PageNumberDiagnostic(err, physicalPage)
 				d.Items = []string{part.Ref, "/page_numbers"}
 				if part.Kind == packet.PartSource {
 					d.File = part.Source

@@ -55,7 +55,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 		}
 		style := p.Page
 		bottom, top := 0.0, p.Size.Height
-		if layout.PageNumbers != nil {
+		if style.Text.Value.Value != "" && layout.PageNumbers != nil {
 			if _, eligible := packet.NumberAt(layout.Numbering, p.FirstPage); eligible {
 				numberLayout, err := NewPageNumberLayout(fonts[packet.Font{}], *layout.PageNumbers)
 				if err != nil {
@@ -115,7 +115,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			}
 			prepared[i].Text = text
 			if len(placed.Findings) > 0 && value.err == nil {
-				ds = append(ds, diag.Report(diag.TextOverflowAllowed, diag.MeasuredTextExtendsOutsideThePageOrTextBlock(), p.Ref))
+				ds = append(ds, diag.Report(diag.TextOverflowAllowed, allowedTextOverflow(placed, p.Size, bottom, top), p.Ref))
 			}
 		}
 		if value.err != nil {
@@ -124,6 +124,36 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 		}
 	}
 	return prepared, ds
+}
+
+func allowedTextOverflow(placed *typeset.Placed, sheet packet.Size, bottom, top float64) diag.Explanation {
+	if ink := placed.InkBounds; ink != nil {
+		if ink.X < 0 || ink.X+ink.Width > sheet.Width {
+			return diag.AllowedGlyphInkOutsideSheet("x", ink.X, ink.X+ink.Width, sheet.Width)
+		}
+		if ink.Y < 0 || ink.Y+ink.Height > sheet.Height {
+			return diag.AllowedGlyphInkOutsideSheet("y", ink.Y, ink.Y+ink.Height, sheet.Height)
+		}
+		if ink.Y < bottom || ink.Y+ink.Height > top {
+			return diag.AllowedTextOutsideArea("Glyph ink", "y", ink.Y, ink.Y+ink.Height, bottom, top)
+		}
+	}
+	for _, finding := range placed.Findings {
+		switch finding.Kind {
+		case typeset.FindingOutsidePageHorizontal:
+			r := placed.Bounds
+			return diag.AllowedTextOutsideArea("Text layout", "x", r.X, r.X+r.Width, 0, sheet.Width)
+		case typeset.FindingOutsidePageVertical:
+			r := placed.Bounds
+			return diag.AllowedTextOutsideArea("Text layout", "y", r.Y, r.Y+r.Height, bottom, top)
+		case typeset.FindingWordTooWide:
+		}
+	}
+	var measurement string
+	if len(placed.Findings) != 0 {
+		measurement = placed.Findings[0].Detail
+	}
+	return diag.AllowedTextExceedsWrapWidth(measurement)
 }
 
 func rect(r typeset.Rect) [4]float64 { return [4]float64{r.X, r.Y, r.X + r.Width, r.Y + r.Height} }

@@ -4,11 +4,8 @@ For commands and packet plans, start with the [README](README.md). This guide
 covers development from a source checkout; binary release archives do not contain
 the test sources or corpus.
 
-The README defines the [product scope and boundaries](README.md#scope-and-boundaries).
-Assembly aids and simple styled text pages, including generated-only plans, are
-supported. General document layout, source-content editing and format conversion
-are outside that scope. Scope eligibility does not imply an implemented feature;
-the README comparison identifies missing merge workflows.
+The README describes the [product scope and boundaries](README.md#scope-and-boundaries)
+and compares the available merge workflows.
 
 - [Build and ordinary tests](#build-and-ordinary-tests)
 - [Install with Go](#install-with-go)
@@ -71,7 +68,8 @@ PDFCONCAT_REQUIRE_VERAPDF=1 go test -count=1 ./internal/pdf -run '^TestPDFUAMach
 Machine reports are retained as test artifacts. Passing these tests does not
 replace visual, reading-order or screen-reader review of actual packets.
 
-Pull requests run CI; tag publication invokes the same workflow before releasing.
+Pull requests trigger snapshot CI. A pushed version tag runs release
+qualification against the tagged commit.
 Race tests run on Linux/macOS; Windows runs ordinary tests. CI gates lint,
 tests on those three operating systems, cross-builds, release packaging and
 native installation through `Required CI`. That aggregate name is a required repository
@@ -165,18 +163,20 @@ check mainly to satisfy another check.
 ## Installer verification
 
 The user contract is in [the installation guide](docs/INSTALL.md).
-`install/install.sh` serves macOS and Linux and must stay POSIX `sh`: Ubuntu runs
-it with dash. `install/install.ps1` serves Windows and must run under both
-Windows PowerShell 5.1 and PowerShell 7; keep it ASCII, and never use `exit`
-outside the final handler, because `irm | iex` runs it in the caller's session.
+`install/install.sh` serves macOS and Linux and must stay POSIX `sh` for shells
+such as dash on Ubuntu. Keep `install/install.ps1` ASCII-compatible for Windows
+PowerShell 5.1 and compatible with PowerShell 7. Reserve `exit` for the final
+handler to support invocation in an existing PowerShell session.
 Both are published as standalone release assets beside the archives they install.
 Latest is resolved once to a stable tag before downloading archive/checksum data;
 version and archive identity must agree. Keep network and mirror paths subject
 to the same checksum, regular-file and ownership checks. Explicit release pins
 are stable versions; local snapshot fixtures may report canonical SemVer suffixes.
 
-PDFConcat owns the common engine bodies shared with EML Attachment Remover,
-Auditory Lab and HTMLCut.
+PDFConcat owns the common engine bodies used by
+[EML Attachment Remover](https://github.com/resoltico/EMLAttachmentRemover/blob/main/install/engine-source.txt),
+[Auditory Lab](https://github.com/resoltico/AuditoryLab/blob/main/install/engine-source.txt)
+and [HTMLCut](https://github.com/resoltico/HTMLCut/blob/main/install/engine-source.txt).
 Keep only literal product differences between `BEGIN PRODUCT SETTINGS` and
 `END PRODUCT SETTINGS`; change common behavior in all four repositories together.
 The copies are self-contained and have no runtime cross-repository dependency.
@@ -367,10 +367,11 @@ archive contents, build flags and hooks. Binary archives contain the program,
 license texts. The notices in `internal/legal/` are embedded in the executable.
 `cmd/pdfconcat/notices_test.go` checks linked-module licenses and embedded assets.
 
-Release builds use `-trimpath` and `-ldflags=-w`, keeping the Go symbol table
+Release builds use `-trimpath` and linker flag `-w`, keeping the Go symbol table
 without DWARF data so binary vulnerability scanners can identify linked packages.
-Do not strip the symbol table with `-s`. Release and ordinary builds use the
-compiler's default optimization settings; profile-guided optimization is disabled.
+Keep the symbol table by omitting `-s`. Clean release builds use the compiler's
+default optimization settings, with no checked-in profile for profile-guided
+optimization.
 
 Before hooks generate the Windows file properties and `asInvoker` manifest with
 the pinned `go-winres`, writing ignored `cmd/pdfconcat/rsrc_windows_*.syso` files.
@@ -425,11 +426,11 @@ require no JSON exchange. Supply a positive `Request.InspectionWorkers`; the
 process host supplies its GOMAXPROCS-derived default. Prepared plans return owned
 snapshots and font byte views are copies.
 
-Run `python3 .github/scripts/verify-dependency.py`,
-`python3 -m unittest discover -s .github/scripts -p '*_test.py'`, and
-`(cd third_party/pdfcpu && go test ./pkg/pdfcpu -run TestZeroOffsetEntryPolicy -count=1)`
-for the canonical local reader patch. No module-cache editing or post-clone patch
-step is supported. Source capture verifies that vendor contains the same code.
+Use the **Generated contracts and dependency source** step in
+[CI](.github/workflows/ci.yml) to check the in-tree pdfcpu source, including the
+reader, encryption admission and numeric round-trip cases. The root module uses
+that source directly. Source capture verifies that the vendor tree contains the
+same code.
 
 `go run ./internal/releasecheck -dir dist` checks complete configured deliverables
 against the independently required six targets, hashes and archive members.

@@ -2,15 +2,16 @@
 
 ## [Unreleased]
 
-- Choose distinct PDF and report names, including when the files are absent. Check and build refuse known aliases and destinations whose parent is missing or is not a directory.
-- Layout errors can point to the responsible authored setting by file and byte location. Diagnostic previews count each consuming item once.
-- Painted page numbers have a thin white outline for dark backgrounds. Margins and text clearance account for the outline.
-- Use either a command's `--help` flag or `help COMMAND` to see the same help topic.
+## [0.15.0] - 2026-11-18
 
-- Diagnose temporary source storage failures separately from bad or changed inputs. Clean spills through the original directory if it moves.
-- Use less memory when checking or building image-heavy packets. Large source snapshots need writable temporary storage during inspection and assembly. [CLI](docs/CLI.md#reports-and-committed-state)
-- Reuse inspection of identical page selections and reduce processing for large generated packets, numbering and authored plans.
-- Stream full JSON reports to staging and avoid building full report records for ordinary CLI summaries.
+- Choose distinct output, report and input paths. Even absent names can conflict. Output and report parents must be existing directories. [CLI](docs/CLI.md#reports-and-committed-state)
+- Preflight reports `output_parent_invalid` or `report_parent_invalid` when a destination parent is missing or is not a directory.
+- Large source PDFs use less memory and need writable temporary storage. Snapshot I/O failures report `source_unreadable` with scratch-operation details. [CLI](docs/CLI.md#reports-and-committed-state)
+- Layout findings can identify authored settings by file and byte location. Diagnostic previews count each consuming item once.
+- Painted page numbers use a thin white outline for dark backgrounds. Margins and text clearance account for the outline.
+- Use `pdfconcat COMMAND --help` or `pdfconcat help COMMAND` for the same command topic.
+- Check and build reuse inspection of identical page selections and do less processing for large plans, generated packets and numbering.
+- Save large JSON reports with less memory. Full report records stream to staging and ordinary CLI summaries materialize only the records they show.
 
 ## [0.14.0] - 2026-11-18
 

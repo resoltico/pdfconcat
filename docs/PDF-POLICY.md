@@ -647,10 +647,12 @@ this does not cover all metadata attached to retained pages or other objects.
 
 ### Memory and cancellation
 
-Assembly is in memory. Imported object graphs, decoded streams, repeated source
+Assembly holds the output object graph in memory and serializes it directly to
+a staged file. Acquisition may spill source bytes to private temporary storage.
+Allow space for concurrent inspection spills and the largest individual source
+used during assembly. Imported objects, decoded streams, repeated source
 occurrences and generated pages can require much more memory than compressed
-input sizes. Upstream defaults limit individual and cumulative stream decoding
-and some object-graph operations; sufficiently large or pathological inputs may
+input sizes. Decoder and graph limits can cause large or pathological inputs to
 be refused.
 
 These safeguards do not provide a universal time or memory bound or guarantee

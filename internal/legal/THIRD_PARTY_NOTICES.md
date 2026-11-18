@@ -9,7 +9,7 @@ versions linked into an executable.
 
 | Module | License | Purpose | License copy |
 | --- | --- | --- | --- |
-| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT; PDFConcat modifications AGPL-3.0-only | PDF reading, validation, merging, fitting and object types; locally modified v0.16.4 reader and numeric serialization | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
+| `github.com/pdfcpu/pdfcpu` | Apache-2.0; its `pkcs7` package MIT; PDFConcat modifications AGPL-3.0-only | PDF reading, validation, merging, fitting and object types through an in-tree source replacement | [Apache-2.0](licenses/Apache-2.0.txt), [pkcs7](licenses/pdfcpu-pkcs7-MIT.txt), [Adobe font metrics](licenses/Adobe-Core14-AFM-notice.txt) |
 | `github.com/go-text/typesetting` | Unlicense OR BSD-3-Clause (used under BSD-3-Clause); its `harfbuzz` package MIT | OpenType parsing and text shaping | [go-text](licenses/go-text-typesetting-LICENSE.txt), [HarfBuzz port](licenses/go-text-harfbuzz-MIT.txt) |
 | `github.com/clipperhouse/uax29/v2` | MIT | Unicode segmentation | [uax29](licenses/clipperhouse-uax29-MIT.txt) |
 | `github.com/hhrutter/tiff` | BSD-3-Clause | PDF image decoding | [tiff](licenses/hhrutter-tiff-BSD-3-Clause.txt) |
@@ -66,29 +66,22 @@ These test assets are not included in the executable or binary release archives.
 
 ## Development tools
 
-Stock golangci-lint, govulncheck and actionlint are development dependencies pinned
-in `tools/go.mod`; GoReleaser is pinned in the release workflow. They are not
-linked into the executable or included in product archives. Their source and
-licenses remain available through their upstream modules/releases. There are no
-local dependency forks or development-tool patches.
+Development tools are pinned in `tools/go.mod` and the CI workflow
+(`.github/workflows/ci.yml`). Build and qualification invoke upstream tools.
+Their source and licenses are available through their upstream modules and
+releases. The executable does not link them, and binary release archives do
+not contain them.
 
 A dependency update that changes the linked module set, a license or NOTICE
 file of a linked package, or the assets a dependency embeds requires a notice
 update; `cmd/pdfconcat/notices_test.go` checks those three. Version-only changes
 do not require duplicating a new version number here.
 
-PDFConcat ships a modified pdfcpu v0.16.4 through the in-tree module replacement
-`third_party/pdfcpu`. Its typed source-only classic-xref admission patch and typed missing-appearance
-error category, exact
-changed-source hashes and upstream module checksums are recorded in that
-directory's `PROVENANCE.md` and `PDFCONCAT-PATCH.json`. The source archive retains
-the canonical replacement and verifies the same patched files in vendored code.
-Build metadata and SBOMs must identify the local replacement as modified source.
+## Modified pdfcpu source
 
-The local numeric changes retain finite model float64 values with round-trip
-non-exponent real decimal output, explicit nonzero real markers and canonical
-zero. They reject nonfinite scalars, dispatch real syntax before integer conversion,
-and refuse oversized integer tokens and real range errors without substituting
-zero or rounded values. Exact changed/upstream source hashes remain
-in `third_party/pdfcpu/PDFCONCAT-PATCH.json`; modified-source SBOMs identify that
-manifest. Upstream notices and PDFConcat modification licensing remain unchanged.
+PDFConcat uses the in-tree module replacement `third_party/pdfcpu`.
+Its `PROVENANCE.md` describes the modifications and upstream license.
+Its `PDFCONCAT-PATCH.json` records the upstream version and checksums and the
+changed-file hashes. The source archive includes the replacement and verifies
+that vendored code contains the same patched files. Build metadata and SBOMs
+identify the module as modified source.

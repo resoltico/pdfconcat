@@ -363,14 +363,23 @@ filenames on newlines. Plans require valid UTF-8 paths.
 
 ### bash and zsh
 
-Globs plus `jq --args` preserve quotes/newlines as arguments. `LC_ALL=C` fixes byte
-order; bash `nullglob` avoids treating an unmatched pattern as a filename. In
-zsh omit `shopt` (or use its `NULL_GLOB` option). For lists beyond OS argument
-limits, generate the plan in batches or with a program that preserves filenames.
+Globs and `jq --args` preserve quotes and newlines within filenames.
+`LC_ALL=C` requests byte order. The example uses bash. In zsh, replace
+`shopt -s nullglob` with `setopt NULL_GLOB`. For lists beyond the OS argument
+limit, use a program that writes each filename as a separate JSON element.
 
 ```sh
-( export LC_ALL=C; shopt -s nullglob
-  jq -n '{version: 8, items: ($ARGS.positional | map({source: .}))}' --args chapters/*.pdf > plan.json )
+( export LC_ALL=C
+  shopt -s nullglob
+  chapters=()
+  for chapter in chapters/*.pdf; do
+    [[ -f "$chapter" ]] && chapters+=("$chapter")
+  done
+  if [[ ${#chapters[@]} -eq 0 ]]; then
+    printf '%s\n' 'No PDF files in chapters/.' >&2
+    exit 1
+  fi
+  jq -n '{version: 8, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
 pdfconcat build --plan plan.json -o book.pdf
 ```
 

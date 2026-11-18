@@ -1,10 +1,10 @@
 # PDFConcat
 
 PDFConcat combines existing PDFs and selected pages into one ordered document.
-Optional assembly aids add separators, simple text inserts, navigation, page
-numbers and optional sheet fitting. Merge whole files directly, or use a reusable
-JSON plan for selections and assembly aids. Check the plan before building and
-save a report with input file hashes and source-to-output page mappings.
+Merge whole files directly, or use a reusable JSON plan to select pages and add
+separators, simple text inserts, navigation and page numbers. Check a proposed
+assembly before building and save a report with input file hashes and
+source-to-output page mappings.
 
 Source pages keep their original sizes unless you request fitting. Generated text
 uses bundled Noto Sans or a supplied static TrueType/OpenType CFF1 font for Latin,
@@ -76,15 +76,10 @@ On Windows 10/11 (x64 or ARM64), use PowerShell. The command saves
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    $startingLocation = Get-Location
-    Set-Location -LiteralPath $HOME
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile .\install-pdfconcat.ps1 -ErrorAction Stop
-        powershell -NoProfile -ExecutionPolicy ByPass -File .\install-pdfconcat.ps1
-        if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
-    } finally {
-        Set-Location -LiteralPath $startingLocation.Path
-    }
+    $installer = Join-Path $HOME 'install-pdfconcat.ps1'
+    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile $installer -ErrorAction Stop
+    powershell -NoProfile -ExecutionPolicy ByPass -File $installer
+    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
 }
 ```
 
@@ -260,10 +255,10 @@ are created beside the saved plan.
 
 ## Automation and reports
 
-Add `--json` to `check` or `build` for one machine-readable result. Without it,
-stdout contains a text summary and stderr contains diagnostics. Options may
-appear between inputs; `--` makes subsequent arguments literal paths. Quote
-paths containing spaces in your shell.
+Add `--json` to `check` or `build` for one machine-readable result. Text mode
+writes the summary to stdout and diagnostics to stderr. Options may appear
+between inputs. Put `--` between complete options or input arguments to treat
+all following arguments as paths. Quote paths containing spaces in your shell.
 
 `--report FILE` requests a full JSON assembly report from either command. When
 destination rules permit, a failed check or build can also save a report. Rejected
@@ -292,25 +287,14 @@ diagnostics and publication facts.
 
 ## PDFConcat or the pdfcpu CLI?
 
-PDFConcat uses [pdfcpu](https://github.com/pdfcpu/pdfcpu) with a
-[documented local patch](third_party/pdfcpu/PROVENANCE.md) as its PDF engine. Both
-tools can merge documents, select pages, insert blanks, generate text, preserve
-bookmarks, resize pages and add page numbers. Their workflows and limits differ.
+PDFConcat assembles packets with plans, layout checks and source-to-output
+reports. Its engine is [pdfcpu](https://github.com/pdfcpu/pdfcpu) with a
+[documented local patch](third_party/pdfcpu/PROVENANCE.md). The standalone
+[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)
+offers merge modes and broader PDF editing commands.
 
-Use **PDFConcat** for repeatable PDF assembly with a plan, layout checks and
-source-to-output reports, optionally adding separators, navigation and text
-inserts. Use **pdfcpu** when you need merge workflows PDFConcat currently lacks:
-appending by updating the existing destination, automatic interleaving or PDF stdin/stdout.
-pdfcpu also provides broader editing commands, including encryption and form
-filling, outside PDFConcat's [scope](#scope-and-boundaries).
-
-The comparison below is against the released **[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)**.
-The PDFConcat column describes the current source and its documented limits.
-
-**●** means built-in support for the task as described; **—** means no dedicated
-built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu
-may require several commands. A dash does not rule out an external script, and
-dots do not imply identical defaults or preservation guarantees.
+**●** marks built-in support, which can involve several commands and is subject
+to the limits below. **—** marks the absence of a dedicated built-in equivalent.
 
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
 | --- | :---: | :---: |
@@ -325,11 +309,11 @@ dots do not imply identical defaults or preservation guarantees.
 | Preserve imported source bookmarks [3] | ● | ● |
 | Create bookmarks [3] | ● | ● |
 | Fit pages to a chosen paper size | ● | ● |
-| Keep near-target sheets using a per-side fitting tolerance | — | ● |
+| Keep near-target source sheets unchanged when fitting | — | ● |
 | Generate simple text pages from JSON | ● | ● |
 | Generate Latin, Greek and Cyrillic text with a bundled font [4] | ● | ● |
 | Add physical page numbers [5] | ● | ● |
-| Describe supported packet assembly in one JSON plan | — | ● |
+| Describe sources, selections and assembly aids in one JSON plan | — | ● |
 | Define nested sections and title dividers in that plan | — | ● |
 | Automatically pad sections to start on odd pages | — | ● |
 | Generate linked contents from sections and final page numbers | — | ● |
@@ -341,34 +325,31 @@ dots do not imply identical defaults or preservation guarantees.
 | Encrypt, decrypt and manage PDF passwords | ● | — |
 | Fill interactive forms | ● | — |
 
-1. **Append and PDF streams.** PDFConcat can combine an existing PDF followed by
-   additional inputs into a different output file. It cannot update that input
-   path, even with `--overwrite`; that option permits replacement, not appending.
-   For pdfcpu merge, create mode accepts one stdin input; create
-   and zip can write to stdout. Append and zip do not accept stdin, and append
-   cannot write to stdout. PDFConcat accepts a JSON plan from stdin, but its PDF
-   inputs and output are files.
-2. **Page selection.** pdfcpu's `collect` command uses page expressions for
-   selection, repetition and reordering. PDFConcat uses ascending, non-overlapping
-   ranges within each source occurrence; repetition or reordering uses separate
-   occurrences. Alternating single-page occurrences can express an interleaved
-   order explicitly; PDFConcat has no automatic interleaving operation. The
+1. **Append and PDF streams.** pdfcpu `merge --mode append` updates a file
+   destination. Create mode accepts one PDF from stdin and can write to stdout.
+   Zip accepts two file inputs and can write to stdout. PDFConcat accepts JSON
+   plans on stdin and uses files for PDF inputs and output. To extend a PDF with
+   PDFConcat, list it first and choose a different output path.
+2. **Page selection and interleaving.** pdfcpu's `collect` uses page expressions
+   for selection, repetition and reordering. Its zip mode interleaves two inputs
+   below PDF 2.0 and appends any remaining pages after one input runs out.
+   PDFConcat uses ascending, non-overlapping ranges within each source item.
+   Use separate items to repeat, reorder or explicitly alternate pages. The
    [selection limits](docs/PLAN.md#source-selections), including partial selection
    of forms, still apply.
-3. **Bookmarks.** pdfcpu normally wraps merged source bookmarks under filenames;
-   `--bookmark-mode preserve` avoids those wrappers. Zip does not preserve source
-   outlines, and stdin merge does not import later inputs' bookmark trees.
-   Its `bookmarks import` command accepts explicit page targets and styles.
+3. **Bookmarks.** With default configuration, pdfcpu file merges wrap source
+   bookmarks under filenames. Use `--bookmarks --bookmark-mode preserve` to
+   keep source bookmark roots. Zip drops source bookmarks. When merging stdin,
+   pdfcpu retains the first input's outline and omits later input outlines.
+   The `bookmarks import` command accepts explicit page targets and styles.
    PDFConcat creates bookmarks from titled plan sections, targeting their first
    non-padding page, and retains source bookmarks beneath the nearest authored
    section. It prunes local navigation to omitted pages and applies its
    [source policy](docs/PDF-POLICY.md#source-policy).
 4. **Bundled fonts.** Both tools include a font for Latin, Greek and Cyrillic.
-   pdfcpu automatically initializes Roboto Regular in its configuration font
-   store; no separate font download is required. PDFConcat uses Noto Sans
-   directly without a configuration/font directory. pdfcpu's `--conf disable`
-   mode can avoid filesystem configuration for operations that do not need user
-   fonts, but does not make that font store available.
+   pdfcpu installs Roboto Regular into its filesystem configuration font store.
+   Select `Roboto-Regular` for generated text and keep filesystem configuration
+   enabled. PDFConcat uses bundled Noto Sans directly.
 5. **Page numbers.** pdfcpu text stamps support current/total page numbers and an
    offset. PDFConcat supports physical or consecutive counting, start offsets,
    kind filters, inherited item suppression and six positions. Padding is never
@@ -381,18 +362,19 @@ dots do not imply identical defaults or preservation guarantees.
    `check` can write a report when requested; a successful check does not
    guarantee a later build or publication.
 
-Version-specific pdfcpu sources:
+pdfcpu v0.16.4 sources include
 [document commands](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/document.go),
-[merge and streaming behavior](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/cli/document_exec.go),
+[merge streams](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/cli/document_exec.go),
+[merge inputs and zip restrictions](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/merge.go),
 [bookmark merge modes](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/merge.go),
 [page operations](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/pages.go),
 [resize parameters](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/model/resize.go),
 [stamps and bookmarks](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/content_usage.go),
 [font initialization](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/model/configuration.go),
-[JSON creation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/create.go), and
+[JSON creation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/create.go),
+[form filling](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/forms.go),
+[encryption and passwords](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/security.go) and
 [PDF info fields](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/info.go).
-The [pdfcpu documentation](https://pdfcpu.io/) provides usage examples; its live
-pages may describe a later version.
 
 ## Limits
 

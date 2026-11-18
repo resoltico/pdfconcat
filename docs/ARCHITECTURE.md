@@ -15,8 +15,8 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/compose` | Measured generated pages, contents and numbering |
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
-| `internal/files` | Native path semantics, regular-file acquisition, role checks and staged-file lifecycle |
-| `internal/wire` | Result v10 DTOs, domain projection and schema |
+| `internal/files` | Native path semantics, regular-file acquisition, private snapshot storage and staged publication |
+| `internal/wire` | Result v10 projection, streamed report encoding and schema |
 | `internal/legal` | Embedded license notices |
 | `internal/oracle`, `internal/pdffixture` | Test-only independent observations and synthetic PDFs |
 
@@ -117,19 +117,19 @@ Both producers share semantic admission and aggregate text/node limits.
 
 1. Admission resolves roles and acquires/decodes a plan or direct items.
 2. Inspection loads fonts and checks text, then inspects distinct sources with
-   the explicit positive `InspectionWorkers` budget. Inspection findings are merged in first-use order;
-   one global structure policy is passed through grouped inspection and assembly
-   re-admission. Original source security/page checks precede semantic detachment
-   or narrowly validated index normalization. Owner-sensitive coverage retains
-   an uncovered-content witness.
-   Composition identifies any implicated authored setting by ref. Projection binds
-   that ref to source coordinates from plan decoding, when available.
-   Final results apply the shared [diagnostic priority](CLI.md#output), preserving
-   stage/first-use order within peers.
+   the explicit positive `InspectionWorkers` budget. It merges findings in
+   first-use order. Inspection and assembly re-admission both use the plan's
+   structure policy. Source security and page checks precede semantic detachment
+   or narrowly validated index normalization. Coverage analysis retains a
+   witness of uncovered content and accounts for structure ownership.
 3. Composition prepares contents, resolves physical layout, checks compatibility
-   and number overlays, and lays out generated text.
+   and number overlays, and lays out generated text. Findings can identify the
+   authored setting responsible for a layout problem.
 4. Build prepares font resources, stages the PDF, assembles, verifies and publishes.
-5. Projection creates the result from the facts each stage actually returned.
+5. Projection creates the result from observed stage facts. When plan decoding
+   recorded coordinates for an implicated setting, projection adds that location
+   to the finding. The shared [diagnostic priority](CLI.md#output) preserves
+   stage and first-use order within each precedence class.
 6. Report publication rechecks destination roles after any PDF publication.
 
 Private source sites retain full source refs, original page ordinals and paths.

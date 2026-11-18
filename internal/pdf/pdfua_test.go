@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/resoltico/pdfconcat/internal/pdffixture"
+
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/compose"
 	packet "github.com/resoltico/pdfconcat/internal/core"
@@ -126,8 +128,8 @@ func TestPDFUAMachineFixture(t *testing.T) {
 	}
 	occurrence := &Occurrence{File: &facts, Facts: views[0]}
 	assembly := Assembly{Metadata: &packet.Metadata{Title: &title, Language: &lang}, Structure: packet.StructurePreserve, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 450, Height: 600}), Parts: []Part{
-		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "first", Source: path}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: occurrence, Data: out.Bytes()},
-		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "repeat", Source: path}, Pages: 1, FirstPage: 2, LastPage: 2}, Occurrence: occurrence, Data: out.Bytes()},
+		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "first", Source: path}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: occurrence, Input: pdffixture.SourceInput(out.Bytes())},
+		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "repeat", Source: path}, Pages: 1, FirstPage: 2, LastPage: 2}, Occurrence: occurrence, Input: pdffixture.SourceInput(out.Bytes())},
 	}}
 	var merged bytes.Buffer
 	if _, err = Assemble(t.Context(), assembly, &merged); err != nil {

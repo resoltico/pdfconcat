@@ -4,8 +4,6 @@
 package app
 
 import (
-	"encoding/json/v2"
-
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/core/outcome"
@@ -13,7 +11,7 @@ import (
 	result "github.com/resoltico/pdfconcat/internal/wire"
 )
 
-func writeReport(r *outcome.Result, roles files.Roles) {
+func writeReport(r *outcome.Result, roles files.Roles, records resultRecords) {
 	if r.Report == nil {
 		return
 	}
@@ -22,20 +20,16 @@ func writeReport(r *outcome.Result, roles files.Roles) {
 	if hasErrors(refusals) {
 		return
 	}
-	full := r.Full()
+	full := *r
 	report := *r.Report
 	report.Written = true
 	full.Report = &report
-	data, err := json.Marshal(result.Project(full))
+	staged, err := files.Create(roles.Report)
 	if err == nil {
-		var staged *files.Staged
-		staged, err = files.Create(roles.Report)
+		defer staged.Abort()
+		err = result.WriteReport(staged, full, records.partRecords(records.parts), records.sectionRecords(records.sections))
 		if err == nil {
-			defer staged.Abort()
-			_, err = staged.Write(append(data, '\n'))
-			if err == nil {
-				r.Report.Written, err = staged.Commit(packet.MayReplace(packet.ReportDestination, roles.Overwrite, roles.InputsKnown))
-			}
+			r.Report.Written, err = staged.Commit(packet.MayReplace(packet.ReportDestination, roles.Overwrite, roles.InputsKnown))
 		}
 	}
 	if err != nil {

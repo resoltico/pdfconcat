@@ -182,7 +182,7 @@ var (
 	TextOverflow                        = define("text_overflow", Error, Invalid, "unusable derived text width, or measured block/ink/word overflow with overflow: error")
 	PageSizeRequired                    = define("page_size_required", Error, Invalid, "`inherit` with no source page to inherit from")
 	PageSizeTooLarge                    = define("page_size_too_large", Error, Invalid, "inherited size above 14,400 pt; give an explicit size")
-	SourceUnreadable                    = define("source_unreadable", Error, Failed, "source file could not be read")
+	SourceUnreadable                    = define("source_unreadable", Error, Failed, "source read or temporary snapshot I/O failed")
 	SourceChanged                       = define("source_changed", Error, Failed, "source bytes or readability at assembly differ from inspection")
 	SourceStructurePartial              = define("source_structure_partial", Warning, "", "retained source content has incomplete structural coverage")
 	SourceNotPDF                        = define("source_not_pdf", Error, Invalid, "source has no recognizable PDF header")

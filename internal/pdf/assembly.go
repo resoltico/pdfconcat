@@ -4,6 +4,9 @@
 package pdf
 
 import (
+	"context"
+	"io"
+
 	"github.com/resoltico/pdfconcat/internal/compose"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
@@ -22,10 +25,15 @@ type Part struct {
 	Occurrence    *Occurrence
 	Text          *compose.TextFacts
 	FieldsRenamed []packet.FieldRename
-	// Data contains the acquired, digest-checked original source bytes for this operation.
-	Data      []byte
-	Generated []compose.Page
-	Repeat    int
+	Input         SourceInput
+	Generated     []compose.Page
+	Repeat        int
+}
+
+// SourceInput acquires immutable bytes for one admission. Closing the reader
+// releases the lease. The digest describes exactly those acquired bytes.
+type SourceInput interface {
+	Open(context.Context) (io.ReadSeekCloser, [32]byte, error)
 }
 
 // Assembly is the complete ordered packet and its shared resources.

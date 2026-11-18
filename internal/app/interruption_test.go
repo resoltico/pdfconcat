@@ -12,6 +12,7 @@ import (
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/core/outcome"
+	"github.com/resoltico/pdfconcat/internal/files"
 )
 
 func TestInterruptionSentencesAcrossApplicationStages(t *testing.T) {
@@ -34,7 +35,7 @@ func TestInterruptionSentencesAcrossApplicationStages(t *testing.T) {
 		_, fontDS := loadFonts(ctx, declared)
 		tail := outcome.New("check")
 		noteCancellation(ctx, &tail)
-		groups := [][]diag.Diagnostic{complete.Diagnostics, admit(ctx, req).diagnostics, fontDS, tail.Diagnostics, build(ctx, declared, &composition{layout: &packet.Layout{}}, false).diagnostics}
+		groups := [][]diag.Diagnostic{complete.Diagnostics, admit(ctx, req).diagnostics, fontDS, tail.Diagnostics, build(ctx, declared, &composition{layout: &packet.Layout{}}, files.Roles{}).diagnostics}
 		for _, diagnostics := range groups {
 			found := false
 			for _, d := range diagnostics {

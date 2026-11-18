@@ -93,9 +93,10 @@ type Result struct {
 	PageNumbers *packet.PageNumbers
 	Diagnostics []diag.Diagnostic
 
-	Report   *Report
-	Parts    []Part
-	Sections []Section
+	Report             *Report
+	Parts              []Part
+	Sections           []Section
+	PreviewRowsOmitted int
 }
 
 // Structure records policy and semantic coverage, not PDF/UA certification.
@@ -122,7 +123,27 @@ func (r Result) Full() Result {
 	return r
 }
 
+// SummaryLimit bounds diagnostic records, item references and preview rows.
+const SummaryLimit = 20
+
+// CappedDiagnostics projects a finalized result without mutating full findings.
+func (r Result) CappedDiagnostics() ([]diag.Diagnostic, int) {
+	n := min(len(r.Diagnostics), SummaryLimit)
+	diagnostics := slices.Clone(r.Diagnostics[:n])
+	for i := range diagnostics {
+		d := &diagnostics[i]
+		if len(d.Items) > SummaryLimit {
+			d.ItemsOmitted = len(d.Items) - SummaryLimit
+			d.Items = d.Items[:SummaryLimit]
+		}
+	}
+	return diagnostics, len(r.Diagnostics) - n
+}
+
 func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
+	if len(input) == 0 {
+		return []diag.Diagnostic{}
+	}
 	output := make([]diag.Diagnostic, 0, len(input))
 	type findingKey struct {
 		code                        diag.Code

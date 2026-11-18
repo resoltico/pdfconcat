@@ -170,12 +170,14 @@ pages. Partial selection of sources containing form fields or widgets is refused
 
 An occurrence is one use of a source in the packet. Inspection validates each
 whole source path once and retains its full hash and byte count, original page
-count and version, safety information and conservative font-prefix facts. Each
-occurrence gets an isolated temporary view of its selected pages; only the
-selected geometry, navigation and appearance facts drive composition compatibility.
-Optional page-number overlay geometry is measured once for the union of selected
-original pages, rather than reparsing each occurrence. Building independently
-rereads and digest-checks every occurrence.
+count and version, safety information and conservative font-prefix facts.
+Inspection analyzes each distinct normalized selection and fitting policy in an
+isolated view, then binds findings to the requesting occurrences. Selected
+geometry, navigation and appearance facts drive composition compatibility.
+Assembly acquires private snapshots as needed, verifies their digests against
+inspection, and gives each occurrence its own mutable PDF graph. Small repeated
+sources can share their immutable snapshot while the operation's allowance
+permits.
 
 ### Assembly details
 

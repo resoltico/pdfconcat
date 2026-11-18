@@ -66,6 +66,9 @@ const (
 func knownCount(n int64) *int64           { return &n }
 func hasErrors(ds []diag.Diagnostic) bool { status := diag.Outcome(ds); return status != "ok" }
 func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
+	if d, ok := diag.SourceScratchDiagnostic(err, file); ok {
+		return d
+	}
 	if files.InvalidInput(err) {
 		switch code {
 		case diag.SourceUnreadable, diag.SourceInputInvalid:

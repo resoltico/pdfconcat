@@ -30,6 +30,16 @@ const PlanVersion = plan.Version
 // MaxPlanBytes bounds a plan including an optional UTF-8 BOM.
 const MaxPlanBytes = plan.MaxBytes
 
+// ResultDetail controls returned parts and sections. A requested report is complete.
+type ResultDetail uint8
+
+// Supported result detail levels.
+const (
+	FullResult ResultDetail = iota
+	SummaryResult
+	PreviewResult
+)
+
 // Request declares one execution and its host-relative destinations.
 type Request struct {
 	Operation                  Operation
@@ -39,6 +49,7 @@ type Request struct {
 	Overwrite                  bool
 	SourceDateEpoch            *string
 	InspectionWorkers          int
+	Detail                     ResultDetail
 }
 
 // Input is a closed plan-file, plan-bytes or direct-item declaration.
@@ -82,7 +93,7 @@ func (BlankItem) item() {}
 
 func validHostText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 func (r Request) valid() bool {
-	if r.InspectionWorkers < 1 || r.Operation != Check && r.Operation != Build || !filepath.IsAbs(r.WorkingDir) || !validHostText(r.WorkingDir) || files.ValidatePath(r.WorkingDir) != nil || !validHostText(r.Output) || !validHostText(r.Report) {
+	if r.Detail > PreviewResult || r.InspectionWorkers < 1 || r.Operation != Check && r.Operation != Build || !filepath.IsAbs(r.WorkingDir) || !validHostText(r.WorkingDir) || files.ValidatePath(r.WorkingDir) != nil || !validHostText(r.Output) || !validHostText(r.Report) {
 		return false
 	}
 	if r.Fitting != nil {

@@ -14,18 +14,30 @@ import (
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 )
 
+// InputIdentity records the native identity a regular-file acquisition observed.
+type InputIdentity struct {
+	path string
+	info fs.FileInfo
+}
+
 // Roles holds the roles known at this point in a run. Unknown inputs force
 // report no-replace even when Overwrite was requested.
 type Roles struct {
 	Output, Report         string
 	Inputs                 []string
+	AcceptedSources        []InputIdentity
 	Overwrite, InputsKnown bool
 }
 
 // Check checks initial roles/destinations. Input read failures belong to their stages.
 func (f Roles) Check() []diag.Diagnostic {
-	ds := f.checkTarget(f.Output, packet.OutputDestination)
+	ds := f.CheckOutput()
 	return append(ds, f.checkReport()...)
+}
+
+// CheckOutput checks aliases again against paths as observed at publication.
+func (f Roles) CheckOutput() []diag.Diagnostic {
+	return f.checkTarget(f.Output, packet.OutputDestination)
 }
 
 // CheckReport must also run immediately before report publication, after any PDF
@@ -69,6 +81,14 @@ func (f Roles) checkTarget(path string, role packet.DestinationRole) []diag.Diag
 	}
 	if facts.Exists && !facts.Regular {
 		return packet.CheckDestination(facts)
+	}
+	if facts.Exists {
+		for _, input := range f.AcceptedSources {
+			if os.SameFile(info, input.info) {
+				facts.AliasedInput = input.path
+				return packet.CheckDestination(facts)
+			}
+		}
 	}
 	for _, input := range f.Inputs {
 		same, err := samePathOrFile(path, input)

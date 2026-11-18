@@ -21,7 +21,12 @@ import (
 // VerifyAssembly checks reopened serialized facts against the resolved contract,
 // before publication. It does not substitute producer caches for output facts.
 func VerifyAssembly(c context.Context, data []byte, expected int64, a Assembly) error {
-	return verify(c, data, expected, &a)
+	return VerifyAssemblyReader(c, bytes.NewReader(data), expected, a)
+}
+
+// VerifyAssemblyReader checks the actual serialized artifact on a fresh reader.
+func VerifyAssemblyReader(c context.Context, reader io.ReadSeeker, expected int64, a Assembly) error {
+	return verify(c, reader, expected, &a)
 }
 
 func verifyDocumentFacts(c context.Context, s *model.Context, a Assembly) error {

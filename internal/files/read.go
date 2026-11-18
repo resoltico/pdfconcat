@@ -23,6 +23,26 @@ var ErrTooLarge = errors.New("input exceeds its byte limit")
 // Read follows input symlinks. A positive limit bounds bytes retained; zero is
 // unbounded. The Stat/open/f.Stat checks assume trusted local namespaces.
 func Read(c context.Context, path string, limit int64) ([]byte, error) {
+	f, err := OpenRegular(c, path, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readStream(c, f, limit)
+}
+
+// SizeHint estimates scheduling weight. Admission checks the actual file
+// descriptor separately and owns diagnostics about its readability.
+func SizeHint(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return 0
+	}
+	return info.Size()
+}
+
+// OpenRegular opens a named regular input for a bounded or seekable reader.
+func OpenRegular(c context.Context, path string, limit int64) (*os.File, error) {
 	if err := c.Err(); err != nil {
 		return nil, err
 	}
@@ -40,18 +60,20 @@ func Read(c context.Context, path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	info, err = f.Stat()
 	if err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
+		_ = f.Close()
 		return nil, &os.PathError{Op: "stat", Path: path, Err: ErrNotRegular}
 	}
 	if limit > 0 && info.Size() > limit {
+		_ = f.Close()
 		return nil, ErrTooLarge
 	}
-	return readStream(c, f, limit)
+	return f, nil
 }
 
 // readStream bounds retained bytes and checks cancellation between reads.

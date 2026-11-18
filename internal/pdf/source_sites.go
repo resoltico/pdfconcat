@@ -28,12 +28,19 @@ type sourceOrigins struct {
 }
 
 func sourceOriginsFor(c context.Context, s *model.Context) (sourceOrigins, error) {
-	result := sourceOrigins{pages: map[types.IndirectRef]int{}, annotations: map[types.IndirectRef]int{}}
 	pages, e := rawPages(c, s)
 	if e != nil {
-		return result, e
+		return sourceOrigins{}, e
 	}
+	return sourceOriginsForPages(c, s, pages)
+}
+
+func sourceOriginsForPages(c context.Context, s *model.Context, pages []pageRef) (sourceOrigins, error) {
+	result := sourceOrigins{pages: make(map[types.IndirectRef]int, len(pages)), annotations: map[types.IndirectRef]int{}}
 	for i, p := range pages {
+		if err := c.Err(); err != nil {
+			return result, err
+		}
 		result.pages[p.ref] = i + 1
 		annots, e := s.DereferenceArray(p.dict["Annots"])
 		if e != nil {

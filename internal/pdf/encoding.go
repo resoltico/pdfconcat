@@ -35,7 +35,12 @@ func (r contentReader) Read(p []byte) (int, error) {
 // unexpected-EOF recovery. The backend has already accepted the stage's decoded
 // length/predictor under its resource budget. PNG prediction adds at most one
 // framing byte per decoded byte; TIFF/no prediction adds none.
-func strictFlate(c context.Context, encoded []byte, decoded int, parms types.Dict) error {
+type drawingDecoder struct {
+	encoded bytes.Reader
+	flate   io.ReadCloser
+}
+
+func (d *drawingDecoder) strictFlate(c context.Context, encoded []byte, decoded int, parms types.Dict) error {
 	limit := int64(decoded)
 	if predictor := parms.IntEntry("Predictor"); predictor != nil && *predictor >= 10 && *predictor <= 15 {
 		if limit > (math.MaxInt64-1)/2 {
@@ -46,12 +51,19 @@ func strictFlate(c context.Context, encoded []byte, decoded int, parms types.Dic
 	if limit == math.MaxInt64 {
 		return filter.ErrDecodeLimitExceeded
 	}
-	r, err := zlib.NewReader(contentReader{context: c, reader: bytes.NewReader(encoded)})
+	d.encoded.Reset(encoded)
+	defer d.encoded.Reset(nil)
+	var err error
+	if resetter, ok := d.flate.(zlib.Resetter); ok {
+		err = resetter.Reset(&d.encoded, nil)
+	} else {
+		d.flate, err = zlib.NewReader(&d.encoded)
+	}
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(io.Discard, io.LimitReader(contentReader{context: c, reader: r}, limit+1))
-	closeErr := r.Close()
+	n, err := io.Copy(io.Discard, io.LimitReader(contentReader{context: c, reader: d.flate}, limit+1))
+	closeErr := d.flate.Close()
 	if err != nil {
 		return err
 	}
@@ -72,6 +84,11 @@ func checkContentLength(n, limit int64) error {
 // stages use the SAME xref table's decoder, so intermediate buffers also count
 // toward its existing cumulative allowance. No private budget is reset or copied.
 func decodeDrawingStream(c context.Context, s *model.Context, stream types.StreamDict) ([]byte, error) {
+	var decoder drawingDecoder
+	return decoder.decode(c, s, stream)
+}
+
+func (d *drawingDecoder) decode(c context.Context, s *model.Context, stream types.StreamDict) ([]byte, error) {
 	data := stream.Raw
 	limit := s.DecodeLimit()
 	if len(stream.FilterPipeline) == 0 {
@@ -106,7 +123,7 @@ func decodeDrawingStream(c context.Context, s *model.Context, stream types.Strea
 			return nil, err
 		}
 		if f.Name == filter.Flate {
-			if err := strictFlate(c, data, len(stage.Content), f.DecodeParms); err != nil {
+			if err := d.strictFlate(c, data, len(stage.Content), f.DecodeParms); err != nil {
 				return nil, fmt.Errorf("drawing-content filter[%d] %q integrity: %w", index, f.Name, err)
 			}
 		}
@@ -140,7 +157,12 @@ func validateContentEncoding(c context.Context, s *model.Context) error {
 	if err != nil {
 		return err
 	}
+	return validateObservedEncoding(c, s, pages)
+}
+
+func validateObservedEncoding(c context.Context, s *model.Context, pages pageContentSnapshot) error {
 	lengths := map[types.IndirectRef]int64{}
+	var decoder drawingDecoder
 	limit := s.DecodeLimit()
 	for page, contents := range pages {
 		var combined int64
@@ -158,7 +180,7 @@ func validateContentEncoding(c context.Context, s *model.Context) error {
 				if !ok {
 					return contentEncodingError(page+1, content.ref, errors.New("content object is not a stream"))
 				}
-				decoded, err := decodeDrawingStream(c, s, stream)
+				decoded, err := decoder.decode(c, s, stream)
 				if err != nil {
 					return contentEncodingError(page+1, content.ref, err)
 				}

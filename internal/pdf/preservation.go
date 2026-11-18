@@ -41,6 +41,10 @@ func capturePageContent(c context.Context, s *model.Context) (pageContentSnapsho
 	if err != nil {
 		return nil, err
 	}
+	return observePageContent(c, s, pages)
+}
+
+func observePageContent(c context.Context, s *model.Context, pages []pageRef) (pageContentSnapshot, error) {
 	result := make(pageContentSnapshot, len(pages))
 	digests := map[types.IndirectRef][sha256.Size]byte{}
 	for i, page := range pages {
@@ -105,6 +109,10 @@ func (before pageContentSnapshot) verify(c context.Context, s *model.Context) er
 	if err != nil {
 		return err
 	}
+	return before.compare(after)
+}
+
+func (before pageContentSnapshot) compare(after pageContentSnapshot) error {
 	if !slices.EqualFunc(before, after, func(a, b pageContent) bool {
 		return a.ref == b.ref && slices.Equal(a.streams, b.streams)
 	}) {
@@ -117,13 +125,30 @@ func (before pageContentSnapshot) verify(c context.Context, s *model.Context) er
 // checks the actual page/content invariant independently of validation notices.
 // It does not establish equivalence of arbitrary PDF objects or rendering.
 func validatePreservingPages(c context.Context, s *model.Context) (model.ValidationReport, error) {
-	before, err := capturePageContent(c, s)
+	_, report, err := validateObservedPages(c, s, nil)
+	return report, err
+}
+
+// validateObservedPages returns the post-validation observation for consumers
+// of the same stable graph. A fresh traversal is mandatory after validation.
+func validateObservedPages(c context.Context, s *model.Context, pages []pageRef) (pageContentSnapshot, model.ValidationReport, error) {
+	var before pageContentSnapshot
+	var err error
+	if pages == nil {
+		before, err = capturePageContent(c, s)
+	} else {
+		before, err = observePageContent(c, s, pages)
+	}
 	if err != nil {
-		return s.ValidationReport(), err
+		return nil, s.ValidationReport(), err
 	}
 	report, err := api.ValidateContextWithReport(c, s)
 	if err != nil {
-		return report, err
+		return nil, report, err
 	}
-	return report, before.verify(c, s)
+	after, err := capturePageContent(c, s)
+	if err != nil {
+		return nil, report, err
+	}
+	return after, report, before.compare(after)
 }

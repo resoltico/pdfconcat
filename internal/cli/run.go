@@ -37,7 +37,7 @@ func operationHint(name string) app.Operation {
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, host Host) int {
 	command, failure := Parse(args)
 	render := func(r app.Result) int {
-		if err := Render(stdout, stderr, r, command.JSON); err != nil {
+		if err := renderFinal(stdout, stderr, r, command.JSON); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -143,5 +143,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	request := app.Request{InspectionWorkers: host.InspectionWorkers, SourceDateEpoch: epoch, Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
 	request.Fitting = command.Fitting
+	request.Detail = app.PreviewResult
+	if command.JSON {
+		request.Detail = app.SummaryResult
+	}
 	return render(app.Execute(ctx, request))
 }

@@ -63,8 +63,17 @@ func inheritedPageAttrs(s *model.Context, node *pageTreeNode, cache map[*pageTre
 	if err != nil {
 		return attrs, err
 	}
+	attrs, err = applyPageAttrs(s, node.dict, attrs)
+	if err != nil {
+		return attrs, err
+	}
+	cache[node] = attrs
+	return attrs, nil
+}
+
+func applyPageAttrs(s *model.Context, dict types.Dict, attrs model.InheritedPageAttrs) (model.InheritedPageAttrs, error) {
 	for _, key := range []string{"MediaBox", "CropBox", "Rotate", "Resources"} {
-		value, err := s.Dereference(node.dict[key])
+		value, err := s.Dereference(dict[key])
 		if err != nil {
 			return attrs, err
 		}
@@ -98,7 +107,6 @@ func inheritedPageAttrs(s *model.Context, node *pageTreeNode, cache map[*pageTre
 			}
 		}
 	}
-	cache[node] = attrs
 	return attrs, nil
 }
 
@@ -111,6 +119,10 @@ func pageGeometries(c context.Context, s *model.Context) ([]pageGeometry, error)
 	if err != nil {
 		return nil, err
 	}
+	return geometriesForPages(c, s, pages)
+}
+
+func geometriesForPages(c context.Context, s *model.Context, pages []pageRef) ([]pageGeometry, error) {
 	result := make([]pageGeometry, 0, len(pages))
 	cache := map[*pageTreeNode]model.InheritedPageAttrs{}
 	for index, page := range pages {
@@ -122,7 +134,10 @@ func pageGeometries(c context.Context, s *model.Context) ([]pageGeometry, error)
 			finding.PDFLocation = &diag.PDFLocation{Object: page.ref.ObjectNumber.Value(), Page: index + 1, Path: "Pages.EffectiveGeometry"}
 			return &policyError{finding: finding}
 		}
-		attrs, err := inheritedPageAttrs(s, page.node, cache)
+		attrs, err := inheritedPageAttrs(s, page.parent, cache)
+		if err == nil {
+			attrs, err = applyPageAttrs(s, page.dict, attrs)
+		}
 		if err != nil {
 			return nil, err
 		}

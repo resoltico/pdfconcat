@@ -3,7 +3,10 @@
 
 package packet
 
-import "slices"
+import (
+	"iter"
+	"slices"
+)
 
 // PageRange selects an inclusive range in original source order.
 type PageRange struct{ First, Last int }
@@ -39,6 +42,7 @@ type Plan struct {
 	sections     []Section
 	events       []event
 	oddStarts    int
+	hasContents  bool
 }
 
 // Leaf is one derived source, page, divider or contents item.
@@ -82,7 +86,6 @@ func newPlan(output string, fit *FitPolicy, numbers *PageNumbers, defaults PageS
 		}
 		numbers = &normalized
 	}
-	items = cloneItems(items)
 	fit = copyValue(fit)
 	defaults = copyStyle(defaults)
 	p := Plan{admitted: true, output: output, fitting: fit, pageNumbers: numbers, pageDefaults: defaults, items: items}
@@ -90,6 +93,18 @@ func newPlan(output string, fit *FitPolicy, numbers *PageNumbers, defaults PageS
 		l.Index = len(p.leaves)
 		p.leaves = append(p.leaves, l)
 		p.events = append(p.events, event{leaf: l.Index})
+	}
+	// Intern complete effective styles, including declaration provenance. Layout
+	// takes owned snapshots when it exposes styles to adapters.
+	styles := map[PageStyle]*PageStyle{}
+	effective := func(style PageStyle) *PageStyle {
+		style = style.Over(defaults)
+		if owned, ok := styles[style]; ok {
+			return owned
+		}
+		owned := copyStyle(style)
+		styles[style] = &owned
+		return &owned
 	}
 	var walk func([]Item, Ref, int, bool)
 	walk = func(items []Item, owner Ref, depth int, enabled bool) {
@@ -113,8 +128,9 @@ func newPlan(output string, fit *FitPolicy, numbers *PageNumbers, defaults PageS
 			case *SourceItem:
 				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartSource, Owner: owner, Source: i.Path, Selection: i.Selection})
 			case *PageItem:
-				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartPage, Owner: owner, Page: &i.Style, Count: i.Count})
+				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartPage, Owner: owner, Page: effective(i.Style), Count: i.Count})
 			case *ContentsItem:
+				p.hasContents = true
 				add(Leaf{NumberingEnabled: choice, Ref: i.Ref, Kind: PartContents, Owner: owner, Contents: i})
 			case *GroupItem:
 				section := -1
@@ -132,7 +148,7 @@ func newPlan(output string, fit *FitPolicy, numbers *PageNumbers, defaults PageS
 					if i.Divider != nil {
 						style := *i.Divider
 						style.Text.Value = Setting[string]{Present: true, Value: i.Title, From: i.Ref + "/title"}
-						add(Leaf{NumberingEnabled: choice, Ref: dividerRef(i.Ref), Kind: PartDivider, Owner: i.Ref, Page: &style, Count: 1})
+						add(Leaf{NumberingEnabled: choice, Ref: dividerRef(i.Ref), Kind: PartDivider, Owner: i.Ref, Page: effective(style), Count: 1})
 					}
 				}
 				walk(i.Items, childOwner, childDepth, choice)
@@ -144,30 +160,81 @@ func newPlan(output string, fit *FitPolicy, numbers *PageNumbers, defaults PageS
 	return p
 }
 
-// Leaves returns the derived item order.
+// Leaves returns an owned snapshot of the derived item order.
 func (p Plan) Leaves() []Leaf {
-	result := append([]Leaf(nil), p.leaves...)
+	result := make([]Leaf, len(p.leaves))
 	for i := range result {
-		l := &result[i]
-		l.Selection = append([]PageRange(nil), l.Selection...)
-		if l.Page != nil {
-			s := copyStyle(*l.Page)
-			l.Page = &s
-		}
-		if l.Contents != nil {
-			c := *l.Contents
-			c.Numbering = copyValue(c.Numbering)
-			l.Contents = &c
-		}
+		result[i] = p.LeafAt(i)
 	}
 	return result
+}
+
+// LeafAt returns an owned snapshot of a single derived item.
+func (p Plan) LeafAt(index int) Leaf {
+	l := p.leaves[index]
+	l.Selection = slices.Clone(l.Selection)
+	if l.Page != nil {
+		style := copyStyle(*l.Page)
+		l.Page = &style
+	}
+	if l.Contents != nil {
+		item := *l.Contents
+		item.Numbering = copyValue(item.Numbering)
+		l.Contents = &item
+	}
+	return l
+}
+
+// LeafCount returns the number of ordered authored and generated leaves.
+func (p Plan) LeafCount() int { return len(p.leaves) }
+
+// HasContents reports whether pagination needs an authored contents item.
+func (p Plan) HasContents() bool { return p.hasContents }
+
+// Sources traverses source leaves in plan order. Each selection slice is owned by the caller.
+func (p Plan) Sources() iter.Seq[Leaf] {
+	return func(yield func(Leaf) bool) {
+		for _, leaf := range p.leaves {
+			if leaf.Kind == PartSource {
+				leaf.Selection = slices.Clone(leaf.Selection)
+				if !yield(leaf) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // Sections returns the declared section ancestry in preorder.
 func (p Plan) Sections() []Section { return append([]Section(nil), p.sections...) }
 
+// SectionCount is the number of authored sections.
+func (p Plan) SectionCount() int { return len(p.sections) }
+
+// SectionAt returns a section by preorder index.
+func (p Plan) SectionAt(index int) Section { return p.sections[index] }
+
 // Items returns an owned snapshot of authored items.
-func (p Plan) Items() []Item { return cloneItems(p.items) }
+func (p Plan) Items() []Item {
+	items := cloneItems(p.items)
+	var apply func([]Item)
+	apply = func(items []Item) {
+		for _, item := range items {
+			switch v := item.(type) {
+			case *PageItem:
+				v.Style = copyStyle(v.Style.Over(p.pageDefaults))
+			case *GroupItem:
+				if v.Divider != nil {
+					style := copyStyle(v.Divider.Over(p.pageDefaults))
+					v.Divider = &style
+				}
+				apply(v.Items)
+			}
+		}
+	}
+	apply(items)
+	return items
+}
 
 // OddStarts returns the number of groups that may require padding.
 func (p Plan) OddStarts() int { return p.oddStarts }

@@ -57,17 +57,16 @@ func admit(ctx context.Context, req Request) *admission {
 		}
 		a.roles.Output = path
 	}
+	timestamp, epochValid := configuredTimestamp(req.SourceDateEpoch)
+	overrides := packet.PlanOverrides{Output: a.roles.Output, Fitting: req.Fitting, TimestampFallback: timestamp}
 	var typed *packet.Plan
 	if input, ok := req.Input.(Declared); ok {
-		owned, ds := packet.ValidateDeclaration(input.Declaration)
-		if len(ds) == 0 {
-			owned, ds = files.ResolveDeclaration(owned, req.WorkingDir)
-		}
+		owned, ds := files.ResolveDeclaration(input.Declaration, req.WorkingDir)
 		if len(ds) > 0 {
 			a.diagnostics = append(a.diagnostics, ds...)
 			return a
 		}
-		prepared, ds := packet.AdmitDeclaration(owned)
+		prepared, ds := packet.AdmitDeclaration(owned, overrides)
 		if len(ds) > 0 {
 			a.diagnostics = append(a.diagnostics, ds...)
 			return a
@@ -103,7 +102,7 @@ func admit(ctx context.Context, req Request) *admission {
 			ds = []diag.Diagnostic{ioDiagnostic(code, err, path)}
 			break
 		}
-		declared, ds = plan.Decode(data, path, filepath.Dir(path), files.Path)
+		declared, ds = plan.Decode(data, path, filepath.Dir(path), files.Path, overrides)
 	case PlanBytes:
 		base := req.WorkingDir
 		var err error
@@ -118,35 +117,18 @@ func admit(ctx context.Context, req Request) *admission {
 			ds = []diag.Diagnostic{ioDiagnostic(diag.PlanTooLarge, files.ErrTooLarge, input.Label)}
 			break
 		}
-		declared, ds = plan.Decode(slices.Clone(input.Data), input.Label, base, files.Path)
+		declared, ds = plan.Decode(slices.Clone(input.Data), input.Label, base, files.Path, overrides)
 	case Declared:
 		declared = *typed
 	case Items:
-		declared, ds = directPlan(input, req.WorkingDir)
+		declared, ds = directPlan(input, req.WorkingDir, overrides)
 	}
 	a.diagnostics = append(a.diagnostics, ds...)
 	if hasErrors(ds) {
 		return a
 	}
-	effective := declared.Declaration()
-	if effective.Structure == "" {
-		effective.Structure = packet.StructurePreserve
-	}
-	if effective.Metadata == nil {
-		effective.Metadata = &packet.Metadata{}
-	}
-	if effective.Timestamp == nil && req.SourceDateEpoch != nil {
-		value := *req.SourceDateEpoch
-		n, e := strconv.ParseInt(value, 10, 64)
-		digits := value != ""
-		for _, r := range value {
-			digits = digits && r >= '0' && r <= '9'
-		}
-		if e != nil || !digits || n < 0 || n > packet.MaxTimestamp {
-			a.diagnostics = append(a.diagnostics, diag.Report(diag.PlanValue, diag.EffectiveSOURCEDATEEPOCHMustBeUnixSecondsFromThrough()))
-		} else {
-			effective.Timestamp = &n
-		}
+	if !epochValid && declared.Timestamp() == nil {
+		a.diagnostics = append(a.diagnostics, diag.Report(diag.PlanValue, diag.EffectiveSOURCEDATEEPOCHMustBeUnixSecondsFromThrough()))
 	}
 	a.roles.InputsKnown = true
 	seenInputs := map[string]bool{}
@@ -159,22 +141,9 @@ func admit(ctx context.Context, req Request) *admission {
 			seenInputs[resource.Path] = true
 		}
 	}
-	if req.Output != "" {
-		effective.Output = a.roles.Output
-	} else {
-		a.roles.Output = effective.Output
-	}
-	if req.Fitting != nil {
-		effective.Fitting = req.Fitting
-	}
-	if req.Operation == Build && effective.Output == "" {
+	a.roles.Output = declared.Output()
+	if req.Operation == Build && a.roles.Output == "" {
 		a.diagnostics = append(a.diagnostics, diag.Report(diag.OutputRequired, diag.AnOutputDestinationIsRequiredForBuild()))
-	}
-	var admissionDS []diag.Diagnostic
-	declared, admissionDS = packet.AdmitDeclaration(effective)
-	a.diagnostics = append(a.diagnostics, admissionDS...)
-	if len(admissionDS) > 0 {
-		return a
 	}
 	a.plan = &declared
 	refusals := a.roles.Check()
@@ -186,7 +155,23 @@ func admit(ctx context.Context, req Request) *admission {
 	}
 	return a
 }
-func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
+func configuredTimestamp(raw *string) (*int64, bool) {
+	if raw == nil {
+		return nil, true
+	}
+	value := *raw
+	n, err := strconv.ParseInt(value, 10, 64)
+	digits := value != ""
+	for _, r := range value {
+		digits = digits && r >= '0' && r <= '9'
+	}
+	if err != nil || !digits || n < 0 || n > packet.MaxTimestamp {
+		return nil, false
+	}
+	return &n, true
+}
+
+func directPlan(items Items, base string, overrides ...packet.PlanOverrides) (packet.Plan, []diag.Diagnostic) {
 	var declared []packet.Item
 	var ds []diag.Diagnostic
 	generated := 0
@@ -220,10 +205,10 @@ func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 		}
 		declared = append(declared, &packet.SourceItem{Ref: source.Ref, Path: path})
 	}
-	owned, validation := packet.ValidateDeclaration(packet.Declaration{Items: declared})
+	prepared, validation := packet.AdmitDeclaration(packet.Declaration{Items: declared}, overrides...)
 	ds = append(ds, validation...)
 	if len(ds) > 0 {
 		return packet.Plan{}, ds
 	}
-	return packet.AdmitDeclaration(owned)
+	return prepared, nil
 }

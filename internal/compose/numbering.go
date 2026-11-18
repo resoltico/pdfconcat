@@ -40,7 +40,7 @@ func (f *PageNumberLayout) Place(size packet.Size, number int64) (*typeset.Place
 	}
 	text := strconv.FormatInt(number, 10)
 	width := float64(len(text)) * f.digits.CellWidth
-	placed, err := f.digits.Place(text, width, 0)
+	placed, err := placeOutlinedDigits(f.digits, text, width, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (f *PageNumberLayout) Place(size packet.Size, number int64) (*typeset.Place
 	if strings.HasPrefix(position, "top-") {
 		dy = size.Height - f.numbers.Margin - ink.Y - ink.Height
 	}
-	placed, err = f.digits.Place(text, width+dx, dy)
+	placed, err = placeOutlinedDigits(f.digits, text, width+dx, dy)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +77,26 @@ func (f *PageNumberLayout) Check(size packet.Size, number int64) error {
 // Font returns the font used by every footer.
 func (f *PageNumberLayout) Font() *typeset.Font { return f.digits.Font }
 
+// StrokeWidth is the white outline's physical width, including both sides.
+func (f *PageNumberLayout) StrokeWidth() float64 { return numberStrokeWidth(f.digits.Size) }
+
+func numberStrokeWidth(size float64) float64 { return min(1, size*0.08) }
+
+func placeOutlinedDigits(digits *typeset.Digits, text string, right, baseline float64) (*typeset.Placed, error) {
+	placed, err := digits.Place(text, right, baseline)
+	if err != nil {
+		return nil, err
+	}
+	if ink := placed.InkBounds; ink != nil {
+		stroke := numberStrokeWidth(digits.Size)
+		ink.X -= stroke / 2
+		ink.Y -= stroke / 2
+		ink.Width += stroke
+		ink.Height += stroke
+	}
+	return placed, nil
+}
+
 // Union measures all footer glyphs for font resource preparation.
 func (f *PageNumberLayout) Union() (*typeset.Placed, error) {
 	return f.digits.Place("0123456789", 10*f.digits.CellWidth, 0)
@@ -84,7 +104,8 @@ func (f *PageNumberLayout) Union() (*typeset.Placed, error) {
 
 // ExclusionTop returns the physical top of the footer's logical and ink envelope.
 func (f *PageNumberLayout) ExclusionTop() float64 {
-	return f.numbers.Margin - f.digits.InkBottom + f.digits.Top
+	radius := f.StrokeWidth() / 2
+	return f.numbers.Margin - (f.digits.InkBottom - radius) + max(f.digits.Top, f.digits.InkTop+radius)
 }
 
 func bottomNumberPlacement(digits *typeset.Digits, size packet.Size, number int64, margin float64) (*typeset.Placed, error) {
@@ -93,7 +114,7 @@ func bottomNumberPlacement(digits *typeset.Digits, size packet.Size, number int6
 	}
 	text := strconv.FormatInt(number, 10)
 	width := float64(len(text)) * digits.CellWidth
-	placed, err := digits.Place(text, (size.Width+width)/2, 0)
+	placed, err := placeOutlinedDigits(digits, text, (size.Width+width)/2, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +122,7 @@ func bottomNumberPlacement(digits *typeset.Digits, size packet.Size, number int6
 		return nil, placementError("The physical page number has no painted glyphs.")
 	}
 	unshifted := placed
-	placed, err = digits.Place(text, (size.Width+width)/2, margin-placed.InkBounds.Y)
+	placed, err = placeOutlinedDigits(digits, text, (size.Width+width)/2, margin-placed.InkBounds.Y)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +187,7 @@ func bottomNumberOverflow(digits *typeset.Digits, size packet.Size, number int64
 				}
 			}
 			text := strconv.FormatInt(number, 10)
-			candidate, err := digits.Place(text, (size.Width+unshifted.Bounds.Width)/2, proposed-unshifted.InkBounds.Y)
+			candidate, err := placeOutlinedDigits(digits, text, (size.Width+unshifted.Bounds.Width)/2, proposed-unshifted.InkBounds.Y)
 			if err == nil && numberFits(candidate, size) {
 				advice = append(advice, fmt.Sprintf("%s page_numbers.margin to %s %g pt.", direction, limit, proposed))
 			} else {
@@ -190,7 +211,8 @@ func (f *PageNumberLayout) Available(canvas, physical packet.Size) (float64, flo
 	}
 	bottom, top := 0.0, canvas.Height
 	if strings.HasPrefix(string(f.numbers.Position), "top-") {
-		edge := physical.Height - f.numbers.Margin - f.digits.InkTop + f.digits.Bottom
+		radius := f.StrokeWidth() / 2
+		edge := physical.Height - f.numbers.Margin - (f.digits.InkTop + radius) + min(f.digits.Bottom, f.digits.InkBottom-radius)
 		top = math.Min(top, (edge-6-offset)/scale)
 	} else {
 		bottom = math.Max(bottom, (f.ExclusionTop()+6-offset)/scale)

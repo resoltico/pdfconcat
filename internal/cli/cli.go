@@ -6,6 +6,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -27,6 +28,11 @@ type Command struct {
 	Overwrite, Help, JSON                       bool
 	Operands                                    []Operand
 }
+
+var commands = []string{"build", "check", "schema", "version", "licenses", "help"}
+
+func knownCommand(name string) bool { return slices.Contains(commands, name) }
+
 type option struct{ name, alias, value, description string }
 
 var options = []option{
@@ -69,8 +75,6 @@ func Parse(args []string) (Command, *app.Result) {
 		return c, nil
 	case "--version":
 		c.Name = "version"
-	case "build", "check", "version", "schema", "licenses":
-		c.Name = args[0]
 	case "help":
 		c.Help = true
 		if len(args) > 2 {
@@ -79,7 +83,7 @@ func Parse(args []string) (Command, *app.Result) {
 		if len(args) == 2 {
 			c.Name = args[1]
 			if c.Name == "--help" || c.Name == "-h" {
-				c.Name = ""
+				c.Name = "help"
 				return c, nil
 			}
 			if !knownCommand(c.Name) {
@@ -93,7 +97,10 @@ func Parse(args []string) (Command, *app.Result) {
 		if strings.HasPrefix(args[0], "-") {
 			return failure("usage_unknown_option", "Unknown root option: "+args[0], 0)
 		}
-		return failure("usage_unknown_command", "Unknown command: "+args[0], 0)
+		if !knownCommand(args[0]) {
+			return failure("usage_unknown_command", "Unknown command: "+args[0], 0)
+		}
+		c.Name = args[0]
 	}
 	if c.Name == "schema" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
@@ -271,17 +278,15 @@ func wantsJSON(args []string) bool {
 	return false
 }
 
-func knownCommand(name string) bool {
-	return name == "build" || name == "check" || name == "schema" || name == "version" || name == "licenses"
-}
-
 // Help uses the same option declarations as Parse.
 func Help(command string) string {
 	var b strings.Builder
 	switch command {
 	case "":
-		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: build, check, schema plan|result, version, licenses, help [COMMAND]\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n\nCopyright (c) 2026 Ervins Strauhmanis. AGPL-3.0-only; no warranty.\nCopy, modify and redistribute under that license; run pdfconcat licenses for terms.\n")
+		b.WriteString("PDFConcat combines PDFs and selected pages into one ordered document.\nMerge files directly or use a plan for selections, sections and simple text inserts.\n\nCommands: " + strings.Join(commands, ", ") + "\nUse pdfconcat help build for inputs and options.\nDocumentation: https://github.com/resoltico/pdfconcat#readme\n\nCopyright (c) 2026 Ervins Strauhmanis. AGPL-3.0-only; no warranty.\nCopy, modify and redistribute under that license; run pdfconcat licenses for terms.\n")
 		return b.String()
+	case "help":
+		return "Usage: pdfconcat help [COMMAND]\nShow the command list or help for a specific command.\nCommands: " + strings.Join(commands, ", ") + "\n"
 	case "schema":
 		return "Usage: pdfconcat schema plan|result\nPrint the JSON Schema.\n"
 	case "licenses":

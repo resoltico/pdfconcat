@@ -52,7 +52,7 @@ func corpusPolicies(t *testing.T) {
 		{"fit-numeric-indirect", []any{corpusSource("numeric-indirect.pdf")}, "A4", "fit_destination_unsupported", 0},
 		{"fit-omitted-numeric", []any{corpusSource("numeric.pdf", [2]int{1, 1})}, "A4", "", 1},
 		{"fit-whole-target", []any{corpusSource("whole-target.pdf")}, "A4", "", 2},
-		{"refusal-before-missing-output-parent", []any{corpusSource("form.pdf")}, "A4", "fit_form_unsupported", 0},
+		{"missing-output-parent-before-inspection", []any{corpusSource("form.pdf")}, "A4", "output_parent_invalid", 0},
 	}
 	var records []corpusRecord
 	for _, tc := range cases {
@@ -68,7 +68,7 @@ func corpusPolicies(t *testing.T) {
 			if tc.Fit != "" {
 				plan["fitting"] = map[string]any{"target": tc.Fit}
 			}
-			if tc.ID == "refusal-before-missing-output-parent" {
+			if tc.ID == "missing-output-parent-before-inspection" {
 				plan["output"] = "absent/packet.pdf"
 			}
 			path := filepath.Join(dir, "plan.json")
@@ -168,7 +168,7 @@ func corpusPolicies(t *testing.T) {
 	})
 	t.Run("late-report-after-pdf", func(t *testing.T) {
 		dir := corpusStage(t, "approval-form.pdf")
-		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, Input: app.Items{app.SourceItem{Path: "approval-form.pdf", Ref: "form"}}, WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf"), Report: filepath.Join(dir, "absent/report.json")})
+		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, Input: app.Items{app.SourceItem{Path: "approval-form.pdf", Ref: "form"}}, WorkingDir: dir, Output: filepath.Join(dir, "packet.pdf"), Report: filepath.Join(corpusReadOnlyDirectory(t), "report.json")})
 		if r.Status != "failed" || !r.Output.Published || r.Report.Written || !code(r, "report_write_failed") {
 			t.Fatal(r)
 		}

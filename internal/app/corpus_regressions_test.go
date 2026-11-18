@@ -44,52 +44,56 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 		args = append(args, name)
 		items = append(items, app.SourceItem{Path: name, Ref: fmt.Sprintf("argv:%d", n+1)})
 	}
-	for _, format := range []string{"json", "text"} {
-		t.Run(format, func(t *testing.T) {
-			report := filepath.Join(dir, "absent-parent", format+".json")
-			commandArgs := append(append([]string{}, args...), "--report", report)
-			if format == "json" {
-				commandArgs = append(commandArgs, "--json")
-			}
-			cmd := exec.CommandContext(t.Context(), binary, commandArgs...)
-			cmd.Dir = dir
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-			err := cmd.Run()
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 || format == "json" && stderr.Len() != 0 {
-				t.Fatalf("late failed-class exit: %v %s %s", err, &stdout, &stderr)
-			}
-			if format == "json" {
-				var r exchange.Result
-				if err = json.Unmarshal(stdout.Bytes(), &r); err != nil {
+	t.Run("late-report", func(t *testing.T) {
+		denied := corpusReadOnlyDirectory(t)
+		for _, format := range []string{"json", "text"} {
+			t.Run(format, func(t *testing.T) {
+				report := filepath.Join(denied, format+".json")
+				commandArgs := append(append([]string{}, args...), "--report", report)
+				if format == "json" {
+					commandArgs = append(commandArgs, "--json")
+				}
+				cmd := exec.CommandContext(t.Context(), binary, commandArgs...)
+				cmd.Dir = dir
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+				err := cmd.Run()
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || format == "json" && stderr.Len() != 0 {
+					t.Fatalf("late failed-class exit: %v %s %s", err, &stdout, &stderr)
+				}
+				if format == "json" {
+					var r exchange.Result
+					if err = json.Unmarshal(stdout.Bytes(), &r); err != nil {
+						t.Fatal(err)
+					}
+					if r.Status != "failed" || len(r.Diagnostics) != 20 || r.DiagnosticsOmitted != 2 || r.Report.Written {
+						t.Fatal(r)
+					}
+					if r.Diagnostics[0].Code.String() != "report_write_failed" || r.Diagnostics[0].File != report || r.Diagnostics[0].Detail == "" {
+						t.Fatal("late report failure or target context was hidden", r)
+					}
+					for _, d := range r.Diagnostics[1:] {
+						if d.Code.String() != "source_not_pdf" {
+							t.Fatal("invalid-source peers changed", r)
+						}
+					}
+				} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stderr.String(), "2 more diagnostics") || !strings.Contains(stderr.String(), "report_write_failed") || strings.Contains(stderr.String(), "use --report") {
+					t.Fatal(stdout.String())
+				}
+				if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "stdout"), stdout.Bytes(), 0600); err != nil {
 					t.Fatal(err)
 				}
-				if r.Status != "failed" || len(r.Diagnostics) != 20 || r.DiagnosticsOmitted != 2 || r.Report.Written {
-					t.Fatal(r)
-				}
-				if r.Diagnostics[0].Code.String() != "report_write_failed" || r.Diagnostics[0].File != report || r.Diagnostics[0].Detail == "" {
-					t.Fatal("late report failure or target context was hidden", r)
-				}
-				for _, d := range r.Diagnostics[1:] {
-					if d.Code.String() != "source_not_pdf" {
-						t.Fatal("invalid-source peers changed", r)
-					}
-				}
-			} else if !strings.Contains(stdout.String(), "check failed") || !strings.Contains(stderr.String(), "2 more diagnostics") || !strings.Contains(stderr.String(), "report_write_failed") || strings.Contains(stderr.String(), "use --report") {
-				t.Fatal(stdout.String())
-			}
-			if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "stdout"), stdout.Bytes(), 0600); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-	badReport := filepath.Join(dir, "absent-parent", "app.json")
-	full := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.Items(items), WorkingDir: dir, Report: badReport})
-	if len(full.Diagnostics) != 22 || full.Diagnostics[0].Code.String() != "report_write_failed" || full.Status != "failed" || cli.ExitCode(full.Status) != 1 {
-		t.Fatal(full)
-	}
+			})
+		}
+		badReport := filepath.Join(denied, "app.json")
+		full := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.Items(items), WorkingDir: dir, Report: badReport})
+		if len(full.Diagnostics) != 22 || full.Diagnostics[0].Code.String() != "report_write_failed" || full.Status != "failed" || cli.ExitCode(full.Status) != 1 {
+			t.Fatal(full)
+		}
+		corpusJSON(t, filepath.Join(dir, "full-failed.json"), full)
+	})
 	goodReport := filepath.Join(t.TempDir(), "report.json")
 	good := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.Items(items), WorkingDir: dir, Report: goodReport})
 	if len(good.Diagnostics) != 21 || good.Status != "invalid" || cli.ExitCode(good.Status) != 2 || !good.Report.Written {
@@ -109,6 +113,25 @@ func corpusHiddenPriority(t *testing.T, binary string) {
 	if !errors.As(err, &exit) || exit.ExitCode() != 2 {
 		t.Fatalf("safe report positive: %v %s", err, raw)
 	}
-	corpusJSON(t, filepath.Join(dir, "full-failed.json"), full)
 	corpusJSON(t, filepath.Join(dir, "full-invalid.json"), good)
+}
+
+func corpusReadOnlyDirectory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0700); err != nil {
+			t.Error(err)
+		}
+	})
+	probe := filepath.Join(dir, "permission-probe")
+	if err := os.WriteFile(probe, nil, 0600); err == nil {
+		t.Skip("effective permissions allow writing to a read-only directory")
+	} else if !os.IsPermission(err) {
+		t.Fatalf("unexpected permission probe failure: %v", err)
+	}
+	return dir
 }

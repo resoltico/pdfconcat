@@ -125,6 +125,7 @@ type PDFLocation struct {
 // Diagnostic is a located error or warning with its consuming plan entries.
 type Diagnostic struct {
 	Identity     FindingIdentity `json:"-"`
+	AuthoredRef  string          `json:"-"` // Plan setting implicated by a measured finding.
 	Severity     Severity        `json:"severity"`
 	Code         Code            `json:"code"`
 	Message      string          `json:"message"`
@@ -169,6 +170,8 @@ var (
 	PathInvalid                         = define("path_invalid", Error, Invalid, "empty path, NUL, Windows drive-relative (`C:x`) or rooted-without-drive (`\\x`)")
 	OutputExists                        = define("output_exists", Error, Invalid, "output exists and replacement was not authorized")
 	ReportExists                        = define("report_exists", Error, Invalid, "report exists and replacement was not authorized, or plan inputs are unknown")
+	OutputParentInvalid                 = define("output_parent_invalid", Error, Invalid, "output parent is absent or is not a directory")
+	ReportParentInvalid                 = define("report_parent_invalid", Error, Invalid, "report parent is absent or is not a directory")
 	OutputNotRegular                    = define("output_not_regular", Error, Invalid, "output exists and is not a regular file (directory, symlink, device)")
 	ReportNotRegular                    = define("report_not_regular", Error, Invalid, "same for the report")
 	OutputIsInput                       = define("output_is_input", Error, Invalid, "output is (or aliases) a plan, font or source file")

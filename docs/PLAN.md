@@ -236,7 +236,7 @@ then displays physical target pages. An empty object enables these defaults:
 | `kinds` | `["source","page","divider","contents"]` | Eligible kinds; `[]` selects none |
 | `position` | `bottom-center` | `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, `bottom-right` |
 | `size` | 9 pt | 1–14,400 pt; point number or length string |
-| `margin` | 8 mm | 0–14,400 pt; distance from ink to the selected nearest edges |
+| `margin` | 8 mm | 0–14,400 pt; distance from outlined ink to the selected nearest edges |
 
 The inherited item `numbering` override applies first, then kind eligibility.
 Automatic padding is never eligible. Physical mode labels eligible physical page
@@ -250,9 +250,9 @@ Contents uses the target's resolved decimal label, or an em dash (—) for an
 unnumbered target. Links retain their original physical target, including an
 unnumbered divider. PDF PageLabels agree with these labels and use empty labels
 for ineligible spans. Conservative digit bounds include the start offset and
-avoid iterative contents pagination. Numbers use black bundled Noto Sans.
+avoid iterative contents pagination. Numbers use bundled Noto Sans with a black fill and a thin white outline.
 
-The complete logical and ink envelopes must fit. A zero margin can fail even
+The complete logical and outlined ink envelopes must fit. A zero margin can fail even
 when painted ink fits. Numbers may overlap existing source content; there is no
 source-content overlap detector or reflow. Generated text is laid out within the
 reserved interval; explicit `overflow: allow` still warns about overflow.

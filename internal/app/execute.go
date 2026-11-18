@@ -26,6 +26,12 @@ func Execute(ctx context.Context, req Request) Result {
 		}
 	}
 	result := project(req, admitted, inspected, composed, built)
+	for i := range result.Diagnostics {
+		d := &result.Diagnostics[i]
+		if location, ok := admitted.locations[d.AuthoredRef]; ok {
+			d.File, d.Location = location.File, &location
+		}
+	}
 	records := recordsFor(admitted, inspected, composed)
 	records.appendRequested(&result, req.Detail)
 	noteCancellation(ctx, &result)

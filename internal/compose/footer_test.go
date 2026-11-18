@@ -76,8 +76,8 @@ func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
 		margin       float64
 		want, absent []string
 	}{
-		{"lower", packet.Size{Width: 300, Height: 200}, 1, 0, []string{"below the physical page", "Increase page_numbers.margin to at least 2.637 pt"}, []string{"Decrease page_numbers.margin"}},
-		{"upper", packet.Size{Width: 300, Height: 20}, 1, 24, []string{"above the physical page", "Decrease page_numbers.margin to at most 10.379 pt"}, []string{"Increase page_numbers.margin"}},
+		{"lower", packet.Size{Width: 300, Height: 200}, 1, 0, []string{"below the physical page", "Increase page_numbers.margin to at least 2.277 pt"}, []string{"Decrease page_numbers.margin"}},
+		{"upper", packet.Size{Width: 300, Height: 20}, 1, 24, []string{"above the physical page", "Decrease page_numbers.margin to at most 10.019 pt"}, []string{"Increase page_numbers.margin"}},
 		{"width", packet.Size{Width: 5, Height: 200}, 1234567890, 24, []string{"width", "reduce page_numbers.size", "increase sheet width"}, []string{"Increase page_numbers.margin", "Decrease page_numbers.margin"}},
 		{"width and lower", packet.Size{Width: 5, Height: 200}, 1234567890, 0, []string{"width", "below the physical page", "Increase page_numbers.margin"}, nil},
 		{"short envelope with lower only", packet.Size{Width: 300, Height: 11}, 1, 0, []string{"below the physical page", "complete logical and ink envelope", "reduce page_numbers.size", "increase sheet height"}, []string{"Increase page_numbers.margin"}},
@@ -110,7 +110,7 @@ func TestFooterOverflowAdviceMatchesFailedPhysicalBounds(t *testing.T) {
 	for _, tc := range []struct {
 		size   packet.Size
 		margin float64
-	}{{packet.Size{Width: 300, Height: 200}, 2.637}, {packet.Size{Width: 300, Height: 20}, 10.379}} {
+	}{{packet.Size{Width: 300, Height: 200}, 2.277}, {packet.Size{Width: 300, Height: 20}, 10.019}} {
 		if err = checkNumberPlacement(digits, tc.size, 1, tc.margin); err != nil {
 			t.Fatalf("recommended margin %g did not fit: %v", tc.margin, err)
 		}
@@ -160,9 +160,9 @@ func TestFooterAdviceOmitsNumericalBoundsThatFailExactContainment(t *testing.T) 
 		fontSize, width, height, margin, validMargin float64
 		direction                                    string
 	}{
-		{"tight upper 9.1pt", 9.1, 1000000, 12.3942, 13.3942, 2.6663, "Decrease"},
-		{"tight upper 1pt", 1, 1000000, 1.3619999999999999, 2.362, 0.293, "Decrease"},
-		{"lower roundoff", 1.3890784982935154, 300, 200, 0, 0.408, "Increase"},
+		{"tight upper 9.1pt", 9.1, 1000000, 12.3942, 13.3942, 2.3023000000000002, "Decrease"},
+		{"tight upper 1pt", 1, 1000000, 1.3619999999999999, 2.362, 0.253, "Decrease"},
+		{"lower roundoff", 1.0671936758893281, 300, 200, 0, 0.30, "Increase"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			digits, err := footerDigits(packet.PageNumbers{Size: tc.fontSize, Mode: "physical", Position: "bottom-center", Start: 1})

@@ -505,48 +505,64 @@ func TestKeptMissingAppearanceStillObeysPDF20OutputPolicy(t *testing.T) {
 }
 func TestCompletePageSizesSurviveRefusalAndLaterWritingFailure(t *testing.T) {
 	for _, lateWrite := range []bool{false, true} {
-		dir := t.TempDir()
-		source := filepath.Join(dir, "source.pdf")
-		width := 14400.005
-		targetText := "14400x100"
-		if lateWrite {
-			width = 100
-			targetText = "100x100"
-		}
-		d := pdffixture.WithBoxes("physical", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: fmt.Sprintf("[0 0 %.17g 100]", width)})
-		if e := d.WriteFile(source); e != nil {
-			t.Fatal(e)
-		}
-		target, e := packet.ParseSize(targetText, false)
-		if e != nil {
-			t.Fatal(e)
-		}
-		items := []packet.Item{&packet.SourceItem{Ref: "source", Path: source}}
-		output := filepath.Join(dir, "output.pdf")
-		if lateWrite {
-			output = filepath.Join(dir, "absent", "output.pdf")
-			items = append(items, &packet.PageItem{Ref: "body", Count: 1})
-		} else {
-			items = append(items, &packet.GroupItem{Ref: "odd", StartOn: packet.StartOdd, Items: []packet.Item{&packet.PageItem{Ref: "body", Count: 1, Style: packet.Defaults()}}})
-		}
-		r := app.Execute(t.Context(), app.Request{Operation: app.Build, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(target), Output: output, Input: app.Declared{Declaration: packet.Declaration{Items: items}}})
-		want := diag.PageSizeTooLarge
-		if lateWrite {
-			want = diag.OutputWriteFailed
-		}
-		if !codePresent(r.Diagnostics, want) || r.Output.Published || r.Parts[0].PageSizes == nil {
-			t.Fatal(r.Diagnostics)
-		}
-		if lateWrite && (r.Parts[1].OutputSize == nil || *r.Parts[1].OutputSize != target) {
-			t.Fatal("write failure lost resolved generated geometry", r.Parts)
-		}
-		if !lateWrite && (r.Pages.Total != nil || r.Parts[1].OutputSize != nil) {
-			t.Fatal("failed Resolve exposed partial layout", r.Parts)
-		}
-		run := (*r.Parts[0].PageSizes)[0]
-		if run.SourceSize.Width != width || run.OutputSize.Width != width {
-			t.Fatal("known keep expectation changed", run)
-		}
+		t.Run(fmt.Sprintf("lateWrite=%t", lateWrite), func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.pdf")
+			width := 14400.005
+			targetText := "14400x100"
+			if lateWrite {
+				width = 100
+				targetText = "100x100"
+			}
+			d := pdffixture.WithBoxes("physical", pdffixture.PageBoxes{}, pdffixture.PageBoxes{Media: fmt.Sprintf("[0 0 %.17g 100]", width)})
+			if e := d.WriteFile(source); e != nil {
+				t.Fatal(e)
+			}
+			target, e := packet.ParseSize(targetText, false)
+			if e != nil {
+				t.Fatal(e)
+			}
+			items := []packet.Item{&packet.SourceItem{Ref: "source", Path: source}}
+			output := filepath.Join(dir, "output.pdf")
+			if lateWrite {
+				denied := t.TempDir()
+				if err := os.Chmod(denied, 0500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := os.Chmod(denied, 0700); err != nil {
+						t.Error(err)
+					}
+				})
+				if err := os.WriteFile(filepath.Join(denied, "permission-probe"), nil, 0600); err == nil {
+					t.Skip("effective permissions allow writing to a read-only directory")
+				} else if !os.IsPermission(err) {
+					t.Fatalf("unexpected permission probe failure: %v", err)
+				}
+				output = filepath.Join(denied, "output.pdf")
+				items = append(items, &packet.PageItem{Ref: "body", Count: 1})
+			} else {
+				items = append(items, &packet.GroupItem{Ref: "odd", StartOn: packet.StartOdd, Items: []packet.Item{&packet.PageItem{Ref: "body", Count: 1, Style: packet.Defaults()}}})
+			}
+			r := app.Execute(t.Context(), app.Request{Operation: app.Build, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(target), Output: output, Input: app.Declared{Declaration: packet.Declaration{Items: items}}})
+			want := diag.PageSizeTooLarge
+			if lateWrite {
+				want = diag.OutputWriteFailed
+			}
+			if !codePresent(r.Diagnostics, want) || r.Output.Published || r.Parts[0].PageSizes == nil {
+				t.Fatal(r.Diagnostics)
+			}
+			if lateWrite && (r.Parts[1].OutputSize == nil || *r.Parts[1].OutputSize != target) {
+				t.Fatal("write failure lost resolved generated geometry", r.Parts)
+			}
+			if !lateWrite && (r.Pages.Total != nil || r.Parts[1].OutputSize != nil) {
+				t.Fatal("failed Resolve exposed partial layout", r.Parts)
+			}
+			run := (*r.Parts[0].PageSizes)[0]
+			if run.SourceSize.Width != width || run.OutputSize.Width != width {
+				t.Fatal("known keep expectation changed", run)
+			}
+		})
 	}
 }
 

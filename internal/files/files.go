@@ -31,13 +31,13 @@ type Roles struct {
 
 // Check checks initial roles/destinations. Input read failures belong to their stages.
 func (f Roles) Check() []diag.Diagnostic {
-	ds := f.CheckOutput()
+	ds := f.checkTarget(f.Output, packet.OutputDestination, true)
 	return append(ds, f.checkReport()...)
 }
 
 // CheckOutput checks aliases again against paths as observed at publication.
 func (f Roles) CheckOutput() []diag.Diagnostic {
-	return f.checkTarget(f.Output, packet.OutputDestination)
+	return f.checkTarget(f.Output, packet.OutputDestination, false)
 }
 
 // CheckReport must also run immediately before report publication, after any PDF
@@ -45,33 +45,38 @@ func (f Roles) CheckOutput() []diag.Diagnostic {
 func (f Roles) CheckReport() []diag.Diagnostic { return f.checkReport() }
 
 func (f Roles) checkReport() []diag.Diagnostic {
-	ds := f.checkTarget(f.Report, packet.ReportDestination)
-	if f.Report != "" && f.Output != "" && !hasNonregularReport(ds) {
-		same, err := samePathOrFile(f.Report, f.Output)
-		if err != nil {
-			d := diag.Report(diag.ReportInspectionFailed, diag.PublicationInspectionFailure(err.Error()))
-			d.File = f.Report
-			ds = append(ds, d)
-		}
-		ds = append(ds, packet.CheckReportSeparation(same, f.Report)...)
+	ds := f.checkTarget(f.Report, packet.ReportDestination, false)
+	if f.Report == "" || f.Output == "" || len(ds) > 0 && ds[0].Code != diag.ReportExists {
+		return ds
 	}
-
+	same, err := samePathOrFile(f.Report, f.Output)
+	if err != nil {
+		d := diag.Report(diag.ReportInspectionFailed, diag.PublicationInspectionFailure(err.Error()))
+		d.File = f.Report
+		return []diag.Diagnostic{d}
+	}
+	if same {
+		return packet.CheckReportSeparation(same, f.Report)
+	}
 	return ds
 }
-func hasNonregularReport(ds []diag.Diagnostic) bool {
-	for _, d := range ds {
-		if d.Code == diag.ReportNotRegular {
-			return true
-		}
-	}
-	return false
-}
 
-func (f Roles) checkTarget(path string, role packet.DestinationRole) []diag.Diagnostic {
+func (f Roles) checkTarget(path string, role packet.DestinationRole, preflightPDF bool) []diag.Diagnostic {
 	if path == "" {
 		return nil
 	}
 	facts := packet.DestinationFacts{Path: path, Role: role, Overwrite: f.Overwrite, InputsKnown: f.InputsKnown}
+	parent := filepath.Dir(path)
+	dir, err := os.Stat(parent)
+	switch {
+	case missingEntry(err) || err == nil && !dir.IsDir():
+		facts.InvalidParent = parent
+	case err != nil:
+		facts.InspectionFailure = err.Error()
+	}
+	if err != nil || facts.InvalidParent != "" {
+		return packet.CheckDestination(facts)
+	}
 	info, err := os.Lstat(path)
 	if err == nil {
 		facts.Exists = true
@@ -90,13 +95,26 @@ func (f Roles) checkTarget(path string, role packet.DestinationRole) []diag.Diag
 			}
 		}
 	}
+	target := pathEntry{file: info, parent: dir, parentPath: parent, leaf: filepath.Base(path)}
+	parents := map[string]fs.FileInfo{parent + string(os.PathSeparator): dir}
 	for _, input := range f.Inputs {
-		same, err := samePathOrFile(path, input)
+		if filepath.Clean(input) == path {
+			facts.AliasedInput = input
+			break
+		}
+		entry, err := observeEntry(input, parents)
 		if err != nil {
+			// A new PDF cannot be published without acquiring its inputs.
+			// Let that stage diagnose inaccessible inputs during preflight.
+			if preflightPDF && !facts.Exists {
+				continue
+			}
 			facts.IdentityFailure = err.Error()
 			break
 		}
-		if same {
+		// The PDF's inputs must exist before publication, so a future
+		// DOS alias alone need not replace a missing-source diagnosis.
+		if target.aliases(entry, !preflightPDF) {
 			facts.AliasedInput = input
 			break
 		}
@@ -104,24 +122,6 @@ func (f Roles) checkTarget(path string, role packet.DestinationRole) []diag.Diag
 	return packet.CheckDestination(facts)
 }
 
-// samePathOrFile protects existing bytes by identity and missing inputs by spelling.
-func samePathOrFile(a, b string) (bool, error) {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true, nil
-	}
-	first, err := os.Stat(a)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	second, err := os.Stat(b)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	return os.SameFile(first, second), nil
+func missingEntry(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, errNotDirectory)
 }

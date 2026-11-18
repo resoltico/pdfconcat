@@ -89,14 +89,14 @@ func TestFileRoleAliasesAndOverwriteRules(t *testing.T) {
 	}
 }
 
-func TestReportRoleRecheckFindsInitiallyAbsentParentAlias(t *testing.T) {
+func TestReportRoleRecheckFindsNewParentAlias(t *testing.T) {
 	dir := t.TempDir()
 	realDir := filepath.Join(dir, "realDir")
 	alias := filepath.Join(dir, "alias")
 	if err := os.Mkdir(realDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(realDir, alias); err != nil {
+	if err := os.Symlink(t.TempDir(), alias); err != nil {
 		t.Skipf("directory symlinks unavailable: %v", err)
 	}
 	output := filepath.Join(realDir, "packet.pdf")
@@ -108,8 +108,14 @@ func TestReportRoleRecheckFindsInitiallyAbsentParentAlias(t *testing.T) {
 	if err := os.WriteFile(output, []byte("%PDF-published"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realDir, alias); err != nil {
+		t.Fatal(err)
+	}
 	ds := f.CheckReport()
-	if !hasCode(ds, diag.ReportIsOutput) {
+	if len(ds) != 1 || !hasCode(ds, diag.ReportIsOutput) {
 		t.Fatalf("late report alias missed: %+v", ds)
 	}
 	if status := diag.Outcome(ds); status != "invalid" {
@@ -176,5 +182,91 @@ func TestReportMissingInputSpellingAndExistingDirectoryAlias(t *testing.T) {
 	after, err := os.ReadFile(existing)
 	if err != nil || string(after) != "preserve" {
 		t.Fatalf("input changed: %q %v", after, err)
+	}
+}
+
+func TestAbsentSiblingNamesUseConservativeIdentity(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	for _, tc := range []struct {
+		otherDir, otherLeaf string
+		alias               bool
+	}{
+		{dir, "Résumé.pdf", true},
+		{dir, "re\u0301sume\u0301.pdf", true},
+		{dir, "résu\u200bmé.pdf", true},
+		{dir, "long-resume.pdf", false},
+		{dir, "résumé.json", false},
+		{other, "résumé.pdf", false},
+	} {
+		input := filepath.Join(dir, "résumé.pdf")
+		report := filepath.Join(tc.otherDir, tc.otherLeaf)
+		roles := files.Roles{Report: report, Inputs: []string{input}, InputsKnown: true}
+		if ds := roles.CheckReport(); hasCode(ds, diag.ReportIsInput) != tc.alias || !tc.alias && len(ds) != 0 {
+			t.Errorf("%q: %+v", report, ds)
+		}
+	}
+}
+
+func TestDanglingInputLinkResolvesRelativeToNativeParent(t *testing.T) {
+	root := t.TempDir()
+	realParent := filepath.Join(root, "actual")
+	nested := filepath.Join(realParent, "nested")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(nested, alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	input := filepath.Join(alias, "input.pdf")
+	if err := os.Symlink(filepath.Join("..", "future.pdf"), input); err != nil {
+		t.Fatal(err)
+	}
+	roles := files.Roles{Report: filepath.Join(realParent, "future.pdf"), Inputs: []string{input}, InputsKnown: true}
+	if ds := roles.CheckReport(); !hasCode(ds, diag.ReportIsInput) {
+		t.Fatalf("dangling link target was missed: %+v", ds)
+	}
+	roles.Report = filepath.Join(root, "future.pdf")
+	if ds := roles.CheckReport(); len(ds) != 0 {
+		t.Fatalf("lexically simplified link target was treated as an alias: %+v", ds)
+	}
+}
+
+func TestDestinationParentMustBeDirectory(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "regular")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, parent := range []string{filepath.Join(root, "absent"), file, filepath.Join(file, "below")} {
+		roles := files.Roles{Output: filepath.Join(parent, "output.pdf"), Report: filepath.Join(parent, "report.json"), InputsKnown: true}
+		ds := roles.Check()
+		if len(ds) != 2 || !hasCode(ds, diag.OutputParentInvalid) || !hasCode(ds, diag.ReportParentInvalid) {
+			t.Errorf("parent %q: %+v", parent, ds)
+		}
+	}
+}
+
+func TestExistingCaseDistinctSiblingsUseNativeIdentity(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "CASE.pdf")
+	second := filepath.Join(dir, "case.pdf")
+	if err := os.WriteFile(first, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(second, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	if os.IsExist(err) {
+		t.Skip("filesystem folds case")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	roles := files.Roles{Output: first, Report: second, Overwrite: true, InputsKnown: true}
+	if ds := roles.Check(); len(ds) != 0 {
+		t.Fatalf("distinct existing files were refused: %+v", ds)
 	}
 }

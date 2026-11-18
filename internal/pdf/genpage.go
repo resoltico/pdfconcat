@@ -546,7 +546,7 @@ func (d *document) appendContent(page compose.Page) {
 		}
 		d.content = fmt.Appendf(d.content, "/%s <</MCID %d>> BDC\n", role, index)
 		d.appendColor(block.Color)
-		d.appendText(block.Text, font)
+		d.appendText(block.Text, font, 0)
 		d.content = append(d.content, "EMC\n"...)
 	}
 }
@@ -593,12 +593,22 @@ func needsActualText(font *typeset.Font, cluster typeset.Cluster) bool {
 // appendText writes the text object of a placed block. A cluster that needs ActualText gets one span
 // per glyph: the first glyph's span carries the cluster text, later glyphs (marks) an empty one, because
 // one span over base and mark makes poppler insert a spurious space after the mark.
-func (d *document) appendText(placed *typeset.Placed, fontIndex int) {
+func (d *document) appendText(placed *typeset.Placed, fontIndex int, outlineWidth float64) {
 	key := fmt.Sprintf("F%d", fontIndex+1)
 	if len(d.fontKeys) > fontIndex {
 		key = d.fontKeys[fontIndex]
 	}
-	d.content = fmt.Appendf(d.content, "BT\n/%s ", key)
+	if outlineWidth > 0 {
+		// A round join bounds the white stroke to half its width outside the ink.
+		d.content = fmt.Appendf(d.content, "1 G %s w 1 j\n", number(outlineWidth))
+	}
+	d.content = append(d.content, "BT\n"...)
+	if outlineWidth > 0 {
+		// Stroke outside the digit and retain the glyph interior as a clip.
+		// Painting the fill afterward preserves thin black stems.
+		d.content = append(d.content, "5 Tr\n"...)
+	}
+	d.content = fmt.Appendf(d.content, "/%s ", key)
 	d.content = append(d.content, number(placed.Size)...)
 	d.content = append(d.content, " Tf\n"...)
 
@@ -612,6 +622,10 @@ func (d *document) appendText(placed *typeset.Placed, fontIndex int) {
 	}
 
 	d.content = append(d.content, "ET\n"...)
+	if outlineWidth > 0 {
+		ink := placed.InkBounds
+		d.content = fmt.Appendf(d.content, "%s %s %s %s re f\n", number(ink.X), number(ink.Y), number(ink.Width), number(ink.Height))
+	}
 }
 
 func (d *document) appendLine(placed *typeset.Placed, line typeset.Line, fontIndex int) {

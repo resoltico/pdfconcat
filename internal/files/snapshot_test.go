@@ -41,7 +41,7 @@ func TestSnapshotKeepsObservedBytesAndCleansPrivateSpill(t *testing.T) {
 			if source.Size() != int64(len(original)) || source.Digest() != sha256.Sum256(original) {
 				t.Fatal("incorrect acquisition facts")
 			}
-			if (source.path != "") != (tc.memory == 0) {
+			if (source.spillName != "") != (tc.memory == 0) {
 				t.Fatal("incorrect snapshot placement")
 			}
 			if err := os.WriteFile(path, []byte("modified bytes"), 0600); err != nil {

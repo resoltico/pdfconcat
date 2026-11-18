@@ -121,24 +121,31 @@ dispatch:
 
 	return out
 }
-func inspectSource(ctx context.Context, use sourceUse) sourceInspection {
+func inspectSource(ctx context.Context, use sourceUse) (out sourceInspection) {
 	items := make([]string, len(use.requests))
 	for i, request := range use.requests {
 		items[i] = request.Item
 	}
-	source, err := files.Acquire(ctx, use.path, sourceMemoryThreshold)
-	if err == nil {
-		defer func() { _ = source.Close() }()
-		var input io.ReadSeekCloser
-		input, err = source.Open()
-		if err == nil {
-			defer func() { _ = input.Close() }()
-			return inspectSnapshot(ctx, use, source, input, items)
+	recordFailure := func(err error) {
+		if err != nil {
+			d := ioDiagnostic(diag.SourceUnreadable, err, use.path)
+			d.Items = items
+			out.diagnostics = append(out.diagnostics, d)
 		}
 	}
-	d := ioDiagnostic(diag.SourceUnreadable, err, use.path)
-	d.Items = items
-	return sourceInspection{diagnostics: []diag.Diagnostic{d}}
+	source, err := files.Acquire(ctx, use.path, sourceMemoryThreshold)
+	if err != nil {
+		recordFailure(err)
+		return out
+	}
+	defer func() { recordFailure(source.Close()) }()
+	input, err := source.Open()
+	if err != nil {
+		recordFailure(err)
+		return out
+	}
+	defer func() { recordFailure(input.Close()) }()
+	return inspectSnapshot(ctx, use, source, input, items)
 }
 
 func inspectSnapshot(ctx context.Context, use sourceUse, source *files.Snapshot, input io.ReadSeeker, items []string) sourceInspection {

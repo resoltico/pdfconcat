@@ -360,9 +360,19 @@ func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) 
 	}
 	defer func() {
 		closeErr := reader.Close()
-		if err == nil && closeErr != nil {
-			err = snapshotFailure(part.Source, closeErr)
+		if closeErr == nil {
+			return
 		}
+		if err == nil {
+			err = snapshotFailure(part.Source, closeErr)
+			return
+		}
+		finding := diagnostic(err, diag.AssemblyFailed)
+		if finding.Detail != "" {
+			finding.Detail += "\n"
+		}
+		finding.Detail += snapshotFailure(part.Source, closeErr).finding.Detail
+		err = &policyError{finding: finding, err: errors.Join(err, closeErr)}
 	}()
 	if digest != part.Occurrence.File.SHA256 {
 		return nil, sourceOrigins{}, changed()
@@ -377,7 +387,10 @@ func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) 
 	return s, origins, err
 }
 
-func snapshotFailure(path string, err error) error {
+func snapshotFailure(path string, err error) *policyError {
+	if d, ok := diag.SourceScratchDiagnostic(err, path); ok {
+		return &policyError{finding: d, err: err}
+	}
 	cause := diag.IOCause{Reason: err.Error(), File: path}
 	var native *fs.PathError
 	if errors.As(err, &native) {

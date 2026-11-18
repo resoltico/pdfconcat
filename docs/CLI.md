@@ -201,9 +201,11 @@ publication.
 
 Large source PDFs use private snapshots in the operating system's temporary
 directory during inspection and assembly. Allow space for concurrent source
-inspections and the largest individual assembly source. Snapshot creation or
-writing failures identify the input and the failed stage. PDF assembly verifies
-the bytes staged at the destination before publishing them.
+inspections and the largest individual assembly source. A temporary-storage
+failure reports `source_unreadable` in either stage, with the input and the
+scratch operation. Each spill stays bound to its original directory for
+reopening and cleanup. PDF assembly verifies the bytes staged at the
+destination before publishing them.
 
 Output/report files use ordinary umask permissions; replacements keep the old
 mode. Publication writes and syncs a sibling temporary file first. Its bounded
@@ -466,7 +468,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `text_overflow` | error | invalid | unusable derived text width, or measured block/ink/word overflow with overflow: error |
 | `page_size_required` | error | invalid | `inherit` with no source page to inherit from |
 | `page_size_too_large` | error | invalid | inherited size above 14,400 pt; give an explicit size |
-| `source_unreadable` | error | failed | source file could not be read |
+| `source_unreadable` | error | failed | source read or temporary snapshot I/O failed |
 | `source_changed` | error | failed | source bytes or readability at assembly differ from inspection |
 | `source_structure_partial` | warning | — | retained source content has incomplete structural coverage |
 | `source_not_pdf` | error | invalid | source has no recognizable PDF header |

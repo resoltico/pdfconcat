@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Diagnose temporary source storage failures separately from bad or changed inputs. Clean spills through the original directory if it moves.
 - Use less memory when checking or building image-heavy packets. Large source snapshots need writable temporary storage during inspection and assembly. [CLI](docs/CLI.md#reports-and-committed-state)
 - Reuse inspection of identical page selections and reduce processing for large generated packets, numbering and authored plans.
 - Stream full JSON reports to staging and avoid building full report records for ordinary CLI summaries.

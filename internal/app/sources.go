@@ -67,7 +67,7 @@ func (s *assemblySource) Open(ctx context.Context) (io.ReadSeekCloser, [32]byte,
 	reader, err := snapshot.Open()
 	if err != nil {
 		if s.cached == nil {
-			_ = snapshot.Close()
+			err = errors.Join(err, snapshot.Close())
 		}
 		return nil, zero, err
 	}

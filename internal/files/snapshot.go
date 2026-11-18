@@ -6,20 +6,25 @@ package files
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 )
 
 // Snapshot owns the bytes observed from a regular input. Large inputs live
 // in a private spill file. Open returns a fresh reader for each admission.
 type Snapshot struct {
-	data     []byte
-	path     string
-	size     int64
-	digest   [32]byte
-	identity InputIdentity
+	data      []byte
+	spillRoot *os.Root
+	spillName string
+	size      int64
+	digest    [32]byte
+	identity  InputIdentity
 }
 
 // Size is the byte count observed during acquisition.
@@ -36,8 +41,12 @@ func (s *Snapshot) Identity() InputIdentity { return s.identity }
 
 // Open returns a fresh reader on the observed bytes.
 func (s *Snapshot) Open() (io.ReadSeekCloser, error) {
-	if s.path != "" {
-		return os.Open(s.path)
+	if s.spillRoot != nil {
+		reader, err := s.spillRoot.Open(s.spillName)
+		if err != nil {
+			return nil, scratchError("reopen private source snapshot", err)
+		}
+		return spillReader{reader}, nil
 	}
 	if s.data == nil {
 		return nil, os.ErrClosed
@@ -52,14 +61,20 @@ func (memoryReader) Close() error { return nil }
 // Close releases the acquired bytes or removes the private spill.
 func (s *Snapshot) Close() error {
 	s.data = nil
-	if s.path == "" {
+	if s.spillRoot == nil {
 		return nil
 	}
-	err := os.Remove(s.path)
-	if err == nil {
-		s.path = ""
+	root, name := s.spillRoot, s.spillName
+	s.spillRoot, s.spillName = nil, ""
+	var removeErr error
+	if name != "" {
+		removeErr = root.Remove(name)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
 	}
-	return err
+	return errors.Join(scratchError("remove private source snapshot", removeErr),
+		scratchError("close private source snapshot directory", root.Close()))
 }
 
 // Acquire streams bytes and their digest in one pass. The memory allowance
@@ -90,24 +105,29 @@ func Acquire(c context.Context, path string, memory int64) (_ *Snapshot, err err
 			return nil, e
 		}
 	}
-	spill, err := os.CreateTemp("", "pdfconcat-source-*.pdf")
+	s.spillRoot, err = os.OpenRoot(os.TempDir())
 	if err != nil {
-		return nil, fmt.Errorf("create private source snapshot: %w", err)
+		return nil, scratchError("create private source snapshot", err)
 	}
-	s.path = spill.Name()
 	defer func() {
 		if err != nil {
-			_ = s.Close()
+			if closeErr := s.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 		}
 	}()
-	// Keep SHA-256 and the snapshot in agreement, including when a write fails.
-	n, writeErr := io.CopyBuffer(io.MultiWriter(spill, hash), io.MultiReader(bytes.NewReader(s.data), r), make([]byte, 128<<10))
-	closeErr := spill.Close()
-	if writeErr != nil {
-		return nil, fmt.Errorf("stage private source snapshot: %w", writeErr)
+	name := "pdfconcat-source-" + rand.Text() + ".pdf"
+	spill, err := s.spillRoot.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, scratchError("create private source snapshot", err)
 	}
-	if closeErr != nil {
-		return nil, fmt.Errorf("close private source snapshot: %w", closeErr)
+	s.spillName = name
+	// Distinguish input read errors from scratch writes, even when the system
+	// reports the same native cause. Hash exactly the bytes written to the spill.
+	n, copyErr := io.CopyBuffer(io.MultiWriter(spillWriter{spill}, hash), io.MultiReader(bytes.NewReader(s.data), r), make([]byte, 128<<10))
+	closeErr := scratchError("close private source snapshot", spill.Close())
+	if copyErr != nil || closeErr != nil {
+		return nil, errors.Join(copyErr, closeErr)
 	}
 	s.data, s.size = nil, n
 	copy(s.digest[:], hash.Sum(nil))
@@ -124,4 +144,24 @@ func (r snapshotReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.reader.Read(p)
+}
+
+func scratchError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &diag.SourceScratchError{Cause: fmt.Errorf("%s: %w", operation, err)}
+}
+
+type spillReader struct{ *os.File }
+
+func (r spillReader) Close() error {
+	return scratchError("close private source snapshot reader", r.File.Close())
+}
+
+type spillWriter struct{ *os.File }
+
+func (w spillWriter) Write(data []byte) (int, error) {
+	n, err := w.File.Write(data)
+	return n, scratchError("stage private source snapshot", err)
 }

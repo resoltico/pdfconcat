@@ -4,6 +4,8 @@
 package diag
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -37,6 +39,30 @@ func IOFailure(code Code, facts IOCause) Diagnostic {
 	d.Detail = strings.ToValidUTF8(facts.NativeDetail, "�")
 	d.File = facts.File
 	return d
+}
+
+// SourceScratchError marks a failure in temporary source storage.
+type SourceScratchError struct{ Cause error }
+
+func (e *SourceScratchError) Error() string { return e.Cause.Error() }
+func (e *SourceScratchError) Unwrap() error { return e.Cause }
+
+// SourceScratchDiagnostic gives inspection and assembly the same diagnosis,
+// independently of the native error that a scratch path and a source can share.
+func SourceScratchDiagnostic(err error, file string) (Diagnostic, bool) {
+	var scratch *SourceScratchError
+	if !errors.As(err, &scratch) {
+		return Diagnostic{}, false
+	}
+	detail := strings.ToValidUTF8(err.Error(), "�")
+	for _, interruption := range []error{context.Canceled, context.DeadlineExceeded} {
+		if errors.Is(err, interruption) {
+			return IOFailure(Interrupted, IOCause{Reason: interruption.Error(), NativeDetail: detail, File: file}), true
+		}
+	}
+	d := New(SourceUnreadable, "Cannot use temporary storage for a private source snapshot. Choose a writable temporary directory with enough space.")
+	d.File, d.Detail = file, detail
+	return d, true
 }
 
 // XRefEntry is accepted original-entry evidence, independent of a backend object.

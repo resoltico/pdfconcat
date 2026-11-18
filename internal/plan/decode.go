@@ -710,20 +710,20 @@ func (p *decoder) fitting() (*packet.FitPolicy, error) {
 func (p *decoder) fitTolerance() (float64, error) {
 	var points float64
 	var err error
-	switch p.d.PeekKind() {
-	case '"':
+	kind := p.d.PeekKind()
+	if kind == '"' {
 		length, readErr := p.text()
 		if readErr != nil {
 			return 0, readErr
 		}
 		points, err = packet.ParseFitToleranceLength(length)
-	case '0':
+	} else if kind == '0' {
 		token, readErr := p.d.ReadToken()
 		if readErr != nil {
 			return 0, readErr
 		}
 		points, err = packet.ParseFitToleranceNumber(token.String())
-	default:
+	} else {
 		return p.number()
 	}
 	if err != nil {

@@ -119,7 +119,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 			}
 		}
 		if value.err != nil {
-			d := diagnosticWidth(value.err, p.Ref, style.Text.Width.From)
+			d := diagnosticWidth(value.err, p.Ref, style.Text.Width.From, 0)
 			ds = append(ds, d)
 		}
 	}

@@ -259,8 +259,8 @@ func AllowedGlyphInkOutsideSheet(axis string, start, end, limit float64) Explana
 }
 
 // AllowedTextOutsideArea reports measured bounds beyond the available text area.
-func AllowedTextOutsideArea(subject, axis string, start, end, min, max float64) Explanation {
-	return Explanation{text: fmt.Sprintf("%s exceeds the available text area. Its %s bounds span %g to %g pt, with %g to %g pt available.", subject, axis, start, end, min, max)}
+func AllowedTextOutsideArea(subject, axis string, start, end, lower, upper float64) Explanation {
+	return Explanation{text: fmt.Sprintf("%s exceeds the available text area. Its %s bounds span %g to %g pt, with %g to %g pt available.", subject, axis, start, end, lower, upper)}
 }
 
 // AllowedTextExceedsWrapWidth reports a line wider than its wrap box.
@@ -270,6 +270,9 @@ func AllowedTextExceedsWrapWidth(measurement string) Explanation {
 
 // PageNumberPlacementFailure reports the physical sheet independently of its label.
 func PageNumberPlacementFailure(page int64, reason string) Explanation {
+	if page == 0 {
+		return Explanation{text: "Page-number placement failed. " + reason}
+	}
 	return Explanation{text: fmt.Sprintf("Page-number placement failed on physical page %d. %s", page, reason)}
 }
 

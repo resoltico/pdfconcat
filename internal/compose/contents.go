@@ -76,13 +76,7 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 	if len(sections) == 0 {
 		return fail(diag.ContentsRequiresAtLeastOneAuthoredSection(), pointer)
 	}
-	size := contents.Size
-	if size == (packet.Size{}) {
-		size, _ = packet.ParseSize("A4", false)
-		if j.FitTo() != nil {
-			size = *j.FitTo()
-		}
-	}
+	size := j.ContentsCanvas(contents.Size)
 	font := fonts[j.PageDefaults().Text.Font.Value]
 	digits, err := typeset.NewDigits(font, 12)
 	if err != nil {
@@ -100,7 +94,11 @@ func PrepareContents(c context.Context, j packet.Plan, facts []packet.SourceFact
 		}
 	}
 	if numberLayout != nil && eligible {
-		lo, hi := numberLayout.Available(size, j.FitTo())
+		fit, err := packet.DecideFit(size, j.Fitting())
+		if err != nil {
+			return nil, []diag.Diagnostic{Diagnostic(err, pointer)}
+		}
+		lo, hi := numberLayout.Available(size, fit.Output)
 		bottom = math.Max(bottom, lo)
 		top = math.Min(top, hi)
 	}

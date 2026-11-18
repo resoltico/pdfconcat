@@ -246,7 +246,7 @@ serialization failures can still produce `assembly_failed`;
 ### Fitting
 
 Fitting compares each page's ordered displayed physical size to the fixed target.
-Within .01 pt per side, the page keeps its actual geometry: no fit Form, box or
+Within the configured absolute tolerance per ordered side (.01 pt by default), the page keeps its actual geometry: no fit Form, box or
 coordinate rewrite, rotation baking, UserUnit deletion, or annotation/structure
 fitting. The interval endpoints use deterministic float64 rounding. Two-decimal
 A4 keeps; integer 595 × 842 pt A4 transforms. A kept CropBox may retain a larger

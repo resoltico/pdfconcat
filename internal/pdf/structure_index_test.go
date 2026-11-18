@@ -64,7 +64,7 @@ func TestStaleUnclaimedParentIndexNormalization(t *testing.T) {
 			t.Run(fmt.Sprintf("direct=%v/indirect-arrays=%v", directTree, indirectArrays), func(t *testing.T) {
 				d := staleParentIndexFixture(directTree, indirectArrays)
 				expectIndexNormalization(t, d, "ParentTree")
-				for _, fit := range []*packet.Size{nil, {Width: 300, Height: 400}} {
+				for _, fit := range []*packet.FitPolicy{nil, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})} {
 					path, ds := selectedPacket(t, d, []packet.Item{
 						&packet.SourceItem{Ref: "first", Path: "source"},
 						&packet.SourceItem{Ref: "repeated", Path: "source"},
@@ -163,7 +163,7 @@ func TestAbsentIDIndexRebuiltWithoutLosingHeaderBindings(t *testing.T) {
 	d := pdffixture.MultipageTable()
 	d.Objs[9] = bytes.Replace(d.Objs[9], []byte("/IDTree 15 0 R"), nil, 1)
 	expectIndexNormalization(t, d, "IDTree")
-	for _, fit := range []*packet.Size{nil, {Width: 300, Height: 400}} {
+	for _, fit := range []*packet.FitPolicy{nil, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})} {
 		path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "first", Path: "source"}, &packet.SourceItem{Ref: "second", Path: "source"}}, fit)
 		if status := diag.Outcome(ds); status != "ok" {
 			t.Fatal(ds)

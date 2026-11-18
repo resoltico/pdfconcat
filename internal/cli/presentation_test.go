@@ -109,7 +109,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, exchange.Version{FormatVersion: 9, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, exchange.Version{FormatVersion: 10, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {

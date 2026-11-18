@@ -5,7 +5,6 @@
 package app
 
 import (
-	"math"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -25,6 +24,9 @@ const (
 	Build = packet.Build
 )
 
+// PlanVersion is the supported JSON plan version.
+const PlanVersion = plan.Version
+
 // MaxPlanBytes bounds a plan including an optional UTF-8 BOM.
 const MaxPlanBytes = plan.MaxBytes
 
@@ -33,7 +35,7 @@ type Request struct {
 	Operation                  Operation
 	Input                      Input
 	WorkingDir, Output, Report string
-	FitTo                      *Sheet
+	Fitting                    *packet.FitPolicy
 	Overwrite                  bool
 	SourceDateEpoch            *string
 	InspectionWorkers          int
@@ -78,21 +80,15 @@ type BlankItem struct{ Ref string }
 
 func (BlankItem) item() {}
 
-// Sheet is a validated physical size.
-type Sheet struct{ size packet.Size }
-
-// ParseSheet uses the shared physical paper and dimension grammar.
-func ParseSheet(text string) (Sheet, error) {
-	size, err := packet.ParseSize(text, false)
-	return Sheet{size: size}, err
-}
-func (s Sheet) valid() bool {
-	return !math.IsNaN(s.size.Width) && !math.IsNaN(s.size.Height) && s.size.Width >= 1 && s.size.Width <= packet.MaxSide && s.size.Height >= 1 && s.size.Height <= packet.MaxSide
-}
 func validHostText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 func (r Request) valid() bool {
-	if r.InspectionWorkers < 1 || r.Operation != Check && r.Operation != Build || !filepath.IsAbs(r.WorkingDir) || !validHostText(r.WorkingDir) || files.ValidatePath(r.WorkingDir) != nil || !validHostText(r.Output) || !validHostText(r.Report) || r.FitTo != nil && !r.FitTo.valid() {
+	if r.InspectionWorkers < 1 || r.Operation != Check && r.Operation != Build || !filepath.IsAbs(r.WorkingDir) || !validHostText(r.WorkingDir) || files.ValidatePath(r.WorkingDir) != nil || !validHostText(r.Output) || !validHostText(r.Report) {
 		return false
+	}
+	if r.Fitting != nil {
+		if _, err := r.Fitting.Normalize(); err != nil {
+			return false
+		}
 	}
 	switch input := r.Input.(type) {
 	case PlanFile:

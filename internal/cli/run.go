@@ -142,9 +142,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 	}
 	request := app.Request{InspectionWorkers: host.InspectionWorkers, SourceDateEpoch: epoch, Operation: operationHint(command.Name), Input: input, WorkingDir: cwd, Output: command.Output, Report: command.Report, Overwrite: command.Overwrite}
-	if command.FitTo != "" {
-		size, _ := app.ParseSheet(command.FitTo)
-		request.FitTo = &size
-	}
+	request.Fitting = command.Fitting
 	return render(app.Execute(ctx, request))
 }

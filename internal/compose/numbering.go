@@ -182,16 +182,11 @@ func bottomNumberOverflow(digits *typeset.Digits, size packet.Size, number int64
 
 // Available returns the generated canvas interval left by the selected physical
 // overlay, inverse transformed through proportional fitting before pagination.
-func (f *PageNumberLayout) Available(canvas packet.Size, fit *packet.Size) (float64, float64) {
-	decision, err := packet.DecideFit(canvas, fit)
-	if err != nil {
-		panic(err)
-	}
-	physical := decision.Output
+func (f *PageNumberLayout) Available(canvas, physical packet.Size) (float64, float64) {
 	scale, offset := 1.0, 0.0
-	if decision.Transform {
-		scale = math.Min(fit.Width/canvas.Width, fit.Height/canvas.Height)
-		offset = (fit.Height - canvas.Height*scale) / 2
+	if canvas != physical {
+		scale = math.Min(physical.Width/canvas.Width, physical.Height/canvas.Height)
+		offset = (physical.Height - canvas.Height*scale) / 2
 	}
 	bottom, top := 0.0, canvas.Height
 	if strings.HasPrefix(string(f.numbers.Position), "top-") {

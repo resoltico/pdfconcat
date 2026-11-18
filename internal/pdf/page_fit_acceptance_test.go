@@ -92,20 +92,26 @@ func nativePageFacts(p map[string]any) map[string]any {
 }
 func selectiveRequest(t *testing.T, data []byte, target string, operation app.Operation) (app.Result, string, string) {
 	t.Helper()
+	var policy *packet.FitPolicy
+	if target != "" {
+		sheet, err := packet.ParseSize(target, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy = packet.DefaultFitPolicy(sheet)
+	}
+	return selectivePolicyRequest(t, data, policy, operation)
+}
+
+func selectivePolicyRequest(t *testing.T, data []byte, policy *packet.FitPolicy, operation app.Operation) (app.Result, string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.pdf")
 	output := filepath.Join(dir, "output.pdf")
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	request := app.Request{Operation: operation, InspectionWorkers: 1, WorkingDir: dir, Input: app.Items{app.SourceItem{Ref: "source", Path: source}}, Output: output}
-	if target != "" {
-		sheet, err := app.ParseSheet(target)
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.FitTo = &sheet
-	}
+	request := app.Request{Operation: operation, InspectionWorkers: 1, WorkingDir: dir, Input: app.Items{app.SourceItem{Ref: "source", Path: source}}, Output: output, Fitting: policy}
 	result := app.Execute(t.Context(), request)
 	if !bytes.Equal(data, readPDF(t, source)) {
 		t.Fatal("source bytes changed")
@@ -180,6 +186,29 @@ func TestSelectiveFitIndependentNativeAndRasterWitnesses(t *testing.T) {
 		})
 	}
 }
+func TestIntegerA4PositionedLinkUsesExplicitTolerance(t *testing.T) {
+	target, err := packet.ParseSize("A4", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := readPDF(t, filepath.Join("testdata/page-fit", "integer-a4.pdf"))
+	fit := &packet.FitPolicy{Target: target, Tolerance: 1}
+	result, source, output := selectivePolicyRequest(t, input, fit, app.Build)
+	if result.Status != "ok" || !result.Output.Published || result.Fitting == nil || *result.Fitting != *fit {
+		t.Fatal(result)
+	}
+	qpdfCheck(t, output)
+	before, after := qpdfPages(t, source), qpdfPages(t, output)
+	if !reflect.DeepEqual(nativePageFacts(before[0]), nativePageFacts(after[0])) {
+		t.Fatal("one-point tolerance changed the linked sheet's native frame")
+	}
+	for _, dict := range qpdfDictionaries(t, output) {
+		if dict["/Subtype"] == "/Form" {
+			t.Fatal("the kept sheet acquired a fitting wrapper")
+		}
+	}
+}
+
 func sharedLinkDoc(duplicate bool) *pdffixture.Doc {
 	d := pdffixture.FitAnnotation("Link", "", false, 0, 4)
 	d.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 7 0 R] >>")
@@ -461,11 +490,11 @@ func TestKeptMissingAppearanceStillObeysPDF20OutputPolicy(t *testing.T) {
 		if e := other.WriteFile(two); e != nil {
 			t.Fatal(e)
 		}
-		target, e := app.ParseSheet("100x100")
+		target, e := packet.ParseSize("100x100", false)
 		if e != nil {
 			t.Fatal(e)
 		}
-		r := app.Execute(t.Context(), app.Request{Operation: op, InspectionWorkers: 1, WorkingDir: dir, FitTo: &target, Output: filepath.Join(dir, "out.pdf"), Input: app.Items{app.SourceItem{Ref: "one", Path: one}, app.SourceItem{Ref: "two", Path: two}}})
+		r := app.Execute(t.Context(), app.Request{Operation: op, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(target), Output: filepath.Join(dir, "out.pdf"), Input: app.Items{app.SourceItem{Ref: "one", Path: one}, app.SourceItem{Ref: "two", Path: two}}})
 		if r.Status != "invalid" || !codePresent(r.Diagnostics, diag.SourceOutputIncompatible) || r.Output.Published {
 			t.Fatal(r.Diagnostics)
 		}
@@ -488,7 +517,7 @@ func TestCompletePageSizesSurviveRefusalAndLaterWritingFailure(t *testing.T) {
 		if e := d.WriteFile(source); e != nil {
 			t.Fatal(e)
 		}
-		target, e := app.ParseSheet(targetText)
+		target, e := packet.ParseSize(targetText, false)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -496,16 +525,23 @@ func TestCompletePageSizesSurviveRefusalAndLaterWritingFailure(t *testing.T) {
 		output := filepath.Join(dir, "output.pdf")
 		if lateWrite {
 			output = filepath.Join(dir, "absent", "output.pdf")
+			items = append(items, &packet.PageItem{Ref: "body", Count: 1})
 		} else {
 			items = append(items, &packet.GroupItem{Ref: "odd", StartOn: packet.StartOdd, Items: []packet.Item{&packet.PageItem{Ref: "body", Count: 1, Style: packet.Defaults()}}})
 		}
-		r := app.Execute(t.Context(), app.Request{Operation: app.Build, InspectionWorkers: 1, WorkingDir: dir, FitTo: &target, Output: output, Input: app.Declared{Declaration: packet.Declaration{Items: items}}})
+		r := app.Execute(t.Context(), app.Request{Operation: app.Build, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(target), Output: output, Input: app.Declared{Declaration: packet.Declaration{Items: items}}})
 		want := diag.PageSizeTooLarge
 		if lateWrite {
 			want = diag.OutputWriteFailed
 		}
 		if !codePresent(r.Diagnostics, want) || r.Output.Published || r.Parts[0].PageSizes == nil {
 			t.Fatal(r.Diagnostics)
+		}
+		if lateWrite && (r.Parts[1].OutputSize == nil || *r.Parts[1].OutputSize != target) {
+			t.Fatal("write failure lost resolved generated geometry", r.Parts)
+		}
+		if !lateWrite && (r.Pages.Total != nil || r.Parts[1].OutputSize != nil) {
+			t.Fatal("failed Resolve exposed partial layout", r.Parts)
 		}
 		run := (*r.Parts[0].PageSizes)[0]
 		if run.SourceSize.Width != width || run.OutputSize.Width != width {
@@ -521,12 +557,12 @@ func TestSelectedMetricKnowledgeAndOwnershipBeforeLayout(t *testing.T) {
 	if e := d.WriteFile(source); e != nil {
 		t.Fatal(e)
 	}
-	target, e := app.ParseSheet("100x200")
+	target, e := packet.ParseSize("100x200", false)
 	if e != nil {
 		t.Fatal(e)
 	}
 	selection := []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}
-	r := app.Execute(t.Context(), app.Request{Operation: app.Check, InspectionWorkers: 1, WorkingDir: dir, FitTo: &target, Input: app.Declared{Declaration: packet.Declaration{Items: []packet.Item{
+	r := app.Execute(t.Context(), app.Request{Operation: app.Check, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(target), Input: app.Declared{Declaration: packet.Declaration{Items: []packet.Item{
 		&packet.GroupItem{Ref: "nested", Items: []packet.Item{&packet.SourceItem{Ref: "first", Path: source, Selection: selection}}},
 		&packet.SourceItem{Ref: "invalid", Path: source, Selection: []packet.PageRange{{First: 4, Last: 4}}},
 		&packet.SourceItem{Ref: "repeat", Path: source, Selection: selection},
@@ -574,11 +610,11 @@ func TestNumberingPreflightUsesActualKeptSizeAtTightMargin(t *testing.T) {
 		if e := d.WriteFile(source); e != nil {
 			t.Fatal(e)
 		}
-		sheet, e := app.ParseSheet("100x200")
+		sheet, e := packet.ParseSize("100x200", false)
 		if e != nil {
 			t.Fatal(e)
 		}
-		r := app.Execute(t.Context(), app.Request{Operation: op, InspectionWorkers: 1, WorkingDir: dir, FitTo: &sheet, Output: filepath.Join(dir, "out.pdf"), Input: app.Declared{Declaration: packet.Declaration{PageNumbers: numbers, Items: []packet.Item{&packet.SourceItem{Ref: "source", Path: source}}}}})
+		r := app.Execute(t.Context(), app.Request{Operation: op, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(sheet), Output: filepath.Join(dir, "out.pdf"), Input: app.Declared{Declaration: packet.Declaration{PageNumbers: numbers, Items: []packet.Item{&packet.SourceItem{Ref: "source", Path: source}}}}})
 		if r.Status != "invalid" || !codePresent(r.Diagnostics, diag.TextOverflow) || r.Output.Published {
 			t.Fatal(op, r.Diagnostics)
 		}
@@ -606,11 +642,11 @@ func TestNearTargetContentsLinksStayInAuthoredCoordinatesAcrossMixedPages(t *tes
 	for _, fit := range []bool{false, true} {
 		request := app.Request{Operation: app.Build, InspectionWorkers: 1, WorkingDir: dir, Output: filepath.Join(dir, fmt.Sprintf("out-%t.pdf", fit)), Input: app.Declared{Declaration: declaration}}
 		if fit {
-			sheet, e := app.ParseSheet("Letter")
+			sheet, e := packet.ParseSize("Letter", false)
 			if e != nil {
 				t.Fatal(e)
 			}
-			request.FitTo = &sheet
+			request.Fitting = packet.DefaultFitPolicy(sheet)
 		}
 		r := app.Execute(t.Context(), request)
 		if r.Status != "ok" {
@@ -710,11 +746,11 @@ func TestUnrepresentableSelectedTransformNamesOriginalSourcePage(t *testing.T) {
 	if e := d.WriteFile(source); e != nil {
 		t.Fatal(e)
 	}
-	target, e := app.ParseSheet("14400x14400")
+	target, e := packet.ParseSize("14400x14400", false)
 	if e != nil {
 		t.Fatal(e)
 	}
-	r := app.Execute(t.Context(), app.Request{Operation: app.Check, InspectionWorkers: 1, WorkingDir: dir, FitTo: &target, Input: app.Declared{Declaration: packet.Declaration{Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: source, Selection: []packet.PageRange{{First: 2, Last: 2}}}}}}})
+	r := app.Execute(t.Context(), app.Request{Operation: app.Check, InspectionWorkers: 1, WorkingDir: dir, Fitting: packet.DefaultFitPolicy(target), Input: app.Declared{Declaration: packet.Declaration{Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: source, Selection: []packet.PageRange{{First: 2, Last: 2}}}}}}})
 	found := false
 	for _, d := range r.Diagnostics {
 		if d.Code == diag.FitGeometryUnsupported {

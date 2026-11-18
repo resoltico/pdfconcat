@@ -174,7 +174,7 @@ func TestFitActualAppearanceStatesAndSharedStreams(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						if err := fitToForTest(t.Context(), candidate, &packet.Size{Width: 300, Height: 500}); err != nil {
+						if err := fitToForTest(t.Context(), candidate, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500})); err != nil {
 							t.Fatal(err)
 						}
 						sourceAnnot, expectedStates := appearanceChoices(t, source, page)

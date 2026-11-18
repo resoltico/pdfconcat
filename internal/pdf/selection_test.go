@@ -40,7 +40,7 @@ func inspectSelection(t *testing.T, doc *pdffixture.Doc, requests []SelectionReq
 	}
 	return source, occurrences
 }
-func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit *packet.Size) (string, []diag.Diagnostic) {
+func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit *packet.FitPolicy) (string, []diag.Diagnostic) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "source.pdf")
@@ -68,7 +68,7 @@ func selectedPacket(t *testing.T, doc *pdffixture.Doc, parts []packet.Item, fit 
 	for item, f := range occurrences {
 		domain[item] = f.SourceFacts
 	}
-	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: parts}), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: fit, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: parts}), domain)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -156,7 +156,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 	if len(source.CoordinateDestinations) == 0 || (len(views["one"].CoordinateDestinations) > 0) || (len(views["two"].CoordinateDestinations) > 0) {
 		t.Fatalf("omitted links still restrict fitting: %+v", views)
 	}
-	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "one", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "two", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 400})
+	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "one", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "two", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -394,7 +394,7 @@ func TestPartialSelectionChecksOriginalHashAfterOmittedPageChanges(t *testing.T)
 	request := []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}}
 	facts, occurrences := inspectSelection(t, doc, request)
 	path := filepath.Join(t.TempDir(), "source.pdf")
-	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts})
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "selected", Path: path, Selection: request[0].Pages}}}), map[string]packet.SourceFacts{"selected": occurrences["selected"].SourceFacts})
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -520,7 +520,7 @@ func TestSelectedAdditionalActionsDoNotRetainNumericFitRestriction(t *testing.T)
 			if len(whole.CoordinateDestinations) == 0 || (len(views["selected"].CoordinateDestinations) > 0) {
 				t.Fatalf("omitted additional action still restricts fitting: %+v", views)
 			}
-			_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, &packet.Size{Width: 300, Height: 400})
+			_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}
@@ -691,8 +691,8 @@ func TestOnPagePopupRetainsSoleParentActionsAcrossOccurrences(t *testing.T) {
 	}
 }
 
-func testAssembly(t *testing.T, layout packet.Layout, files map[string]SourceFacts, views map[string]OccurrenceFacts, fit *packet.Size) Assembly {
-	a := Assembly{Parts: make([]Part, len(layout.Parts)), Sections: layout.Sections, FitTo: fit, Fonts: nil, NumberLayout: nil}
+func testAssembly(t *testing.T, layout packet.Layout, files map[string]SourceFacts, views map[string]OccurrenceFacts, fit *packet.FitPolicy) Assembly {
+	a := Assembly{Parts: make([]Part, len(layout.Parts)), Sections: layout.Sections, Fitting: fit, Fonts: nil, NumberLayout: nil}
 	facts := map[string]*SourceFacts{}
 	for path, file := range files {
 		facts[path] = &file
@@ -704,7 +704,7 @@ func testAssembly(t *testing.T, layout packet.Layout, files map[string]SourceFac
 			a.Parts[i].Data, _ = os.ReadFile(part.Source)
 			view := views[part.Ref]
 			if fit != nil {
-				_, slots, ds := Inspect(t.Context(), a.Parts[i].Data, "", []SelectionRequest{{Item: part.Ref, Pages: view.Selection, FitTo: fit}})
+				_, slots, ds := Inspect(t.Context(), a.Parts[i].Data, "", []SelectionRequest{{Item: part.Ref, Pages: view.Selection, Fitting: fit}})
 				if len(slots) != 1 || slots[0] == nil {
 					t.Fatalf("fixture fitting admission: %+v", ds)
 				}
@@ -735,12 +735,12 @@ func TestFitAnnotationCompatibilityUsesSelectedPages(t *testing.T) {
 	doc := pdffixture.FitAnnotation("FreeText", "/Contents (Hello world) /DA (/Helv 10 Tf 0 g)", false, 0, 4)
 	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 7 0 R] >>")
 	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
-	_, slots, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 1, Last: 1}}, FitTo: &packet.Size{Width: 300, Height: 500}}, {Item: "good", Pages: []packet.PageRange{{First: 2, Last: 2}}, FitTo: &packet.Size{Width: 300, Height: 500}}})
+	_, slots, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "bad", Pages: []packet.PageRange{{First: 1, Last: 1}}, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500})}, {Item: "good", Pages: []packet.PageRange{{First: 2, Last: 2}}, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500})}})
 	if diag.Outcome(ds) != "invalid" || slots[0] == nil || slots[1] == nil || !slots[0].AnnotationFittingIssue.Present() || slots[1].AnnotationFittingIssue.Present() {
 		t.Fatal(slots, ds)
 	}
 
-	path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "/items/0", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, &packet.Size{Width: 300, Height: 500})
+	path, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "/items/0", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 	if len(ds) != 0 || path == "" {
 		t.Fatalf("unselected unsupported annotation blocked fit: %s %+v", path, ds)
 	}
@@ -760,7 +760,7 @@ func TestAnnotationIssueLocationsRetainOriginalPage(t *testing.T) {
 	// The annotated source page is second, but first in the retained selection.
 	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [7 0 R 3 0 R] >>")
 	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"))
-	_, slots, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 2, Last: 2}}, FitTo: &packet.Size{Width: 300, Height: 500}}})
+	_, slots, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 2, Last: 2}}, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500})}})
 	if diag.Outcome(ds) != "invalid" || slots[0] == nil {
 		t.Fatal(ds)
 	}

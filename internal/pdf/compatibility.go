@@ -64,7 +64,7 @@ func CheckCompatibility(a Assembly) Compatibility {
 		if authoredDepth+selected.OutlineDepth > model.DefaultResourceLimits().MaxRecursionDepth+1 {
 			add(diag.SourceOutlineDepthUnsupported, diag.AuthoredSectionsAndImportedBookmarksExceedThePDFBackendS())
 		}
-		if !fittingOwnsSelection(selected, a.FitTo, f.Pages) {
+		if !fittingOwnsSelection(selected, a.Fitting, f.Pages) {
 			add(diag.SourceProcessingFailed, diag.SourceOccurrenceGeometryIsInconsistent())
 			continue
 		}
@@ -89,6 +89,6 @@ func CheckCompatibility(a Assembly) Compatibility {
 	return result
 }
 
-func sameFittingTarget(a, b *packet.Size) bool {
+func sameFittingPolicy(a, b *packet.FitPolicy) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }

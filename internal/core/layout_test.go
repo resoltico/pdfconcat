@@ -59,7 +59,7 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 	parts := []Item{&PageItem{Ref: "lead", Style: inherited, Count: 2}, &SourceItem{Ref: "source", Path: "a"}, &PageItem{Ref: "after", Style: inherited, Count: 3}, &PageItem{Ref: "explicit", Style: explicit, Count: 1}}
 	facts := map[string]SourceFacts{"source": {Pages: 4, FirstSize: a, LastSize: b}}
 	j := newPlan("", nil, nil, PageStyle{}, parts)
-	layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
+	layout, ds := resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -75,10 +75,10 @@ func TestResolveCanvasesAndRanges(t *testing.T) {
 	fit := Size{Width: 612, Height: 792}
 	{
 		draft := j.Declaration()
-		draft.FitTo = &fit
+		draft.Fitting = DefaultFitPolicy(fit)
 		j = preparePlan(draft)
 	}
-	layout, ds = resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
+	layout, ds = resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
 	if len(ds) > 0 || layout.Parts[0].Size != fit || layout.Parts[2].Size != fit || layout.Parts[3].Size != explicit.Size.Value {
 		t.Fatalf("fit %+v %+v", layout, ds)
 	}
@@ -124,7 +124,7 @@ func TestNestedPaddingRangesAndTargets(t *testing.T) {
 			parent.StartOn = "odd"
 		}
 		j := newPlan("", nil, nil, PageStyle{}, []Item{cover, parent})
-		layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), nil, 0)
+		layout, ds := resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), nil, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
@@ -192,20 +192,20 @@ func TestPaddingUsesPreviousPhysicalSheetWhileOtherPagesUseSourceNeighbor(t *tes
 	facts := map[string]SourceFacts{"source": {Pages: 1, FirstSize: sourceSize, LastSize: sourceSize}}
 	items := j.Items()
 	itemAs[*PageItem](t, items[1]).Style.Size.Value = previousPhysical
-	j = newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), items)
-	for _, fit := range []*Size{nil, {Width: 612, Height: 792}} {
+	j = newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), items)
+	for _, fit := range []*FitPolicy{nil, DefaultFitPolicy(Size{Width: 612, Height: 792})} {
 		{
 			draft := j.Declaration()
-			draft.FitTo = fit
+			draft.Fitting = fit
 			j = preparePlan(draft)
 		}
-		layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
+		layout, ds := resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
 		if len(ds) > 0 {
 			t.Fatal(ds)
 		}
 		wantPadding, wantInherited := previousPhysical, sourceSize
 		if fit != nil {
-			wantPadding, wantInherited = *fit, *fit
+			wantPadding, wantInherited = fit.Target, fit.Target
 		}
 		if layout.Parts[2].Size != wantPadding || layout.Parts[2].Kind != "padding" || layout.Parts[3].Size != wantInherited {
 			t.Fatalf("physical vs source inheritance %+v", layout)
@@ -213,7 +213,7 @@ func TestPaddingUsesPreviousPhysicalSheetWhileOtherPagesUseSourceNeighbor(t *tes
 	}
 	facts["source"] = SourceFacts{Pages: 1, FirstSize: sourceSize, LastSize: Size{Width: .5, Height: 200}}
 	j = newPlan("", nil, nil, PageStyle{}, []Item{&SourceItem{Ref: "source", Path: "input"}, &GroupItem{Ref: "boundary", StartOn: "odd", Items: []Item{explicitPage("body", sourceSize, 1)}}})
-	layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
+	layout, ds := resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
 	if len(ds) != 1 || ds[0].Items[0] != "boundary" || !strings.Contains(ds[0].Message, "fit") || len(layout.Parts) != 0 {
 		t.Fatalf("unusable parity canvas: %+v %+v", layout, ds)
 	}
@@ -231,7 +231,7 @@ func TestCompactMappingsAndSections(t *testing.T) {
 		t.Fatalf("declarations %+v %+v", leaves, sections)
 	}
 	facts := map[string]SourceFacts{"input": {Pages: 4, FirstSize: size, LastSize: size, Selection: []PageRange{{First: 2, Last: 4}, {First: 7, Last: 7}}}}
-	layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
+	layout, ds := resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 0)
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -263,7 +263,7 @@ func TestLayoutLimitsAndNoInventedPartialSequence(t *testing.T) {
 			facts["source"] = SourceFacts{Pages: int(MaxPageIndex), FirstSize: size, LastSize: size}
 			facts["source2"] = SourceFacts{Pages: 1, FirstSize: size, LastSize: size}
 		}
-		layout, ds := resolvePacket(newPlan(j.Output(), j.FitTo(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 1)
+		layout, ds := resolvePacket(newPlan(j.Output(), j.Fitting(), j.PageNumbers(), j.PageDefaults(), j.Items()), facts, 1)
 		if len(ds) == 0 || ds[0].Code != diag.PlanLimit || len(layout.Parts) != 0 || layout.TotalPages != 0 || len(layout.Sections) != 0 {
 			t.Fatalf("invented partial layout: %+v %+v", layout, ds)
 		}

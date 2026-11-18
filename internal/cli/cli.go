@@ -22,18 +22,20 @@ type Operand struct {
 
 // Command is a parsed request; parsing performs no filesystem I/O.
 type Command struct {
-	Name, Plan, Output, BaseDir, FitTo, Report, Schema string
-	Overwrite, Help, JSON                              bool
-	Operands                                           []Operand
+	Name, Plan, Output, BaseDir, Report, Schema string
+	Fitting                                     *packet.FitPolicy
+	Overwrite, Help, JSON                       bool
+	Operands                                    []Operand
 }
 type option struct{ name, alias, value, description string }
 
 var options = []option{
 	{"--blank", "", "", "Insert one generated page with default style; size comes from a source or --fit-to SIZE."},
-	{"--plan", "", "FILE|-", "Read a plan v7 JSON file or standard input."},
+	{"--plan", "", "FILE|-", fmt.Sprintf("Read a plan v%d JSON file or standard input.", app.PlanVersion)},
 	{"--output", "-o", "FILE", "Output PDF; overrides plan output."},
 	{"--base-dir", "", "DIR", "Base directory for --plan -."},
-	{"--fit-to", "", "SIZE", packet.FittingDescription()},
+	{"--fit-to", "", "SIZE", packet.FittingDescription() + " Replaces the plan fitting policy."},
+	{"--fit-tolerance", "", "LENGTH", packet.FitToleranceDescription() + " Requires --fit-to in the same invocation."},
 	{"--report", "", "FILE", "Write a full JSON report."},
 	{"--overwrite", "", "", "Replace existing output/report files."},
 	{"--json", "", "", "Print one JSON result to standard output."},
@@ -114,6 +116,8 @@ func Parse(args []string) (Command, *app.Result) {
 		}
 		return c, nil
 	}
+	fitting := packet.DefaultFitPolicy(packet.Size{})
+	toleranceIndex := 0
 	seen := map[string]bool{}
 	positional := false
 	for i := 1; i < len(args); i++ {
@@ -159,10 +163,20 @@ func Parse(args []string) (Command, *app.Result) {
 			case "--base-dir":
 				c.BaseDir = value
 			case "--fit-to":
-				if _, err := app.ParseSheet(value); err != nil {
+				size, err := packet.ParseSize(value, false)
+				if err != nil {
 					return failure("usage_invalid_value", err.Error(), i)
 				}
-				c.FitTo = value
+				fitting.Target = size
+			case "--fit-tolerance":
+				points, err := packet.Length(value)
+				if err == nil {
+					fitting.Tolerance, err = packet.NormalizeFitTolerance(points)
+				}
+				if err != nil {
+					return failure("usage_invalid_value", err.Error(), i)
+				}
+				toleranceIndex = i
 			case "--report":
 				c.Report = value
 			case "--overwrite":
@@ -175,6 +189,11 @@ func Parse(args []string) (Command, *app.Result) {
 		} else {
 			c.Operands = append(c.Operands, Operand{Path: arg, Index: i})
 		}
+	}
+	if seen["--fit-to"] {
+		c.Fitting = fitting
+	} else if seen["--fit-tolerance"] {
+		return failure("usage_conflict", "--fit-tolerance requires --fit-to.", toleranceIndex)
 	}
 	if c.Help {
 		return c, nil

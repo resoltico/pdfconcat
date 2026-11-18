@@ -61,7 +61,7 @@ func TestTopContentsExclusionOnlyWhenEligible(t *testing.T) {
 	numbers := &packet.PageNumbers{Size: 9, Margin: 100, Position: packet.NumberTopLeft, Mode: "physical", Start: 1}
 	for _, enabled := range []bool{true, false} {
 		items := []packet.Item{&packet.ContentsItem{Ref: "toc", Size: size, Title: "Contents", Numbering: &enabled}, &packet.GroupItem{Ref: "section", Title: "A section", Items: []packet.Item{&packet.PageItem{Ref: "body", Count: 1, Style: packet.Defaults()}}}}
-		plan := pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: &fit, PageNumbers: numbers, PageDefaults: packet.Defaults(), Items: items})
+		plan := pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: packet.DefaultFitPolicy(fit), PageNumbers: numbers, PageDefaults: packet.Defaults(), Items: items})
 		footer, err := NewPageNumberLayout(font, *numbers)
 		if err != nil {
 			t.Fatal(err)
@@ -73,7 +73,7 @@ func TestTopContentsExclusionOnlyWhenEligible(t *testing.T) {
 		heading := paintedBounds(contents.pages[0].Blocks[0].Text)
 		top := heading.Y + heading.Height
 		if enabled {
-			_, limit := footer.Available(size, &fit)
+			_, limit := footer.Available(size, fit)
 			if top > limit+1e-8 {
 				t.Fatalf("heading %g crosses exclusion %g", top, limit)
 			}
@@ -97,14 +97,18 @@ func TestNearTargetCanvasUsesIdentityNumberExclusion(t *testing.T) {
 			t.Fatal(e)
 		}
 		canvas := packet.Size{Width: 300.005, Height: 400.009}
-		a, b := footer.Available(canvas, nil)
-		c, d := footer.Available(canvas, &target)
+		a, b := footer.Available(canvas, canvas)
+		fit, err := packet.DecideFit(canvas, packet.DefaultFitPolicy(target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, d := footer.Available(canvas, fit.Output)
 		if a != c || b != d {
 			t.Fatal("kept canvas exclusion was inverse-scaled", a, b, c, d)
 		}
 		changed := packet.Size{Width: 500, Height: 600}
-		a, b = footer.Available(changed, nil)
-		c, d = footer.Available(changed, &target)
+		a, b = footer.Available(changed, changed)
+		c, d = footer.Available(changed, target)
 		if a == c && b == d {
 			t.Fatal("transformed canvas lost inverse exclusion")
 		}

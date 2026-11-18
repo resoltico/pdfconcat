@@ -32,7 +32,7 @@ func TestStructureFittingGate(t *testing.T) {
 		}
 		// Exercise the same Form creation used by fitting, then relocate ownership.
 		original := pages[0]
-		if err = fitToForTest(t.Context(), s, &packet.Size{Width: 300, Height: 400}); err != nil {
+		if err = fitToForTest(t.Context(), s, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})); err != nil {
 			t.Fatal(err)
 		}
 		attrs, err := s.DereferenceDict(original.dict["Resources"])
@@ -120,7 +120,7 @@ func TestNestedTaggedFormsRetainStreamOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = fitToForTest(t.Context(), s, &packet.Size{Width: 300, Height: 400}); err != nil {
+	if err = fitToForTest(t.Context(), s, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})); err != nil {
 		t.Fatal(err)
 	}
 	if err = combineStructure(t.Context(), s, []structurePart{{root: original}}); err != nil {

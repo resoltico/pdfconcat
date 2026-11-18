@@ -181,7 +181,7 @@ func TestWarningFormRequestAndActualRenameSourceSites(t *testing.T) {
 		domain[item] = v[0].SourceFacts
 		items = append(items, &packet.SourceItem{Ref: item, Path: path})
 	}
-	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: items}), domain)
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: items}), domain)
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}
@@ -293,7 +293,7 @@ func TestWarningNavigationSurvivesLaterStructureFitFailure(t *testing.T) {
 		t.Run(fmt.Sprintf("fitted-%t", fitted), func(t *testing.T) {
 			request := SelectionRequest{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}
 			if fitted {
-				request.FitTo = &packet.Size{Width: 300, Height: 400}
+				request.Fitting = packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})
 			}
 			_, occurrences, ds := Inspect(t.Context(), doc.Bytes(), "", []SelectionRequest{request})
 			navigation := warningCode(ds, diag.SourceNavigationRemoved)

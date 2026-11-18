@@ -62,7 +62,7 @@ func LayOut(c context.Context, layout packet.Layout, fonts map[packet.Font]*type
 					ds = append(ds, Diagnostic(err, p.Ref))
 					continue
 				}
-				bottom, top = numberLayout.Available(p.Size, layout.FitTo)
+				bottom, top = numberLayout.Available(p.Size, p.OutputSize)
 			}
 		}
 		if top-bottom < 1 {

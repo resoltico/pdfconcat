@@ -10,8 +10,37 @@ import (
 	"sort"
 )
 
-// FitTolerance is the absolute displayed-size match tolerance in physical points.
-const FitTolerance = 0.01
+// DefaultFitTolerance is the default absolute match tolerance in points.
+const DefaultFitTolerance = 0.01
+
+// FitPolicy compares displayed sides with a target using an absolute point tolerance.
+type FitPolicy struct {
+	Target    Size
+	Tolerance float64
+}
+
+// DefaultFitPolicy supplies the tolerance for callers that omit it.
+func DefaultFitPolicy(target Size) *FitPolicy {
+	return &FitPolicy{Target: target, Tolerance: DefaultFitTolerance}
+}
+
+// NormalizeFitTolerance validates the physical length and canonicalizes signed zero.
+func NormalizeFitTolerance(points float64) (float64, error) {
+	if !finite(points) || points < 0 || points > MaxSide {
+		return 0, fmt.Errorf("fitting tolerance must be from 0 through %g points", MaxSide)
+	}
+	return math.Abs(points), nil
+}
+
+// Normalize validates a complete policy, preserving an explicitly exact tolerance.
+func (p FitPolicy) Normalize() (FitPolicy, error) {
+	if !validSize(p.Target, false) {
+		return FitPolicy{}, fmt.Errorf("fitting requires finite page sides from 1 through %g points", MaxSide)
+	}
+	tolerance, err := NormalizeFitTolerance(p.Tolerance)
+	p.Tolerance = tolerance
+	return p, err
+}
 
 // FitDecision owns both disposition and the expected displayed output geometry.
 type FitDecision struct {
@@ -22,22 +51,23 @@ type FitDecision struct {
 // DecideFit compares ordered dimensions directly with the fixed target. The
 // inclusive interval endpoints are rounded once by float64 arithmetic, rather
 // than subtracting nearly equal values at the tolerance boundary.
-func DecideFit(source Size, target *Size) (FitDecision, error) {
+func DecideFit(source Size, policy *FitPolicy) (FitDecision, error) {
 	positive := func(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
 	if !positive(source.Width) || !positive(source.Height) {
 		return FitDecision{}, errors.New("source physical dimensions must be finite and positive")
 	}
 	d := FitDecision{Source: source, Output: source}
-	if target == nil {
+	if policy == nil {
 		return d, nil
 	}
-	if !validSize(*target, false) {
-		return FitDecision{}, errors.New("fitting target is invalid")
+	fit, err := policy.Normalize()
+	if err != nil {
+		return FitDecision{}, err
 	}
-	match := func(a, b float64) bool { return a >= b-FitTolerance && a <= b+FitTolerance }
-	if !match(source.Width, target.Width) || !match(source.Height, target.Height) {
+	match := func(a, b float64) bool { return a >= b-fit.Tolerance && a <= b+fit.Tolerance }
+	if !match(source.Width, fit.Target.Width) || !match(source.Height, fit.Target.Height) {
 		d.Transform = true
-		d.Output = *target
+		d.Output = fit.Target
 	}
 	return d, nil
 }
@@ -73,7 +103,12 @@ func ExpectedPageSize(runs []PageSizeRun, original int) (Size, bool) {
 
 // FittingDescription is the shared capability description used in help.
 func FittingDescription() string {
-	return fmt.Sprintf("Fit pages outside %g pt of this displayed-size target; matching pages keep their native geometry.", FitTolerance)
+	return "Fit pages outside the absolute tolerance on either ordered displayed side of the target. Matching pages keep their native geometry."
+}
+
+// FitToleranceDescription describes the resolved absolute match allowance.
+func FitToleranceDescription() string {
+	return fmt.Sprintf("Absolute tolerance in points from 0 through %g. Defaults to %g pt when omitted. Zero requires exact dimensions.", MaxSide, DefaultFitTolerance)
 }
 
 // FittingNavigationDescription describes fitting-specific ownership limits.

@@ -50,11 +50,11 @@ func TestTableHeaderSelectionsAndSerializedBindings(t *testing.T) {
 			for _, fit := range []bool{false, true} {
 				t.Run(fmt.Sprintf("class=%v/indirect=%v/fit=%v", class, indirect, fit), func(t *testing.T) {
 					d := tableHeaderFixture(class, indirect)
-					var size *packet.Size
+					var size *packet.FitPolicy
 					if fit {
-						size = &packet.Size{Width: 300, Height: 400}
+						size = packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})
 					}
-					_, slots, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "invalid", Pages: []packet.PageRange{{First: 3, Last: 3}}, FitTo: size}})
+					_, slots, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "invalid", Pages: []packet.PageRange{{First: 3, Last: 3}}, Fitting: size}})
 					status := diag.Outcome(ds)
 					if status != "invalid" || slots[0] == nil || len(slots[0].PageSizes) == 0 {
 						t.Fatalf("dangling selection accepted: %+v", ds)
@@ -228,7 +228,7 @@ func TestNamespacedTableHeaderBindings(t *testing.T) {
 			}
 			d.Objs[9] = bytes.Replace(d.Objs[9], []byte("/IDTree"), []byte("/Namespaces [20 0 R 21 0 R] /IDTree"), 1)
 			d.Objs[11] = bytes.Replace(d.Objs[11], []byte("/S /TH"), []byte(fmt.Sprintf("/S /%s /NS %d 0 R", name, ns)), 1)
-			_, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "a", Path: "source"}, &packet.SourceItem{Ref: "b", Path: "source"}}, &packet.Size{Width: 300, Height: 400})
+			_, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "a", Path: "source"}, &packet.SourceItem{Ref: "b", Path: "source"}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 			if len(ds) > 0 {
 				t.Fatal(ds)
 			}

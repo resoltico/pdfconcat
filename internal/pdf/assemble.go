@@ -142,7 +142,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			if e != nil {
 				return result, e
 			}
-			plans, e = planFitting(geometries, a.FitTo, part.Repeat, origins)
+			plans, e = planFitting(geometries, a.Fitting, part.Repeat, origins)
 			if e != nil {
 				return result, e
 			}

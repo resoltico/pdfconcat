@@ -18,7 +18,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
 
-func fitToForTest(c context.Context, s *model.Context, target *packet.Size) error {
+func fitToForTest(c context.Context, s *model.Context, target *packet.FitPolicy) error {
 	geometries, err := pageGeometries(c, s)
 	if err != nil {
 		return err
@@ -34,13 +34,14 @@ func fitToForTest(c context.Context, s *model.Context, target *packet.Size) erro
 	return fitContext(c, s, plans, origins)
 }
 
-func TestFittingFactsBindTargetNativeGeometryAndCompleteRuns(t *testing.T) {
+func TestFittingFactsBindPolicyNativeGeometryAndCompleteRuns(t *testing.T) {
 	data := pdffixture.Plain("geometry owner").Bytes()
-	facts, views, ds := Inspect(t.Context(), data, "", []SelectionRequest{{Item: "source"}})
+	policy := packet.FitPolicy{Target: packet.Size{Width: 612, Height: 792}, Tolerance: 1}
+	facts, views, ds := Inspect(t.Context(), data, "", []SelectionRequest{{Item: "source", Fitting: &policy}})
 	if diag.Outcome(ds) != "ok" || len(views) != 1 || views[0] == nil {
 		t.Fatal(ds)
 	}
-	a := Assembly{Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Data: data}}}
+	a := Assembly{Fitting: &policy, Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Data: data}}}
 	var output bytes.Buffer
 	if _, err := Assemble(t.Context(), a, &output); err != nil {
 		t.Fatal(err)
@@ -48,7 +49,7 @@ func TestFittingFactsBindTargetNativeGeometryAndCompleteRuns(t *testing.T) {
 	if err := VerifyAssembly(t.Context(), output.Bytes(), 1, a); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"origin", "unit"} {
+	for _, kind := range []string{"origin", "unit", "within allowance"} {
 		s, err := readOutput(t.Context(), output.Bytes())
 		if err != nil {
 			t.Fatal(err)
@@ -57,16 +58,20 @@ func TestFittingFactsBindTargetNativeGeometryAndCompleteRuns(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if kind == "origin" {
+		switch kind {
+		case "origin":
 			pages[0].dict["MediaBox"] = types.NewRectangle(1, 0, 613, 792).Array()
 			pages[0].dict["CropBox"] = types.NewRectangle(1, 0, 613, 792).Array()
-		} else {
+		case "unit":
 			pages[0].dict["MediaBox"] = types.NewRectangle(0, 0, 306, 396).Array()
 			pages[0].dict["CropBox"] = types.NewRectangle(0, 0, 306, 396).Array()
 			pages[0].dict["UserUnit"] = types.Float(2)
+		case "within allowance":
+			pages[0].dict["MediaBox"] = types.NewRectangle(0, 0, 612.5, 792).Array()
+			pages[0].dict["CropBox"] = types.NewRectangle(0, 0, 612.5, 792).Array()
 		}
-		// Both controls retain the same displayed width/height. Native-tuple
-		// verification must independently detect the changed coordinate system.
+		// The first two changes keep displayed dimensions; the last changes
+		// width within the match allowance. All must fail native verification.
 		if err = verifyPlannedGeometry(t.Context(), s, a); err == nil {
 			t.Fatal("pre-write native change passed", kind)
 		}
@@ -84,9 +89,20 @@ func TestFittingFactsBindTargetNativeGeometryAndCompleteRuns(t *testing.T) {
 		t.Fatal("inconsistent run accepted")
 	}
 	views[0].PageSizes[0] = original
-	a.FitTo = &packet.Size{Width: 300, Height: 400}
+	for _, changed := range []*packet.FitPolicy{nil, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}), {Target: policy.Target, Tolerance: 0}} {
+		a.Fitting = changed
+		if diag.Outcome(CheckCompatibility(a).Diagnostics) != "failed" {
+			t.Fatalf("changed policy accepted stale decisions: %+v", changed)
+		}
+		var refused bytes.Buffer
+		if _, err := Assemble(t.Context(), a, &refused); err == nil || refused.Len() != 0 {
+			t.Fatalf("assembly accepted stale decisions: %+v, %v", changed, err)
+		}
+	}
+	policy.Tolerance = 0
+	a.Fitting = &policy
 	if diag.Outcome(CheckCompatibility(a).Diagnostics) != "failed" {
-		t.Fatal("different target accepted stale decisions")
+		t.Fatal("inspection retained the caller's mutable policy")
 	}
 }
 func TestRepeatedGeneratedFittingPlansStayCompact(t *testing.T) {
@@ -96,7 +112,7 @@ func TestRepeatedGeneratedFittingPlansStayCompact(t *testing.T) {
 	for i := range pages {
 		pages[i] = p
 	}
-	plan, err := planFitting(pages, &packet.Size{Width: 300, Height: 400}, len(pages), sourceOrigins{pages: map[types.IndirectRef]int{p.ref: 1}})
+	plan, err := planFitting(pages, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}), len(pages), sourceOrigins{pages: map[types.IndirectRef]int{p.ref: 1}})
 	if err != nil || plan.Count != 100000 || len(plan.Pages) != 1 || !plan.Repeated {
 		t.Fatal("expanded repeated plan", len(plan.Pages), err)
 	}
@@ -111,7 +127,7 @@ func TestRepeatedGeneratedFittingPlansStayCompact(t *testing.T) {
 func TestUnrepresentableFittingRefusesBeforeMutation(t *testing.T) {
 	box := types.NewRectangle(0, 0, 1e-306, 1e-306)
 	page := pageGeometry{box: *box, attrs: model.InheritedPageAttrs{MediaBox: box}, unit: 1e308, size: packet.Size{Width: 100, Height: 100}}
-	_, err := planFitting([]pageGeometry{page}, &packet.Size{Width: 14400, Height: 14400}, 1, sourceOrigins{pages: map[types.IndirectRef]int{page.ref: 7}})
+	_, err := planFitting([]pageGeometry{page}, packet.DefaultFitPolicy(packet.Size{Width: 14400, Height: 14400}), 1, sourceOrigins{pages: map[types.IndirectRef]int{page.ref: 7}})
 	if err == nil || Diagnostic(err).Code != diag.FitGeometryUnsupported {
 		t.Fatal("actual overflowing scale accepted", err)
 	}
@@ -164,7 +180,7 @@ func TestMixedFittingPreservesSharedStructureClassOnKeptPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := planFitting(geometries, &packet.Size{Width: 600, Height: 800}, 1, origins)
+	plan, err := planFitting(geometries, packet.DefaultFitPolicy(packet.Size{Width: 600, Height: 800}), 1, origins)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,14 +256,14 @@ func TestChangedPreparedSelectionCannotReuseSameSizedPageOwner(t *testing.T) {
 	warningEntry(d, 6, "/Annots [8 0 R]")
 	d.Objs[7] = bytes.ReplaceAll(d.Objs[7], []byte("/P 4 0 R"), []byte("/P 6 0 R"))
 	target := packet.Size{Width: 300, Height: 400}
-	facts, views, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "source", Pages: []packet.PageRange{{First: 1, Last: 1}}, FitTo: &target}})
+	facts, views, ds := Inspect(t.Context(), d.Bytes(), "", []SelectionRequest{{Item: "source", Pages: []packet.PageRange{{First: 1, Last: 1}}, Fitting: packet.DefaultFitPolicy(target)}})
 	if diag.Outcome(ds) != "ok" || views[0] == nil {
 		t.Fatal(ds)
 	}
 	// The frames match exactly, but page two has a retained numeric self-target.
 	// It must never inherit page one's earlier coordinate/ownership admission.
 	views[0].Selection[0] = packet.PageRange{First: 2, Last: 2}
-	a := Assembly{FitTo: &target, Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Data: d.Bytes()}}}
+	a := Assembly{Fitting: packet.DefaultFitPolicy(target), Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: &Occurrence{File: &facts, Facts: views[0]}, Data: d.Bytes()}}}
 	var output bytes.Buffer
 	_, err := Assemble(t.Context(), a, &output)
 	if err == nil || Diagnostic(err).Code != diag.SourceProcessingFailed || output.Len() != 0 {

@@ -22,7 +22,7 @@ import (
 
 // OccurrenceFacts describes one retained selection, without duplicating source identity.
 type OccurrenceFacts struct {
-	fittingTarget        *packet.Size
+	fittingPolicy        *packet.FitPolicy
 	fitting              fittingPlan
 	fitFindings          []diag.Diagnostic
 	DestinationLocations map[string][]diag.PDFLocation
@@ -401,11 +401,14 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 	return objectLocations(c, s, true, func(d types.Dict, _ diag.PDFLocation) error { return visit(d) })
 }
 
-func observe(c context.Context, s *model.Context, origins sourceOrigins, target *packet.Size, geometries []pageGeometry) (SourceFacts, []diag.Diagnostic, error) {
+func observe(c context.Context, s *model.Context, origins sourceOrigins, policy *packet.FitPolicy, geometries []pageGeometry) (SourceFacts, []diag.Diagnostic, error) {
 	facts := SourceFacts{OccurrenceFacts: OccurrenceFacts{SourceFacts: packet.SourceFacts{Pages: s.PageCount}}, Version: s.XRefTable.Version().String()}
-	if target != nil {
-		value := *target
-		facts.fittingTarget = &value
+	if policy != nil {
+		normalized, err := policy.Normalize()
+		if err != nil {
+			return facts, nil, err
+		}
+		facts.fittingPolicy = &normalized
 	}
 	prefixes, err := importedSubsetPrefixes(c, s)
 	facts.SubsetPrefixes = prefixes
@@ -494,7 +497,7 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins, target 
 	if err != nil {
 		return facts, ds, err
 	}
-	facts.fitting, err = planFitting(geometries, target, 1, origins)
+	facts.fitting, err = planFitting(geometries, facts.fittingPolicy, 1, origins)
 	if err != nil {
 		return facts, ds, err
 	}

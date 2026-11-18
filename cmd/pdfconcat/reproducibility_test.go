@@ -30,10 +30,10 @@ func TestPDFBytesAcrossProcessesAndEffectiveInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	plans := map[string]string{
-		"generated":     `{"version":7,"fit_to":"A4","items":[{"page":{"text":{"value":"A report"}}}]}`,
-		"cff":           `{"version":7,"fit_to":"A4","items":[{"page":{"text":{"value":"Rīgas office report","font":{"file":` + strconv.Quote(font) + `}}}}]}`,
-		"source":        `{"version":7,"items":[{"source":"SOURCE"}]}`,
-		"tagged-fitted": `{"version":7,"fit_to":"A4","metadata":{"title":"A title","language":"en"},"page_numbers":{"start":9,"mode":"consecutive","position":"top-right"},"items":[{"source":"SOURCE"},{"source":"SOURCE"},{"page":{"text":{"value":"After the annex"}}}]}`,
+		"generated":     `{"version":8,"fitting":{"target":"A4"},"items":[{"page":{"text":{"value":"A report"}}}]}`,
+		"cff":           `{"version":8,"fitting":{"target":"A4"},"items":[{"page":{"text":{"value":"Rīgas office report","font":{"file":` + strconv.Quote(font) + `}}}}]}`,
+		"source":        `{"version":8,"items":[{"source":"SOURCE"}]}`,
+		"tagged-fitted": `{"version":8,"fitting":{"target":"A4"},"metadata":{"title":"A title","language":"en"},"page_numbers":{"start":9,"mode":"consecutive","position":"top-right"},"items":[{"source":"SOURCE"},{"source":"SOURCE"},{"page":{"text":{"value":"After the annex"}}}]}`,
 	}
 	env := []string{}
 	for _, value := range os.Environ() {

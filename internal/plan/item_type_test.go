@@ -19,8 +19,8 @@ func TestInvalidItemTypeExplainsShapesAtExactLocation(t *testing.T) {
 		name, prefix, suffix, pointer string
 		column                        int
 	}{
-		{"root", "{\"version\":7,\"items\":[\n  ", "]}", "/items/0", 3},
-		{"nested", "{\"version\":7,\"items\":[{\"title\":\"Section\",\"items\":[\n\t", "]}]}", "/items/0/items/0", 2},
+		{"root", "{\"version\":8,\"items\":[\n  ", "]}", "/items/0", 3},
+		{"nested", "{\"version\":8,\"items\":[{\"title\":\"Section\",\"items\":[\n\t", "]}]}", "/items/0/items/0", 2},
 	} {
 		for _, value := range []string{`"source.pdf"`, `7`, `true`, `false`, `[]`} {
 			for _, bom := range []string{"", "\ufeff"} {
@@ -51,15 +51,15 @@ func TestItemBoundaryRetainsNullSyntaxAndMemberErrors(t *testing.T) {
 		code    diag.Code
 		pointer string
 	}{
-		{`{"version":7,"items":[null]}`, diag.PlanNull, "/items/0"},
-		{`{"version":7,"items":[{"title":"Section","items":[null]}]}`, diag.PlanNull, "/items/0/items/0"},
-		{`{"version":7,"items":["unterminated]}`, diag.PlanSyntax, "/items/0"},
-		{`{"version":7,"items":[tru]}`, diag.PlanSyntax, "/items/0"},
-		{`{"version":7,"items":[nul]}`, diag.PlanSyntax, "/items/0"},
-		{`{"version":7,"items":[1e]}`, diag.PlanSyntax, "/items/0"},
-		{`{"version":7,"items":[{"source":7}]}`, diag.PlanType, "/items/0/source"},
-		{`{"version":7,"items":[{"page":false}]}`, diag.PlanType, "/items/0/page"},
-		{`{"version":7,"items":[{}]}`, diag.PlanItemShape, "/items/0"},
+		{`{"version":8,"items":[null]}`, diag.PlanNull, "/items/0"},
+		{`{"version":8,"items":[{"title":"Section","items":[null]}]}`, diag.PlanNull, "/items/0/items/0"},
+		{`{"version":8,"items":["unterminated]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":8,"items":[tru]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":8,"items":[nul]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":8,"items":[1e]}`, diag.PlanSyntax, "/items/0"},
+		{`{"version":8,"items":[{"source":7}]}`, diag.PlanType, "/items/0/source"},
+		{`{"version":8,"items":[{"page":false}]}`, diag.PlanType, "/items/0/page"},
+		{`{"version":8,"items":[{}]}`, diag.PlanItemShape, "/items/0"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			_, ds := plan.Decode([]byte(tc.input), "packet.json", t.TempDir(), files.Path)
@@ -74,7 +74,7 @@ func TestItemBoundaryRetainsNullSyntaxAndMemberErrors(t *testing.T) {
 }
 
 func TestCurrentItemShapesRemainAccepted(t *testing.T) {
-	input := `{"version":7,"items":[{"source":"source.pdf"},{"page":{"size":"A4"}},{"contents":{}},{"title":"Section","items":[{"source":"appendix.pdf"}]}]}`
+	input := `{"version":8,"items":[{"source":"source.pdf"},{"page":{"size":"A4"}},{"contents":{}},{"title":"Section","items":[{"source":"appendix.pdf"}]}]}`
 	j, ds := plan.Decode([]byte(input), "packet.json", t.TempDir(), files.Path)
 	if len(ds) != 0 {
 		t.Fatal(ds)

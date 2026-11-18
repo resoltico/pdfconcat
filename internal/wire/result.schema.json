@@ -20,7 +20,7 @@
         "status",
         "output",
         "pages",
-        "fit_to",
+        "fitting",
         "diagnostics",
         "diagnostics_omitted",
         "report",
@@ -32,7 +32,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 9
+          "const": 10
         },
         "command": {
           "enum": [
@@ -69,13 +69,45 @@
             }
           ]
         },
-        "fit_to": {
+        "fitting": {
           "anyOf": [
             {
               "type": "null"
             },
             {
-              "$ref": "#/$defs/size"
+              "additionalProperties": false,
+              "properties": {
+                "target": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "height": {
+                      "maximum": 14400,
+                      "minimum": 1,
+                      "type": "number"
+                    },
+                    "width": {
+                      "maximum": 14400,
+                      "minimum": 1,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "width",
+                    "height"
+                  ],
+                  "type": "object"
+                },
+                "tolerance": {
+                  "maximum": 14400,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "target",
+                "tolerance"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -318,7 +350,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 9
+          "const": 10
         },
         "command": {
           "const": "version"
@@ -447,7 +479,7 @@
     },
     "size": {
       "type": "object",
-      "description": "A generated part's authored canvas in points before optional selective fitting.",
+      "description": "A generated canvas in physical points.",
       "additionalProperties": false,
       "required": [
         "width",
@@ -551,6 +583,7 @@
         "kind",
         "pages",
         "output_pages",
+        "output_size",
         "text",
         "input_pages",
         "spans",
@@ -610,6 +643,17 @@
         },
         "size": {
           "$ref": "#/$defs/size"
+        },
+        "output_size": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/size"
+            }
+          ],
+          "description": "Expected generated frame in physical points once layout resolves."
         },
         "text": {
           "description": "Measured text layout for a page item or divider. Null for empty text, unavailable layout, and source, contents or padding parts.",
@@ -724,7 +768,12 @@
             "required": [
               "path",
               "fields_renamed"
-            ]
+            ],
+            "properties": {
+              "output_size": {
+                "type": "null"
+              }
+            }
           },
           "else": {
             "properties": {

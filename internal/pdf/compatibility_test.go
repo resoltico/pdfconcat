@@ -64,7 +64,7 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 			if status := diag.Outcome(ds); status != "ok" || len(f.CoordinateDestinations) == 0 {
 				t.Fatalf("facts %+v: %+v", f, ds)
 			}
-			_, _, ds = assembleDocs(t, []*pdffixture.Doc{d}, &packet.Size{Width: 300, Height: 400})
+			_, _, ds = assembleDocs(t, []*pdffixture.Doc{d}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 			if !codePresent(ds, diag.FitDestinationUnsupported) {
 				t.Fatal(ds)
 			}
@@ -84,7 +84,7 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 	}
 	for _, position := range []string{"/Fit", "/FitB", "/XYZ null null 2", "/FitH null", "/FitBH null", "/FitV null", "/FitBV null"} {
 		t.Run(position, func(t *testing.T) {
-			path, _, ds := assembleDocs(t, []*pdffixture.Doc{localLink(position, true)}, &packet.Size{Width: 306, Height: 396})
+			path, _, ds := assembleDocs(t, []*pdffixture.Doc{localLink(position, true)}, packet.DefaultFitPolicy(packet.Size{Width: 306, Height: 396}))
 			if status := diag.Outcome(ds); status != "ok" {
 				t.Fatal(ds)
 			}
@@ -162,7 +162,7 @@ func TestRetainedDestinationRoles(t *testing.T) {
 			if tc.name == "named repeated" {
 				docs = append(docs, tc.doc)
 			}
-			_, _, ds = assembleDocs(t, docs, &packet.Size{Width: 300, Height: 400})
+			_, _, ds = assembleDocs(t, docs, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 			if codePresent(ds, diag.FitDestinationUnsupported) != tc.want {
 				t.Fatal(ds)
 			}
@@ -246,10 +246,10 @@ func TestCompatibilityRefusesBeforePublication(t *testing.T) {
 				for _, command := range []string{"check", "build"} {
 					options := app.Request{InspectionWorkers: 1, WorkingDir: dir, Output: output, Overwrite: true}
 					if fit != "" {
-						sheet, _ := app.ParseSheet(fit)
-						options.FitTo = &sheet
+						sheet, _ := packet.ParseSize(fit, false)
+						options.Fitting = packet.DefaultFitPolicy(sheet)
 					}
-					r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Operation(command), Input: app.Items(operands), WorkingDir: options.WorkingDir, Output: options.Output, Report: options.Report, FitTo: options.FitTo, Overwrite: options.Overwrite})
+					r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Operation(command), Input: app.Items(operands), WorkingDir: options.WorkingDir, Output: options.Output, Report: options.Report, Fitting: options.Fitting, Overwrite: options.Overwrite})
 					if r.Status != "invalid" || !codePresent(r.Diagnostics, code) || r.Output.Published {
 						t.Fatalf("%s: %+v", command, r)
 					}
@@ -282,7 +282,7 @@ func TestFlatOutlineSiblingsRemainSupported(t *testing.T) {
 		}
 		d.Objs = append(d.Objs, []byte(fmt.Sprintf("<< /Title (bookmark %d) /Parent 6 0 R /Dest [3 0 R /Fit] %s >>", i, links)))
 	}
-	path, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, &packet.Size{Width: 306, Height: 396})
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, packet.DefaultFitPolicy(packet.Size{Width: 306, Height: 396}))
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
@@ -439,7 +439,7 @@ func TestFittingAllowsNonInteractiveAppearanceBoundary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := pdffixture.FitAnnotation("Screen", tc.action, true, 0, tc.flags)
 			doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [0 -30 100 70]"))
-			_, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+			_, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 			if status := diag.Outcome(ds); status != "ok" {
 				t.Fatal(ds)
 			}
@@ -449,7 +449,7 @@ func TestFittingAllowsNonInteractiveAppearanceBoundary(t *testing.T) {
 		t.Run("empty FreeText "+rect, func(t *testing.T) {
 			doc := pdffixture.FitAnnotation("FreeText", "/DA (/F1 10 Tf 0 g) /Contents (INVISIBLE)", false, 90, 4)
 			doc.Objs[5] = bytes.ReplaceAll(doc.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect "+rect))
-			path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+			path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 			if status := diag.Outcome(ds); status != "ok" {
 				t.Fatal(ds)
 			}
@@ -469,7 +469,7 @@ func TestFittingPreservesExistingCaptionAppearance(t *testing.T) {
 	if err := doc.WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, &packet.Size{Width: 300, Height: 500})
+	path, _, ds := assembleDocs(t, []*pdffixture.Doc{doc}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500}))
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
@@ -508,5 +508,44 @@ func TestUnfittedTextIconWithoutAppearanceRemainsSupported(t *testing.T) {
 	annotations := fitAnnotationObjects(t, path)
 	if len(annotations) != 1 || annotations[0]["/Subtype"] != "/Text" {
 		t.Fatal("icon annotation lost", annotations)
+	}
+}
+
+func TestCombinedFormRefusalRetainsResolvedFittingGeometry(t *testing.T) {
+	dir := t.TempDir()
+	one, two := filepath.Join(dir, "one.pdf"), filepath.Join(dir, "two.pdf")
+	if err := defaultForm("ONE", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0).WriteFile(one); err != nil {
+		t.Fatal(err)
+	}
+	if err := defaultForm("TWO", "Cour", "Courier", "/Cour 12 Tf 0 g", 0).WriteFile(two); err != nil {
+		t.Fatal(err)
+	}
+	target := packet.Size{Width: 612, Height: 792}
+	authored := packet.Size{Width: 611.5, Height: 791.5}
+	style := packet.PageStyle{Size: packet.Setting[packet.Size]{Value: authored, Present: true}}
+	items := []packet.Item{&packet.GroupItem{Ref: "section", Title: "Forms", Items: []packet.Item{
+		&packet.PageItem{Ref: "cover", Style: style, Count: 2},
+		&packet.SourceItem{Ref: "source-one", Path: one},
+		&packet.SourceItem{Ref: "source-two", Path: two},
+	}}}
+	for _, op := range []app.Operation{app.Check, app.Build} {
+		path := filepath.Join(dir, "out.pdf")
+		r := app.Execute(t.Context(), app.Request{Operation: op, InspectionWorkers: 1, WorkingDir: dir, Output: path, Input: app.Declared{
+			Declaration: packet.Declaration{Fitting: &packet.FitPolicy{Target: target, Tolerance: 1}, Items: items},
+		}})
+		if r.Status != "invalid" || !codePresent(r.Diagnostics, diag.SourceFormUnsupported) || r.Output.Published {
+			t.Fatalf("%s: %+v", op, r)
+		}
+		if r.Pages.Total == nil || *r.Pages.Total != 4 || len(r.Parts) != 3 || r.Sections[0].OutputPages == nil || *r.Sections[0].OutputPages != [2]int64{1, 4} {
+			t.Fatalf("lost successful layout: %+v", r)
+		}
+		p := r.Parts[0]
+		if p.Size == nil || *p.Size != authored || p.OutputSize == nil || *p.OutputSize != authored ||
+			p.Text != nil || r.Structure.Coverage != nil || r.Parts[1].OutputSize != nil || r.Parts[1].PageSizes == nil {
+			t.Fatalf("incorrect stage facts: %+v", r)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("unexpected output after combined refusal: %v", err)
+		}
 	}
 }

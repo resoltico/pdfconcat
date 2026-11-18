@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/resoltico/pdfconcat/internal/app"
+	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/oracle"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
@@ -62,9 +63,9 @@ func TestFittingReadOnlyInteractionAndAppearance(t *testing.T) {
 					t.Fatal(err)
 				}
 				original := sha256.Sum256(doc.Bytes())
-				sheet, _ := app.ParseSheet("300x500pt")
+				sheet, _ := packet.ParseSize("300x500pt", false)
 				for _, op := range []app.Operation{app.Check, app.Build} {
-					result := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: op, Input: app.Items{app.SourceItem{Path: source, Ref: "argv:1"}}, WorkingDir: dir, Output: output, FitTo: &sheet})
+					result := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: op, Input: app.Items{app.SourceItem{Path: source, Ref: "argv:1"}}, WorkingDir: dir, Output: output, Fitting: packet.DefaultFitPolicy(sheet)})
 					if flags.accepted {
 						if result.Status != "ok" {
 							t.Fatalf("%s: %+v", op, result)
@@ -175,9 +176,9 @@ func TestReadOnlyDoesNotWaiveFittingProtections(t *testing.T) {
 			if err := os.WriteFile(output, sentinel, 0600); err != nil {
 				t.Fatal(err)
 			}
-			sheet, _ := app.ParseSheet("300x500pt")
+			sheet, _ := packet.ParseSize("300x500pt", false)
 			for _, op := range []app.Operation{app.Check, app.Build} {
-				result := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: op, Input: app.Items{app.SourceItem{Path: source, Ref: "argv:1"}}, WorkingDir: dir, Output: output, Overwrite: true, FitTo: &sheet})
+				result := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: op, Input: app.Items{app.SourceItem{Path: source, Ref: "argv:1"}}, WorkingDir: dir, Output: output, Overwrite: true, Fitting: packet.DefaultFitPolicy(sheet)})
 				if result.Status != "invalid" || !codePresent(result.Diagnostics, tc.code) || result.Output == nil || result.Output.Published {
 					t.Fatalf("%s: %+v", op, result)
 				}

@@ -20,7 +20,7 @@ func TestEmergencyWrappingMetadataPaths(t *testing.T) {
 			pathText := "originals/data/Supporting/" + id + "/original/" + name
 			cover := strings.Join([]string{"Annex " + id, "Invoice original", "", "Public note: original bytes.", "Second line with spaces.", "", "Origin: Local synthetic author", "Original file: " + pathText, "Original SHA-256: " + strings.Repeat("a", 64), "The original is not a PDF and has no reading copy; open the original file."}, "\n")
 			text := map[string]any{"value": cover, "size": 11, "anchor": "top-left", "x": 36, "y": -48, "align": "left"}
-			recipe := map[string]any{"version": 7, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4", "text": text}, "items": []any{map[string]any{"page": map[string]any{}}}}
+			recipe := map[string]any{"version": 8, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4", "text": text}, "items": []any{map[string]any{"page": map[string]any{}}}}
 			path := packetPlan(t, dir, recipe)
 			for _, operation := range []app.Operation{app.Check, app.Build} {
 				r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: operation, Input: app.PlanFile{Path: path}, WorkingDir: dir})
@@ -67,7 +67,7 @@ func TestEmergencyWrappingDividerAndExplicitReset(t *testing.T) {
 	dir := t.TempDir()
 	title := strings.Repeat("identifier", 15)
 	defaults := map[string]any{"size": "A4", "text": map[string]any{"wrap": "emergency"}}
-	recipe := map[string]any{"version": 7, "page_defaults": defaults, "items": []any{
+	recipe := map[string]any{"version": 8, "page_defaults": defaults, "items": []any{
 		map[string]any{"title": title, "divider": map[string]any{}, "items": []any{map[string]any{"page": map[string]any{}}}},
 	}}
 	path := packetPlan(t, dir, recipe)

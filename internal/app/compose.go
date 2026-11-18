@@ -45,7 +45,8 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata(), Timestamp: j.Timestamp(), Structure: j.Structure(), Parts: assemblyParts(layout, inspected), Sections: layout.Sections, FitTo: j.FitTo(), NumberLayout: numberLayout}
+	out.layout = &layout
+	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata(), Timestamp: j.Timestamp(), Structure: j.Structure(), Parts: assemblyParts(layout, inspected), Sections: layout.Sections, Fitting: layout.Fitting, NumberLayout: numberLayout}
 	out.diagnostics = append(out.diagnostics, resolvePolicies(out.assembly, operation == Check)...)
 	if hasErrors(out.diagnostics) {
 		return out
@@ -61,7 +62,7 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 				if err = c.Err(); err != nil {
 					break
 				}
-				size := part.Size
+				size := part.OutputSize
 				if part.Kind == packet.PartSource {
 					number := part.FirstPage + int64(offset)
 					for mappingIndex+1 < len(part.Mapping) && number >= part.Mapping[mappingIndex+1].OutputFirst {
@@ -75,14 +76,6 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 						err = errors.New("expected source page geometry is unavailable")
 						break
 					}
-				}
-				if part.Kind != packet.PartSource {
-					fit, e := packet.DecideFit(size, j.FitTo())
-					if e != nil {
-						err = e
-						break
-					}
-					size = fit.Output
 				}
 				if err = numberLayout.Check(size, numberForPage(layout.Numbering, part.FirstPage+int64(offset))); err != nil {
 					break
@@ -102,7 +95,6 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 	if hasErrors(out.diagnostics) {
 		return out
 	}
-	out.layout = &layout
 	prepared, ds := compose.LayOut(c, layout, inspected.fonts)
 	out.diagnostics = append(out.diagnostics, ds...)
 	if contents != nil {

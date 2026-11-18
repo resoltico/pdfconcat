@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Ervins Strauhmanis
 
-// Package plan decodes strict, located version 7 assembly plans.
+// Package plan decodes strict, located assembly plans.
 package plan
 
 //go:generate go run ../contractgen -root ../..
@@ -27,7 +27,10 @@ import (
 // MaxBytes bounds the original UTF-8 plan, including an optional BOM.
 const MaxBytes = 64 << 20
 
-// Schema is the editor-facing plan v7 JSON Schema.
+// Version is the supported plan exchange contract.
+const Version = 8
+
+// Schema is the editor-facing plan JSON Schema.
 //
 //go:embed plan.schema.json
 var Schema []byte
@@ -229,11 +232,11 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 				case token.Kind() == 'n':
 					err = &fault{code: diag.PlanNull, message: "null is not allowed.", pointer: "/version", offset: start}
 				case token.Kind() == '0':
-					if token.String() != "7" {
-						err = &fault{code: diag.PlanVersionUnsupported, message: "Supported plan version is 7.", pointer: "/version", offset: start}
+					if token.String() != strconv.Itoa(Version) {
+						err = &fault{code: diag.PlanVersionUnsupported, message: fmt.Sprintf("Supported plan version is %d.", Version), pointer: "/version", offset: start}
 					}
 				default:
-					err = p.fail(diag.PlanType, "version must be the JSON integer 7.")
+					err = p.fail(diag.PlanType, fmt.Sprintf("version must be the JSON integer %d.", Version))
 				}
 			}
 		case "metadata":
@@ -281,12 +284,8 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 			draft.Output, err = p.path()
 		case "dir":
 			dir, err = p.path()
-		case "fit_to":
-			var size packet.Size
-			size, err = p.size(false)
-			if err == nil {
-				draft.FitTo = &size
-			}
+		case "fitting":
+			draft.Fitting, err = p.fitting()
 		case "page_defaults":
 			defaults, err = p.style(false)
 		case "page_numbers":
@@ -303,7 +302,7 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 		return result, err
 	}
 	if !seenVersion {
-		return result, p.fail(diag.PlanVersionUnsupported, "Missing version; supported plan version is 7.")
+		return result, p.fail(diag.PlanVersionUnsupported, fmt.Sprintf("Missing version; supported plan version is %d.", Version))
 	}
 	if !seenItems {
 		return result, p.fail(diag.PlanType, "Required member items is missing.")
@@ -684,6 +683,34 @@ func (p *decoder) resolveItems(nodes []node, base string) []packet.Item {
 		}
 	}
 	return items
+}
+
+func (p *decoder) fitting() (*packet.FitPolicy, error) {
+	policy := packet.DefaultFitPolicy(packet.Size{})
+	err := p.object(func(name string) error {
+		switch name {
+		case "target":
+			size, err := p.size(false)
+			policy.Target = size
+			return err
+		case "tolerance":
+			points, err := p.length(false)
+			if err != nil {
+				return err
+			}
+			policy.Tolerance, err = packet.NormalizeFitTolerance(points)
+			if err != nil {
+				return p.fail(diag.PlanValue, err.Error())
+			}
+			return nil
+		default:
+			return p.unknown(name)
+		}
+	})
+	if err == nil && policy.Target == (packet.Size{}) {
+		err = p.fail(diag.PlanType, "Fitting requires a target member.")
+	}
+	return policy, err
 }
 
 func (p *decoder) size(inherit bool) (packet.Size, error) {

@@ -200,7 +200,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 					report = filepath.Join(t.TempDir(), "report.json")
 				}
 				if !unreadable {
-					if err := os.WriteFile(planPath, []byte(`{"version":7,"items":[`), 0600); err != nil {
+					if err := os.WriteFile(planPath, []byte(`{"version":8,"items":[`), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -294,7 +294,7 @@ func TestReportAliasAfterPublicationCannotReplacePDF(t *testing.T) {
 func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ text, code string }{{"漢", "text_unsupported_character"}, {"😀", "text_glyph_missing"}} {
-		plan := `{"version":7,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
+		plan := `{"version":8,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
 		r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 		if exit != 2 || !hasDiagnostic(r, tc.code) || hasDiagnostic(r, "source_input_invalid") {
 			t.Fatalf("font/text ordering: %+v %d", r, exit)
@@ -302,7 +302,7 @@ func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	}
 	for _, text := range []string{"", "A"} {
 		out := filepath.Join(dir, "tiny-"+text+".pdf")
-		plan := `{"version":7,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
+		plan := `{"version":8,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
 		r, exit, _ := invokeJSON(t, []string{"build", "--plan", "-", "-o", out}, plan)
 		if text == "" {
 			if exit != 0 || !r.Output.Published {
@@ -327,7 +327,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 		t.Fatalf("directory source: %+v %d", r, exit)
 	}
 	fontPlan := func(path string) string {
-		data, err := json.Marshal(map[string]any{"version": 7, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
+		data, err := json.Marshal(map[string]any{"version": 8, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -407,7 +407,7 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 
 func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 	dir := t.TempDir()
-	plan := `{"version":7,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
+	plan := `{"version":8,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
 	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 	if exit != 2 || !hasDiagnostic(r, "font_input_invalid") {
 		t.Fatalf("empty text bypassed selected-font validation: %+v %d", r, exit)
@@ -417,7 +417,7 @@ func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 func TestTextPlanLocationsAndInputContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Rīga-Ελλάδα-Київ.json")
-	input := "{\n  \"version\":7,\n  \"items\":[null]\n}\n"
+	input := "{\n  \"version\":8,\n  \"items\":[null]\n}\n"
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -427,9 +427,9 @@ func TestTextPlanLocationsAndInputContext(t *testing.T) {
 		t.Fatalf("located plan error: %d %q %q", exit, stdout.String(), stderr.String())
 	}
 	for _, tc := range []struct{ input, code, file, item string }{
-		{`{"version":7,"items":[{"source":"missing.pdf"}]}`, "source_input_invalid", filepath.Join(dir, "missing.pdf"), "/items/0"},
-		{`{"version":7,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_input_invalid", filepath.Join(dir, "missing.ttf"), "/items/0"},
-		{`{"version":7,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
+		{`{"version":8,"items":[{"source":"missing.pdf"}]}`, "source_input_invalid", filepath.Join(dir, "missing.pdf"), "/items/0"},
+		{`{"version":8,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_input_invalid", filepath.Join(dir, "missing.ttf"), "/items/0"},
+		{`{"version":8,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
 	} {
 		stdout.Reset()
 		stderr.Reset()
@@ -506,7 +506,7 @@ func TestLanguageSyntaxRefusedBeforePublication(t *testing.T) {
 	for _, tag := range []string{"en-a-foo-a-bar", "en-abcde-abcde", "en-Latn-Latn"} {
 		dir := t.TempDir()
 		output := filepath.Join(dir, "out.pdf")
-		plan := `{"version":7,"metadata":{"language":"` + tag + `"},"items":[{"page":{"size":"A4","text":{"value":"Text"}}}]}`
+		plan := `{"version":8,"metadata":{"language":"` + tag + `"},"items":[{"page":{"size":"A4","text":{"value":"Text"}}}]}`
 		for _, command := range []string{"check", "build"} {
 			r, exit, _ := invokeJSON(t, []string{command, "--plan", "-", "-o", output}, plan)
 			if exit != 2 || r.Status != "invalid" || !hasDiagnostic(r, "plan_value") {
@@ -527,7 +527,7 @@ func TestInitialPlanSyntaxNamedFileAndStdin(t *testing.T) {
 	}{
 		{"empty", "", true, 0}, {"whitespace", " \r\n\t", true, 0},
 		{"BOM", "\ufeff", true, 3}, {"BOM whitespace", "\ufeff\t \n", true, 3},
-		{"truncated", `{"version":7,"items":[`, false, 22}, {"NBSP", "\u00a0", false, 0},
+		{"truncated", `{"version":8,"items":[`, false, 22}, {"NBSP", "\u00a0", false, 0},
 	} {
 		for _, stdin := range []bool{false, true} {
 			t.Run(tc.name+strconv.FormatBool(stdin), func(t *testing.T) {

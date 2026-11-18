@@ -36,7 +36,7 @@ func TestCustomContentsMetricsPaginationAndExclusions(t *testing.T) {
 		draft.PageNumbers = &packet.PageNumbers{Size: 10, Margin: 18, Position: packet.NumberTopRight, Kinds: []packet.PartKind{packet.PartContents}, Mode: "physical", Start: 1}
 		j = pdffixture.Plan(t, draft)
 	}
-	j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), FitTo: j.FitTo(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems})
+	j = pdffixture.Plan(t, packet.Declaration{Output: j.Output(), Fitting: j.Fitting(), PageNumbers: j.PageNumbers(), PageDefaults: j.PageDefaults(), Items: jItems})
 	fallback, ds := PrepareContents(t.Context(), j, nil, fonts, testFooter(t, j))
 	if len(ds) > 0 {
 		t.Fatal(ds)

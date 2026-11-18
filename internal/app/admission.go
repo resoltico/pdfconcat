@@ -164,9 +164,8 @@ func admit(ctx context.Context, req Request) *admission {
 	} else {
 		a.roles.Output = effective.Output
 	}
-	if req.FitTo != nil {
-		size := req.FitTo.size
-		effective.FitTo = &size
+	if req.Fitting != nil {
+		effective.Fitting = req.Fitting
 	}
 	if req.Operation == Build && effective.Output == "" {
 		a.diagnostics = append(a.diagnostics, diag.Report(diag.OutputRequired, diag.AnOutputDestinationIsRequiredForBuild()))

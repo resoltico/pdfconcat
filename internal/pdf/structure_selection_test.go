@@ -59,7 +59,7 @@ func taggedSelectionFixture() *pdffixture.Doc {
 func TestTaggedSelectionRepetitionAndFittedClasses(t *testing.T) {
 	tools := oracle.RequireTools(t)
 	d := taggedSelectionFixture()
-	path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}}, &packet.SourceItem{Ref: "repeated", Path: "source", Selection: []packet.PageRange{{First: 3, Last: 3}}}}, &packet.Size{Width: 300, Height: 400})
+	path, ds := selectedPacket(t, d, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}, {First: 3, Last: 3}}}, &packet.SourceItem{Ref: "repeated", Path: "source", Selection: []packet.PageRange{{First: 3, Last: 3}}}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -144,7 +144,7 @@ func TestPDF20NamespaceRolesKeepTheirScope(t *testing.T) {
 	source.Objs[6] = bytes.Replace(source.Objs[6], []byte("/S /Local"), []byte("/S 10 0 R"), 1)
 	source.Objs[5] = bytes.Replace(source.Objs[5], []byte("/Local /P"), []byte("/Local 11 0 R"), 1)
 	source.Objs[8] = bytes.Replace(source.Objs[8], []byte("/Local /Local"), []byte("/Local 10 0 R"), 1)
-	path, ds := selectedPacket(t, source, []packet.Item{&packet.SourceItem{Ref: "first", Path: "source"}, &packet.SourceItem{Ref: "repeat", Path: "source"}}, &packet.Size{Width: 300, Height: 400})
+	path, ds := selectedPacket(t, source, []packet.Item{&packet.SourceItem{Ref: "first", Path: "source"}, &packet.SourceItem{Ref: "repeat", Path: "source"}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
@@ -211,7 +211,7 @@ func TestSerializedCoverageIsCheckedAgainstResolvedExpectation(t *testing.T) {
 }
 
 func TestIndirectStructureBindingsSurviveAssembly(t *testing.T) {
-	for _, fit := range []*packet.Size{nil, {Width: 300, Height: 400}} {
+	for _, fit := range []*packet.FitPolicy{nil, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})} {
 		for _, array := range []bool{false, true} {
 			source := taggedSelectionFixture()
 			// Alias -> indirect Local -> P; indirect C -> names/revision array with an

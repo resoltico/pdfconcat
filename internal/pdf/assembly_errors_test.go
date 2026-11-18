@@ -56,7 +56,7 @@ func TestAssemblyReportsActualWriterFailures(t *testing.T) {
 	if status := diag.Outcome(ds); status != "ok" {
 		t.Fatal(ds)
 	}
-	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: path}}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
+	layout, ds := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: path, Ref: path}}}), map[string]packet.SourceFacts{path: facts.SourceFacts})
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}

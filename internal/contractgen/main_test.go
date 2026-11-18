@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,28 +29,30 @@ func TestDerivedArtifactsCurrentAndStaleControl(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	path := filepath.Join(root, "docs/CLI.md")
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = file.WriteString("stale control"); err != nil {
-		t.Fatal(err)
-	}
-	if err = file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// Alter a generated value, rather than unrelated prose that generation preserves.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = bytes.Replace(data, []byte("| `request_invalid` | error"), []byte("| `request_invalid` | warning"), 1)
-	if err = os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = run(root, true); err == nil {
-		t.Fatal("stale generated value admitted")
+	for _, tc := range []struct{ path, current, stale string }{
+		{"docs/CLI.md", "| `request_invalid` | error", "| `request_invalid` | warning"},
+		{"internal/plan/plan.schema.json", `"default": 0.01`, `"default": 0.1`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			path := filepath.Join(root, tc.path)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			altered := bytes.Replace(data, []byte(tc.current), []byte(tc.stale), 1)
+			if bytes.Equal(data, altered) {
+				t.Fatal("negative control did not change a generated value")
+			}
+			if err = os.WriteFile(path, altered, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err = run(root, true); err == nil || !strings.Contains(err.Error(), "stale generated artifact: "+tc.path) {
+				t.Fatalf("stale generated value: %v", err)
+			}
+			if err = os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

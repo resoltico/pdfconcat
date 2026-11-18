@@ -137,7 +137,7 @@ func TestPhysicalFootersPreserveSourceAndPostFitGeometryStreamsAndPixels(t *test
 					}
 					s.Table[contentRef.ObjectNumber.Value()].Object = *original
 					if fit {
-						if err = fitToForTest(t.Context(), s, &packet.Size{Width: 400, Height: 500}); err != nil {
+						if err = fitToForTest(t.Context(), s, packet.DefaultFitPolicy(packet.Size{Width: 400, Height: 500})); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -438,7 +438,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 					}
 				}
 				if tc.fit {
-					if err = fitToForTest(t.Context(), s, &packet.Size{Width: 400, Height: 500}); err != nil {
+					if err = fitToForTest(t.Context(), s, packet.DefaultFitPolicy(packet.Size{Width: 400, Height: 500})); err != nil {
 						t.Fatal(err)
 					}
 				}

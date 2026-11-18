@@ -31,7 +31,7 @@ func assembleSourceBytes(t *testing.T, data []byte) string {
 	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	layout, _ := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", FitTo: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: source, Ref: source}}}), map[string]packet.SourceFacts{source: facts.SourceFacts})
+	layout, _ := resolvePacket(pdffixture.Plan(t, packet.Declaration{Output: "", Fitting: nil, PageNumbers: nil, PageDefaults: packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Path: source, Ref: source}}}), map[string]packet.SourceFacts{source: facts.SourceFacts})
 	var b bytes.Buffer
 	if _, err := pdf.Assemble(t.Context(), testAssembly(t, layout, map[string]pdf.SourceFacts{source: facts}, wholeOccurrences(layout, map[string]pdf.SourceFacts{source: facts}), nil, nil, nil), &b); err != nil {
 		t.Fatal(err)

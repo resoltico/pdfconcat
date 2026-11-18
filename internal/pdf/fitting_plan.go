@@ -68,7 +68,7 @@ func (p fittingPlan) page(index int) pageFitting {
 	}
 	return p.Pages[index]
 }
-func planFitting(geometries []pageGeometry, target *packet.Size, repeat int, origins sourceOrigins) (fittingPlan, error) {
+func planFitting(geometries []pageGeometry, policy *packet.FitPolicy, repeat int, origins sourceOrigins) (fittingPlan, error) {
 	count := len(geometries)
 	if repeat > 1 {
 		if repeat != count {
@@ -87,7 +87,7 @@ func planFitting(geometries []pageGeometry, target *packet.Size, repeat int, ori
 		if !known || original < 1 {
 			return fittingPlan{}, refuse(diag.SourceProcessingFailed, diag.SourceOccurrenceGeometryIsInconsistent())
 		}
-		d, err := packet.DecideFit(p.size, target)
+		d, err := packet.DecideFit(p.size, policy)
 		if err != nil {
 			return fittingPlan{}, err
 		}
@@ -189,11 +189,7 @@ func verifyPlannedGeometry(c context.Context, s *model.Context, a Assembly) erro
 				if index >= len(part.Generated) {
 					return errors.New("generated geometry ownership is unavailable")
 				}
-				fit, e := packet.DecideFit(packet.Size{Width: part.Generated[index].Width, Height: part.Generated[index].Height}, a.FitTo)
-				if e != nil {
-					return e
-				}
-				expected = canvasGeometry(fit.Output)
+				expected = canvasGeometry(part.OutputSize)
 			}
 			if nativeOf(pages[offset]) != expected {
 				return errors.New("output native or displayed geometry differs from its resolved expectation")
@@ -209,8 +205,8 @@ func verifyPlannedGeometry(c context.Context, s *model.Context, a Assembly) erro
 
 // fittingOwnsSelection checks exported occurrence facts against the private
 // admitted owner. Equal geometry cannot substitute for original page identity.
-func fittingOwnsSelection(f *OccurrenceFacts, target *packet.Size, inputPages int) bool {
-	if f == nil || f.Pages < 1 || f.fitting.Repeated || f.fitting.Count != f.Pages || len(f.fitting.Pages) != f.Pages || !sameFittingTarget(target, f.fittingTarget) || len(f.Selection) == 0 {
+func fittingOwnsSelection(f *OccurrenceFacts, policy *packet.FitPolicy, inputPages int) bool {
+	if f == nil || f.Pages < 1 || f.fitting.Repeated || f.fitting.Count != f.Pages || len(f.fitting.Pages) != f.Pages || !sameFittingPolicy(policy, f.fittingPolicy) || len(f.Selection) == 0 {
 		return false
 	}
 	if !slices.Equal(f.PageSizes, fittingRuns(f.fitting)) || f.FirstSize != f.fitting.Pages[0].Native.Size || f.LastSize != f.fitting.Pages[len(f.fitting.Pages)-1].Native.Size {

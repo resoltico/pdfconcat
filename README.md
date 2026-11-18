@@ -154,7 +154,8 @@ To place all source pages on portrait A4 sheets:
 pdfconcat build -o packet-a4.pdf --fit-to A4 cover.pdf appendix.pdf
 ```
 
-Fitting compares displayed dimensions with a .01 pt tolerance per ordered side.
+Fitting compares displayed dimensions with a default .01 pt tolerance per ordered side.
+Use `--fit-tolerance 1pt` with `--fit-to A4` to keep integer-rounded A4 sheets.
 Matching pages keep their native geometry; other pages are centered proportionally
 on the target. Artwork retains its original visible clipping; text is not reflowed.
 Annotation appearances, interactive hit areas, forms and internal destinations
@@ -179,7 +180,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 7,
+  "version": 8,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -209,7 +210,7 @@ text, divider titles and contents; absent or unmatched tags use deterministic
 neutral shaping. See [authored language](docs/PLAN.md#authored-language).
 
 The A4 `page_defaults` style sets the section title page; it does not resize source
-pages. To fit the whole packet, add `"fit_to": "A4"` at the plan's top level.
+pages. To fit the whole packet, add `"fitting": {"target": "A4"}` at the plan's top level.
 
 Page numbering supports physical or consecutive counting, start offsets,
 per-item suppression and six positions. For example,
@@ -222,7 +223,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 7,
+  "version": 8,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -267,7 +268,7 @@ PDF and report publication are separate operations. A stdout write failure retur
 exit 1 and leaves already-published files saved; inspect publication facts before
 retrying. See [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v7; results and reports use format v9. Print their schemas with:
+Plans use format v8; results and reports use format v10. Print their schemas with:
 
 ```sh
 pdfconcat schema plan

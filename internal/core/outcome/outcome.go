@@ -72,6 +72,7 @@ type Part struct {
 	Count         int
 	OutputPages   *[2]int64
 	Size          *packet.Size
+	OutputSize    *packet.Size
 	Text          *Text
 	FieldsRenamed []packet.FieldRename
 	PageSizes     *[]packet.PageSizeRun
@@ -88,7 +89,7 @@ type Result struct {
 	Status      diag.Status
 	Output      *Output
 	Pages       *Pages
-	FitTo       *packet.Size
+	Fitting     *packet.FitPolicy
 	PageNumbers *packet.PageNumbers
 	Diagnostics []diag.Diagnostic
 

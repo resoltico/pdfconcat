@@ -16,9 +16,9 @@ import (
 
 // SelectionRequest identifies one occurrence in a grouped source inspection.
 type SelectionRequest struct {
-	Item  string
-	Pages []packet.PageRange
-	FitTo *packet.Size
+	Item    string
+	Pages   []packet.PageRange
+	Fitting *packet.FitPolicy
 }
 
 // Inspect reads and validates a whole source once. Each ephemeral view
@@ -128,7 +128,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			ds = append(ds, d)
 			continue
 		}
-		selected, _, err := observe(c, view, origins, request.FitTo, geometries)
+		selected, _, err := observe(c, view, origins, request.Fitting, geometries)
 		if err != nil {
 			d := diagnostic(err, diag.SourceInvalid)
 			d.Items = []string{request.Item}
@@ -171,10 +171,10 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 			root, e := structureRoot(view)
 			if e == nil && root != nil {
 				e = pruneStructure(c, view)
-				if e == nil && request.FitTo != nil {
+				if e == nil && request.Fitting != nil {
 					e = fitContext(c, view, selectedFacts.fitting, origins)
 				}
-				if e == nil && request.FitTo != nil {
+				if e == nil && request.Fitting != nil {
 					root, e = structureRoot(view)
 					if e == nil {
 						cat, err := view.Catalog()
@@ -185,7 +185,7 @@ func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requ
 						}
 					}
 				}
-				if e == nil && request.FitTo != nil {
+				if e == nil && request.Fitting != nil {
 					e = validateStructure(c, view)
 				}
 			}

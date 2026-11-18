@@ -19,14 +19,14 @@ func (p Plan) TextUses() []TextUse {
 	add := func(font Font, text string, refs ...string) {
 		uses = append(uses, TextUse{Leaf: current, Font: font, Text: text, Refs: refs})
 	}
-	leaves, sections := p.Leaves(), p.Sections()
+	leaves, sections := p.leaves, p.sections
 	for _, leaf := range leaves {
 		current = leaf.Index
 		if leaf.Page != nil {
 			add(leaf.Page.Text.Font.Value, leaf.Page.Text.Value.Value, leaf.Page.Text.Value.From, leaf.Page.Text.Font.From, leaf.Ref)
 		}
 		if leaf.Contents != nil {
-			font := p.PageDefaults().Text.Font
+			font := p.pageDefaults.Text.Font
 			add(font.Value, leaf.Contents.Title, leaf.Ref, font.From)
 			for _, section := range sections {
 				add(font.Value, section.Title, section.Item+"/title", leaf.Ref, font.From)
@@ -36,7 +36,7 @@ func (p Plan) TextUses() []TextUse {
 		}
 	}
 	current = -1
-	if p.PageNumbers() != nil {
+	if p.pageNumbers != nil {
 		add(Font{}, "0123456789", "/page_numbers")
 	}
 	return uses
@@ -76,7 +76,7 @@ func (p Plan) Inputs() []InputResource {
 	}
 	uses := p.TextUses()
 	next := 0
-	for _, leaf := range p.Leaves() {
+	for _, leaf := range p.leaves {
 		if leaf.Kind == PartSource {
 			add(leaf.Source, leaf.Ref)
 		}

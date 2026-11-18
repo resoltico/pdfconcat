@@ -365,30 +365,11 @@ func AdmitDeclaration(input Declaration) (Plan, []diag.Diagnostic) {
 }
 
 func preparePlan(d Declaration) Plan {
-	items := cloneItems(d.Items)
-	var apply func([]Item)
-	apply = func(items []Item) {
-		for _, item := range items {
-			switch v := item.(type) {
-			case *PageItem:
-				v.Style = copyStyle(v.Style.Over(d.PageDefaults))
-			case *GroupItem:
-				if v.Divider != nil {
-					s := copyStyle(v.Divider.Over(d.PageDefaults))
-					v.Divider = &s
-				}
-				apply(v.Items)
-			case *SourceItem, *ContentsItem:
-			}
-		}
-	}
-	apply(items)
-	p := newPlan(d.Output, d.Fitting, d.PageNumbers, d.PageDefaults, items)
+	p := newPlan(d.Output, d.Fitting, d.PageNumbers, d.PageDefaults, d.Items)
 	p.metadata = copyMetadata(d.Metadata)
 	p.timestamp = copyValue(d.Timestamp)
 	p.structure = d.Structure
-	raw := cloneDeclaration(d)
-	p.declaration = &raw
+	p.declaration = &d
 	return p
 }
 

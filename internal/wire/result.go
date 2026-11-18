@@ -6,7 +6,10 @@ package result
 
 import (
 	_ "embed"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"io"
+	"iter"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
@@ -140,6 +143,25 @@ type Version struct {
 // Project serializes domain facts without making a wire DTO the execution state.
 func Project(input outcome.Result) Result {
 	r := input.Full()
+	result := projectHeader(r)
+	for _, part := range r.Parts {
+		result.Parts = append(result.Parts, projectPart(part))
+	}
+	for _, section := range r.Sections {
+		result.Sections = append(result.Sections, projectSection(section))
+	}
+	return result
+}
+
+// ProjectSummary renders only summary fields of an ordered result.
+func ProjectSummary(r outcome.Result) Result {
+	result := projectHeader(r)
+	result.Parts, result.Sections = nil, nil
+	result.Diagnostics, result.DiagnosticsOmitted = r.CappedDiagnostics()
+	return result
+}
+
+func projectHeader(r outcome.Result) Result {
 	result := Result{FormatVersion: WireVersion, Metadata: r.Metadata, Timestamp: r.Timestamp, Numbering: r.Numbering, Command: r.Command, Status: r.Status, PageNumbers: r.PageNumbers, Diagnostics: r.Diagnostics, Parts: []Part{}, Sections: []Section{}}
 	if r.Fitting != nil {
 		result.Fitting = &Fitting{Target: r.Fitting.Target, Tolerance: r.Fitting.Tolerance}
@@ -156,31 +178,66 @@ func Project(input outcome.Result) Result {
 	if r.Structure != nil {
 		result.Structure = &Structure{Policy: r.Structure.Policy, Coverage: r.Structure.Coverage}
 	}
-	for _, part := range r.Parts {
-		p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, OutputSize: part.OutputSize, FieldsRenamed: RenameFacts(part.FieldsRenamed)}
-		if part.PageSizes != nil {
-			runs := make([]PageSizeRun, len(*part.PageSizes))
-			for i, r := range *part.PageSizes {
-				runs[i] = PageSizeRun{Source: r.Source, SourceSize: r.SourceSize, OutputSize: r.OutputSize}
-			}
-			p.PageSizes = &runs
-		}
-		if part.Text != nil {
-			p.Text = &Text{Font: part.Text.Font, FontSize: part.Text.FontSize, Bounds: part.Text.Bounds, InkBounds: part.Text.InkBounds, Overflow: part.Text.Overflow}
-		}
-		if part.Spans != nil {
-			spans := make([]Span, len(*part.Spans))
-			for index, span := range *part.Spans {
-				spans[index] = Span{Source: span.Source, Output: span.Output}
-			}
-			p.Spans = &spans
-		}
-		result.Parts = append(result.Parts, p)
-	}
-	for _, section := range r.Sections {
-		result.Sections = append(result.Sections, Section{Item: section.Item, Title: section.Title, Parent: section.Parent, TargetPage: section.TargetPage, OutputPages: section.OutputPages})
-	}
 	return result
+}
+
+func projectPart(part outcome.Part) Part {
+	p := Part{Item: part.Item, InputPages: part.InputPages, Section: part.Section, Reason: part.Reason, BeforeItem: part.BeforeItem, Kind: part.Kind, Path: part.Path, SHA256: part.SHA256, Bytes: part.Bytes, Pages: part.Pages, Count: part.Count, OutputPages: part.OutputPages, Size: part.Size, OutputSize: part.OutputSize, FieldsRenamed: RenameFacts(part.FieldsRenamed)}
+	if part.PageSizes != nil {
+		runs := make([]PageSizeRun, len(*part.PageSizes))
+		for i, r := range *part.PageSizes {
+			runs[i] = PageSizeRun{Source: r.Source, SourceSize: r.SourceSize, OutputSize: r.OutputSize}
+		}
+		p.PageSizes = &runs
+	}
+	if part.Text != nil {
+		p.Text = &Text{Font: part.Text.Font, FontSize: part.Text.FontSize, Bounds: part.Text.Bounds, InkBounds: part.Text.InkBounds, Overflow: part.Text.Overflow}
+	}
+	if part.Spans != nil {
+		spans := make([]Span, len(*part.Spans))
+		for index, span := range *part.Spans {
+			spans[index] = Span{Source: span.Source, Output: span.Output}
+		}
+		p.Spans = &spans
+	}
+	return p
+}
+
+func projectSection(section outcome.Section) Section {
+	return Section{Item: section.Item, Title: section.Title, Parent: section.Parent, TargetPage: section.TargetPage, OutputPages: section.OutputPages}
+}
+
+// WriteReport projects and encodes one record at a time. The encoder flushes
+// incrementally to the staged sink and keeps at most one record's scratch.
+func WriteReport(w io.Writer, r outcome.Result, parts iter.Seq[outcome.Part], sections iter.Seq[outcome.Section]) error {
+	report := struct {
+		Result
+		Parts    records[outcome.Part, Part]       `json:"parts"`
+		Sections records[outcome.Section, Section] `json:"sections"`
+	}{
+		Result:   projectHeader(r),
+		Parts:    records[outcome.Part, Part]{parts, projectPart},
+		Sections: records[outcome.Section, Section]{sections, projectSection},
+	}
+	enc := jsontext.NewEncoder(w)
+	return json.MarshalEncode(enc, report)
+}
+
+type records[T, U any] struct {
+	values  iter.Seq[T]
+	project func(T) U
+}
+
+func (r records[T, U]) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if err := enc.WriteToken(jsontext.BeginArray); err != nil {
+		return err
+	}
+	for value := range r.values {
+		if err := json.MarshalEncode(enc, r.project(value)); err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndArray)
 }
 
 // RenameFacts distinguishes unknown/null from an observed empty array.

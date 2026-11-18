@@ -12,25 +12,13 @@ import (
 	"unicode"
 
 	"github.com/resoltico/pdfconcat/internal/app"
+	"github.com/resoltico/pdfconcat/internal/core/outcome"
 	result "github.com/resoltico/pdfconcat/internal/wire"
 )
 
 // Summary omits parts and bounds both diagnostics and their consumer pointers.
 func Summary(input app.Result) result.Result {
-	r := result.Project(input)
-	r.Parts = nil
-	r.Sections = nil
-	if len(r.Diagnostics) > 20 {
-		r.DiagnosticsOmitted = len(r.Diagnostics) - 20
-		r.Diagnostics = r.Diagnostics[:20]
-	}
-	for i := range r.Diagnostics {
-		if len(r.Diagnostics[i].Items) > 20 {
-			r.Diagnostics[i].ItemsOmitted = len(r.Diagnostics[i].Items) - 20
-			r.Diagnostics[i].Items = r.Diagnostics[i].Items[:20]
-		}
-	}
-	return r
+	return result.ProjectSummary(input.Full())
 }
 
 // JSON writes a complete JSON document and newline.
@@ -45,11 +33,15 @@ func JSON(w io.Writer, value any) error {
 
 // Render writes a capped JSON document or a text summary with separate diagnostics.
 func Render(w, stderr io.Writer, r app.Result, asJSON bool) error {
+	return renderFinal(w, stderr, r.Full(), asJSON)
+}
+
+func renderFinal(w, stderr io.Writer, r app.Result, asJSON bool) error {
+	summary := result.ProjectSummary(r)
 	if asJSON {
-		return JSON(w, Summary(r))
+		return JSON(w, summary)
 	}
-	rows, omitted := previewRows(r)
-	summary := Summary(r)
+	rows, omitted := previewRows(r, summary.Report)
 	if _, err := fmt.Fprintf(w, "%s %s\n", summary.Command, summary.Status); err != nil {
 		return err
 	}
@@ -175,8 +167,7 @@ func printableMessage(message string) string {
 	return b.String()
 }
 
-func previewRows(r app.Result) ([]string, int) {
-	report := result.Project(r).Report
+func previewRows(r app.Result, report *result.Report) ([]string, int) {
 	var rows []string
 	pages := func(span *[2]int64) string {
 		if span == nil {
@@ -185,7 +176,7 @@ func previewRows(r app.Result) ([]string, int) {
 		return fmt.Sprintf("%d–%d", span[0], span[1])
 	}
 	for _, section := range r.Sections {
-		if len(rows) == 20 {
+		if len(rows) == outcome.SummaryLimit {
 			break
 		}
 		target := "unknown"
@@ -195,7 +186,7 @@ func previewRows(r app.Result) ([]string, int) {
 		rows = append(rows, fmt.Sprintf("Section %s: target %s, pages %s", strconv.Quote(section.Title), target, pages(section.OutputPages)))
 	}
 	for _, part := range r.Parts {
-		if len(rows) == 20 {
+		if len(rows) == outcome.SummaryLimit {
 			break
 		}
 		switch part.Kind {
@@ -204,12 +195,12 @@ func previewRows(r app.Result) ([]string, int) {
 			if part.Spans != nil {
 				mapping := *part.Spans
 				var spans []string
-				for _, span := range mapping[:min(len(mapping), 20)] {
+				for _, span := range mapping[:min(len(mapping), outcome.SummaryLimit)] {
 					spans = append(spans, fmt.Sprintf("%d–%d", span.Source[0], span.Source[1]))
 				}
 				source = strings.Join(spans, ",")
-				if len(mapping) > 20 {
-					source += fmt.Sprintf(" (%d more spans; %s)", len(mapping)-20, strings.TrimSuffix(reportHint(report), "."))
+				if len(mapping) > outcome.SummaryLimit {
+					source += fmt.Sprintf(" (%d more spans; %s)", len(mapping)-outcome.SummaryLimit, strings.TrimSuffix(reportHint(report), "."))
 				}
 			}
 			rows = append(rows, fmt.Sprintf("Source %s: selected %s → pages %s", strconv.Quote(part.Path), source, pages(part.OutputPages)))
@@ -219,5 +210,5 @@ func previewRows(r app.Result) ([]string, int) {
 			rows = append(rows, fmt.Sprintf("%s %s: pages %s", part.Kind, strconv.Quote(part.Item), pages(part.OutputPages)))
 		}
 	}
-	return rows, len(r.Sections) + len(r.Parts) - len(rows)
+	return rows, r.PreviewRowsOmitted + len(r.Sections) + len(r.Parts) - len(rows)
 }

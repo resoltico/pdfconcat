@@ -320,7 +320,7 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 	}
 	draft.PageDefaults = defaults
 	draft.Items = p.resolveItems(nodes, scope)
-	owned, ds := packet.ValidateDeclaration(draft)
+	result, ds := packet.AdmitDeclaration(draft)
 	if len(ds) > 0 {
 		d := ds[0]
 		ref := ""
@@ -331,16 +331,6 @@ func (p *decoder) document(base string) (packet.Plan, error) {
 			return result, &fault{code: d.Code, message: d.Message, pointer: p.contentsPointer, offset: p.contentsOffset}
 		}
 		return result, &fault{code: d.Code, message: d.Message, pointer: ref, offset: p.d.InputOffset()}
-	}
-	result, ds = packet.AdmitDeclaration(owned)
-	if len(ds) > 0 {
-		return result, p.fail(ds[0].Code, ds[0].Message)
-	}
-	if p.contents > 0 {
-		sections := result.Sections()
-		if len(sections) == 0 {
-			return result, &fault{code: diag.PlanValue, message: "Contents requires at least one titled section.", pointer: p.contentsPointer, offset: p.contentsOffset}
-		}
 	}
 	return result, nil
 }

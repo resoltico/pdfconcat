@@ -25,10 +25,17 @@ func Execute(ctx context.Context, req Request) Result {
 		}
 	}
 	result := project(req, admitted, inspected, composed, built)
+	records := recordsFor(admitted, inspected, composed)
+	records.appendRequested(&result, req.Detail)
 	noteCancellation(ctx, &result)
+	result = result.Full()
+	finalized := len(result.Diagnostics)
 	if !admitted.reportRefused {
-		writeReport(&result, admitted.roles)
+		writeReport(&result, admitted.roles, records)
 	}
 	noteCancellation(ctx, &result)
-	return result.Full()
+	if len(result.Diagnostics) != finalized {
+		result = result.Full()
+	}
+	return result
 }

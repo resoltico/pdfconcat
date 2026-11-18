@@ -206,8 +206,10 @@ func directPlan(items Items, base string) (packet.Plan, []diag.Diagnostic) {
 		}
 		declared = append(declared, &packet.SourceItem{Ref: source.Ref, Path: path})
 	}
+	prepared, validation := packet.AdmitDeclaration(packet.Declaration{Items: declared})
+	ds = append(ds, validation...)
 	if len(ds) > 0 {
 		return packet.Plan{}, ds
 	}
-	return packet.AdmitDeclaration(packet.Declaration{Items: declared})
+	return prepared, nil
 }

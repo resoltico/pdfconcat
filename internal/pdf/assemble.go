@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 
 	"path/filepath"
 
@@ -346,7 +347,7 @@ func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly
 	return nil
 }
 
-func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) (*model.Context, sourceOrigins, error) {
+func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, err error) {
 	changed := func() error {
 		return refuse(diag.SourceChanged, diag.SourceBytesChangedAfterInspectionS(part.Source))
 	}
@@ -355,20 +356,34 @@ func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) 
 	}
 	reader, digest, err := part.Input.Open(c)
 	if err != nil {
-		return nil, sourceOrigins{}, pdfFailure(diag.SourceChanged, diag.PDFProcessingFailure(err.Error()), err)
+		return nil, sourceOrigins{}, snapshotFailure(part.Source, err)
 	}
-	defer func() { _ = reader.Close() }()
+	defer func() {
+		closeErr := reader.Close()
+		if err == nil && closeErr != nil {
+			err = snapshotFailure(part.Source, closeErr)
+		}
+	}()
 	if digest != part.Occurrence.File.SHA256 {
 		return nil, sourceOrigins{}, changed()
 	}
 	// Re-admission is the fallback for mutable backend graphs. The acquired
 	// bytes are fixed, and the compiled selection facts retain original sites.
-	s, origins, _, err := readSourceReader(c, reader, policy)
+	s, origins, _, err = readSourceReader(c, reader, policy)
 	if err == nil {
 		// The read stage materializes lazy parsed objects before returning.
 		s.Read.RS = nil
 	}
 	return s, origins, err
+}
+
+func snapshotFailure(path string, err error) error {
+	cause := diag.IOCause{Reason: err.Error(), File: path}
+	var native *fs.PathError
+	if errors.As(err, &native) {
+		cause.Reason, cause.NativeDetail = native.Err.Error(), err.Error()
+	}
+	return &policyError{finding: diag.IOFailure(diag.SourceChanged, cause), err: err}
 }
 
 // Diagnostic preserves typed product failures at the application boundary.

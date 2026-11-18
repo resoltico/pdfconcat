@@ -708,23 +708,19 @@ func (p *decoder) fitting() (*packet.FitPolicy, error) {
 }
 
 func (p *decoder) fitTolerance() (float64, error) {
-	var points float64
-	var err error
 	kind := p.d.PeekKind()
-	if kind == '"' {
-		length, readErr := p.text()
-		if readErr != nil {
-			return 0, readErr
-		}
-		points, err = packet.ParseFitToleranceLength(length)
-	} else if kind == '0' {
-		token, readErr := p.d.ReadToken()
-		if readErr != nil {
-			return 0, readErr
-		}
-		points, err = packet.ParseFitToleranceNumber(token.String())
-	} else {
+	if kind != '"' && kind != '0' {
 		return p.number()
+	}
+	token, err := p.d.ReadToken()
+	if err != nil {
+		return 0, err
+	}
+	var points float64
+	if kind == '"' {
+		points, err = packet.ParseFitToleranceLength(token.String())
+	} else {
+		points, err = packet.ParseFitToleranceNumber(token.String())
 	}
 	if err != nil {
 		return 0, p.fail(diag.PlanValue, err.Error())

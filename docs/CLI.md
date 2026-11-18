@@ -189,11 +189,11 @@ existing targets must be regular files. Symlink targets, directories and devices
 are refused. Input symlinks to regular files are allowed. Roles are checked again
 before report publication, including an output that did not exist initially.
 
-When the plan could not be decoded, its inputs are unknown. Report publication
-then always uses no-replace, even with `--overwrite`, so it cannot replace an
-input hidden in a malformed plan. Existing-target and known-collision refusals
-use `report_exists`, `report_not_regular`, `report_is_input` or
-`report_is_output`.
+When the plan could not be decoded, its inputs are unknown. Choose a fresh
+report path in that case. Report publication uses no-replace even with
+`--overwrite` to protect inputs that the decoder could not identify.
+Existing-target and known-collision refusals use `report_exists`,
+`report_not_regular`, `report_is_input` or `report_is_output`.
 
 Existing inputs and the output are protected by file identity. Missing inputs
 are protected only by cleaned path spelling; reports are rechecked after PDF
@@ -375,11 +375,11 @@ pdfconcat build --plan plan.json -o book.pdf
 
 ## Diagnostic evidence
 
-Core diagnostics own the condition, explanation and terminology. The CLI adds
-command syntax to text remedies; JSON and reports retain the core explanation.
-`detail`, when present, contains backend evidence rather than a stable product
-message. `pdf_location` can identify a positive `object` number, positive `page`
-number, or dictionary `path`; absent fields mean attribution is unavailable.
+Core diagnostics supply the condition, explanation and applicable remedy.
+The CLI can add command syntax to text output. JSON results and reports retain
+the core explanation. `detail` can carry observations, measurements or phase
+information. `pdf_location` can identify a positive `object` or `page` number,
+or a dictionary `path`. Absent fields mean attribution is unavailable.
 Source-page numbers refer to the original source, including after selection;
 output-page numbers refer to the composed PDF. Source object numbers are captured
 before selection and backend renumbering; they are not output object IDs. Paths
@@ -397,7 +397,8 @@ Navigation warnings identify the changed binding: a retained annotation can lose
 removes its dependent Next subtree. Distinct catalogue entries and destination
 declarations remain distinct findings, including equal legacy/name-tree sites.
 URI Base warnings require an actually retained relative action and a nonempty
-source Base; orphan, selected-out and absolute actions do not establish impact.
+source Base. A build can report the same source site during inspection and during
+assembly. The phase in `detail` distinguishes those observations.
 Check rename warnings identify known source scopes/definitions as predictions;
 only build reports actual old/new mappings. Generated-layout warnings keep plan
 provenance, and backend notices expose only locations the backend supplies.

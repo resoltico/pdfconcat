@@ -85,13 +85,14 @@ To install the current checkout into Go's executable directory:
 go install ./cmd/pdfconcat
 ```
 
-To install the source release, clone its tag and run the command from that
-checkout so the root module selects the required in-tree pdfcpu source:
+To install from a release, replace `vX.Y.Z` with a tag from
+[Releases](https://github.com/resoltico/pdfconcat/releases). Run the command from
+that checkout so the root module selects the required in-tree pdfcpu source.
 
 ```sh
-git clone --branch v0.13.0 --depth 1 https://github.com/resoltico/pdfconcat.git
-cd pdfconcat
-go install ./cmd/pdfconcat
+git clone --branch vX.Y.Z --depth 1 https://github.com/resoltico/pdfconcat.git &&
+  cd pdfconcat &&
+  go install ./cmd/pdfconcat
 ```
 
 Use the Go version declared in [go.mod](go.mod). The executable goes into the

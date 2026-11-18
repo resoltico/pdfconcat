@@ -212,9 +212,10 @@ Core owns each page's keep/transform decision and expected displayed size. The P
 adapter binds those decisions to original selected identities and exact native
 geometry, checks destination target dispositions and annotation/widget ownership,
 and rechecks the actual re-admitted pages before mutation. Source metrics come
-from the batched geometry observation. Repeated generated pages share a fitting
-record with an explicit count; wire page-size runs carry expectations rather
-than publication claims.
+from the batched geometry observation, which binds each occurrence to the complete
+effective fitting policy. Repeated generated pages share a fitting record with
+an explicit count. The result projects expected frames for generated parts and
+page-size runs for source pages. Publication is a separate fact.
 
 Kept pages bypass fitting mutation. The adapter owns affine placement and source
 composition accuracy admission, finite round-trip numeric serialization, explicit

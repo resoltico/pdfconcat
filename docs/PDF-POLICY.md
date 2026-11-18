@@ -583,8 +583,10 @@ scope refuses when a transformation needs it; use original sizes or a reviewed s
 explicit page association. Final indexes are rebuilt from retained semantic
 ownership. Generated meaningful text is tagged, and contents links receive
 Link/OBJR associations. Each title/label pair is emitted contiguously in physical
-and logical reading order. Source languages belong on imported subtree
-boundaries. No PDF/UA identifier is inherited.
+and logical reading order. Each imported tagged subtree retains its source
+language, including when it comes from the first source in the packet. Explicit
+descendant languages retain their narrower scope. The output catalog uses the
+authored document language. PDF/UA identifiers are omitted.
 
 Inline-image payloads remain opaque. Structure inspection accepts a unique
 lexically valid EI boundary, with bounded lookahead, and refuses ambiguous

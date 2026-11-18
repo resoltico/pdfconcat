@@ -2,15 +2,18 @@
 
 ## [Unreleased]
 
-- Plans require version 8. Replace root `fit_to` with `fitting.target` and update result, report and version JSON consumers to format 10. [Plan](docs/PLAN.md#selective-fitting-and-source-geometry)
-- Choose an absolute fitting tolerance in points or physical units. It defaults to .01 pt. Zero requires exact dimensions, and 1 pt keeps integer-rounded A4.
-- `--fit-to` replaces the plan policy after validation. Use `--fit-tolerance` in the same invocation to change the replacement's .01 pt default.
-- Reports include expected generated `output_size` after layout resolves and retain geometry and counts on later refusals. Source geometry remains in exact `page_sizes` runs.
+## [0.14.0] - 2026-11-18
 
-- Equivalent decimal fitting lengths resolve to the same point tolerance. Negative nonzero tolerances are refused even when they would round to zero.
-- Imported tagged pages retain their source language when their PDF starts the packet.
-- Generated blanks accept any page number that fits the sheet. Contents rows reserve space for custom-font unnumbered labels and keep them in their own links.
-- Fitting help shows metric syntax. Publication, URI Base and text and numbering diagnostics identify the applicable stage, placement problem or usable remedy.
+- Use plan version 8 and replace root `fit_to` with `fitting.target`. Update result, report and version JSON readers to format 10. [Plan](docs/PLAN.md#selective-fitting-and-source-geometry)
+- Set an absolute fitting tolerance in physical units. It defaults to .01 pt, zero requires exact dimensions, and 1 pt keeps integer-rounded A4 sheets.
+- Equivalent unit spellings resolve to the same fitting tolerance. Negative nonzero tolerances are refused even when they would round to zero.
+- Use `--fit-tolerance` with `--fit-to`. The CLI replaces the whole plan policy after validation and uses .01 pt when only the target is supplied.
+- Reports give expected generated page sizes after layout resolves and retain established counts and geometry through later refusals. Source geometry stays in exact `page_sizes` runs.
+- Imported tagged pages retain their inherited source language when their PDF starts the packet.
+- Generated blanks accept page numbers that fit the sheet. Contents layout keeps custom-font unnumbered labels inside their own section links.
+- Fitting help shows metric syntax. Publication, URI Base, text overflow and numbering diagnostics identify the applicable remedy, stage or measured limit.
+- Release retries can publish previously qualified artifacts for the same immutable tag. [Release workflow](CONTRIBUTING.md#release)
+- Contributor tooling uses govulncheck 1.10.0, regexp2 2.13.1 and go-shellwords 1.0.17.
 
 ## [0.13.0] - 2026-11-17
 

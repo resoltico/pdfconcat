@@ -2,7 +2,7 @@
 
 PDFConcat combines existing PDFs and selected pages into one ordered document.
 Optional assembly aids add separators, simple text inserts, navigation, page
-numbers and consistent sheet sizes. Merge whole files directly, or use a reusable
+numbers and optional sheet fitting. Merge whole files directly, or use a reusable
 JSON plan for selections and assembly aids. Check the plan before building and
 save a report with input file hashes and source-to-output page mappings.
 
@@ -149,21 +149,21 @@ including a font used only by linked contents.
 
 ## Fit page sizes
 
-To place all source pages on portrait A4 sheets:
+Fit pages outside the default tolerance to portrait A4:
 
 ```sh
 pdfconcat build -o packet-a4.pdf --fit-to A4 cover.pdf appendix.pdf
 ```
 
-Fitting compares displayed dimensions with a default .01 pt tolerance per ordered side.
-Use `--fit-tolerance 1pt` with `--fit-to A4` to keep integer-rounded A4 sheets.
-Matching pages keep their native geometry; other pages are centered proportionally
-on the target. Artwork retains its original visible clipping; text is not reflowed.
+Fitting compares the displayed width and height with an absolute tolerance of
+0.01 pt per side by default. Use `--fit-tolerance 1pt` with `--fit-to A4` to keep
+integer-rounded A4 sheets, or `--fit-tolerance 0pt` to require exact dimensions.
+Matching pages keep their native geometry. Other pages are scaled proportionally
+and centered on the target, preserving visible clipping and the text layout.
 Annotation appearances, interactive hit areas, forms and internal destinations
-can restrict fitting. If fitting is refused,
-follow the diagnostic and [fitting policy](docs/PDF-POLICY.md#fitting); some inputs
-need reviewed appearances or their original page sizes. Omit `--fit-to` to retain
-original sizes.
+can restrict transformations. For remedies, see the
+[fitting policy](docs/PDF-POLICY.md#fitting). Omit `--fit-to` in direct mode to
+keep the source sizes.
 
 For a first run without preparing any input PDFs, create one blank A4 page in a
 writable folder where `blank-a4.pdf` does not already exist:
@@ -305,7 +305,7 @@ built-in equivalent. The table covers each CLI's commands as a whole, so pdfcpu
 may require several commands. A dash does not rule out an external script, and
 dots do not imply identical defaults or preservation guarantees.
 
-| Task | pdfcpu CLI v0.16.4 | PDFConcat 0.13.0 |
+| Task | pdfcpu CLI v0.16.4 | PDFConcat |
 | --- | :---: | :---: |
 | Merge PDFs in a chosen order | ● | ● |
 | Append PDFs by updating the existing destination [1] | ● | — |
@@ -318,6 +318,7 @@ dots do not imply identical defaults or preservation guarantees.
 | Preserve imported source bookmarks [3] | ● | ● |
 | Create bookmarks [3] | ● | ● |
 | Fit pages to a chosen paper size | ● | ● |
+| Keep near-target sheets using a per-side fitting tolerance | — | ● |
 | Generate simple text pages from JSON | ● | ● |
 | Generate Latin, Greek and Cyrillic text with a bundled font [4] | ● | ● |
 | Add physical page numbers [5] | ● | ● |
@@ -378,6 +379,7 @@ Version-specific pdfcpu sources:
 [merge and streaming behavior](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/cli/document_exec.go),
 [bookmark merge modes](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/merge.go),
 [page operations](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/pages.go),
+[resize parameters](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/model/resize.go),
 [stamps and bookmarks](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/content_usage.go),
 [font initialization](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/model/configuration.go),
 [JSON creation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/create.go), and

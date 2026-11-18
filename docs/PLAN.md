@@ -212,15 +212,17 @@ for layout measurement. Its file path retains the root base-directory scope even
 when contents is nested under a group's `dir`. Other `page_defaults` text fields
 (value, size, color, positioning and spacing) do not configure contents. Page-number
 overlays keep their separate bundled-font policy.
-A whole row stays on one page. The number column has fixed measured digit cells;
-final numbers do not reflow titles or change the measured contents page count.
-Overwide indentation, unsupported text or a row too tall for a page is refused;
-titles are not split across pages, truncated or shrunk.
+Each row stays on one page. Pagination and link rectangles use the measured
+title and label bounds, including the possible em dash. The resolved labels
+fit the reserved number column without reflowing titles. PDFConcat refuses
+overwide indentation, unsupported text and rows too tall for the available
+height. Titles stay whole at the fixed contents text size.
 
-Eligible generated pages reserve the selected overlay edge plus 6pt clearance
-before pagination/placement. Fitting inverse-transforms the physical exclusion
-into the authored canvas. Suppressed overlays reserve no space. Large margins
-can reduce usable height or cause a refusal.
+Contents and nonempty generated text reserve the selected overlay edge plus
+6 pt of clearance when their own page-number overlay is eligible. Fitting maps
+that physical exclusion back into the authored canvas. Large margins can
+reduce the available text height. Generated blanks need room only for the
+page-number overlay itself.
 
 ## Page numbering
 
@@ -239,8 +241,10 @@ then displays physical target pages. An empty object enables these defaults:
 The inherited item `numbering` override applies first, then kind eligibility.
 Automatic padding is never eligible. Physical mode labels eligible physical page
 p as `start+p-1`; suppressed pages and padding still occupy physical positions.
-Consecutive mode advances only on eligible pages. Overflow is refused before
-output staging. A suppression affects both painting and consecutive counting.
+Consecutive mode advances only on eligible pages. If an eligible label would
+exceed the supported index range, PDFConcat reports the first affected physical
+page and the highest usable start for the selected mode before output staging.
+Suppression affects both painting and consecutive counting.
 
 Contents uses the target's resolved decimal label, or an em dash (—) for an
 unnumbered target. Links retain their original physical target, including an
@@ -447,13 +451,14 @@ refused. Supported scripts are left-to-right Latin, Greek, Cyrillic and suitable
 Common/Inherited characters. RTL/complex scripts are refused even if a font has
 their glyphs. Missing glyph sequences are errors.
 
-Default overflow refuses an unsplittable word or fragment wider than the block,
-or logical/ink bounds past a page edge. `allow` places measured overflow and
-warns; it does not shrink, truncate or normalize text. Empty text has no text
-geometry; whitespace can have logical bounds without ink. A nonempty value on a
-page whose default margins leave width below 1 pt is refused even with `allow`;
-specify a valid explicit
-width or a wider page. Explicit authored sizes are laid out before fitting.
+By default, PDFConcat refuses an unsplittable word or fragment wider than the
+block or measured bounds outside the available text area. `allow` uses the
+measured layout and warns about excess wrap width, bounds outside the available
+area or ink crossing a physical page edge. Ink outside the page can be clipped.
+Empty text produces no text geometry. Whitespace can have logical bounds
+without ink. If the default margins leave a nonempty value less than 1 pt of
+text width, supply a valid explicit width or a wider page. Text layout uses
+the authored canvas before fitting.
 
 ## Fonts
 
@@ -512,8 +517,11 @@ decoder. Schema validity alone is not a successful check of a packet.
 Set `"fitting": {"target": "A4", "tolerance": "1pt"}` to keep integer-rounded
 595 × 842 pt A4 sheets. The object requires `target`. Omitted `tolerance`
 defaults to .01 pt and keeps ordinary two-decimal 595.28 × 841.89 pt A4.
-Tolerance accepts a nonnegative length through 14,400 pt. Decimal units are converted to physical points before binary64 rounding. Numeric `0` and
-`"0pt"` both require exact dimensions.
+Tolerance accepts a nonnegative length through 14,400 pt. PDFConcat converts
+decimal units to physical points before rounding to binary64, so equivalent
+lengths such as `1in` and `25.4mm` resolve to the same tolerance. Negative nonzero
+values are refused even if they would round to zero. Zero, including signed
+zero, requires exact dimensions.
 
 Each ordered displayed side must fall within the fixed target's inclusive
 interval, with each endpoint rounded once in float64 arithmetic. The comparison
@@ -529,11 +537,11 @@ Their own non-null BleedBox/TrimBox/ArtBox references are omitted with separate
 located warnings; default printing bounds apply. Production-print fidelity is
 unsupported. See [fitting restrictions](PDF-POLICY.md#fitting).
 
-Odd-start padding uses the preceding actual expected displayed frame, including
-near-target kept dimensions, and still obeys generated-page size limits. Ordinary
-authored inherited/default canvases continue to default to `fitting.target`. Reports expose
-complete selected source geometry as [page-size runs](CLI.md#selected-source-page-size-runs), without
-adding a blank page or enabling numbering.
+Odd-start padding uses the preceding expected displayed frame, including
+near-target dimensions of kept pages, subject to the generated-page size limits.
+Other inherited or default generated canvases use `fitting.target` when
+fitting is enabled. Reports record expected frames for generated parts and
+[page-size runs](CLI.md#selected-source-page-size-runs) for selected source pages.
 
 Fitting may refuse a finite but ill-conditioned coordinate system before Check
 succeeds. The [forward accuracy boundary](PDF-POLICY.md#forward-fitting-accuracy)

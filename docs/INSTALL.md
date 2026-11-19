@@ -6,7 +6,9 @@ background updater, scheduled task or file association is needed. Your PDFs,
 plans and reports are outside the installer's scope.
 
 Use an installer and payload from the same qualified build, with its matching
-documentation. Save the reviewed installer for update and offline removal.
+documentation. The [README quick install](../README.md#install) keeps no script
+after a successful run. To inspect the installer before running it or keep it
+for offline removal, save it using the instructions below.
 Published installers link to this guide at their build's Git commit; source
 installers link to the current `main` guide.
 
@@ -73,8 +75,7 @@ curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https
 If curl is unavailable, use `wget --https-only -O ./install-pdfconcat.sh URL`
 with the same URL and `&&` chain. The installer itself can use curl or wget and
 requires standard shell tools, tar and a SHA-256 tool (`sha256sum`, `shasum` or
-`openssl`). `less` is only for your review; the [README quick start](../README.md#install)
-omits it.
+`openssl`). Use `less` to review the exact copy you will run.
 
 On Windows, use Windows PowerShell 5.1 or PowerShell 7. Download the
 installer to your home directory and display the saved script for review.
@@ -134,8 +135,7 @@ unchanged.
 ## Update and choose a release
 
 Repeat the latest download-and-install command to update an unchanged managed
-copy. Keep the saved installer for offline uninstall. To pin the installer and
-payload together, choose a stable tag from
+copy. To pin the installer and payload together, choose a stable tag from
 [Releases](https://github.com/resoltico/pdfconcat/releases) and replace `X.Y.Z`
 with its version number. The download URL adds the tag's leading `v`.
 
@@ -143,8 +143,13 @@ with its version number. The download URL adds the tag's leading `v`.
 version=X.Y.Z
 curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh \
   "https://github.com/resoltico/pdfconcat/releases/download/v${version}/install.sh" &&
-  less ./install-pdfconcat.sh &&
-  sh ./install-pdfconcat.sh --version "$version"
+  less ./install-pdfconcat.sh
+```
+
+After a successful download and review, install the pinned release:
+
+```sh
+sh ./install-pdfconcat.sh --version "$version"
 ```
 
 On Windows, set `$version` before downloading and reviewing the pinned installer:
@@ -296,9 +301,11 @@ merely because they became empty. Unrelated files are preserved.
 
 ## Uninstall
 
-Use the same reviewed installer, saved as `install-pdfconcat.sh` or
-`install-pdfconcat.ps1`, to remove an unchanged installation and only the PATH
-entries it owns:
+Use the reviewed installer matching the installed release. If you used the
+README quick install, get the release number from `pdfconcat --version` and
+follow the matching [download and review steps](#update-and-choose-a-release).
+Run the saved installer as shown below to remove an unchanged installation and
+only the PATH entries it owns.
 
 ```sh
 sh ./install-pdfconcat.sh --uninstall

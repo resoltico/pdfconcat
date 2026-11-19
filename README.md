@@ -66,27 +66,41 @@ Install a standalone release for your user account; no Go installation is needed
 On macOS 15+ or Linux (Apple Silicon/ARM64 or Intel/x86-64):
 
 ```sh
-curl --proto '=https' --proto-redir '=https' -fL -o ./install-pdfconcat.sh https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh &&
-  sh ./install-pdfconcat.sh
+sh -c '
+    installer=$(curl --proto "=https" --proto-redir "=https" -fsSL https://github.com/resoltico/pdfconcat/releases/latest/download/install.sh) &&
+        printf "%s\n" "$installer" | sh
+'
 ```
 
-On Windows 10/11 (x64 or ARM64), use PowerShell. The command saves
-`install-pdfconcat.ps1` in your home directory.
+On Windows 10/11 (x64 or ARM64), use PowerShell.
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
-    $installer = Join-Path $HOME 'install-pdfconcat.ps1'
-    Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile $installer -ErrorAction Stop
-    powershell -NoProfile -ExecutionPolicy ByPass -File $installer
-    if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+    $directory = New-Item -ItemType Directory -Path ([IO.Path]::GetTempPath()) -Name ('pdfconcat-install-' + [guid]::NewGuid())
+    $installer = Join-Path $directory.FullName 'install-pdfconcat.ps1'
+    $keepInstaller = $false
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri https://github.com/resoltico/pdfconcat/releases/latest/download/install.ps1 -OutFile $installer
+        $keepInstaller = $true
+        powershell -NoProfile -ExecutionPolicy ByPass -File $installer
+        if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+        $keepInstaller = $false
+    } finally {
+        if ($keepInstaller) {
+            Write-Warning "Installer kept for retry at $installer"
+        } else {
+            Remove-Item -LiteralPath $directory.FullName -Recurse -Force -ErrorAction Continue
+        }
+    }
 }
 ```
 
-These commands download and execute a release installer. To inspect it first,
-pin a release, choose a custom directory or avoid PATH changes, follow the
-[installation guide](docs/INSTALL.md). Open a new terminal after installation,
-then verify:
+These commands download and execute a release installer. If Windows installation
+fails after download, the command prints the temporary script path for retry.
+To inspect or keep a copy for offline uninstall, pin a release, choose a custom
+directory or avoid PATH changes, follow the [installation guide](docs/INSTALL.md).
+Open a new terminal after installation, then verify:
 
 ```sh
 pdfconcat version

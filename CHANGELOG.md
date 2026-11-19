@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Quick install leaves no downloaded script after success on macOS, Linux or Windows. Save a matching installer for offline uninstall. [Installation](docs/INSTALL.md)
+
 ## [0.15.0] - 2026-11-18
 
 - Choose distinct output, report and input paths. Even absent names can conflict. Output and report parents must be existing directories. [CLI](docs/CLI.md#reports-and-committed-state)

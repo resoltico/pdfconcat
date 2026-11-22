@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-22
+
+- Use plan version 10 and replace `flatten-visible-forms` with `flatten-visible-content`. [Plan](docs/PLAN.md#optional-content)
+- Remove proved-empty optional-content settings by default and report a source warning. [PDF policy](docs/PDF-POLICY.md#optional-content)
+- Opt in to remove proved bare undeclared whole-page wrappers. Preserve retained artwork and check the saved stage for surviving layer operators, including on fitted and repeated pages.
+- Refuse confirmed unsupported optional-content operators, including in nested artwork and omitted source pages. Withhold the Form opt-in hint when inspection finds conflicting evidence.
+- Compose exact-length inline images, including PDF 2.0 images with explicit lengths, without mistaking their bytes for content operators.
+- Remove links made targetless by page selection and their tagged object references while retaining independent actions.
+- Refuse missing named marked-content properties at the original PDF location in Check and Build. Preserve page properties borrowed by legacy Forms.
+- Report each navigation consequence once across inspection and assembly, keeping distinct actions and consuming items.
+
 ## [0.16.0] - 2026-11-22
 
 - Use plan version 9. Review earlier plans against the current contract before updating their version. [Plan](docs/PLAN.md)

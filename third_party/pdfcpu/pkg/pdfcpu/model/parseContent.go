@@ -17,6 +17,7 @@ limitations under the License.
 package model
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -348,6 +349,12 @@ func skipBIEntry(s string, prn PageResourceNames, pdf20 bool, state *inlineImage
 
 func skipBI(l *string, prn PageResourceNames, relaxed, pdf20 bool) error {
 	s := *l
+	if tail, exact, err := ExactInlineImageTail(context.TODO(), s, relaxed, pdf20); exact || err != nil {
+		if err == nil {
+			*l = tail
+		}
+		return err
+	}
 	var state inlineImageState
 	//fmt.Printf("skipBI <%s>\n", s)
 	for {

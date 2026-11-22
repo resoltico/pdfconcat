@@ -89,6 +89,10 @@ func decodeDrawingStream(c context.Context, s *model.Context, stream types.Strea
 }
 
 func (d *drawingDecoder) decode(c context.Context, s *model.Context, stream types.StreamDict) ([]byte, error) {
+	return d.decodeWithBudget(c, s, stream, s.XRefTable)
+}
+
+func (d *drawingDecoder) decodeWithBudget(c context.Context, s *model.Context, stream types.StreamDict, budget *model.XRefTable) ([]byte, error) {
 	data := stream.Raw
 	limit := s.DecodeLimit()
 	if len(stream.FilterPipeline) == 0 {
@@ -116,7 +120,7 @@ func (d *drawingDecoder) decode(c context.Context, s *model.Context, stream type
 			return nil, fmt.Errorf("drawing-content filter[%d] %q: %w", index, f.Name, filter.ErrUnsupportedFilter)
 		}
 		stage := types.StreamDict{Dict: stream.Dict, Raw: data, FilterPipeline: []types.PDFFilter{f}}
-		if err := s.DecodeStream(&stage); err != nil {
+		if err := budget.DecodeStream(&stage); err != nil {
 			return nil, fmt.Errorf("drawing-content filter[%d] %q: %w", index, f.Name, err)
 		}
 		if err := checkContentLength(int64(len(stage.Content)), limit); err != nil {

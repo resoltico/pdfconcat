@@ -307,13 +307,12 @@ the frozen corpus; no timing threshold gates builds.
 ## Release
 
 Release publication requires maintainer authorization. Review the intended
-changes, pending changelog outcomes, linked licenses/NOTICE files and installation
-instructions. Prepare the matching dated, nonempty changelog section and merge
-the release changes into `main`. Tag that intended commit as `vX.Y.Z` and push
-the tag. The [release workflow](.github/workflows/release.yml) runs reusable CI
-before publication; keep `Required CI` intact. Do not publish a second release by
-hand while it is running. Do not create tags, releases or upstream issues without
-maintainer authorization.
+changes, changelog, linked licenses and notices, and installation instructions.
+Include the matching dated, nonempty changelog section in the release pull request.
+Merge it after the required PR checks pass. Tag the resulting `main` commit as
+`vX.Y.Z` and push that tag. The [release workflow](.github/workflows/release.yml)
+qualifies the tagged source and publishes its artifacts after `Required CI` passes.
+Follow that run through publication. Use its output as the release record.
 
 To retry qualification for an existing unpublished tag after a workflow repair,
 run the **Release** workflow manually from `main` with its `tag` input. It resolves

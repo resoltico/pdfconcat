@@ -14,11 +14,11 @@ import (
 )
 
 func readOutput(c context.Context, data []byte) (*model.Context, error) {
-	return readSerializedOutput(c, bytes.NewReader(data), nil)
+	return readSerializedOutput(c, bytes.NewReader(data), nil, nil)
 }
 
 // Check raw reference, catalog, layer and navigation evidence before semantic validation.
-func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *navigationObservation) (*model.Context, error) {
+func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *navigationObservation, wrapperPages []int64) (*model.Context, error) {
 	conf, err := configuration()
 	if err != nil {
 		return nil, err
@@ -78,7 +78,18 @@ func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *n
 	if err != nil {
 		return nil, err
 	}
-	if err = scanLayerGraph(c, s, pages, &visibleLayer{}); err != nil {
+	before, err := observePageContent(c, s, pages)
+	if err != nil {
+		return nil, err
+	}
+	evidence := newLayerProgramEvidence(s)
+	if err = verifySerializedWrapperPages(c, s, pages, before, wrapperPages, evidence); err != nil {
+		return nil, err
+	}
+	if err = scanLayerGraph(c, s, pages, &optionalContentPlan{}, layerDetect, evidence); err != nil {
+		return nil, err
+	}
+	if err = detectLayerPagePrograms(c, s, pages, before, evidence); err != nil {
 		return nil, err
 	}
 	if navigation != nil {
@@ -97,7 +108,7 @@ func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *n
 	if err = checkDocument(c, s, pages); err != nil {
 		return nil, err
 	}
-	observed, report, err := validateObservedPages(c, s, pages)
+	observed, report, err := validatePageWitness(c, s, before)
 	if err != nil {
 		return nil, err
 	}

@@ -70,7 +70,7 @@ func TestHelpAndVersionForms(t *testing.T) {
 	}
 	for _, command := range []string{"build", "check"} {
 		help := cli.Help(command)
-		for _, remedy := range []string{"size comes from a source", "--fit-to SIZE", "FreeText", "Text icons", "Caret", "captioned Lines", "rotated NoRotate", "normal appearances", "link hit areas", "PDF-POLICY.md#fitting"} {
+		for _, remedy := range []string{"size comes from a source", "--fit-to SIZE", "FreeText", "Text icons", "Caret", "captioned Lines", "rotated NoRotate", "normal appearances", "link hit areas", "PDF-POLICY.md#fitting", "plan v10", "flatten-visible-content"} {
 			if !strings.Contains(help, remedy) {
 				t.Fatalf("%s help omits %q: %s", command, remedy, help)
 			}

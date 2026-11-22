@@ -737,6 +737,11 @@ func OptionalContentProfileUnproved() Explanation {
 	return explain("optional_content_profile", "The source does not match the supported always-visible Form layer profile.")
 }
 
+// OptionalContentOperatorFound identifies confirmed optional marked content.
+func OptionalContentOperatorFound() Explanation {
+	return explain("optional_content_operator", "The drawing stream contains an optional-content marked operator outside the admitted profiles.")
+}
+
 // OptionalContentProgramUnproved identifies drawing programs that cannot be proved independent.
 func OptionalContentProgramUnproved() Explanation {
 	return explain("optional_content_program", "The drawing stream could not be proved independent of optional content.")
@@ -814,4 +819,19 @@ func URIBaseEvidence(object, generation int64, path string, assembly bool) Expla
 		stage = "Assembly"
 	}
 	return explain("uri_base_removed", fmt.Sprintf("%s found a retained relative action. URI Base at source object %d %d %s is omitted.", stage, object, generation, path), strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10), path)
+}
+
+// OptionalContentEmptyRemoved describes the planned removal of empty settings.
+func OptionalContentEmptyRemoved() Explanation {
+	return explain("optional_content_empty_removed", "The composition plan removes the source’s empty optional-content settings.")
+}
+
+// OptionalContentWrappersRemoved describes the planned wrapper removal.
+func OptionalContentWrappersRemoved() Explanation {
+	return explain("optional_content_wrappers_removed", "The composition plan removes the source’s undeclared whole-page visibility wrappers and preserves the enclosed artwork on pages retained after selection.")
+}
+
+// MissingMarkedContentProperty identifies an unresolved property in a known scope.
+func MissingMarkedContentProperty(name string) Explanation {
+	return explain("missing_marked_content_property", fmt.Sprintf("The marked-content operator requires property %q in its resource scope.", name), name)
 }

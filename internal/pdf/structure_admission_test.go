@@ -382,8 +382,10 @@ func TestStructureAdmissionDiscardKeepsGeneralProtections(t *testing.T) {
 			d.Objs = append(d.Objs, []byte("<< /Type /Sig /ByteRange [0 1 2 3] /Contents <00> >>"))
 			return d
 		}, diag.SourceSigned},
-		{"layers", func() *pdffixture.Doc {
-			return admissionEntry(pdffixture.Tagged("layers"), 1, "/OCProperties << /OCGs [] /D << /Order [] >> >>")
+		{"layers hidden in discarded tree", func() *pdffixture.Doc {
+			d := pdffixture.Tagged("layers")
+			admissionEntry(d, 6, "/Private << /Type /OCG /Name (Shadow group) >>")
+			return admissionEntry(d, 1, "/OCProperties << /OCGs [] /D << /Order [] >> >>")
 		}, diag.SourceOptionalContent},
 	}
 	for _, tc := range cases {

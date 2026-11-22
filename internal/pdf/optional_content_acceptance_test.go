@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	"github.com/resoltico/pdfconcat/internal/app"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
@@ -69,14 +71,14 @@ func TestReachableOrphanOptionalContentAtBothBoundaries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "packet.pdf"), []byte("sentinel"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleForms} {
+	for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleContent} {
 		for _, op := range []app.Operation{app.Check, app.Build} {
 			result := runLayerRequest(t, dir, op, policy, &packet.SourceItem{Path: source, Selection: []packet.PageRange{{First: 2, Last: 2}}})
 			if result.Status != "invalid" || result.Output.Published || !codePresent(result.Diagnostics, diag.SourceOptionalContent) {
 				t.Fatal(result.Diagnostics)
 			}
 			for _, d := range result.Diagnostics {
-				if d.Code == diag.SourceOptionalContent && strings.Contains(d.Message, "flatten-visible-forms") {
+				if d.Code == diag.SourceOptionalContent && strings.Contains(d.Message, "flatten-visible-content") {
 					t.Fatal(d)
 				}
 			}
@@ -140,14 +142,15 @@ func TestVisibleFormLayerAdmissionProfile(t *testing.T) {
 			if err := d.WriteFile(source); err != nil {
 				t.Fatal(err)
 			}
-			// Graphics proof still belongs to the opt-in path.
-			hint := test.admit || test.name == "optional-marked-content" || test.name == "malformed-marked-content"
+			// The hint is conditional for a registered Form candidate. A
+			// confirmed optional operator or known visibility conflict blocks it.
+			hint := test.admit || test.name == "malformed-marked-content"
 			preview := runLayerRequest(t, dir, app.Check, packet.OptionalContentRefuse, &packet.SourceItem{Path: source})
 			if len(preview.Diagnostics) != 1 || preview.Diagnostics[0].Code != diag.SourceOptionalContent ||
-				strings.Contains(preview.Diagnostics[0].Message, "flatten-visible-forms") != hint {
+				strings.Contains(preview.Diagnostics[0].Message, "flatten-visible-content") != hint {
 				t.Fatal(preview.Diagnostics)
 			}
-			result := runLayerRequest(t, dir, app.Check, packet.OptionalContentFlattenVisibleForms, &packet.SourceItem{Path: source})
+			result := runLayerRequest(t, dir, app.Check, packet.OptionalContentFlattenVisibleContent, &packet.SourceItem{Path: source})
 			if test.admit {
 				if result.Status != "ok" || !codePresent(result.Diagnostics, diag.SourceOptionalContentFlattened) {
 					t.Fatal(result.Diagnostics)
@@ -158,7 +161,7 @@ func TestVisibleFormLayerAdmissionProfile(t *testing.T) {
 				t.Fatal(result.Diagnostics)
 			}
 			for _, d := range result.Diagnostics {
-				if d.Code == diag.SourceOptionalContent && strings.Contains(d.Message, "flatten-visible-forms") {
+				if d.Code == diag.SourceOptionalContent && strings.Contains(d.Message, "flatten-visible-content") {
 					t.Fatal(d)
 				}
 			}
@@ -188,10 +191,10 @@ func TestDefaultLayerRefusalWithholdsHintForUnsupportedStaticProfile(t *testing.
 			if err := doc.WriteFile(source); err != nil {
 				t.Fatal(err)
 			}
-			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleForms} {
+			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleContent} {
 				result := runLayerRequest(t, dir, app.Check, policy, &packet.SourceItem{Path: source})
 				if result.Status != "invalid" || len(result.Diagnostics) != 1 ||
-					result.Diagnostics[0].Code != diag.SourceOptionalContent || strings.Contains(result.Diagnostics[0].Message, "flatten-visible-forms") {
+					result.Diagnostics[0].Code != diag.SourceOptionalContent || strings.Contains(result.Diagnostics[0].Message, "flatten-visible-content") {
 					t.Fatal(result.Diagnostics)
 				}
 				if policy == packet.OptionalContentRefuse && (!strings.Contains(result.Diagnostics[0].Message, "visibility layers") ||
@@ -255,7 +258,7 @@ func TestVisibleFormLayerRefusesOtherReachableUses(t *testing.T) {
 			if err := d.WriteFile(source); err != nil {
 				t.Fatal(err)
 			}
-			result := runLayerRequest(t, dir, app.Build, packet.OptionalContentFlattenVisibleForms, &packet.SourceItem{Path: source})
+			result := runLayerRequest(t, dir, app.Build, packet.OptionalContentFlattenVisibleContent, &packet.SourceItem{Path: source})
 			if result.Status != "invalid" || result.Output.Published || !codePresent(result.Diagnostics, diag.SourceOptionalContent) {
 				t.Fatal(result.Diagnostics)
 			}
@@ -278,13 +281,13 @@ func TestPdfcpuStampFlattensWithVisibleArtworkAndRepeatedSources(t *testing.T) {
 	last := &packet.SourceItem{Ref: "last", Path: source, Selection: []packet.PageRange{{First: 1, Last: 1}}}
 	defaultPolicy := runLayerRequest(t, dir, app.Check, packet.OptionalContentRefuse, first)
 	if len(defaultPolicy.Diagnostics) != 1 || defaultPolicy.Diagnostics[0].Code != diag.SourceOptionalContent ||
-		!strings.Contains(defaultPolicy.Diagnostics[0].Message, `"optional_content": "flatten-visible-forms"`) ||
+		!strings.Contains(defaultPolicy.Diagnostics[0].Message, `"optional_content": "flatten-visible-content"`) ||
 		!strings.Contains(defaultPolicy.Diagnostics[0].Message, "If the source qualifies") ||
 		!strings.Contains(defaultPolicy.Diagnostics[0].Message, "Deliver the original separately") {
 		t.Fatal(defaultPolicy.Diagnostics)
 	}
 	for _, op := range []app.Operation{app.Check, app.Build} {
-		result := runLayerRequest(t, dir, op, packet.OptionalContentFlattenVisibleForms, first, &packet.PageItem{Count: 1}, last)
+		result := runLayerRequest(t, dir, op, packet.OptionalContentFlattenVisibleContent, first, &packet.PageItem{Count: 1}, last)
 		if result.Status != "ok" || result.Output.Published != (op == app.Build) || len(result.Parts) != 3 {
 			t.Fatal(result.Diagnostics)
 		}
@@ -360,7 +363,7 @@ func TestLayerAndDestinationFindingsDescribePlansWhenBuildCannotPublish(t *testi
 		}
 		result := app.Execute(t.Context(), app.Request{Operation: op, WorkingDir: dir, Output: out,
 			InspectionWorkers: 1, Overwrite: true, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 400, Height: 600}),
-			Input: app.Declared{Declaration: packet.Declaration{OptionalContent: packet.OptionalContentFlattenVisibleForms, Items: items}}})
+			Input: app.Declared{Declaration: packet.Declaration{OptionalContent: packet.OptionalContentFlattenVisibleContent, Items: items}}})
 		if result.Output.Published || op == app.Check && result.Status != "ok" ||
 			op == app.Build && (result.Status != "invalid" || !codePresent(result.Diagnostics, diag.TextOverflow)) {
 			t.Fatal(result)
@@ -402,7 +405,7 @@ func TestLayerWarningQualifiesArtworkByPageSelection(t *testing.T) {
 	for _, page := range []int{1, 2} {
 		item := &packet.SourceItem{Path: source, Selection: []packet.PageRange{{First: page, Last: page}}}
 		for _, op := range []app.Operation{app.Check, app.Build} {
-			result := runLayerRequest(t, dir, op, packet.OptionalContentFlattenVisibleForms, item)
+			result := runLayerRequest(t, dir, op, packet.OptionalContentFlattenVisibleContent, item)
 			if result.Status != "ok" || result.Output.Published != (op == app.Build) {
 				t.Fatal(result.Diagnostics)
 			}
@@ -453,7 +456,7 @@ func TestLayerPolicyKeepsSignatureAndDamageRefusals(t *testing.T) {
 			if err := d.WriteFile(src); err != nil {
 				t.Fatal(err)
 			}
-			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleForms} {
+			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleContent} {
 				result := runLayerRequest(t, dir, app.Build, policy, &packet.SourceItem{Path: src})
 				if result.Status != "invalid" || result.Output.Published || !codePresent(result.Diagnostics, test.code) {
 					t.Fatal(result.Diagnostics)
@@ -484,7 +487,7 @@ func TestNullOptionalContentSlotsAreAbsent(t *testing.T) {
 			if err := d.WriteFile(source); err != nil {
 				t.Fatal(err)
 			}
-			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleForms} {
+			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleContent} {
 				for _, op := range []app.Operation{app.Check, app.Build} {
 					result := runLayerRequest(t, dir, op, policy, &packet.SourceItem{Path: source})
 					if result.Status != "ok" || result.Output.Published != (op == app.Build) ||
@@ -508,7 +511,7 @@ func TestNullSlotsDuringVisibleLayerFlattening(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, op := range []app.Operation{app.Check, app.Build} {
-		result := runLayerRequest(t, dir, op, packet.OptionalContentFlattenVisibleForms, &packet.SourceItem{Path: source})
+		result := runLayerRequest(t, dir, op, packet.OptionalContentFlattenVisibleContent, &packet.SourceItem{Path: source})
 		if result.Status != "ok" || !codePresent(result.Diagnostics, diag.SourceOptionalContentFlattened) {
 			t.Fatal(result.Diagnostics)
 		}
@@ -556,5 +559,299 @@ func TestAlternateImageNullDoesNotTriggerLayerRefusal(t *testing.T) {
 				t.Fatal(ds)
 			}
 		})
+	}
+}
+
+func TestOptionalContentWrappersWithSelectionFittingAndRepeatedSources(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "wrapped.pdf")
+	doc := pdffixture.Plain("WRAPPED SOURCE")
+	doc.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 6 0 R] /Resources << /Font << /F1 5 0 R >> /Properties << /Pr12 8 0 R >> >> >>")
+	doc.Objs[2] = bytes.ReplaceAll(doc.Objs[2], []byte(" /Resources << /Font << /F1 5 0 R >> >>"), nil)
+	doc.Objs[3] = layerStream("", "/OC /Pr12 BDC\nBT /F1 14 Tf 80 500 Td (WRAPPED SOURCE) Tj ET\n"+layerColor+"\nEMC")
+	doc.Objs = append(doc.Objs, []byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R >>"),
+		layerStream("", "BT /F1 14 Tf 80 500 Td (ORDINARY SOURCE) Tj ET"), []byte(layerGroup))
+	if err := doc.WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	qpdfCheck(t, source)
+	original := sha256.Sum256(readPDF(t, source))
+	formSource := filepath.Join(dir, "form.pdf")
+	if err := layerFixture(layerCatalog, layerGroup, layerColor).WriteFile(formSource); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "output.pdf")
+	selectPage := func(ref packet.Ref, page int) *packet.SourceItem {
+		return &packet.SourceItem{Ref: ref, Path: source, Selection: []packet.PageRange{{First: page, Last: page}}}
+	}
+	items := []packet.Item{
+		selectPage("omit", 2), &packet.PageItem{Count: 1},
+		selectPage("first", 1), &packet.SourceItem{Path: formSource}, selectPage("repeat", 1),
+	}
+	for _, op := range []app.Operation{app.Check, app.Build} {
+		result := app.Execute(t.Context(), app.Request{Operation: op, WorkingDir: dir, Output: out,
+			InspectionWorkers: 1, Overwrite: true, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 400, Height: 600}),
+			Input: app.Declared{Declaration: packet.Declaration{OptionalContent: packet.OptionalContentFlattenVisibleContent, Items: items}}})
+		if result.Status != "ok" || result.Output.Published != (op == app.Build) || len(result.Parts) != 5 {
+			t.Fatal(result.Diagnostics)
+		}
+		found := 0
+		for _, d := range result.Diagnostics {
+			if d.Code == diag.SourceOptionalContentWrappersRemoved {
+				found++
+				if d.File != source || d.PDFLocation == nil || d.PDFLocation.Page != 1 || len(d.Items) != 3 ||
+					!strings.Contains(d.Message, "pages retained after selection") {
+					t.Fatalf("warning %v, location %+v, source %q", d, d.PDFLocation, source)
+				}
+			}
+		}
+		if found != 1 || !codePresent(result.Diagnostics, diag.SourceOptionalContentFlattened) {
+			t.Fatal(result.Diagnostics)
+		}
+		for _, i := range []int{0, 2, 4} {
+			if result.Parts[i].SHA256 != hex.EncodeToString(original[:]) {
+				t.Fatal("expected original source digest for occurrence", i, result.Parts[i])
+			}
+		}
+	}
+	if current := sha256.Sum256(readPDF(t, source)); current != original {
+		t.Fatal("source file changed")
+	}
+	qpdfCheck(t, out)
+	tools := oracle.RequireTools(t)
+	if tools.PDFToText != "" {
+		for page, marker := range map[int]string{1: "ORDINARY SOURCE", 3: "WRAPPED SOURCE", 4: "VISIBLE TEXT", 5: "WRAPPED SOURCE"} {
+			got, err := exec.CommandContext(t.Context(), tools.PDFToText, "-f", strconv.Itoa(page), "-l", strconv.Itoa(page), out, "-").Output()
+			if err != nil || !strings.Contains(string(got), marker) {
+				t.Fatalf("page %d: %q, %v", page, got, err)
+			}
+		}
+	}
+}
+
+func TestOptionalContentWrapperPreservesTaggedContent(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "tagged.pdf")
+	doc := pdffixture.Tagged("TAGGED WRAPPER")
+	doc.Objs[2] = bytes.ReplaceAll(doc.Objs[2], []byte("/Font << /F1 5 0 R >>"), []byte("/Font << /F1 5 0 R >> /Properties << /Layer "+layerGroup+" >>"))
+	start := bytes.Index(doc.Objs[3], []byte("stream\n")) + len("stream\n")
+	end := bytes.LastIndex(doc.Objs[3], []byte("\nendstream"))
+	doc.Objs[3] = layerStream("", "/OC /Layer BDC\n"+string(doc.Objs[3][start:end])+"\nEMC")
+	if err := doc.WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	result := runLayerRequest(t, dir, app.Build, packet.OptionalContentFlattenVisibleContent, &packet.SourceItem{Path: source})
+	if result.Status != "ok" || !result.Output.Published || !codePresent(result.Diagnostics, diag.SourceOptionalContentWrappersRemoved) {
+		t.Fatal(result.Diagnostics)
+	}
+	out := filepath.Join(dir, "packet.pdf")
+	qpdfCheck(t, out)
+	s, err := api.ReadContextFile(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := s.Catalog()
+	if err != nil || cat["StructTreeRoot"] == nil || cat["MarkInfo"] == nil {
+		t.Fatalf("tagged structure did not survive: %v", err)
+	}
+	page, _, _, err := s.PageDict(t.Context(), 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := s.PageContent(page, 1)
+	if err != nil || !bytes.Contains(decoded, []byte("/MCID 0")) || !bytes.Contains(decoded, []byte("TAGGED WRAPPER")) {
+		t.Fatalf("tagged marked content: %q, %v", decoded, err)
+	}
+}
+
+func TestEmptyOptionalContentCompressedConfigKeepsExplicitNullEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, catalogExtra string
+		want                       diag.Code
+	}{
+		{"empty", "<< >>", "", diag.SourceOptionalContentEmptyRemoved},
+		{"null array", "<< /ON null >>", "", diag.SourceOptionalContent},
+		{"alias through object stream", "<< >>", "/Private 5 0 R", diag.SourceOptionalContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := &pdffixture.Doc{Version: "1.7", Objs: [][]byte{
+				fmt.Appendf(nil, "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [] /D 7 0 R >> %s >>", tc.catalogExtra),
+				[]byte("<< /Type /Pages /Count 1 /Kids [3 0 R] >>"),
+				[]byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents 4 0 R >>"),
+				layerStream("", layerColor),
+				layerStream("/Type /ObjStm /N 1 /First 4 /Private 7 0 R", "7 0 "+tc.config),
+			}}
+			raw := objectStreamXRefFixture(t, doc, 0)
+			_, _, findings := pdf.Inspect(t.Context(), raw, "", nil)
+			if len(findings) < 1 || findings[0].Code != tc.want {
+				t.Fatal(findings)
+			}
+		})
+	}
+}
+
+func TestOptionalContentOrdinaryMarkedContentBuildsUnderBothPolicies(t *testing.T) {
+	for _, mark := range []string{
+		"/OC BMC",
+		"/OC << /ActualText (ordinary properties) >> BDC",
+		"/Span << /VE (ordinary property text) >> BDC",
+		"/OC /Normal BDC",
+		"/OC << /ActualText (ordinary point) >> DP",
+		"/OC /Normal DP",
+	} {
+		t.Run(mark, func(t *testing.T) {
+			for _, wrapped := range []bool{false, true} {
+				dir := t.TempDir()
+				doc := pdffixture.Plain("ordinary marks")
+				properties := "/Properties << /Normal 6 0 R"
+				ordinary := mark + "\n" + layerColor
+				if !strings.HasSuffix(mark, " DP") {
+					ordinary += "\nEMC"
+				}
+				program := ordinary
+				if wrapped {
+					properties += " /Layer " + layerGroup
+					program = "/OC /Layer BDC\n" + program + "\nEMC"
+				}
+				doc.Objs[2] = bytes.Replace(doc.Objs[2], []byte("/Font"), []byte(properties+" >> /Font"), 1)
+				doc.Objs[3] = layerStream("", program)
+				doc.Objs = append(doc.Objs, []byte("<< /ActualText (Named ordinary properties) /VE (private text) >>"))
+				input := filepath.Join(dir, "marks.pdf")
+				if err := doc.WriteFile(input); err != nil {
+					t.Fatal(err)
+				}
+				for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleContent} {
+					if wrapped && policy == packet.OptionalContentRefuse {
+						continue
+					}
+					for _, op := range []app.Operation{app.Check, app.Build} {
+						result := runLayerRequest(t, dir, op, policy, &packet.SourceItem{Path: input})
+						if result.Status != "ok" || result.Output.Published != (op == app.Build) {
+							t.Fatalf("%s, %s, wrapped=%t: %v", op, policy, wrapped, result.Diagnostics)
+						}
+					}
+					output := filepath.Join(dir, "packet.pdf")
+					qpdfCheck(t, output)
+					s, err := api.ReadContextFile(t.Context(), output)
+					if err != nil {
+						t.Fatal(err)
+					}
+					page, _, _, err := s.PageDict(t.Context(), 1, false)
+					if err != nil {
+						t.Fatal(err)
+					}
+					data, err := s.PageContent(page, 1)
+					if err != nil || !bytes.Contains(data, []byte(ordinary)) {
+						t.Fatalf("ordinary marked bytes changed in composed output: %q, %v", data, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestOptionalContentOrdinaryNamedFormProperties(t *testing.T) {
+	for _, tc := range []struct {
+		name, pageProperties, formResources string
+		allowed, nested                     bool
+	}{
+		{"inherited scope", "/Properties << /Note << /ActualText (ordinary) >> >>", "", true, false},
+		{"nested page scope", "/Properties << /Note << /ActualText (ordinary) >> >>", "", true, true},
+		{"explicit local scope", "", "/Resources << /Properties << /Note << /ActualText (ordinary) >> >> >>", true, false},
+		{"explicit unresolved", "", "/Resources << >>", false, false},
+		{"nested with truly missing page property", "", "", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "form.pdf")
+			doc := pdffixture.Plain("ordinary named Form")
+			doc.Objs[2] = bytes.Replace(doc.Objs[2], []byte("/Font"), []byte("/XObject << /Fig 6 0 R >> "+tc.pageProperties+" /Font"), 1)
+			doc.Objs[3] = layerStream("", "/Fig Do")
+			const form = "/Type /XObject /Subtype /Form /BBox [0 0 612 792] "
+			if tc.nested {
+				doc.Objs = append(doc.Objs, layerStream(form+"/Resources << /XObject << /Inner 7 0 R >> >>", "/Inner Do"))
+			}
+			doc.Objs = append(doc.Objs, layerStream(form+tc.formResources,
+				"/OC /Note BDC "+layerColor+" EMC"))
+			if err := doc.WriteFile(source); err != nil {
+				t.Fatal(err)
+			}
+			for _, policy := range []packet.OptionalContentPolicy{packet.OptionalContentRefuse, packet.OptionalContentFlattenVisibleContent} {
+				for _, op := range []app.Operation{app.Check, app.Build} {
+					result := runLayerRequest(t, dir, op, policy, &packet.SourceItem{Path: source})
+					if tc.allowed {
+						if result.Status != "ok" || result.Output.Published != (op == app.Build) {
+							t.Fatalf("%s %s: %v", op, policy, result.Diagnostics)
+						}
+						if op == app.Build {
+							assertRetainedNamedFormProperty(t, filepath.Join(dir, "packet.pdf"), tc.nested)
+						}
+					} else {
+						code := diag.SourceOptionalContent
+						if tc.nested {
+							code = diag.SourceInvalid
+						}
+						if result.Status != "invalid" || result.Output.Published || !codePresent(result.Diagnostics, code) {
+							t.Fatalf("%s %s: %v", op, policy, result.Diagnostics)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func assertRetainedNamedFormProperty(t *testing.T, path string, nested bool) {
+	t.Helper()
+	s, err := api.ReadContextFile(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, attrs, err := s.PageDict(t.Context(), 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xobjects, err := s.DereferenceDict(attrs.Resources["XObject"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := s.Dereference(xobjects["Fig"])
+	form, ok := value.(types.StreamDict)
+	if err != nil || !ok {
+		t.Fatalf("Form missing: %T, %v", value, err)
+	}
+	if nested {
+		outer, err := s.DereferenceDict(form.Dict["Resources"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		children, err := s.DereferenceDict(outer["XObject"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := s.Dereference(children["Inner"])
+		inner, ok := value.(types.StreamDict)
+		if err != nil || !ok {
+			t.Fatalf("nested Form missing: %T, %v", value, err)
+		}
+		form = inner
+	}
+	if err := s.DecodeStream(&form); err != nil || !bytes.Contains(form.Content, []byte("/OC /Note BDC")) {
+		t.Fatalf("borrowed named mark missing: %q, %v", form.Content, err)
+	}
+	resources, err := s.DereferenceDict(form.Dict["Resources"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resources == nil {
+		resources = attrs.Resources
+	}
+	props, err := s.DereferenceDict(resources["Properties"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := s.DereferenceDict(props["Note"])
+	if err != nil || note["ActualText"] != types.StringLiteral("ordinary") {
+		t.Fatalf("required property missing in effective output scope: %v, %v", note, err)
 	}
 }

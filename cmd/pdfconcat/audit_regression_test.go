@@ -68,7 +68,7 @@ func TestFittingCLIRejectsNegativeUnderflowAndShowsMetricGrammar(t *testing.T) {
 	}
 }
 
-func TestURIBaseStagesRemainVisibleInJSONAndText(t *testing.T) {
+func TestURIBaseWarningUsesEstablishedStageInJSONAndText(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "relative.pdf")
 	if err := pdffixture.URILink("relative", "relative/path", "https://example.invalid/", false).WriteFile(source); err != nil {
@@ -80,13 +80,11 @@ func TestURIBaseStagesRemainVisibleInJSONAndText(t *testing.T) {
 		if code := run([]string{operation, source, "-o", output}, strings.NewReader(""), &out, &stderr); code != 0 {
 			t.Fatal(stderr.String())
 		}
-		count := 1
+		phase := "Inspection found"
 		if operation == "build" {
-			count = 2
+			phase = "Assembly found"
 		}
-		if strings.Count(stderr.String(), "source_uri_base_removed") != count ||
-			!strings.Contains(stderr.String(), "Inspection found") ||
-			strings.Contains(stderr.String(), "Assembly found") != (count == 2) {
+		if strings.Count(stderr.String(), "source_uri_base_removed") != 1 || !strings.Contains(stderr.String(), phase) {
 			t.Fatal(stderr.String())
 		}
 		r, code, raw := invokeJSON(t, []string{operation, source, "-o", output, "--overwrite"}, "")
@@ -99,8 +97,7 @@ func TestURIBaseStagesRemainVisibleInJSONAndText(t *testing.T) {
 				details = append(details, d.Detail)
 			}
 		}
-		if len(details) != count || !strings.HasPrefix(details[0], "Inspection found") ||
-			(count == 2 && !strings.HasPrefix(details[1], "Assembly found")) {
+		if len(details) != 1 || !strings.HasPrefix(details[0], phase) {
 			t.Fatal(raw)
 		}
 	}
@@ -109,7 +106,7 @@ func TestURIBaseStagesRemainVisibleInJSONAndText(t *testing.T) {
 func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "blank.pdf")
-	blank := `{"version":9,"page_numbers":{"margin":88,"size":9},"page_defaults":{"text":{"value":"Body"}},"items":[{"page":{"size":"100x100","text":{"value":""}}}]}`
+	blank := `{"version":10,"page_numbers":{"margin":88,"size":9},"page_defaults":{"text":{"value":"Body"}},"items":[{"page":{"size":"100x100","text":{"value":""}}}]}`
 	r, code, raw := invokeJSON(t, []string{"build", "--plan", "-", "-o", out}, blank)
 	if code != 0 || !r.Output.Published {
 		t.Fatal(raw)
@@ -119,7 +116,7 @@ func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 	if code != 2 || !hasDiagnostic(r, "text_overflow") || !strings.Contains(raw, "Page-number exclusion") {
 		t.Fatal(raw)
 	}
-	plan, err := json.Marshal(map[string]any{"version": 9, "page_numbers": map[string]any{"margin": 100, "start": 19},
+	plan, err := json.Marshal(map[string]any{"version": 10, "page_numbers": map[string]any{"margin": 100, "start": 19},
 		"items": []map[string]any{{"source": out}}})
 	if err != nil {
 		t.Fatal(err)
@@ -147,10 +144,40 @@ func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 
 func TestAllowedOverflowDistinguishesPhysicalInkAndWrapWidth(t *testing.T) {
 	for _, tc := range []struct{ x, detail string }{{"0", "configured wrap width"}, {"-240", "Glyph ink crosses a physical page edge"}} {
-		plan := `{"version":9,"items":[{"page":{"size":"300x400","text":{"value":"UnbrokenToken","size":16,"width":12,"x":` + tc.x + `,"overflow":"allow"}}}]}`
+		plan := `{"version":10,"items":[{"page":{"size":"300x400","text":{"value":"UnbrokenToken","size":16,"width":12,"x":` + tc.x + `,"overflow":"allow"}}}]}`
 		r, code, raw := invokeJSON(t, []string{"check", "--plan", "-"}, plan)
 		if code != 0 || !hasDiagnostic(r, "text_overflow_allowed") || !strings.Contains(raw, tc.detail) {
 			t.Fatal(raw)
+		}
+	}
+}
+
+func TestMissingMarkedContentPropertyRefusedWithSourceAttribution(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "missing.pdf")
+	for _, op := range []string{"BDC", "DP"} {
+		doc := pdffixture.EncodedPages("missing property", []pdffixture.EncodedStream{{Data: []byte("/Span /Missing " + op + "\n0 0 10 10 re f")}})
+		if op == "BDC" {
+			doc = pdffixture.EncodedPages("missing property", []pdffixture.EncodedStream{{Data: []byte("/Span /Missing BDC\n0 0 10 10 re f\nEMC")}})
+		}
+		if err := doc.WriteFile(source); err != nil {
+			t.Fatal(err)
+		}
+		out := filepath.Join(dir, "packet.pdf")
+		for _, operation := range []string{"check", "build"} {
+			args := []string{operation, source}
+			if operation == "build" {
+				args = append(args, "-o", out)
+			}
+			result, code, raw := invokeJSON(t, args, "")
+			if code != 2 || len(result.Diagnostics) != 1 {
+				t.Fatalf("%s %s: %s", op, operation, raw)
+			}
+			d := result.Diagnostics[0]
+			if d.Code.String() != "source_invalid" || d.File != source || d.PDFLocation == nil ||
+				d.PDFLocation.Page != 1 || d.PDFLocation.Path != "Content."+op || len(d.Items) != 1 || d.Items[0] != "argv:1" {
+				t.Fatalf("%s %s: %s", op, operation, raw)
+			}
 		}
 	}
 }

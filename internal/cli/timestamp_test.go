@@ -22,7 +22,7 @@ func TestEffectiveEnvironmentTimestamp(t *testing.T) {
 	} {
 		var out, errout bytes.Buffer
 		dir := t.TempDir()
-		code := Run(t.Context(), []string{"check", "--plan", "-", "--json"}, strings.NewReader(`{"version":9,`+tc.plan+`"items":[{"page":{"size":"A4"}}]}`), &out, &errout, Host{InspectionWorkers: 1, WorkingDir: func() (string, error) { return dir, nil }, SourceDateEpoch: func() (string, bool) { return tc.environment, true }})
+		code := Run(t.Context(), []string{"check", "--plan", "-", "--json"}, strings.NewReader(`{"version":10,`+tc.plan+`"items":[{"page":{"size":"A4"}}]}`), &out, &errout, Host{InspectionWorkers: 1, WorkingDir: func() (string, error) { return dir, nil }, SourceDateEpoch: func() (string, bool) { return tc.environment, true }})
 		if code != tc.exit || errout.Len() != 0 {
 			t.Fatalf("exit %d stderr %s", code, errout.String())
 		}

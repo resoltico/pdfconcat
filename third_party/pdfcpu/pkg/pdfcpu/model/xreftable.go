@@ -2338,8 +2338,17 @@ func (xRefTable *XRefTable) PageContent(d types.Dict, pageNr int) ([]byte, error
 	return bb, nil
 }
 
-func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string, prn PageResourceNames, pageNr int) error {
+// RequiredResourceBinding resolves a name in a known resource subdictionary.
+// A nil result means the scope has no effective binding for that name.
+func (xRefTable *XRefTable) RequiredResourceBinding(resources types.Dict, name string) (types.Object, error) {
+	return xRefTable.Dereference(resources[name])
+}
+
+func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string, prn PageResourceNames, pageNr int, keepUnused bool) error {
 	if !prn.HasResources(key) {
+		if keepUnused {
+			return nil
+		}
 		d.Delete(key)
 		return nil
 	}
@@ -2365,20 +2374,22 @@ func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string,
 		ShowSkipped(fmt.Sprintf("page %d: %s", pageNr, s))
 		return nil
 	}
-	set := types.StringSet{}
 	res := prn.Resources(key)
 	// Iterate over inherited resource sub dict and remove any entries not required.
 	for k := range d1 {
 		ki := types.Name(k).Value()
-		if !res[ki] {
+		if !res[ki] && !keepUnused {
 			d1.Delete(k)
 			continue
 		}
-		set[ki] = true
 	}
 	// Check for missing resource sub dict entries.
 	for _, k := range slices.Sorted(maps.Keys(res)) {
-		if !set[k] {
+		binding, err := xRefTable.RequiredResourceBinding(d1, k)
+		if err != nil {
+			return fmt.Errorf("page %d: resource %s %s: %w", pageNr, key, k, err)
+		}
+		if binding == nil {
 			s := fmt.Sprintf("page %d: missing required %s: %s", pageNr, key, k)
 			if xRefTable.ValidationMode == ValidationStrict {
 				return errors.New(s)
@@ -2390,9 +2401,60 @@ func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string,
 	return nil
 }
 
+// The page content parser does not descend into Forms. A legacy Form that
+// borrows page resources can use properties the page program never names.
+func (xRefTable *XRefTable) formBorrowsPageResources(resources types.Dict) (bool, error) {
+	scopes := []types.Dict{resources}
+	seen := map[types.IndirectRef]bool{}
+	for len(scopes) > 0 {
+		scope := scopes[len(scopes)-1]
+		scopes = scopes[:len(scopes)-1]
+		objects, err := xRefTable.DereferenceDict(scope["XObject"])
+		if err != nil {
+			return false, err
+		}
+		for _, name := range slices.Sorted(maps.Keys(objects)) {
+			ref, ok := objects[name].(types.IndirectRef)
+			if !ok || seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			value, err := xRefTable.Dereference(ref)
+			if err != nil {
+				return false, err
+			}
+			stream, ok := value.(types.StreamDict)
+			if !ok {
+				continue
+			}
+			subtype, err := xRefTable.Dereference(stream.Dict["Subtype"])
+			if err != nil {
+				return false, err
+			}
+			if subtype != types.Name("Form") {
+				continue
+			}
+			local, err := xRefTable.DereferenceDict(stream.Dict["Resources"])
+			if err != nil || local == nil {
+				return local == nil, err
+			}
+			scopes = append(scopes, local)
+		}
+	}
+	return false, nil
+}
+
 func (xRefTable *XRefTable) consolidateResourceDict(d types.Dict, prn PageResourceNames, pageNr int) error {
+	keepProperties := false
+	if d["Properties"] != nil {
+		var err error
+		keepProperties, err = xRefTable.formBorrowsPageResources(d)
+		if err != nil {
+			return err
+		}
+	}
 	for _, k := range resourceTypes {
-		if err := xRefTable.consolidateResourceSubDict(d, k, prn, pageNr); err != nil {
+		if err := xRefTable.consolidateResourceSubDict(d, k, prn, pageNr, k == "Properties" && keepProperties); err != nil {
 			return err
 		}
 	}

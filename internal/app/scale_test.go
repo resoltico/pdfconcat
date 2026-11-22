@@ -25,7 +25,7 @@ import (
 
 func writePlan(tb testing.TB, dir string, items []any) string {
 	tb.Helper()
-	data, err := json.Marshal(map[string]any{"version": 9, "output": "packet.pdf", "items": items})
+	data, err := json.Marshal(map[string]any{"version": 10, "output": "packet.pdf", "items": items})
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func BenchmarkPacket(b *testing.B) {
 			},
 		})
 	}
-	data, err := json.Marshal(map[string]any{"version": 9, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": items})
+	data, err := json.Marshal(map[string]any{"version": 10, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "page_numbers": map[string]any{}, "items": items})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func corpusScaleProfiles(t *testing.T) {
 			dir := t.ArtifactDir()
 			items := []any{corpusGenerated(tc.Count, "A4", "")}
 			pages := tc.Count
-			plan := map[string]any{"version": 9, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}}
+			plan := map[string]any{"version": 10, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}}
 			if tc.Numbers {
 				plan["page_numbers"] = map[string]any{}
 			}

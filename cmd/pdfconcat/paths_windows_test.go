@@ -34,7 +34,7 @@ func TestWindowsCLIPathRefusals(t *testing.T) {
 					case "source":
 						args = append(args, path)
 					}
-					r, exit, _ := invokeJSON(t, args, `{"version":9,"items":[{"page":{}}]}`)
+					r, exit, _ := invokeJSON(t, args, `{"version":10,"items":[{"page":{}}]}`)
 					if exit != 2 || r.Status != "invalid" || !hasDiagnostic(r, "path_invalid") || hasDiagnostic(r, "plan_input_invalid") {
 						t.Fatalf("path refusal: exit=%d result=%+v", exit, r)
 					}

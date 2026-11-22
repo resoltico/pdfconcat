@@ -158,7 +158,14 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	}
 	conf.ValidationMode = model.ValidationStrict
 	conf.ZeroOffsetPolicy = model.AdmitUnreferencedZeroOffsets
-	s, err = readPDFContext(c, reader, conf)
+	nulls := layerNullEvidence{}
+	defer func() { nulls = nil }()
+	readContext := model.WithDictionaryNullObserver(c, func(d types.Dict, _ string) {
+		if nulls != nil {
+			nulls[layerDictIdentity(d)] = d
+		}
+	})
+	s, err = readPDFContext(readContext, reader, conf)
 	if errors.Is(err, pdfcpu.ErrEncrypted) || errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) || s != nil && s.Encrypt != nil {
 		return s, origins, ds, refuse(diag.SourceEncrypted, diag.EncryptedSourcesAreUnsupportedIncludingPDFsThatOpenWithoutA())
 	}
@@ -185,16 +192,48 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	if e = originalSignatureChecks(c, s); e != nil {
 		return s, origins, ds, e
 	}
-	layers, e := planOptionalContent(c, s, policies.OptionalContent, pages, originalContent)
-	if e != nil {
+	if e = inspectRetainedDestinations(c, s, pages, true); e != nil {
 		return s, origins, ds, e
 	}
-	if e = inspectRetainedDestinations(c, s, pages, true); e != nil {
+	layers, e := planOptionalContent(c, s, policies.OptionalContent, pages, originalContent, nulls)
+	if e != nil {
 		return s, origins, ds, e
 	}
 	undefinedReferences, e := isolateUndefinedSourceReferences(c, s)
 	if e != nil {
 		return s, origins, ds, e
+	}
+	cat, err := s.Catalog()
+	if err != nil {
+		return s, origins, ds, err
+	}
+	// This context belongs to this admission. The source snapshot and any
+	// aliased stream objects are left intact by the page-local replacements.
+	if layers.wrappers != nil {
+		before, e := observePageContent(c, s, pages)
+		if e != nil {
+			return s, origins, ds, e
+		}
+		if e = originalContent.compare(before); e != nil {
+			return s, origins, ds, e
+		}
+		if e = layers.wrappers.apply(c, s, pages, before, nulls); e != nil {
+			return s, origins, ds, e
+		}
+		originalContent, e = observePageContent(c, s, pages)
+		if e != nil {
+			return s, origins, ds, e
+		}
+	}
+	nulls = nil
+	if layers.removeCatalog {
+		if layers.emptyCatalog != nil && !sameLayerObject(cat["OCProperties"], layers.emptyCatalog) {
+			return s, origins, ds, layerRefusal(catalogSite(s).key("OCProperties"), diag.OptionalContentRefused())
+		}
+		delete(cat, "OCProperties")
+	}
+	for _, owner := range layers.nullVisibility {
+		delete(owner, "OC")
 	}
 	findings, e := admitSourceStructure(c, s, policies.Structure)
 	ds = append(ds, findings...)
@@ -213,16 +252,17 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 		return s, origins, ds, err
 	}
 	origins.undefinedReferences = undefinedReferences
+	if layers.wrappers != nil {
+		for _, page := range layers.wrappers.pages {
+			origins.wrapperPages = append(origins.wrapperPages, page.number)
+		}
+	}
 	origins.catalog, e = captureCatalogSites(s, origins)
 	if e != nil {
 		return s, origins, ds, e
 	}
 	var restoreNamedOperands []func()
 	origins.destinations, err = readDestinationDefinitions(c, s, &restoreNamedOperands)
-	if err != nil {
-		return s, origins, ds, err
-	}
-	cat, err := s.Catalog()
 	if err != nil {
 		return s, origins, ds, err
 	}
@@ -242,7 +282,7 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	// producer differences while page/content preservation is checked directly.
 	s.Configuration.ValidationMode = model.ValidationRelaxed
 	s.XRefTable.ValidationMode = model.ValidationRelaxed
-	observed, report, err := validateObservedPages(c, s, pages)
+	observed, report, err := validatePageWitness(c, s, originalContent)
 	for _, restore := range slices.Backward(restoreNamedOperands) {
 		restore()
 	}
@@ -264,11 +304,19 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 		return s, origins, ds, err
 	}
 	if layers.group != (types.IndirectRef{}) {
-		finding, e := layers.apply(c, s, pages)
+		finding, e := layers.applyForms(c, s, pages)
 		if e != nil {
 			return s, origins, ds, e
 		}
 		ds = append(ds, finding)
+	}
+	if layers.emptyCatalog != nil {
+		ds = append(ds, sourceWarning(diag.SourceOptionalContentEmptyRemoved, diag.OptionalContentEmptyRemoved(), diag.Explanation{}, catalogSite(s).key("OCProperties")))
+	}
+	if layers.wrappers != nil {
+		page := layers.wrappers.pages[0]
+		site := sourceSite{ref: page.content.ref, page: page.number}.key("Contents")
+		ds = append(ds, sourceWarning(diag.SourceOptionalContentWrappersRemoved, diag.OptionalContentWrappersRemoved(), diag.Explanation{}, site))
 	}
 	return s, origins, ds, nil
 }
@@ -369,6 +417,7 @@ func checkDocument(c context.Context, s *model.Context, pages []pageRef) error {
 }
 
 type pageTreeNode struct {
+	ref    types.IndirectRef
 	dict   types.Dict
 	parent *pageTreeNode
 }
@@ -427,7 +476,7 @@ func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
 			pages = append(pages, pageRef{ref: ref, dict: d, parent: parent})
 			return 1, nil
 		case types.Name("Pages"):
-			node := &pageTreeNode{dict: d, parent: parent}
+			node := &pageTreeNode{ref: ref, dict: d, parent: parent}
 			kids, err := s.DereferenceArray(d["Kids"])
 			if err != nil || len(kids) == 0 {
 				return 0, refuse(diag.SourceDamaged, diag.PagesRequiresNonemptyKids())

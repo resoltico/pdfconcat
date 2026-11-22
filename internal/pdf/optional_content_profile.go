@@ -88,9 +88,9 @@ func (p *layerProfile) intent(d types.Dict, site sourceSite) {
 
 // staticVisibleLayer checks catalog and group metadata without observing any
 // Form owners or drawing programs.
-func staticVisibleLayer(c context.Context, s *model.Context, raw types.Object, site sourceSite) (visibleLayer, error) {
+func staticVisibleLayer(c context.Context, s *model.Context, raw types.Object, site sourceSite) (optionalContentPlan, error) {
 	p := layerProfile{context: c, pdf: s}
-	var result visibleLayer
+	var result optionalContentPlan
 	root := p.dict(raw, site, "OCGs", "D", "Configs")
 	groups := p.array(root, "OCGs", site)
 	p.require(len(groups) == 1, site.key("OCGs"))
@@ -158,4 +158,69 @@ func staticVisibleLayer(c context.Context, s *model.Context, raw types.Object, s
 	}
 	result.group = group
 	return result, p.err
+}
+
+// Keep the observed dictionary alive for identity comparisons until planning
+// finishes. The parser removes explicit null values from the semantic map.
+type layerNullEvidence map[uintptr]types.Dict
+
+func (e layerNullEvidence) hasNull(d types.Dict) bool {
+	return e[layerDictIdentity(d)] != nil
+}
+
+// emptyLayerCatalog proves the exact settings shape and records every indirect
+// identity that must be confined to the catalog edge.
+func emptyLayerCatalog(c context.Context, s *model.Context, raw types.Object, site sourceSite, nulls layerNullEvidence) (map[types.IndirectRef]bool, error) {
+	refs := map[types.IndirectRef]bool{}
+	resolve := func(raw types.Object, site sourceSite) (types.Object, error) {
+		if err := c.Err(); err != nil {
+			return nil, err
+		}
+		if ref, ok := raw.(types.IndirectRef); ok {
+			refs[ref] = true
+		}
+		return layerValue(s, raw, site)
+	}
+	root, err := resolve(raw, site)
+	if err != nil {
+		return nil, err
+	}
+	d, ok := root.(types.Dict)
+	if !ok || len(d) != 2 || nulls.hasNull(d) {
+		return nil, layerRefusal(site, diag.OptionalContentRefused())
+	}
+	empty := func(raw types.Object, site sourceSite) error {
+		value, err := resolve(raw, site)
+		if err != nil {
+			return err
+		}
+		if a, ok := value.(types.Array); !ok || len(a) != 0 {
+			return layerRefusal(site, diag.OptionalContentRefused())
+		}
+		return nil
+	}
+	if err := empty(d["OCGs"], site.key("OCGs")); err != nil {
+		return nil, err
+	}
+	configSite := site.key("D")
+	value, err := resolve(d["D"], configSite)
+	if err != nil {
+		return nil, err
+	}
+	config, ok := value.(types.Dict)
+	if !ok || nulls.hasNull(config) {
+		return nil, layerRefusal(configSite, diag.OptionalContentRefused())
+	}
+	for _, key := range slices.Sorted(maps.Keys(config)) {
+		where := configSite.key(key)
+		switch key {
+		case "ON", "Order", "RBGroups":
+			if err := empty(config[key], where); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, layerRefusal(where, diag.OptionalContentRefused())
+		}
+	}
+	return refs, nil
 }

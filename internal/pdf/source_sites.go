@@ -21,6 +21,7 @@ type sourceSite struct {
 	path string
 }
 type sourceOrigins struct {
+	wrapperPages        []int
 	undefinedReferences map[types.IndirectRef]types.IndirectRef
 	pages               map[types.IndirectRef]int
 	annotations         map[types.IndirectRef]int
@@ -127,7 +128,7 @@ func (n navigationChange) diagnostic() diag.Diagnostic {
 	return sourceWarning(diag.SourceNavigationRemoved, diag.NavigationTargetsOmittedFromThisSourceOccurrenceWereRemoved(), diag.NavigationEvidence(n.name, int64(n.target.ref.ObjectNumber.Value()), int64(n.target.ref.GenerationNumber.Value()), n.target.path, int64(n.targetPage), n.action, n.outline), n.site)
 }
 func (n navigationChange) key() string {
-	return n.site.describe() + fmt.Sprint("/", n.site.page, "/", n.targetPage, "/", n.name, "/", n.action, "/", n.outline)
+	return n.site.describe() + fmt.Sprint("/", n.site.page, "/", n.targetPage, "/", n.name, "/", n.target.describe(), "/", n.action, "/", n.outline)
 }
 func navigationDiagnostics(changes []navigationChange) []diag.Diagnostic {
 	result := []diag.Diagnostic{}

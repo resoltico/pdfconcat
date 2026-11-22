@@ -33,7 +33,7 @@ func titlePlan(t *testing.T, sections int, contents, dividers bool, font string)
 	if font != "" {
 		page["text"] = map[string]any{"font": map[string]any{"file": font}}
 	}
-	data, err := json.Marshal(map[string]any{"version": 9, "page_defaults": page, "items": items})
+	data, err := json.Marshal(map[string]any{"version": 10, "page_defaults": page, "items": items})
 	if err != nil {
 		t.Fatal(err)
 	}

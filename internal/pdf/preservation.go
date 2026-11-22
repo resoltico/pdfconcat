@@ -142,6 +142,10 @@ func validateObservedPages(c context.Context, s *model.Context, pages []pageRef)
 	if err != nil {
 		return nil, s.ValidationReport(), err
 	}
+	return validatePageWitness(c, s, before)
+}
+
+func validatePageWitness(c context.Context, s *model.Context, before pageContentSnapshot) (pageContentSnapshot, model.ValidationReport, error) {
 	report, err := api.ValidateContextWithReport(c, s)
 	if err != nil {
 		return nil, report, err

@@ -88,8 +88,8 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 		return key != nil, e
 	}
 	active := map[int]bool{}
-	var scan func([]byte, types.Dict, types.IndirectRef, markedScope, int) error
-	scan = func(data []byte, resources types.Dict, owner types.IndirectRef, inherited markedScope, depth int) (err error) {
+	var scan func([]byte, types.Dict, types.Dict, types.IndirectRef, markedScope, int) error
+	scan = func(data []byte, resources, pageResources types.Dict, owner types.IndirectRef, inherited markedScope, depth int) (err error) {
 		loc := diag.PDFLocation{Object: owner.ObjectNumber.Value(), Page: currentPage, Path: "Content"}
 		defer func() { err = structureAt(err, loc) }()
 		semanticNamespace, err := namespace(owner)
@@ -143,6 +143,25 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 			op := rest[:n]
 			rest = rest[n:]
 			loc.Path = "Content." + op
+			var markedProperty types.Object
+			if (op == "BDC" || op == "DP") && len(args) == 2 {
+				markedProperty = args[1]
+				_, hasTag := args[0].(types.Name)
+				if name, ok := markedProperty.(types.Name); ok && hasTag {
+					props, err := s.DereferenceDict(resources["Properties"])
+					if err != nil {
+						return err
+					}
+					markedProperty, err = s.RequiredResourceBinding(props, string(name))
+					if err != nil {
+						return err
+					}
+					if markedProperty == nil {
+						return sourceSite{ref: owner, page: currentPage, path: loc.Path}.wrap(
+							refuse(diag.SourceInvalid, diag.MissingMarkedContentProperty(string(name))))
+					}
+				}
+			}
 			switch op {
 			case "BMC", "BDC":
 				if len(args) < 1 {
@@ -155,13 +174,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				stack = append(stack, scope)
 				scope.artifact = scope.artifact || tag == "Artifact"
 				if op == "BDC" && !semanticNamespace && len(args) == 2 && facts.unboundMCID == nil {
-					property := args[1]
-					if name, ok := property.(types.Name); ok {
-						if props, e := s.DereferenceDict(resources["Properties"]); e == nil {
-							property = props[string(name)]
-						}
-					}
-					if properties, e := s.DereferenceDict(property); e == nil && properties["MCID"] != nil {
+					if properties, e := s.DereferenceDict(markedProperty); e == nil && properties["MCID"] != nil {
 						p := loc
 						p.Path = "Content.BDC.MCID"
 						facts.unboundMCID = &p
@@ -171,15 +184,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 					if len(args) != 2 {
 						return errors.New("BDC lacks property list")
 					}
-					property := args[1]
-					if name, ok := property.(types.Name); ok {
-						props, e := s.DereferenceDict(resources["Properties"])
-						if e != nil {
-							return e
-						}
-						property = props[string(name)]
-					}
-					dict, e := s.DereferenceDict(property)
+					dict, e := s.DereferenceDict(markedProperty)
 					if e != nil || dict == nil {
 						return errors.New("BDC property list is invalid")
 					}
@@ -236,7 +241,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				}
 				budget := int64(len(rest))*32 + 1
 				var err error
-				rest, err = inlineTail(c, rest, &budget, 0)
+				rest, err = inlineTail(c, rest, &budget, 0, s.PDF20())
 				if err != nil {
 					return err
 				}
@@ -281,11 +286,14 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 						return errors.New("cyclic marked-content Form")
 					}
 					active[number] = true
-					res := resources
+					res := pageResources
 					if stream.Dict["Resources"] != nil {
-						res, e = s.DereferenceDict(stream.Dict["Resources"])
+						local, e := s.DereferenceDict(stream.Dict["Resources"])
 						if e != nil {
 							return e
+						}
+						if local != nil {
+							res = local
 						}
 					}
 					content, e := decodeDrawingStream(c, s, stream)
@@ -295,7 +303,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 					childOwner := ref
 					childScope := scope
 					childScope.semantic = childScope.semantic || owned
-					if e = scan(content, res, childOwner, childScope, depth+1); e != nil {
+					if e = scan(content, res, pageResources, childOwner, childScope, depth+1); e != nil {
 						return e
 					}
 					delete(active, number)
@@ -324,7 +332,7 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 		if e != nil {
 			return facts, e
 		}
-		if e = scan(data, page.attrs.Resources, page.ref, markedScope{}, 0); e != nil {
+		if e = scan(data, page.attrs.Resources, page.attrs.Resources, page.ref, markedScope{}, 0); e != nil {
 			return facts, e
 		}
 		annotations, e := s.DereferenceArray(page.dict["Annots"])

@@ -180,10 +180,11 @@ are included in results and full reports. Unknown facts are null. Physical
 `target_page` and output spans retain physical indexes regardless of numbering.
 See the [plan contract](PLAN.md#document-identity-time-and-structure).
 
-A JSON plan can opt in to removing a [proved always-visible Form layer](PDF-POLICY.md#optional-content).
-Direct file operands use the default layer refusal. Fitted-destination and
-layer-flattening findings describe planned changes. Read `output.published`
-for evidence that a PDF was committed.
+Both input modes remove proved-empty optional-content settings. Use
+`"optional_content": "flatten-visible-content"` in a plan to allow the other
+[admitted optional-content profiles](PDF-POLICY.md#optional-content).
+Fitted-destination and optional-content findings describe planned changes.
+Use `output.published` to determine whether Build committed a PDF.
 
 ## Reports and committed state
 
@@ -393,7 +394,7 @@ limit, use a program that writes each filename as a separate JSON element.
     printf '%s\n' 'No PDF files in chapters/.' >&2
     exit 1
   fi
-  jq -n '{version: 9, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
+  jq -n '{version: 10, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -407,7 +408,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 9; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 10; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -431,16 +432,18 @@ retains backend compatibility evidence, including phase and disposition in
 `detail`. A skipped validation notice does not mean that content was removed;
 explicitly reported repairs cause a separate `source_unsupported` refusal.
 
-Navigation warnings identify the changed binding: a retained annotation can lose
-`Dest` or an action edge without being removed. Removing an invalid GoTo also
-removes its dependent Next subtree. Distinct catalogue entries and destination
-declarations remain distinct findings, including equal legacy/name-tree sites.
-URI Base warnings require an actually retained relative action and a nonempty
-source Base. A build can report the same source site during inspection and during
-assembly. The phase in `detail` distinguishes those observations.
-Check rename warnings identify known source scopes/definitions as predictions;
-only build reports actual old/new mappings. Layout findings include a structured
-plan location when a specific authored value is implicated. Each finding lists
+Navigation warnings identify changed bindings and their affected items. Build
+combines equivalent inspection and assembly findings, using assembly evidence
+when available. Distinct definitions and actions retain their own findings,
+including matching entries in the destination dictionary and name tree. A URI
+Base warning requires a retained relative action and a nonempty source Base.
+See [PDF policy](PDF-POLICY.md#destination-byte-identity) for selection and action
+pruning.
+
+Check rename warnings identify known source scopes and definitions as
+predictions. Build reports the original and assigned names. Layout findings
+include a structured plan location when a specific authored value is implicated.
+Each finding lists
 distinct consuming items in first-seen order. Backend notices expose only
 locations the backend supplies.
 
@@ -554,6 +557,8 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `working_directory_unavailable` | error | failed | The process working directory could not be determined |
 | `output_inspection_failed` | error | failed | The output destination could not be inspected |
 | `report_inspection_failed` | error | failed | The report destination could not be inspected |
+| `source_optional_content_empty_removed` | warning | — | composition removes proved-empty optional-content settings |
+| `source_optional_content_wrappers_removed` | warning | — | composition removes proved undeclared whole-page visibility wrappers and preserves retained artwork |
 | `usage_unknown_command` | error | invalid | first argument is not a command |
 | `usage_unknown_option` | error | invalid | option not defined for the command |
 | `usage_missing_value` | error | invalid | option needs a value |

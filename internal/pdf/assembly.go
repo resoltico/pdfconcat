@@ -59,7 +59,8 @@ type PartResult struct {
 
 // Assembled binds actual facts to owners; absent or unestablished entries are unknown.
 type Assembled struct {
-	navigation  *navigationObservation
-	Parts       map[packet.PartIdentity]PartResult
-	Diagnostics []diag.Diagnostic
+	navigation   *navigationObservation
+	wrapperPages []int64
+	Parts        map[packet.PartIdentity]PartResult
+	Diagnostics  []diag.Diagnostic
 }

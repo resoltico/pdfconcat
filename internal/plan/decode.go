@@ -28,7 +28,7 @@ import (
 const MaxBytes = 64 << 20
 
 // Version is the supported plan exchange contract.
-const Version = 9
+const Version = 10
 
 // Schema is the editor-facing plan JSON Schema.
 //

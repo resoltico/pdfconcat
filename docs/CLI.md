@@ -51,10 +51,11 @@ options or operands.
 ## Build, check and fitting
 
 `build` needs output from `-o` or the plan. `check` does not need an output path.
-When specified, it checks the destination's role, existence and parent directory. Both load and validate
-fonts, inspect every distinct source, resolve sizes/ranges and lay out text.
-`check` writes no PDF but may write its requested report. Passing check predicts
-assembly; merge, pruning, fitting, I/O or publication can still fail later.
+When given a destination, `check` validates its role, existence and parent
+directory. Both commands validate fonts, inspect distinct sources, resolve
+page ranges and sizes, and lay out text. `check` can write a requested report.
+Assembly, staged PDF verification and publication run only in `build` and can
+still fail after a successful `check`.
 
 A direct blank inherits the last selected page size of the nearest preceding
 source, or the first selected page size of the first following source. With no
@@ -97,11 +98,11 @@ is written when stderr is available; no diagnostic delivery is guaranteed when
 stderr is also broken. Any PDF or report already published remains saved. Its
 saved processing facts do not imply that the final stdout summary was delivered.
 
-Usage errors print diagnostics and a help hint on stderr, with empty stdout.
-For build, check and version, an exact `--json` before the option delimiter
-selects JSON even when argument parsing fails. A `--` consumed as an option's
-required value is not that delimiter. The first error and its location are
-retained.
+In text mode, usage errors print diagnostics and a help hint on stderr, with
+empty stdout. For build, check and version, an exact `--json` before the option
+delimiter selects JSON even when argument parsing fails. A `--` consumed as an
+option's required value is not that delimiter. The first error and its location
+are retained.
 
 ```json
 {
@@ -189,10 +190,11 @@ Use `output.published` to determine whether Build committed a PDF.
 ## Reports and committed state
 
 Use `--report FILE` to request a full JSON report, including when `check` or
-`build` fails. Reporting happens after application execution; argv rejection or
-failure to establish a valid working directory produces no report. Report
-targets are checked against known plan/font/source inputs and the output;
-the parent of each destination must exist and be a directory. Existing targets
+`build` fails. Reporting happens after application execution. A rejected
+command line, an unavailable working directory, or a failed stdin plan read
+produces no report. Report targets are checked against known plan, font and
+source inputs and the output. Each destination needs an existing parent
+directory. Existing targets
 must be regular files. PDFConcat accepts input symlinks to regular files and
 refuses symlinks, directories, and devices as destinations.
 
@@ -219,23 +221,25 @@ initially absent. A destination can still fail to write after its parent passes
 preflight.
 
 Each invocation starts without saved PDFConcat settings, caches, or job
-history. Large source PDFs use private snapshots in the operating system's
-temporary directory during inspection and assembly. Allow space for concurrent
+history. Large source PDFs use snapshots in the operating system's temporary
+directory during inspection and assembly. Allow space for concurrent
 source inspections and the largest individual assembly source. A
 temporary-storage failure reports `source_unreadable` in either stage, with the
 input and the scratch operation. Each spill stays bound to its original
-directory for reopening and cleanup. The PDF verifier reopens the completed
-stage through the owned file handle, including for destinations with no read
-permission bits. Before publication, a bounded sequential read verifies that
-the staged length and SHA-256 match the assembler's emitted bytes.
+directory for reopening and cleanup. The verifier reads the completed PDF
+through the owned staging handle, including for destinations with no read
+permission bits. It compares the staged length and SHA-256 with the assembler's
+emitted bytes before publication.
 
-New output and report files use ordinary umask permissions. Replacements use
-the permission bits observed during the final destination check. The empty
-sibling stage adopts any incumbent's permissions before data is written, and
-publication applies the final permissions before syncing the open file. The
-stage's bounded name leaves the full filesystem filename limit available for
-the destination. PDF and report stages stay bound to their original parent
-directory for cleanup. An observed parent replacement prevents publication.
+On macOS and Linux, new output and report files use ordinary umask permissions.
+The empty sibling stage takes an existing destination's permission bits before
+data is written. Before publication, the final destination check supplies the
+replacement's permission bits and the stage is synced with that mode. On
+Windows, the mode setting controls the file's read-only attribute. PDFConcat
+writes no custom access control list. Temporary filenames leave the full
+filesystem filename limit available for the destination. PDF and report stages
+stay bound to their original parent directory for cleanup. An observed parent
+replacement prevents publication.
 
 A crash or forced termination can leave source snapshots and sibling PDF or
 report stages containing document bytes on disk. Later invocations leave these

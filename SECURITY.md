@@ -123,18 +123,18 @@ With undecoded plans, a report can only create a new path even if
 overwrite was requested. A trailing error does not erase the fact that an output
 has already been saved; do not blindly retry a result with `output.published: true`.
 
-New files use ordinary umask permissions. Replacements use the mode observed at
-the final destination check. PDFConcat stages output next to its destination
-and checks the staged PDF and its emitted byte identity through the owned
-file handle. PDF and report cleanup use the original parent directory.
-An observed parent replacement prevents publication. Large source snapshots spill
-to private files in the operating system's temporary directory. Publication
-requires native rename or hard-link semantics and, on Unix, directory sync.
-Network shares may lack those guarantees. PDFConcat makes no private ACL or
-recovery-copy guarantee. Output and report publication are independent. See
-[saved outputs, crash residue, and workspace guidance](docs/CLI.md#reports-and-committed-state).
+PDFConcat stages output next to its destination and checks the staged PDF and
+its emitted byte identity through the owned file handle. PDF and report cleanup
+use the original parent directory. An observed parent replacement prevents
+publication. Large source snapshots can spill into the operating system's
+temporary directory. Forced termination can leave stages or snapshots containing
+document bytes. Publication requires native rename or hard-link semantics and,
+on Unix, directory sync. Network shares may lack those guarantees. Output and
+report publication are independent. See the platform permission details and
+private-workspace guidance under [saved outputs and reports](docs/CLI.md#reports-and-committed-state).
 
-Whole-source admission applies before selective fitting, and PDF 2.0 policy
-applies to the composed output. The [fitting policy](docs/PDF-POLICY.md#fitting)
-defines destination and annotation ownership checks, source clipping, omitted
-printing boxes, and the exact geometry checks at publication.
+Whole-source admission applies before selective fitting. For PDF 2.0 output,
+PDF 2.0 compatibility checks apply to the composed document. The
+[fitting policy](docs/PDF-POLICY.md#fitting) defines destination and annotation
+ownership checks, source clipping, omitted printing boxes, and the exact
+geometry checks at publication.

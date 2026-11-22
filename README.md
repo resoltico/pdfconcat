@@ -42,8 +42,8 @@ and output are files. The CLI accepts a JSON plan on stdin.
 
 ## Install
 
-Install a standalone release for your user account; no Go installation is needed.
-On macOS 15+ or Linux (Apple Silicon/ARM64 or Intel/x86-64):
+Install a standalone release for your user account. On macOS 15 or later
+(Apple Silicon or Intel), or Linux (ARM64 or x86-64):
 
 ```sh
 sh -c '
@@ -86,6 +86,9 @@ Open a new terminal after installation, then verify:
 pdfconcat version
 pdfconcat --help
 ```
+
+If your shell resolves a different copy, use the quoted path printed by the
+installer. See [PATH troubleshooting](docs/INSTALL.md#troubleshooting).
 
 Re-run the download-and-install command to update an unchanged installer-managed
 copy. Receiptless executables require the
@@ -293,7 +296,7 @@ commands. A dash indicates no dedicated built-in workflow.
 | Merge PDFs in a chosen order | [`merge`](https://pdfcpu.io/core/merge/) | Direct operands or plan |
 | Append by updating an existing PDF | `merge --mode append` | — |
 | Automatically alternate pages from two PDFs | `merge --mode zip` [1] | — |
-| Read a PDF from stdin while merging | One input in `merge` create mode [1] | — |
+| Read a PDF from stdin while merging | One `-` input in `merge` create mode [1] | — |
 | Write the merged PDF to stdout | `merge` create or zip mode [1] | — |
 | Select, repeat or reorder source pages | [`collect`](https://pdfcpu.io/core/collect/), then `merge` for multiple inputs | Source ranges and separate occurrences in a plan [1] |
 | Keep source pages at their original sizes | `merge` | Default assembly |
@@ -303,7 +306,7 @@ commands. A dash indicates no dedicated built-in workflow.
 | Preserve supported source structure tags when merging | — [2] | Default structure policy [2] |
 | Fit pages to a chosen paper size | [`resize`](https://pdfcpu.io/core/resize/) [3] | `--fit-to` or plan fitting [3] |
 | Keep sheets automatically within a fitting tolerance | — | Per-side absolute tolerance [3] |
-| Generate simple text pages from JSON | [`create`](https://pdfcpu.io/create/create/) | Plan text pages |
+| Generate text pages from JSON | [`create`](https://pdfcpu.io/create/create/) | Plan text pages |
 | Generate Latin, Greek and Cyrillic text with a bundled font | `create` with Roboto Regular from the configuration font store [4] | Bundled Noto Sans |
 | Paint page numbers | [Text stamps](https://pdfcpu.io/core/stamp/) | Plan numbering with physical or consecutive counts |
 | Describe sources, selections and assembly aids in one JSON plan | — | Plan |
@@ -319,10 +322,10 @@ commands. A dash indicates no dedicated built-in workflow.
 | Encrypt, decrypt and change PDF passwords | [Security commands](https://pdfcpu.io/getting_started/piping/) | — |
 | Fill interactive forms | [`form fill`](https://pdfcpu.io/form/form_fill/) | — |
 
-1. **Merge inputs and order.** pdfcpu zip alternates two file inputs below
-   PDF 2.0 and emits the remainder of the longer input. PDFConcat uses ascending,
-   non-overlapping ranges within each source item. Separate items can repeat,
-   reorder or alternate selections. [pdfcpu merge and piping](https://pdfcpu.io/getting_started/piping/) ·
+1. **Merge inputs and order.** pdfcpu zip alternates pages from two files with
+   PDF versions earlier than 2.0 and emits the remainder of the longer input.
+   PDFConcat uses ascending, non-overlapping ranges within each source item.
+   Separate items can repeat, reorder or alternate selections. [pdfcpu merge and piping](https://pdfcpu.io/getting_started/piping/) ·
    [PDFConcat selection rules](docs/PLAN.md#source-selections)
 2. **Bookmarks and structure.** pdfcpu file merges wrap source bookmarks under
    filenames by default. Use `--bookmarks --bookmark-mode preserve` to retain
@@ -334,8 +337,9 @@ commands. A dash indicates no dedicated built-in workflow.
    [pdfcpu stdin merge implementation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/merge.go) ·
    [PDFConcat sections](docs/PLAN.md#sections-title-dividers-and-odd-starts) ·
    [PDFConcat structure policy](docs/PLAN.md#structure)
-3. **Fitting.** pdfcpu resize can enforce a sheet orientation and can rotate the
-   content for best fit. PDFConcat uses the requested target orientation,
+3. **Fitting.** pdfcpu resize can enforce a sheet orientation and allows best-fit
+   content rotation by default in that mode. Set `rotate:off` to keep the artwork's
+   displayed orientation. PDFConcat uses the requested target orientation,
    preserves the artwork's displayed orientation and remaps supported local
    destinations on transformed pages. [pdfcpu resize](https://pdfcpu.io/core/resize/) ·
    [PDFConcat fitting policy](docs/PDF-POLICY.md#fitting)
@@ -363,6 +367,7 @@ output. See the [structure policy](docs/PLAN.md#structure).
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
+- A font selected for drawing must resolve in the effective resource scope. See [drawing programs and resource bindings](docs/PDF-POLICY.md#drawing-programs-and-resource-bindings).
 - Zero-offset classic xref entries have a narrow exception for unreferenced entries and proved references from discarded structure indexes. See [input tolerance](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).
 - Fitting checks destination targets, annotation/widget ownership and geometry, and placement accuracy. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.

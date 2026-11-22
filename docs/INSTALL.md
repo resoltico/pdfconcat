@@ -425,10 +425,13 @@ first establish that no installer is using it before manual cleanup.
 
 If the verified candidate cannot run, use its reported diagnostic to check the
 CPU, minimum OS/runtime and device policy. Do not bypass checksum verification.
-If PATH was not changed, use the quoted full path printed by the installer or
-open a new terminal after successful persistence. For shell shadowing use
-`command -v pdfconcat`; in PowerShell use `Get-Command pdfconcat` and remove a
-conflicting installation using the method that installed it.
+Open a new terminal after a saved PATH change.
+
+When another executable comes first on the installer's PATH, the installer
+reports its path. Use the quoted full path printed by the installer to run the
+new copy. To check your own shell, use `command -v pdfconcat` on macOS or Linux,
+or `Get-Command pdfconcat.exe` in PowerShell. Remove a conflicting installation
+using the method that installed it.
 
 On macOS, the installer reports a recognizable system-managed copy at
 `/usr/local/bin/pdfconcat` regardless of PATH order. When a parent path fails

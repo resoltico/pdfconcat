@@ -586,7 +586,7 @@ namespace CliInstaller {
             Write-Step 'PATH' 'Available in this session; open a new terminal for the saved user PATH.'
         } else { Write-Step 'PATH' 'Left unchanged.' }
         $exeName = $Product.Command + '.exe'
-        $found = Microsoft.PowerShell.Core\Get-Command -Name $exeName -CommandType Application -ListImported -ErrorAction SilentlyContinue
+        $found = Microsoft.PowerShell.Core\Get-Command -Name $exeName -CommandType Application -ListImported -TotalCount 1 -ErrorAction SilentlyContinue
         if ($found -and -not (Test-SamePath $found.Path $exe)) {
             Write-Step 'PATH' "The installer session finds another ${exeName}: $($found.Path)"
         }

@@ -770,29 +770,42 @@ legacy_real_directory() { [ ! -L "$1" ] && [ -d "$1" ]; }
 legacy_no_acl() {
     legacy_acl=$(/bin/ls -lde "$1" 2>/dev/null) || return 1
     case "${legacy_acl}" in *'
-'*) return 1 ;; esac
+'*) return 1 ;; *) return 0 ;; esac
 }
+# Recognition predicates explicitly reject failed checks, including when tested
+# by the advisory. They do not depend on errexit.
+# shellcheck disable=SC2310
 legacy_directory() {
-    legacy_real_directory "$1" &&
-        [ "$(legacy_mac_stat '%u %Lp' "$1")" = '0 755' ] && legacy_no_acl "$1"
+    legacy_real_directory "$1" || return 1
+    legacy_metadata=$(legacy_mac_stat '%u %Lp' "$1") || return 1
+    [ "${legacy_metadata}" = '0 755' ] && legacy_no_acl "$1"
 }
+# shellcheck disable=SC2310
 legacy_link() {
-    [ -L "$1" ] && [ "$(legacy_mac_stat '%u %Lp' "$1")" = '0 755' ] &&
-        legacy_no_acl "$1" && [ "$(/usr/bin/readlink "$1" 2>/dev/null)" = "$2" ]
+    [ -L "$1" ] || return 1
+    legacy_metadata=$(legacy_mac_stat '%u %Lp' "$1") || return 1
+    [ "${legacy_metadata}" = '0 755' ] && legacy_no_acl "$1" || return 1
+    legacy_target=$(/usr/bin/readlink "$1" 2>/dev/null) || return 1
+    [ "${legacy_target}" = "$2" ]
 }
+# shellcheck disable=SC2310
 legacy_regular() {
-    [ -f "$1" ] && [ ! -L "$1" ] &&
-        [ "$(legacy_mac_stat '%u %Lp %l' "$1")" = "0 $2 1" ] && legacy_no_acl "$1"
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    legacy_metadata=$(legacy_mac_stat '%u %Lp %l' "$1") || return 1
+    [ "${legacy_metadata}" = "0 $2 1" ] && legacy_no_acl "$1"
 }
+# shellcheck disable=SC2310
 legacy_bounded() {
     legacy_size=$(legacy_mac_stat '%z' "$1") || return 1
-    case "${legacy_size}" in '' | *[!0-9]*) return 1 ;; esac
+    case "${legacy_size}" in '' | *[!0-9]*) return 1 ;; *) ;; esac
     [ "${#legacy_size}" -le 8 ] && [ "${legacy_size}" -le "$2" ]
 }
 legacy_hash() {
     legacy_digest=$(/usr/bin/shasum -a 256 < "$1" 2>/dev/null) || return 1
     printf '%s\n' "${legacy_digest%% *}"
 }
+# Missing or unverified evidence is handled by explicit predicate results.
+# shellcheck disable=SC2310
 legacy_system_advice() (
     legacy_prefix=$1
     legacy_root=${legacy_prefix}/libexec/pdfconcat
@@ -808,7 +821,7 @@ legacy_system_advice() (
     legacy_current=$(/usr/bin/readlink "${legacy_root}/current" 2>/dev/null) || return 0
     legacy_id=${legacy_current#releases/}
     [ "${legacy_current}" = "releases/${legacy_id}" ] && [ "${#legacy_id}" = 64 ] || return 0
-    case "${legacy_id}" in *[!0-9a-f]*) return 0 ;; esac
+    case "${legacy_id}" in *[!0-9a-f]*) return 0 ;; *) ;; esac
     legacy_link "${legacy_root}/current" "${legacy_current}" || return 0
     legacy_link "${legacy_command}" "${legacy_root}/current/payload/pdfconcat" || return 0
 
@@ -826,7 +839,8 @@ legacy_system_advice() (
         note 'Removal' "${legacy_guide}"
         return 0
     fi
-    [ "$(legacy_hash "${legacy_receipt}")" = "${legacy_id}" ] || return 0
+    legacy_receipt_hash=$(legacy_hash "${legacy_receipt}") || return 0
+    [ "${legacy_receipt_hash}" = "${legacy_id}" ] || return 0
     legacy_version=$(LC_ALL=C /usr/bin/awk '
         NR == 1 { if ($0 != "PDFCONCAT-MACOS-1") exit 1 }
         NR == 2 { if ($0 !~ /^version v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/) exit 1; version = $2 }
@@ -864,8 +878,10 @@ legacy_system_advice() (
     esac
     legacy_helper=${legacy_generation}/setup.sh
     legacy_regular "${legacy_helper}" 755 && legacy_bounded "${legacy_helper}" 131072 || return 0
-    [ "$(legacy_hash "${legacy_helper}")" = "${legacy_expected}" ] || return 0
-    [ "$(/usr/bin/grep -Fxc "f 755 ${legacy_expected} setup.sh" "${legacy_receipt}" || true)" = 1 ] || return 0
+    legacy_helper_hash=$(legacy_hash "${legacy_helper}") || return 0
+    [ "${legacy_helper_hash}" = "${legacy_expected}" ] || return 0
+    legacy_helper_count=$(/usr/bin/grep -Fxc "f 755 ${legacy_expected} setup.sh" "${legacy_receipt}") || return 0
+    [ "${legacy_helper_count}" = 1 ] || return 0
     note 'Legacy setup' "Historical removal command: /bin/bash ${legacy_root}/current/setup.sh uninstall"
 )
 report_command_paths() {

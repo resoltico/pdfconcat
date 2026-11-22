@@ -379,11 +379,11 @@
     "title": {
       "allOf": [
         {
-          "pattern": "[^\\p{Z}\\s]"
+          "pattern": "[^\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]"
         },
         {
           "not": {
-            "pattern": "[\\p{Cc}\\p{Cf}\u2028\u2029]"
+            "pattern": "[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890-\u0891\u08e2\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]"
           }
         }
       ],
@@ -409,7 +409,7 @@
     },
     "fitting": {
       "additionalProperties": false,
-      "description": "Fit pages outside the absolute tolerance on either ordered displayed side of the target. Matching pages keep their native geometry. Fitting refuses numeric local destinations only on transformed targets, and widgets on transformed or unproved owners. Transformed FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances. On transformed pages, link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.",
+      "description": "Fit pages outside the absolute tolerance on either ordered displayed side of the target. Matching pages keep their native geometry. Fitting maps local destination coordinates on transformed targets. Numeric FitH, FitV, FitBH and FitBV require an unrotated target. Widgets require an untransformed, proved owner. Transformed FreeText, Text icons, Caret, captioned Lines, rotated NoRotate and boundary-crossing annotations need normal appearances. On transformed pages, link hit areas and other annotation activation/hover/focus regions must stay inside the source frame.",
       "properties": {
         "target": {
           "$ref": "#/$defs/sheetSize"
@@ -454,6 +454,15 @@
         }
       },
       "type": "object"
+    },
+    "optional_content": {
+      "default": "refuse",
+      "description": "Refuse PDF visibility layers, or explicitly remove a proved always-visible Form layer and its controls.",
+      "enum": [
+        "refuse",
+        "flatten-visible-forms"
+      ],
+      "type": "string"
     },
     "output": {
       "description": "Output PDF, relative to the base directory. -o overrides it.",
@@ -537,7 +546,7 @@
       "type": "integer"
     },
     "version": {
-      "const": 8,
+      "const": 9,
       "description": "Plan format version."
     }
   },

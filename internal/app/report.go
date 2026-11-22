@@ -29,7 +29,13 @@ func writeReport(r *outcome.Result, roles files.Roles, records resultRecords) {
 		defer staged.Abort()
 		err = result.WriteReport(staged, full, records.partRecords(records.parts), records.sectionRecords(records.sections))
 		if err == nil {
-			r.Report.Written, err = staged.Commit(packet.MayReplace(packet.ReportDestination, roles.Overwrite, roles.InputsKnown))
+			var refusals []diag.Diagnostic
+			r.Report.Written, refusals, err = roles.Publish(staged, packet.ReportDestination)
+			r.Diagnostics = append(r.Diagnostics, refusals...)
+			if err != nil {
+				r.Diagnostics = append(r.Diagnostics, publicationDiagnostic(packet.ReportDestination, roles.Report, roles.InputsKnown, r.Report.Written, err))
+			}
+			return
 		}
 	}
 	if err != nil {

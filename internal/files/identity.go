@@ -21,19 +21,6 @@ type pathEntry struct {
 	parentPath, leaf string
 }
 
-func samePathOrFile(a, b string) (bool, error) {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true, nil
-	}
-	parents := make(map[string]fs.FileInfo)
-	first, err := observeEntry(a, parents)
-	if err != nil {
-		return false, err
-	}
-	second, err := observeEntry(b, parents)
-	return first.aliases(second, true), err
-}
-
 func (a pathEntry) aliases(b pathEntry, protectShortNames bool) bool {
 	if a.file != nil && b.file != nil {
 		return os.SameFile(a.file, b.file)

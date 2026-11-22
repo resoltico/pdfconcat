@@ -5,9 +5,11 @@
 package files
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,12 +19,17 @@ import (
 type Staged struct {
 	*os.File
 	target, temp string
+	creationMode fs.FileMode
+	mode         fs.FileMode
 	published    bool
 	closed       bool
 }
 
-// Create uses conventional permissions (0666 minus umask). Replacing an existing
-// regular file preserves its mode; symlinks and other nonregular targets are refused.
+// ErrDestinationExists identifies rejection by an atomic no-replace operation.
+var ErrDestinationExists = errors.New("publication destination exists")
+
+// Create uses conventional permissions (0666 minus umask). If an incumbent
+// exists, the empty stage adopts its permissions before any bytes are written.
 func Create(target string) (*Staged, error) {
 	var mode fs.FileMode
 	existing, err := os.Lstat(target)
@@ -36,13 +43,20 @@ func Create(target string) (*Staged, error) {
 	}
 	// Keep the sibling name independent of the target's filesystem name budget.
 	temp := filepath.Join(filepath.Dir(target), ".pdfconcat."+rand.Text()+".tmp")
-	f, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
+	f, err := os.OpenFile(temp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return nil, err
 	}
 	result := &Staged{File: f, target: target, temp: temp}
+	info, err := f.Stat()
+	if err != nil {
+		_ = result.Abort()
+		return nil, err
+	}
+	result.creationMode = info.Mode().Perm()
+	result.mode = result.creationMode
 	if existing != nil {
-		if err = f.Chmod(mode); err != nil {
+		if err = result.setMode(mode); err != nil {
 			_ = result.Abort()
 			return nil, err
 		}
@@ -50,13 +64,39 @@ func Create(target string) (*Staged, error) {
 	return result, nil
 }
 
-// Path identifies the owned temporary file, for verification before publication.
+func (f *Staged) setMode(mode fs.FileMode) error {
+	if mode == f.mode {
+		return nil
+	}
+	if err := f.Chmod(mode); err != nil {
+		return err
+	}
+	f.mode = mode
+	return nil
+}
+
+// Path identifies the owned temporary file.
 func (f *Staged) Path() string { return f.temp }
+
+// Reader reads the completed stage through the owned handle. It starts at zero,
+// leaves the writer's position alone, and is bounded to the current file length.
+// The stage retains ownership of the handle until commit or abort.
+func (f *Staged) Reader(c context.Context) (io.ReadSeeker, error) {
+	if err := c.Err(); err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return io.NewSectionReader(f.File, 0, info.Size()), nil
+}
 
 // Published stays true if rename/link succeeded even when Commit also failed.
 func (f *Staged) Published() bool { return f.published }
 
-// Commit flushes, closes, publishes, then syncs the containing directory.
+// Commit performs the native namespace transition. Roles.Publish supplies
+// the final role and permission checks for application destinations.
 func (f *Staged) Commit(overwrite bool) (bool, error) {
 	if f.closed {
 		return f.published, errors.New("temporary file is already closed")
@@ -99,15 +139,22 @@ func publish(temp, target string, overwrite bool, noReplace func(string, string)
 		return true, nil
 	}
 	if !unsupportedRename(err) {
-		return false, err
+		return false, noReplaceFailure(err)
 	}
 	if err = link(temp, target); err != nil {
-		return false, fmt.Errorf("publishing without replacing the destination failed: %w", err)
+		return false, noReplaceFailure(fmt.Errorf("publishing without replacing the destination failed: %w", err))
 	}
 	if err = remove(temp); err != nil {
 		return true, err
 	}
 	return true, nil
+}
+
+func noReplaceFailure(err error) error {
+	if errors.Is(err, fs.ErrExist) {
+		return errors.Join(ErrDestinationExists, err)
+	}
+	return err
 }
 
 // Abort closes/removes only the owned temporary name, never the target.

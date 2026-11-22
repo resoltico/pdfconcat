@@ -40,6 +40,30 @@ func ValidateMetadata(m Metadata) error {
 	return nil
 }
 
+// OptionalContentPolicy governs admission of PDF visibility layers.
+type OptionalContentPolicy string
+
+// Supported optional-content policies.
+const (
+	OptionalContentRefuse              OptionalContentPolicy = "refuse"
+	OptionalContentFlattenVisibleForms OptionalContentPolicy = "flatten-visible-forms"
+)
+
+// Values gives the supported authored policies in declaration order.
+func (OptionalContentPolicy) Values() []string {
+	return []string{string(OptionalContentRefuse), string(OptionalContentFlattenVisibleForms)}
+}
+
+// OptionalContentDescription describes the plan's layer admission boundary.
+func OptionalContentDescription() string {
+	return "Refuse PDF visibility layers, or explicitly remove a proved always-visible Form layer and its controls."
+}
+
+// OptionalContentValueMessage explains the accepted layer policy values.
+func OptionalContentValueMessage() string {
+	return "Optional content must be refuse or flatten-visible-forms."
+}
+
 // StructurePolicy controls preservation of source semantics.
 type StructurePolicy string
 

@@ -36,9 +36,9 @@ func CheckDestination(f DestinationFacts) []diag.Diagnostic {
 	if f.Path == "" {
 		return nil
 	}
-	exists, notRegular, isInput, inspection, parentInvalid := diag.OutputExists, diag.OutputNotRegular, diag.OutputIsInput, diag.OutputInspectionFailed, diag.OutputParentInvalid
+	notRegular, isInput, inspection, parentInvalid := diag.OutputNotRegular, diag.OutputIsInput, diag.OutputInspectionFailed, diag.OutputParentInvalid
 	if f.Role == ReportDestination {
-		exists, notRegular, isInput, inspection, parentInvalid = diag.ReportExists, diag.ReportNotRegular, diag.ReportIsInput, diag.ReportInspectionFailed, diag.ReportParentInvalid
+		notRegular, isInput, inspection, parentInvalid = diag.ReportNotRegular, diag.ReportIsInput, diag.ReportInspectionFailed, diag.ReportParentInvalid
 	}
 	var ds []diag.Diagnostic
 	add := func(code diag.Code, message string) {
@@ -57,12 +57,29 @@ func CheckDestination(f DestinationFacts) []diag.Diagnostic {
 		add(inspection, f.IdentityFailure)
 	case f.AliasedInput != "":
 		add(isInput, fmt.Sprintf("Destination must use a distinct file from input %q. Choose a different filename or directory.", f.AliasedInput))
-	case f.Exists && f.Role == ReportDestination && !f.InputsKnown:
-		add(exists, "Report destination exists and the plan inputs are unknown. Choose a new report path.")
 	case f.Exists && !MayReplace(f.Role, f.Overwrite, f.InputsKnown):
-		add(exists, "Destination exists. Choose a new path or use --overwrite to authorize replacement.")
+		ds = append(ds, destinationExists(f.Role, f.Path, f.InputsKnown,
+			"Destination exists. Choose a new path or use --overwrite to authorize replacement."))
 	}
 	return ds
+}
+
+// PublicationDestinationExists explains occupancy proved by atomic no-replace.
+func PublicationDestinationExists(role DestinationRole, path string, inputsKnown bool) diag.Diagnostic {
+	return destinationExists(role, path, inputsKnown, "Destination already exists. Choose a new path.")
+}
+
+func destinationExists(role DestinationRole, path string, inputsKnown bool, message string) diag.Diagnostic {
+	code := diag.OutputExists
+	if role == ReportDestination {
+		code = diag.ReportExists
+		if !inputsKnown {
+			message = "Report destination exists and the plan inputs are unknown. Choose a new report path."
+		}
+	}
+	d := diag.New(code, message)
+	d.File = path
+	return d
 }
 
 // CheckReportSeparation owns the product rule after native identity observation.

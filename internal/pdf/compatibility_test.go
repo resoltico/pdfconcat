@@ -49,7 +49,7 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 		position string
 		tail     []any
 	}{
-		{"/XYZ 0 null null", []any{"/XYZ", float64(0), nil, nil}},
+		{"/XYZ 0 40 null", []any{"/XYZ", float64(0), float64(40), nil}},
 		{"/XYZ null 20 null", []any{"/XYZ", nil, float64(20), nil}},
 		{"/FitH 20", []any{"/FitH", float64(20)}},
 		{"/FitBH 20", []any{"/FitBH", float64(20)}},
@@ -60,13 +60,23 @@ func TestFittingDestinationCoordinates(t *testing.T) {
 		position := tc.position
 		t.Run(position, func(t *testing.T) {
 			d := localLink(position, true)
-			f, _, ds := pdf.Inspect(t.Context(), d.Bytes(), "", nil)
-			if status := diag.Outcome(ds); status != "ok" || len(f.CoordinateDestinations) == 0 {
-				t.Fatalf("facts %+v: %+v", f, ds)
-			}
-			_, _, ds = assembleDocs(t, []*pdffixture.Doc{d}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
-			if !codePresent(ds, diag.FitDestinationUnsupported) {
+			fitted, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, packet.DefaultFitPolicy(packet.Size{Width: 306, Height: 396}))
+			if !codePresent(ds, diag.FitDestinationMapped) || diag.Outcome(ds) != "ok" {
 				t.Fatal(ds)
+			}
+			mapped, err := oracle.Load(oracle.RequireTools(t), fitted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			physical, operands, err := mapped.AnnotationDestination(1, 0)
+			want := append([]any(nil), tc.tail...)
+			for i := 1; i < len(want); i++ {
+				if value, ok := want[i].(float64); ok {
+					want[i] = value / 2
+				}
+			}
+			if err != nil || physical != 1 || !reflect.DeepEqual(operands, want) {
+				t.Fatalf("mapped destination page=%d tail=%v, want %v: %v", physical, operands, want, err)
 			}
 			path, _, ds := assembleDocs(t, []*pdffixture.Doc{d}, nil)
 			if status := diag.Outcome(ds); status != "ok" {
@@ -154,16 +164,12 @@ func TestRetainedDestinationRoles(t *testing.T) {
 			tc.doc.Objs[5] = []byte("<< /Subtype /Link /Rect [10 20 30 40] /A << /S /GoTo /D (outside) /Next << /S /GoTo /D [3 0 R /FitH 20] >> >> >>")
 		}
 		t.Run(tc.name, func(t *testing.T) {
-			f, _, ds := pdf.Inspect(t.Context(), tc.doc.Bytes(), "", nil)
-			if status := diag.Outcome(ds); status != "ok" || (len(f.CoordinateDestinations) > 0) != tc.want {
-				t.Fatalf("want coordinates=%v: facts %+v ds %+v", tc.want, f, ds)
-			}
 			docs := []*pdffixture.Doc{tc.doc}
 			if tc.name == "named repeated" {
 				docs = append(docs, tc.doc)
 			}
-			_, _, ds = assembleDocs(t, docs, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
-			if codePresent(ds, diag.FitDestinationUnsupported) != tc.want {
+			_, _, ds := assembleDocs(t, docs, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
+			if tc.want && diag.Outcome(ds) != "ok" || codePresent(ds, diag.FitDestinationMapped) != tc.want {
 				t.Fatal(ds)
 			}
 		})
@@ -171,16 +177,14 @@ func TestRetainedDestinationRoles(t *testing.T) {
 }
 
 func TestCompatibilityRefusesBeforePublication(t *testing.T) {
-	for _, kind := range []string{"coordinates", "Screen direct", "Screen chained", "appearance", "FreeText", "fallback boundary", "missing selected appearance", "NoRotate fallback", "Link boundary with appearance", "Screen boundary action", "Screen boundary hover", "Line caption", "Caret symbol", "Text icon bounds"} {
+	for _, kind := range []string{"coordinates", "appearance", "FreeText", "fallback boundary", "missing selected appearance", "NoRotate fallback", "Link boundary with appearance", "Screen boundary action", "Screen boundary hover", "Line caption", "Caret symbol", "Text icon bounds"} {
 		for _, reverse := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/reverse=%v", kind, reverse), func(t *testing.T) {
 				dir := t.TempDir()
 				docs := []*pdffixture.Doc{localLink("/FitH 20", false)}
 				code := diag.FitDestinationUnsupported
 				fit := "A4"
-				if strings.HasPrefix(kind, "Screen") {
-					docs = []*pdffixture.Doc{screenAction(kind == "Screen chained")}
-				}
+				insertEntry(docs[0], 3, "/Rotate 90")
 				if kind == "appearance" {
 					docs = []*pdffixture.Doc{defaultForm("FORM", "Helv", "Helvetica", "/Helv 12 Tf 0 g", 0), pdffixture.Versioned("plain", "2.0", "")}
 					code = diag.SourceOutputIncompatible
@@ -377,8 +381,8 @@ func TestInspectionPreservesValidatedGraphBoundaries(t *testing.T) {
 				}
 				// A deep local target must still be observed, not silently truncated.
 				d.Objs[len(d.Objs)-1] = []byte("<< /S /GoTo /D [3 0 R /FitH 20] >>")
-				facts, _, ds = pdf.Inspect(t.Context(), d.Bytes(), "", nil)
-				if status := diag.Outcome(ds); status != "ok" || len(facts.CoordinateDestinations) == 0 {
+				facts, _, ds = pdf.Inspect(t.Context(), d.Bytes(), "", []pdf.SelectionRequest{{Item: "deep", Fitting: packet.DefaultFitPolicy(packet.Size{Width: 306, Height: 396})}})
+				if status := diag.Outcome(ds); status != "ok" || !codePresent(ds, diag.FitDestinationMapped) {
 					t.Fatalf("deep target was not inspected: %+v %+v", facts, ds)
 				}
 			})

@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/fault"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -30,7 +29,6 @@ type OccurrenceFacts struct {
 	DestinationLocations map[string][]diag.PDFLocation
 	packet.SourceFacts
 	DestNames              []string
-	CoordinateDestinations []coordinateDestination
 	PDF20AppearanceIssue   diag.AnnotationIssue
 	AnnotationFittingIssue diag.AnnotationIssue
 	OutlineDepth           int
@@ -116,10 +114,16 @@ func diagnostic(err error, fallback diag.Code) diag.Diagnostic {
 }
 
 func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
-	return readSourceReader(c, bytes.NewReader(data), policy)
+	return readSourceReader(c, bytes.NewReader(data), SourcePolicies{Structure: policy})
 }
 
-func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
+// SourcePolicies are the effective source-admission choices for a packet.
+type SourcePolicies struct {
+	Structure       packet.StructurePolicy
+	OptionalContent packet.OptionalContentPolicy
+}
+
+func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePolicies) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.SourceProcessingFailed, diag.ThePDFBackendFailedUnexpectedly(), fmt.Errorf("%v", value))
@@ -154,12 +158,17 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.Str
 	}
 	conf.ValidationMode = model.ValidationStrict
 	conf.ZeroOffsetPolicy = model.AdmitUnreferencedZeroOffsets
-	s, err = api.ReadContext(c, reader, conf)
+	s, err = readPDFContext(c, reader, conf)
 	if errors.Is(err, pdfcpu.ErrEncrypted) || errors.Is(err, pdfcpu.ErrWrongPassword) || errors.Is(err, pdfcpu.ErrUnsupportedEncryptionFeature) || s != nil && s.Encrypt != nil {
 		return s, origins, ds, refuse(diag.SourceEncrypted, diag.EncryptedSourcesAreUnsupportedIncludingPDFsThatOpenWithoutA())
 	}
 	if err != nil {
 		return s, origins, ds, err
+	}
+	if len(s.Read.MismatchedObjectHeaders) != 0 {
+		if err := checkReadReferences(c, s, false); err != nil {
+			return s, origins, ds, err
+		}
 	}
 	for _, entry := range s.ZeroOffsetEntries {
 		ds = append(ds, diag.IgnoredXRefEntry(diag.XRefEntry{Object: entry.Object, Generation: entry.Generation, Revision: entry.Revision, Offset: entry.XRefOffset}))
@@ -169,13 +178,25 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.Str
 		return s, origins, ds, e
 	}
 	s.PageCount = len(pages)
-	if _, e = capturePageContent(c, s); e != nil {
+	originalContent, e := observePageContent(c, s, pages)
+	if e != nil {
 		return s, origins, ds, e
 	}
 	if e = originalSignatureChecks(c, s); e != nil {
 		return s, origins, ds, e
 	}
-	findings, e := admitSourceStructure(c, s, policy)
+	layers, e := planOptionalContent(c, s, policies.OptionalContent, pages, originalContent)
+	if e != nil {
+		return s, origins, ds, e
+	}
+	if e = inspectRetainedDestinations(c, s, pages, true); e != nil {
+		return s, origins, ds, e
+	}
+	undefinedReferences, e := isolateUndefinedSourceReferences(c, s)
+	if e != nil {
+		return s, origins, ds, e
+	}
+	findings, e := admitSourceStructure(c, s, policies.Structure)
 	ds = append(ds, findings...)
 	if e != nil {
 		return s, origins, ds, pdfFailure(diag.SourceInvalid, diag.TheDeclaredSourceStructureCannotBePreservedUseStructureDiscard(), e)
@@ -191,11 +212,13 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.Str
 	if err != nil {
 		return s, origins, ds, err
 	}
+	origins.undefinedReferences = undefinedReferences
 	origins.catalog, e = captureCatalogSites(s, origins)
 	if e != nil {
 		return s, origins, ds, e
 	}
-	origins.destinations, err = readDestinations(c, s)
+	var restoreNamedOperands []func()
+	origins.destinations, err = readDestinationDefinitions(c, s, &restoreNamedOperands)
 	if err != nil {
 		return s, origins, ds, err
 	}
@@ -220,6 +243,9 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.Str
 	s.Configuration.ValidationMode = model.ValidationRelaxed
 	s.XRefTable.ValidationMode = model.ValidationRelaxed
 	observed, report, err := validateObservedPages(c, s, pages)
+	for _, restore := range slices.Backward(restoreNamedOperands) {
+		restore()
+	}
 	findings, repair := validationNotices(report)
 	ds = append(ds, findings...)
 	if err != nil {
@@ -237,7 +263,13 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policy packet.Str
 	if err = validateObservedEncoding(c, s, observed); err != nil {
 		return s, origins, ds, err
 	}
-
+	if layers.group != (types.IndirectRef{}) {
+		finding, e := layers.apply(c, s, pages)
+		if e != nil {
+			return s, origins, ds, e
+		}
+		ds = append(ds, finding)
+	}
 	return s, origins, ds, nil
 }
 
@@ -314,7 +346,6 @@ func checkDocument(c context.Context, s *model.Context, pages []pageRef) error {
 	}{
 		{"Perms", diag.SourceSigned, diag.CatalogPermissionStructuresRefused()},
 		{"DocTimeStamp", diag.SourceSigned, diag.DocumentTimestampsRefused()},
-		{"OCProperties", diag.SourceOptionalContent, diag.OptionalContentRefused()},
 	} {
 		value, e := s.Dereference(cat[policy.key])
 		if e != nil {
@@ -350,6 +381,9 @@ type pageRef struct {
 
 // rawPages rejects content-replacing tree repair before pdfcpu validation runs.
 func rawPages(c context.Context, s *model.Context) ([]pageRef, error) {
+	if s.Root == nil || !liveReference(s, *s.Root) {
+		return nil, sourceSite{path: "Trailer.Root"}.wrap(refuse(diag.SourceDamaged, diag.APageTreeReferenceIsMissingFreeOrHasThe()))
+	}
 	catalog, err := s.Catalog()
 	if err != nil {
 		return nil, err
@@ -557,10 +591,6 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins, policy 
 				facts.DestinationLocations[name] = append(facts.DestinationLocations[name], *location)
 			}
 		}
-	}
-	facts.CoordinateDestinations, err = fittingDestinations(c, s, origins)
-	if err != nil {
-		return facts, ds, err
 	}
 	facts.PDF20AppearanceIssue, err = appearanceIssue(c, s)
 	if err != nil {

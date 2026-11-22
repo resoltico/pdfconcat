@@ -21,10 +21,11 @@ type sourceSite struct {
 	path string
 }
 type sourceOrigins struct {
-	pages        map[types.IndirectRef]int
-	annotations  map[types.IndirectRef]int
-	destinations map[string]destination
-	catalog      map[string]sourceSite
+	undefinedReferences map[types.IndirectRef]types.IndirectRef
+	pages               map[types.IndirectRef]int
+	annotations         map[types.IndirectRef]int
+	destinations        map[string]destination
+	catalog             map[string]sourceSite
 }
 
 func sourceOriginsFor(c context.Context, s *model.Context) (sourceOrigins, error) {
@@ -42,7 +43,7 @@ func sourceOriginsForPages(c context.Context, s *model.Context, pages []pageRef)
 			return result, err
 		}
 		result.pages[p.ref] = i + 1
-		annots, e := s.DereferenceArray(p.dict["Annots"])
+		annots, e := navigationContainer[types.Array](s, p.dict["Annots"], sourceSite{ref: p.ref, page: i + 1}.key("Annots"))
 		if e != nil {
 			return result, e
 		}

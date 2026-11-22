@@ -291,7 +291,10 @@ type Configuration struct {
 	// RejectEncryptedInput refuses recognized encrypted input before key setup.
 	// This is a per-read runtime option and is not read from config.yml.
 	RejectEncryptedInput bool
-	resources            configurationResources
+	// KeepDirectInfo retains a PDF 2.0 direct trailer Info dictionary without
+	// allocating an indirect object. This runtime option defaults to false.
+	KeepDirectInfo bool
+	resources      configurationResources
 
 	// Location of corresponding config.yml
 	Path string

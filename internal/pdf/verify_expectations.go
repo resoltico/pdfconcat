@@ -16,17 +16,21 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 )
 
 // VerifyAssembly checks reopened serialized facts against the resolved contract,
 // before publication. It does not substitute producer caches for output facts.
 func VerifyAssembly(c context.Context, data []byte, expected int64, a Assembly) error {
-	return VerifyAssemblyReader(c, bytes.NewReader(data), expected, a)
+	return verify(c, bytes.NewReader(data), expected, &a, nil)
 }
 
-// VerifyAssemblyReader checks the actual serialized artifact on a fresh reader.
-func VerifyAssemblyReader(c context.Context, reader io.ReadSeeker, expected int64, a Assembly) error {
-	return verify(c, reader, expected, &a)
+// VerifyReader checks the staged output against the assembly and its navigation.
+func (built Assembled) VerifyReader(c context.Context, reader io.ReadSeeker, expected int64, a Assembly) error {
+	if built.navigation == nil {
+		return refuse(diag.OutputInvalid, diag.TheComposedPDFCouldNotBeVerified())
+	}
+	return verify(c, reader, expected, &a, built.navigation)
 }
 
 func verifyDocumentFacts(c context.Context, s *model.Context, a Assembly) error {
@@ -63,7 +67,7 @@ func verifyDocumentFacts(c context.Context, s *model.Context, a Assembly) error 
 	} else if len(prefs) != 0 {
 		return errors.New("unexpected viewer preferences")
 	}
-	info := types.Dict{}
+	info := s.DirectInfoDict
 	if s.Info != nil {
 		info, err = s.DereferenceDict(*s.Info)
 		if err != nil {

@@ -113,7 +113,7 @@ func FitToleranceDescription() string {
 
 // FittingNavigationDescription describes fitting-specific ownership limits.
 func FittingNavigationDescription() string {
-	return "Fitting refuses numeric local destinations only on transformed targets, and widgets on transformed or unproved owners."
+	return "Fitting maps local destination coordinates on transformed targets. Numeric FitH, FitV, FitBH and FitBV require an unrotated target. Widgets require an untransformed, proved owner."
 }
 
 // FittingAppearanceDescription describes transformed-page appearance requirements.

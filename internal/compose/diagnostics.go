@@ -45,14 +45,14 @@ func diagnosticWidth(err error, item, widthOrigin string, page int64) diag.Diagn
 	case errors.Is(err, typeset.ErrShapingFailed):
 		code = diag.AssemblyFailed
 	case errors.As(err, &overflow):
-		code = diag.TextOverflow
-		if widthOrigin != "" && implicatedWidth(overflow) {
-			d := diag.Report(code, diag.GeneratedTextFailure(err.Error(), widthOrigin), item)
-			d.AuthoredRef = widthOrigin
-			return d
+		if !implicatedWidth(overflow) {
+			widthOrigin = ""
 		}
+		d := diag.Report(diag.TextOverflow, diag.GeneratedTextOverflow(err.Error(), widthOrigin), item)
+		d.AuthoredRef = widthOrigin
+		return d
 	}
-	return diag.Report(code, diag.GeneratedTextFailure(err.Error(), ""), item)
+	return diag.Report(code, diag.GeneratedTextFailure(err.Error()), item)
 }
 
 func implicatedWidth(overflow *typeset.OverflowError) bool {

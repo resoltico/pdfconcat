@@ -79,3 +79,39 @@ before dictionary I/O/key work, cancellation, cloning and the supported xref for
 ```
 go test ./pkg/pdfcpu -run TestEncryptedInputReadPolicy -count=1
 ```
+
+
+The reader refuses an occupied object-zero entry after resolving the effective
+xref table and before free-list repair. Strict classic reads preserve the
+original in-use classification of the effective row, including at offset
+zero. Relaxed classic reads keep the prior zero-offset repair. A missing head
+is still supplied by the existing reader across supported xref representations.
+
+The effective-version reader checks the full identity of an indirect catalog
+`Version` before caching the override. Undefined references fail at that
+boundary. A live null contributes no override, and a valid catalog version
+takes precedence only when it is later than the header. The general
+dereference API retains its upstream behavior. PDFConcat's reader tests cover
+admission and reopened output through this same backend path.
+
+The runtime-only `Configuration.KeepDirectInfo` option retains a PDF 2.0
+direct trailer Info dictionary for validation without allocating an object
+number during the read. The default still materializes it. PDFConcat enables
+the option for source admission and output verification, then discards source
+Info when it installs authored packet metadata.
+
+The reader records effective raw trailer fields for xref streams as well as
+classic tables. For each key it keeps the first value encountered in the
+newest-first traversal. PDFConcat uses the raw trailer as the root of its
+strict reopened reference check.
+
+The reader records disagreements between an effective xref identity and the
+physical indirect-object header. PDFConcat checks that evidence along reachable
+references in source and output reads, retaining the tolerance for unused alias
+rows. The strict reader compares both identity components of effective
+uncompressed rows at the physical offsets of parsed xref streams. A stream
+without an effective row at its offset remains admissible. The reader also
+checks headers of active object streams and requires each effective compressed
+entry to match the object number in the selected directory slot before adopting
+the compressed object. Superseded rows and unused directory entries do not
+select objects. Relaxed object-stream reading retains the upstream behavior.

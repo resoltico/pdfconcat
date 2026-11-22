@@ -15,6 +15,9 @@ limitations under the License.
 */
 
 // Package model defines shared PDF processing state and configuration types.
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 package model
 
 import (
@@ -217,6 +220,14 @@ type ReadContext struct {
 	ObjectStreams       types.IntSet // All object numbers of any object streams found which need to be decoded.
 	UsingXRefStreams    bool         // File is using xref streams.
 	XRefStreams         types.IntSet // All object numbers of any xref streams found.
+
+	// XRefStreamHeaders indexes parsed section headers by physical offset
+	// until the effective xref table is complete.
+	XRefStreamHeaders map[int64]types.IndirectRef
+
+	// MismatchedObjectHeaders records effective xref identities whose body
+	// header names a different object. Unused alias rows can be tolerated.
+	MismatchedObjectHeaders map[types.IndirectRef]types.IndirectRef
 }
 
 func newReadContext(rs io.ReadSeeker) (*ReadContext, error) {

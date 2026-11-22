@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 
@@ -15,6 +16,78 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
+
+// The page slot stays a full reference. Other slots hold resolved PDF scalars.
+type explicitDestination struct {
+	page                types.IndirectRef
+	mode                types.Name
+	operands            types.Array
+	hasIndirectOperands bool
+}
+
+// An undefined operand reference has the value null under ISO 32000-1.
+// This resolution rule applies only to destination modes and operands.
+func destinationOperand(s *model.Context, o types.Object) (types.Object, bool, error) {
+	_, indirect := o.(types.IndirectRef)
+	value, _, err := resolveNavigation(s, o)
+	return value, indirect, err
+}
+
+func readExplicitDestination(s *model.Context, array types.Array) (explicitDestination, error) {
+	var d explicitDestination
+	bad := func() error { return refuse(diag.SourceUnsupported, diag.InvalidExplicitDestination()) }
+	if len(array) < 2 {
+		return d, bad()
+	}
+	d.page, _ = array[0].(types.IndirectRef)
+	mode, indirect, err := destinationOperand(s, array[1])
+	if err != nil {
+		return d, err
+	}
+	d.mode, _ = mode.(types.Name)
+	d.hasIndirectOperands = indirect
+	count := 0
+	switch d.mode {
+	case "Fit", "FitB":
+	case "FitH", "FitV", "FitBH", "FitBV":
+		count = 1
+	case "XYZ":
+		count = 3
+	case "FitR":
+		count = 4
+	default:
+		return d, bad()
+	}
+	if len(array) != count+2 {
+		return d, bad()
+	}
+	for _, raw := range array[2:] {
+		value, indirect, err := destinationOperand(s, raw)
+		if err != nil {
+			return d, err
+		}
+		switch value.(type) {
+		case nil:
+			if d.mode == "FitR" {
+				return d, bad()
+			}
+		case types.Integer, types.Float:
+		default:
+			return d, refuse(diag.SourceUnsupported, diag.UnsupportedDestinationCoordinateValue())
+		}
+		d.hasIndirectOperands = d.hasIndirectOperands || indirect
+		d.operands = append(d.operands, value)
+	}
+	return d, nil
+}
+
+func (d explicitDestination) tail() types.Array {
+	return append(types.Array{d.mode}, d.operands...)
+}
+
+func (d explicitDestination) array() types.Array {
+	return append(types.Array{d.page, d.mode}, d.operands...)
+}
 
 type destination struct {
 	page   int
@@ -25,6 +98,13 @@ type destination struct {
 }
 
 func readDestinations(c context.Context, s *model.Context) (map[string]destination, error) {
+	return readDestinationDefinitions(c, s, nil)
+}
+
+// With restorations supplied, show resolved operands to backend validation
+// without changing arrays shared by other owners. Source validation then
+// restores the original name-tree slots before packet projection begins.
+func readDestinationDefinitions(c context.Context, s *model.Context, restorations *[]func()) (map[string]destination, error) {
 	pages, err := rawPages(c, s)
 	if err != nil {
 		return nil, err
@@ -34,36 +114,49 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 		index[page.ref] = i + 1
 	}
 	result := map[string]destination{}
-	decode := func(o types.Object, legacy bool) (destination, error) {
-		o, err := s.Dereference(o)
+	decode := func(o types.Object, legacy bool, site sourceSite, replace func(types.Object)) (destination, error) {
+		o, err := navigationValue(s, o, site)
 		if err != nil {
 			return destination{}, err
 		}
-		if d, ok := o.(types.Dict); ok {
-			o, err = s.Dereference(d["D"])
+		wrapper, _ := o.(types.Dict)
+		if wrapper != nil {
+			if s.PDF20() && wrapper["SD"] != nil {
+				if _, err := absentStructureDestination(s, wrapper["SD"], site.key("SD")); err != nil {
+					return destination{}, err
+				}
+			}
+			o, err = navigationValue(s, wrapper["D"], site.key("D"))
 			if err != nil {
 				return destination{}, err
 			}
 		}
-		a, ok := o.(types.Array)
 		dest := destination{legacy: legacy}
-		if ok && len(a) > 0 {
-			if ref, ok := a[0].(types.IndirectRef); ok {
-				dest.page = index[ref]
-				dest.target = ref
+		a, ok := o.(types.Array)
+		if !ok || len(a) == 0 {
+			return dest, site.wrap(refuse(diag.SourceUnsupported, diag.InvalidNavigationBinding()))
+		}
+		if e := checkExplicitStructureDestination(s, a, site); e != nil {
+			return destination{}, e
+		}
+		dest.target, _ = a[0].(types.IndirectRef)
+		dest.page = index[dest.target]
+		if dest.page == 0 {
+			return dest, nil
+		}
+		explicit, e := readExplicitDestination(s, a)
+		if e != nil {
+			return destination{}, site.wrap(e)
+		}
+		dest.tail = explicit.tail()
+		if restorations != nil && explicit.hasIndirectOperands {
+			var replacement types.Object = explicit.array()
+			if wrapper != nil {
+				definition := maps.Clone(wrapper)
+				definition["D"] = replacement
+				replacement = definition
 			}
-			for _, entry := range a[1:] {
-				value, err := s.Dereference(entry)
-				if err != nil {
-					return destination{}, err
-				}
-				switch value.(type) {
-				case nil, types.Name, types.Integer, types.Float:
-					dest.tail = append(dest.tail, value)
-				default:
-					return destination{}, refuse(diag.SourceUnsupported, diag.UnsupportedDestinationCoordinateValue())
-				}
-			}
+			replace(replacement)
 		}
 		return dest, nil
 	}
@@ -71,24 +164,20 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 	if err != nil {
 		return nil, err
 	}
-	names, err := s.DereferenceDict(cat["Names"])
+	base := catalogSite(s)
+	names, err := navigationContainer[types.Dict](s, cat["Names"], base.key("Names"))
 	if err != nil {
 		return nil, err
 	}
-	base := catalogSite(s)
 	namesSite := base.key("Names").anchor(cat["Names"], sourceOrigins{})
 	seen := map[types.IndirectRef]bool{}
 	var walk func(types.Object, sourceSite, int) error
 	walk = func(o types.Object, site sourceSite, depth int) error {
-		site = site.anchor(o, sourceOrigins{})
 		if err := c.Err(); err != nil {
 			return err
 		}
 		if depth > 64 {
 			return refuse(diag.SourceUnsupported, diag.DestinationNameTreeExceedsDepth())
-		}
-		if o == nil {
-			return nil
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if seen[ref] {
@@ -96,24 +185,53 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			}
 			seen[ref] = true
 		}
-		d, err := s.DereferenceDict(o)
+		d, err := navigationContainer[types.Dict](s, o, site)
 		if err != nil {
 			return err
 		}
-		a, err := s.DereferenceArray(d["Names"])
+		if d == nil {
+			if depth > 0 {
+				return site.wrap(refuse(diag.SourceUnsupported, diag.InvalidNavigationBinding()))
+			}
+			return nil
+		}
+		site = site.anchor(o, sourceOrigins{})
+		limitsSite := site.key("Limits")
+		limits, err := navigationContainer[types.Array](s, d["Limits"], limitsSite)
+		if err != nil {
+			return err
+		}
+		for i, bound := range limits {
+			if _, err := navigationValue(s, bound, limitsSite.index(i)); err != nil {
+				return err
+			}
+		}
+		a, err := navigationContainer[types.Array](s, d["Names"], site.key("Names"))
 		if err != nil {
 			return err
 		}
 		if len(a)%2 != 0 {
 			return refuse(diag.SourceInvalid, diag.OddDestinationNameArray())
 		}
-		arraySite := site.key("Names").anchor(d["Names"], sourceOrigins{})
+		namesValue := d["Names"]
+		arraySite := site.key("Names").anchor(namesValue, sourceOrigins{})
+		var resolvedEntries types.Array
 		for i := 0; i < len(a); i += 2 {
-			name, err := destinationName(s, a[i])
+			keySite := arraySite.index(i)
+			key, err := navigationValue(s, a[i], keySite)
 			if err != nil {
 				return err
 			}
-			dest, e := decode(a[i+1], false)
+			name, err := destinationName(key)
+			if err != nil {
+				return keySite.wrap(err)
+			}
+			dest, e := decode(a[i+1], false, arraySite.index(i+1), func(o types.Object) {
+				if resolvedEntries == nil {
+					resolvedEntries = slices.Clone(a)
+				}
+				resolvedEntries[i+1] = o
+			})
 			if e != nil {
 				return e
 			}
@@ -123,7 +241,11 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			dest.sites = []sourceSite{arraySite.index(i + 1)}
 			result[name] = dest
 		}
-		kids, err := s.DereferenceArray(d["Kids"])
+		if resolvedEntries != nil {
+			*restorations = append(*restorations, func() { d["Names"] = namesValue })
+			d["Names"] = resolvedEntries
+		}
+		kids, err := navigationContainer[types.Array](s, d["Kids"], site.key("Kids"))
 		if err != nil {
 			return err
 		}
@@ -138,19 +260,26 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 	if err = walk(names["Dests"], namesSite.key("Dests"), 0); err != nil {
 		return nil, err
 	}
-	legacy, err := s.DereferenceDict(cat["Dests"])
+	legacy, err := navigationContainer[types.Dict](s, cat["Dests"], base.key("Dests"))
 	if err != nil {
 		return nil, err
 	}
-	legacySite := base.key("Dests").anchor(cat["Dests"], sourceOrigins{})
+	legacyValue := cat["Dests"]
+	legacySite := base.key("Dests").anchor(legacyValue, sourceOrigins{})
 	legacyNames := make([]string, 0, len(legacy))
 	for name := range legacy {
 		legacyNames = append(legacyNames, name)
 	}
 	slices.Sort(legacyNames)
+	var resolvedLegacy types.Dict
 	for _, name := range legacyNames {
 		o := legacy[name]
-		dest, e := decode(o, true)
+		dest, e := decode(o, true, legacySite.name(name), func(o types.Object) {
+			if resolvedLegacy == nil {
+				resolvedLegacy = maps.Clone(legacy)
+			}
+			resolvedLegacy[name] = o
+		})
 		if e != nil {
 			return nil, legacySite.name(name).wrap(e)
 		}
@@ -162,6 +291,10 @@ func readDestinations(c context.Context, s *model.Context) (map[string]destinati
 			dest.sites = append(existing.sites, dest.sites...)
 		}
 		result[name] = dest
+	}
+	if resolvedLegacy != nil {
+		*restorations = append(*restorations, func() { cat["Dests"] = legacyValue })
+		cat["Dests"] = resolvedLegacy
 	}
 	return result, nil
 }
@@ -232,27 +365,23 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 	if e != nil {
 		return nil, nil, e
 	}
-	err = walkRetained(c, s, origins, nil, func(d types.Dict, key string, _ sourceSite, _ sourceSite) (bool, error) {
-		keep, err := localTarget(s, d[key], targetNames, pageSet)
+	err = walkRetained(c, s, origins, nil, func(binding retainedTarget) (bool, error) {
+		keep, err := localTarget(binding.value, targetNames, pageSet)
 		if err != nil || !keep {
 			return keep, err
 		}
-		value, err := s.Dereference(d[key])
-		if err != nil {
-			return false, err
-		}
-		if _, array := value.(types.Array); array || value == nil {
+		if _, array := binding.value.(types.Array); array || binding.value == nil {
 			return true, nil
 		}
-		name, err := destinationName(s, value)
+		name, err := destinationName(binding.value)
 		if err != nil {
 			return false, err
 		}
 		if replacement, ok := replacements[name]; ok {
-			if _, isName := value.(types.Name); isName {
-				d[key] = types.Name(replacement)
+			if _, isName := binding.value.(types.Name); isName {
+				binding.owner[binding.key] = types.Name(replacement)
 			} else {
-				d[key] = destinationLiteral(replacement)
+				binding.owner[binding.key] = destinationLiteral(replacement)
 			}
 		}
 		return true, nil
@@ -265,23 +394,13 @@ func detachDestinations(c context.Context, s *model.Context, used map[string]boo
 		return nil, nil, err
 	}
 	delete(cat, "Dests")
-	nameDict, err := s.DereferenceDict(cat["Names"])
-	if err != nil {
-		return nil, nil, err
-	}
-	delete(nameDict, "Dests")
-	delete(s.Names, "Dests")
 	// No other document-level name tree is part of the output policy.
 	delete(cat, "Names")
 	clear(s.Names)
 	return result, renamed, nil
 }
 
-func destinationName(s *model.Context, o types.Object) (string, error) {
-	value, err := s.Dereference(o)
-	if err != nil {
-		return "", err
-	}
+func destinationName(value types.Object) (string, error) {
 	switch name := value.(type) {
 	case types.Name:
 		return string(name), nil
@@ -367,4 +486,52 @@ func rebuildDestinations(c context.Context, s *model.Context, dests map[string]d
 	}
 	clear(s.Names)
 	return nil
+}
+
+func refuseStructureDestination(site sourceSite) error {
+	return site.wrap(refuse(diag.SourceStructureDestination, diag.StructureDestinationUnsupported()))
+}
+
+// A structure destination array uses an element reference in the page slot.
+// A declaration using PDF 2.0 navigation must not be silently projected away.
+func checkExplicitStructureDestination(s *model.Context, array types.Array, site sourceSite) error {
+	if !s.PDF20() || len(array) == 0 {
+		return nil
+	}
+	ref, ok := array[0].(types.IndirectRef)
+	if !ok || !liveReference(s, ref) {
+		return nil
+	}
+	target, err := s.Dereference(ref)
+	if err != nil {
+		return err
+	}
+	dict, ok := target.(types.Dict)
+	if !ok {
+		return nil
+	}
+	kind, err := nameValue(s, dict["Type"])
+	if err != nil {
+		return err
+	}
+	if kind == "StructElem" || kind == "" && dict["S"] != nil && dict["P"] != nil {
+		return refuseStructureDestination(site)
+	}
+	return nil
+}
+
+// A live null carries no structure destination. Check the reference first
+// because the backend can also return nil for an undefined object.
+func absentStructureDestination(s *model.Context, raw types.Object, site sourceSite) (bool, error) {
+	val, defined, err := resolveNavigation(s, raw)
+	if !defined {
+		return false, refuseStructureDestination(site)
+	}
+	if err != nil {
+		return false, site.wrap(err)
+	}
+	if val != nil && s.PDF20() {
+		return false, refuseStructureDestination(site)
+	}
+	return val == nil, nil
 }

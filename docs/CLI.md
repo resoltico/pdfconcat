@@ -180,6 +180,11 @@ are included in results and full reports. Unknown facts are null. Physical
 `target_page` and output spans retain physical indexes regardless of numbering.
 See the [plan contract](PLAN.md#document-identity-time-and-structure).
 
+A JSON plan can opt in to removing a [proved always-visible Form layer](PDF-POLICY.md#optional-content).
+Direct file operands use the default layer refusal. Fitted-destination and
+layer-flattening findings describe planned changes. Read `output.published`
+for evidence that a PDF was committed.
+
 ## Reports and committed state
 
 Use `--report FILE` to request a full JSON report, including when `check` or
@@ -187,14 +192,18 @@ Use `--report FILE` to request a full JSON report, including when `check` or
 failure to establish a valid working directory produces no report. Report
 targets are checked against known plan/font/source inputs and the output;
 the parent of each destination must exist and be a directory. Existing targets
-must be regular files. Symlink targets, directories and devices are refused. Input symlinks to regular files are allowed. Roles are checked again
-before report publication, including an output that did not exist initially.
+must be regular files. PDFConcat accepts input symlinks to regular files and
+refuses symlinks, directories, and devices as destinations.
 
 When the plan could not be decoded, its inputs are unknown. Choose a fresh
 report path in that case. Report publication uses no-replace even with
 `--overwrite` to protect inputs that the decoder could not identify.
 Existing-target and known-collision refusals use `report_exists`,
 `report_not_regular`, `report_is_input` or `report_is_output`.
+An atomic no-replace collision uses the same exit 2 and destination code as an
+existing target found during preflight (`output_exists` or `report_exists`).
+It advises choosing a fresh path. Replacement advice requires preflight to
+verify a regular destination distinct from all known inputs.
 
 Existing files are compared by native identity, including hard links. If either
 name is absent, PDFConcat compares their resolved parent directories and checks
@@ -203,8 +212,9 @@ case, canonical Unicode form, or ignorable or format characters can be refused
 even on a filesystem that distinguishes them. Windows and recognized FAT and
 SMB volumes also account for DOS spelling and potential short-name aliases when
 checking reports or publishing a PDF. For a short-name conflict, choose
-different extensions or directories. Reports are rechecked after
-PDF publication. A destination can still fail to write after its parent passes
+different extensions or directories. PDFConcat rechecks report destinations
+after PDF publication and report serialization, including when the output was
+initially absent. A destination can still fail to write after its parent passes
 preflight.
 
 Large source PDFs use private snapshots in the operating system's temporary
@@ -212,21 +222,25 @@ directory during inspection and assembly. Allow space for concurrent source
 inspections and the largest individual assembly source. A temporary-storage
 failure reports `source_unreadable` in either stage, with the input and the
 scratch operation. Each spill stays bound to its original directory for
-reopening and cleanup. PDF assembly verifies the bytes staged at the
-destination before publishing them.
+reopening and cleanup. PDF assembly verifies the completed staged bytes through
+the owned file handle before publication, including for destinations with no
+read permission bits.
 
-Output/report files use ordinary umask permissions; replacements keep the old
-mode. Publication writes and syncs a sibling temporary file first. Its bounded
-name is independent of the destination basename, so staging does not reduce the
-destination's filesystem filename limit. Without `--overwrite`, it uses a
-no-replace rename, with a link fallback when necessary.
-With `--overwrite`, it uses a replacing rename, except that a report whose plan
-inputs are unknown still uses no-replace. On Unix it then syncs the containing
-directory. A trailing sync or temp-cleanup failure
-can coexist with `output.published: true` or `report.written: true`. A report
-failure never rolls back the PDF. The saved report cannot predict its own late
-failure; the final CLI result is authoritative for that outcome. There are no recovery
-copies or cross-file transaction guarantees.
+New output and report files use ordinary umask permissions. Replacements use
+the permission bits observed during the final destination check. The empty
+sibling stage adopts any incumbent's permissions before data is written, and
+publication applies the final permissions before syncing the open file. The
+stage's bounded name leaves the full filesystem filename limit available for
+the destination.
+
+Without `--overwrite`, publication uses a no-replace rename with a hard-link
+fallback. With `--overwrite`, publication uses a replacing rename when the
+destination rules permit replacement. Reports with unknown inputs still use
+no-replace. On Unix, the containing directory is synced after publication. A
+trailing sync or temp-cleanup failure can coexist with `output.published: true`
+or `report.written: true`. PDF publication and report publication are separate
+operations. Use the final CLI result to determine whether the report was written
+and whether any trailing operation failed. PDFConcat creates no recovery copies.
 
 A full report adds preorder `sections` with `item`, `title`, nullable `parent`,
 `target_page` and `output_pages`. It records `page_numbers` once at packet level.
@@ -379,7 +393,7 @@ limit, use a program that writes each filename as a separate JSON element.
     printf '%s\n' 'No PDF files in chapters/.' >&2
     exit 1
   fi
-  jq -n '{version: 8, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
+  jq -n '{version: 9, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -393,7 +407,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 8; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 9; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -506,11 +520,14 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_encrypted` | error | invalid | encrypted, including empty-password encryption |
 | `source_signed` | error | invalid | signature value, catalog permission structures (`/Perms`) or document timestamp |
 | `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
-| `source_optional_content` | error | invalid | `/OCProperties` present |
+| `source_optional_content` | error | invalid | optional content is present outside the admitted policy |
+| `source_optional_content_flattened` | warning | — | composition removes the proved layer's visibility controls and preserves the appearance of retained Form artwork |
 | `fit_geometry_unsupported` | error | invalid | the required fitting affine lacks finite usable geometry or supported forward-placement accuracy |
 | `fit_annotation_ownership_unsupported` | error | invalid | a multiply bound annotation dictionary belongs to at least one transformed page |
 | `fit_print_box_omitted` | warning | — | fitting omits a page's optional printing box; output defaults apply |
-| `fit_destination_unsupported` | error | invalid | a retained local destination has numeric position coordinates on a transformed target page |
+| `fit_destination_unsupported` | error | invalid | a retained local destination cannot be mapped to its transformed target |
+| `fit_destination_mapped` | warning | — | the fitting plan maps local destination coordinates to a fitted target |
+| `source_structure_destination` | error | invalid | retained PDF structure destination cannot be preserved |
 | `source_output_incompatible` | error | invalid | retained annotations lack appearances required by the effective PDF 2.0 output |
 | `fit_annotation_unsupported` | error | invalid | fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame |
 | `fit_form_unsupported` | error | invalid | a widget transforms or its page ownership is unresolved or conflicting while other pages transform |

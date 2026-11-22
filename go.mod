@@ -19,7 +19,7 @@ require (
 require (
 	github.com/hhrutter/tiff v1.0.8 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
-	github.com/xdg-go/stringprep v1.0.4 // indirect
+	github.com/xdg-go/stringprep v1.0.5 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
 	seehuhn.de/go/dag v1.0.1 // indirect
 	seehuhn.de/go/geom v0.8.0 // indirect

@@ -77,7 +77,7 @@ func TestInvalidEffectiveTimestampReservesParsedInputs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reserved.json")
 	epoch := "invalid"
-	r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.PlanBytes{Data: []byte(`{"version":8,"items":[{"source":"reserved.json"}]}`)}, WorkingDir: dir, Report: path, Overwrite: true, SourceDateEpoch: &epoch})
+	r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.PlanBytes{Data: []byte(`{"version":9,"items":[{"source":"reserved.json"}]}`)}, WorkingDir: dir, Report: path, Overwrite: true, SourceDateEpoch: &epoch})
 	if r.Report == nil || r.Report.Written || r.Status != "invalid" {
 		t.Fatalf("invalid timestamp bypassed report/input policy: %+v", r)
 	}

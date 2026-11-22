@@ -109,7 +109,7 @@ func TestURIBaseStagesRemainVisibleInJSONAndText(t *testing.T) {
 func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "blank.pdf")
-	blank := `{"version":8,"page_numbers":{"margin":88,"size":9},"page_defaults":{"text":{"value":"Body"}},"items":[{"page":{"size":"100x100","text":{"value":""}}}]}`
+	blank := `{"version":9,"page_numbers":{"margin":88,"size":9},"page_defaults":{"text":{"value":"Body"}},"items":[{"page":{"size":"100x100","text":{"value":""}}}]}`
 	r, code, raw := invokeJSON(t, []string{"build", "--plan", "-", "-o", out}, blank)
 	if code != 0 || !r.Output.Published {
 		t.Fatal(raw)
@@ -119,7 +119,7 @@ func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 	if code != 2 || !hasDiagnostic(r, "text_overflow") || !strings.Contains(raw, "Page-number exclusion") {
 		t.Fatal(raw)
 	}
-	plan, err := json.Marshal(map[string]any{"version": 8, "page_numbers": map[string]any{"margin": 100, "start": 19},
+	plan, err := json.Marshal(map[string]any{"version": 9, "page_numbers": map[string]any{"margin": 100, "start": 19},
 		"items": []map[string]any{{"source": out}}})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 
 func TestAllowedOverflowDistinguishesPhysicalInkAndWrapWidth(t *testing.T) {
 	for _, tc := range []struct{ x, detail string }{{"0", "configured wrap width"}, {"-240", "Glyph ink crosses a physical page edge"}} {
-		plan := `{"version":8,"items":[{"page":{"size":"300x400","text":{"value":"UnbrokenToken","size":16,"width":12,"x":` + tc.x + `,"overflow":"allow"}}}]}`
+		plan := `{"version":9,"items":[{"page":{"size":"300x400","text":{"value":"UnbrokenToken","size":16,"width":12,"x":` + tc.x + `,"overflow":"allow"}}}]}`
 		r, code, raw := invokeJSON(t, []string{"check", "--plan", "-"}, plan)
 		if code != 0 || !hasDiagnostic(r, "text_overflow_allowed") || !strings.Contains(raw, tc.detail) {
 			t.Fatal(raw)

@@ -21,8 +21,13 @@
     },
     {
       "path": "pkg/pdfcpu/model/configuration.go",
-      "sha256": "e005d8c923818c8e8598b5352a7cbc7b10027b7ec62505d048d31d6d75ad2dfd",
+      "sha256": "b31088baffa3cb4a8ac53d871bd60ecfdf97d64e9ce445f401038cfbb49bdd93",
       "upstream_sha256": "920db67316d4480ec627c6a71a97aa89c3d05a92a48019bbca48edd1cd3e487f"
+    },
+    {
+      "path": "pkg/pdfcpu/model/context.go",
+      "sha256": "f29af829cc9faa1b88d73adc6d19c536ae81fe430f0f81fca7a4b6379251ecb1",
+      "upstream_sha256": "281f461ce95d6a67f4c532eaaead4aebcd06d521f45d18f183ea4892d52aec0e"
     },
     {
       "path": "pkg/pdfcpu/model/numeric_roundtrip_test.go",
@@ -46,7 +51,7 @@
     },
     {
       "path": "pkg/pdfcpu/model/xreftable.go",
-      "sha256": "ef6877de11f9548c0302b5aa5db5da0ac0ba02e17ac1a9f3c8751a6d00a0e455",
+      "sha256": "317e29a66b6e99fb40ac617202239c61c628ea16dc4d1f6388d5a01f0a9adad6",
       "upstream_sha256": "05433cb1782d3b88efe95b5e66669b6a84026aae944470b1b27742623904413d"
     },
     {
@@ -56,7 +61,7 @@
     },
     {
       "path": "pkg/pdfcpu/read.go",
-      "sha256": "f91ebe3a95947c8a2c0d91f366c1f10cc38cbd183e680f39541ff017863347ce",
+      "sha256": "7db62e37aa524818f292b1565c01d665336408d9095afb8263f92908e641898d",
       "upstream_sha256": "2677cca296d7d63f603bc141de938f99cabe466b73d5d279fd434f23e00ca64c"
     },
     {
@@ -65,9 +70,19 @@
       "upstream_sha256": null
     },
     {
+      "path": "pkg/pdfcpu/types/streamdict.go",
+      "sha256": "56ba071d113de2ff10ef797adeab6174d6a99a05d904f91bc99282443847f27e",
+      "upstream_sha256": "af9ef689333b2ddedae1baab51e327f51238b8b33dc103bb89bf2d43e6295133"
+    },
+    {
       "path": "pkg/pdfcpu/types/types.go",
       "sha256": "636e924a749a650a882ab306187360472de0d472f44f6618d2e722df07ab4292",
       "upstream_sha256": "acbe1a8b3d28083f88bd0b07af2dd1ef7db0da64267e42e4410e73120b37fec3"
+    },
+    {
+      "path": "pkg/pdfcpu/validate/info.go",
+      "sha256": "443c448aa955baa5076346db366e938ddb9e922d5ac00ab0fde5ea30fa9be837",
+      "upstream_sha256": "cf1c8a829de4083f4eec59502e8c074ea1b273751a06423f459d4ef5b34d76f7"
     },
     {
       "path": "pkg/pdfcpu/zero_offset.go",

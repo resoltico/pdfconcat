@@ -11,7 +11,7 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/app` | Acquisition, original input reservation, inspection, composition, digest rechecks and publication ordering |
 | `internal/core` | Typed declarations, semantic validation, owned traversal, layout, vocabulary and domain facts |
 | `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence, summary caps and complete execution facts |
-| `internal/plan` | Strict, located plan v8 decoding with an explicit native path resolver |
+| `internal/plan` | Strict, located plan v9 decoding with an explicit native path resolver |
 | `internal/compose` | Measured generated pages, contents and numbering |
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
@@ -49,7 +49,8 @@ and schedules inspection by estimated parser work and the host worker count.
 The estimate governs scheduling and the PDF backend enforces its own per-input
 limits. Assembly rechecks source digests and independently admits mutable
 graphs. Its serializer discovers references before encoding to the staged sink.
-The application gives strict verification a fresh reader on the staged file.
+The files adapter gives strict verification an independent, length-bounded
+reader on the open staging handle.
 
 ## Frontend contract
 
@@ -59,9 +60,10 @@ and one sealed input variant:
 - `PlanFile{Path}` reads a named plan relative to `WorkingDir`.
 - `PlanBytes{Data, Label, BaseDir}` decodes supplied bytes; `Label` supplies display
   provenance, and `BaseDir` resolves relative to `WorkingDir` when supplied.
-- `Declared{Declaration}` supplies all source, page, contents, section, directory,
-  style, metadata, fitting and numbering capabilities without JSON. Core semantic
-  admission clones and validates the declaration before native resolution.
+- `Declared{Declaration}` supplies source, page, contents, section, directory,
+  style, metadata, fitting, numbering, structure, and optional-content settings
+  without JSON. Core semantic admission clones and validates the declaration
+  before native resolution.
 - `Items` contains `SourceItem{Ref, Path}` and `BlankItem{Ref}` values. Each ref
   must be nonempty and unique within the request.
 
@@ -118,10 +120,11 @@ Both producers share semantic admission and aggregate text/node limits.
 1. Admission resolves roles and acquires/decodes a plan or direct items.
 2. Inspection loads fonts and checks text, then inspects distinct sources with
    the explicit positive `InspectionWorkers` budget. It merges findings in
-   first-use order. Inspection and assembly re-admission both use the plan's
-   structure policy. Source security and page checks precede semantic detachment
-   or narrowly validated index normalization. Coverage analysis retains a
-   witness of uncovered content and accounts for structure ownership.
+   first-use order. Inspection and assembly re-admission use the same structure
+   and optional-content policies. Source security and page checks precede
+   semantic detachment or narrowly validated index normalization. Coverage
+   analysis retains a witness of uncovered content and accounts for structure
+   ownership.
 3. Composition prepares contents, resolves physical layout, checks compatibility
    and number overlays, and lays out generated text. Findings can identify the
    authored setting responsible for a layout problem.
@@ -130,7 +133,8 @@ Both producers share semantic admission and aggregate text/node limits.
    recorded coordinates for an implicated setting, projection adds that location
    to the finding. The shared [diagnostic priority](CLI.md#output) preserves
    stage and first-use order within each precedence class.
-6. Report publication rechecks destination roles after any PDF publication.
+6. Report publication serializes the report after any PDF publication, then
+   rechecks destination roles before committing the report.
 
 Private source sites retain full source refs, original page ordinals and paths.
 Admission captures catalogue/navigation sites before backend normalization;
@@ -220,7 +224,7 @@ retained separately as Detail. There is no free-form phase/default renderer.
 
 Core owns each page's keep/transform decision and expected displayed size. The PDF
 adapter binds those decisions to original selected identities and exact native
-geometry, checks destination target dispositions and annotation/widget ownership,
+geometry, plans destination edits by target reference and checks annotation/widget ownership,
 and rechecks the actual re-admitted pages before mutation. Source metrics come
 from the batched geometry observation, which binds each occurrence to the complete
 effective fitting policy. Repeated generated pages share a fitting record with
@@ -234,7 +238,21 @@ intrinsic/fitted graphics state per invocation, with bounded repeated work and
 cancellation. Resolved font/pattern selections survive scope changes; text-object
 matrices have their BT/ET lifetime separately from q/Q graphics state. Tiling
 patterns install their parent stream's entry state. Shared appearance placement
-comes from the same owner used by the writer.
+comes from the same owner used by the writer. Navigation edits are planned
+before any slot is rewritten. Assembly checks final targets against their
+physical occurrences and compares the binding inventory read from the staged
+bytes before publication.
+
+### Optional-content admission
+
+The PDF adapter scans effective source and serialized output roots for visibility
+bindings. The typed plan can allow a single visible Form profile. The default
+refusal offers the opt-in when the catalog and group pass static profile checks.
+Opt-in admission additionally checks reachable owners and bounded drawing
+programs before selection, then removes the proved dictionary entries after
+source validation. Fresh assembly admission repeats the proof against the
+inspected source digest. Staged verification checks the raw graph for remaining
+visibility bindings.
 
 See [fitting policy](PDF-POLICY.md#fitting), [forward accuracy](PDF-POLICY.md#forward-fitting-accuracy)
 and [text execution](PDF-POLICY.md#text-execution-context) for the supported

@@ -18,14 +18,15 @@ import (
 // Declaration is the complete authored packet, before native path resolution.
 // Values and presence are independent of provenance. Admission owns a deep copy.
 type Declaration struct {
-	Metadata     *Metadata
-	Timestamp    *int64
-	Structure    StructurePolicy
-	Output, Dir  string
-	Fitting      *FitPolicy
-	PageNumbers  *PageNumbers
-	PageDefaults PageStyle
-	Items        []Item
+	Metadata        *Metadata
+	Timestamp       *int64
+	Structure       StructurePolicy
+	OptionalContent OptionalContentPolicy
+	Output, Dir     string
+	Fitting         *FitPolicy
+	PageNumbers     *PageNumbers
+	PageDefaults    PageStyle
+	Items           []Item
 }
 
 func copyValue[T any](p *T) *T {
@@ -47,16 +48,27 @@ func validSize(s Size, inherit bool) bool {
 	return inherit && s == (Size{}) || finite(s.Width) && finite(s.Height) && s.Width >= 1 && s.Width <= MaxSide && s.Height >= 1 && s.Height <= MaxSide
 }
 func validTitle(s string) bool {
-	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > MaxAuthoredFieldRunes || strings.TrimSpace(s) == "" {
+	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > MaxAuthoredFieldRunes {
 		return false
 	}
+	visible := false
 	for _, r := range s {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+		if TitleRuneForbidden(r) {
 			return false
 		}
+		visible = visible || !TitleRuneWhitespace(r)
 	}
-	return true
+	return visible
 }
+
+// TitleRuneForbidden identifies controls, format characters and line separators.
+func TitleRuneForbidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
+// TitleRuneWhitespace identifies runes that cannot make a title nonempty.
+func TitleRuneWhitespace(r rune) bool { return unicode.IsSpace(r) }
+
 func validateStyle(s PageStyle) error {
 	if !utf8.ValidString(s.Text.Font.Value.Path) || strings.ContainsRune(s.Text.Font.Value.Path, 0) {
 		return errors.New("font path must be valid UTF-8 without NUL")
@@ -109,6 +121,12 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 	}
 	if d.Structure != StructurePreserve && d.Structure != StructureDiscard {
 		return fail(diag.PlanValue, "Structure must be preserve or discard.", "structure")
+	}
+	if d.OptionalContent == "" {
+		d.OptionalContent = OptionalContentRefuse
+	}
+	if !slices.Contains(d.OptionalContent.Values(), string(d.OptionalContent)) {
+		return fail(diag.PlanValue, OptionalContentValueMessage(), "optional_content")
 	}
 	if d.Fitting != nil {
 		policy, err := d.Fitting.Normalize()
@@ -401,6 +419,7 @@ func preparePlan(d Declaration) Plan {
 	p.metadata = copyMetadata(d.Metadata)
 	p.timestamp = copyValue(d.Timestamp)
 	p.structure = d.Structure
+	p.optionalContent = d.OptionalContent
 	p.declaration = &d
 	return p
 }

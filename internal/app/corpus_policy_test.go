@@ -48,8 +48,8 @@ func corpusPolicies(t *testing.T) {
 		{"pdf2-link-exempt", []any{corpusSource("uri.pdf"), corpusSource("v2.pdf")}, "", "", 2},
 		{"pdf2-omitted-note", []any{corpusSource("note.pdf", [2]int{2, 2}), corpusSource("v2.pdf")}, "", "", 2},
 		{"pdf2-retained-note", []any{corpusSource("note.pdf", [2]int{1, 1}), corpusSource("v2.pdf")}, "", "source_output_incompatible", 0},
-		{"fit-numeric-direct", []any{corpusSource("numeric.pdf")}, "A4", "fit_destination_unsupported", 0},
-		{"fit-numeric-indirect", []any{corpusSource("numeric-indirect.pdf")}, "A4", "fit_destination_unsupported", 0},
+		{"fit-numeric-direct", []any{corpusSource("numeric.pdf")}, "A4", "", 2},
+		{"fit-numeric-indirect", []any{corpusSource("numeric-indirect.pdf")}, "A4", "", 2},
 		{"fit-omitted-numeric", []any{corpusSource("numeric.pdf", [2]int{1, 1})}, "A4", "", 1},
 		{"fit-whole-target", []any{corpusSource("whole-target.pdf")}, "A4", "", 2},
 		{"missing-output-parent-before-inspection", []any{corpusSource("form.pdf")}, "A4", "output_parent_invalid", 0},
@@ -64,7 +64,7 @@ func corpusPolicies(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			plan := map[string]any{"version": 8, "output": "packet.pdf", "items": tc.Items}
+			plan := map[string]any{"version": 9, "output": "packet.pdf", "items": tc.Items}
 			if tc.Fit != "" {
 				plan["fitting"] = map[string]any{"target": tc.Fit}
 			}
@@ -91,6 +91,9 @@ func corpusPolicies(t *testing.T) {
 				}
 				if r.Status != "ok" || *r.Pages.Total != int64(tc.Pages) {
 					t.Fatal(r)
+				}
+				if strings.HasPrefix(tc.ID, "fit-numeric-") && !code(r, "fit_destination_mapped") {
+					t.Fatal("missing fitting warning", r)
 				}
 				if operation == app.Check {
 					if r.Output.Published {
@@ -146,7 +149,7 @@ func corpusPolicies(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		plan := map[string]any{"version": 8, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": []any{corpusSource("technical-note.pdf"), corpusPage("Pruned Ā Ελληνικά", "pruned.ttf"), corpusPage("Full Ā Ελληνικά", "full.ttf")}}
+		plan := map[string]any{"version": 9, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": []any{corpusSource("technical-note.pdf"), corpusPage("Pruned Ā Ελληνικά", "pruned.ttf"), corpusPage("Full Ā Ελληνικά", "full.ttf")}}
 		path := filepath.Join(dir, "plan.json")
 		corpusJSON(t, path, plan)
 		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, Input: app.PlanFile{Path: path}, WorkingDir: dir})

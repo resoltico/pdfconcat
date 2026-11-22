@@ -26,7 +26,7 @@ func TestTableHeaderSelectionRefusedBeforePublication(t *testing.T) {
 			if fit {
 				extra = `,"fitting":{"target":"A4"}`
 			}
-			data := `{"version":8` + extra + `,"items":[{"source":"table.pdf","pages":[[3,3]]}]}`
+			data := `{"version":9` + extra + `,"items":[{"source":"table.pdf","pages":[[3,3]]}]}`
 			if e := os.WriteFile(plan, []byte(data), 0600); e != nil {
 				t.Fatal(e)
 			}
@@ -50,7 +50,7 @@ func TestTableHeaderSelectionRefusedBeforePublication(t *testing.T) {
 				}
 			}
 			// Explicit discard is a supported decision, rather than silent loss.
-			data = strings.Replace(data, `"version":8`, `"version":8,"structure":"discard"`, 1)
+			data = strings.Replace(data, `"version":9`, `"version":9,"structure":"discard"`, 1)
 			if e := os.WriteFile(plan, []byte(data), 0600); e != nil {
 				t.Fatal(e)
 			}

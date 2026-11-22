@@ -77,31 +77,37 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 	base := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], origins).key("Fields").anchor(form["Fields"], origins)
 	var result []fieldRecord
 	seen := map[types.IndirectRef]bool{}
-	var visit func(types.Object, string, types.Object, sourceSite, int) error
-	visit = func(o types.Object, prefix string, ft types.Object, site sourceSite, depth int) error {
-		site = site.anchor(o, origins)
+	var visit func(types.Object, string, types.Object, sourceSite, int) (bool, error)
+	visit = func(o types.Object, prefix string, ft types.Object, site sourceSite, depth int) (bool, error) {
 		if err := c.Err(); err != nil {
-			return err
+			return false, err
 		}
 		if depth > 64 {
-			return refuse(diag.SourceUnsupported, diag.FormFieldTreeExceedsTheSupportedDepthOf())
+			return false, site.wrap(refuse(diag.SourceUnsupported, diag.FormFieldTreeExceedsTheSupportedDepthOf()))
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if !liveReference(s, ref) {
-				return refuse(diag.SourceInvalid, diag.AFormFieldReferenceIsMissingFreeOrHasThe())
+				return false, site.wrap(refuse(diag.SourceInvalid, diag.AFormFieldReferenceIsMissingFreeOrHasThe()))
 			}
 			if seen[ref] {
-				return refuse(diag.SourceInvalid, diag.FormFieldTreeRepeatsANode())
+				return false, site.wrap(refuse(diag.SourceInvalid, diag.FormFieldTreeRepeatsANode()))
 			}
 			seen[ref] = true
 		}
-		d, err := s.DereferenceDict(o)
+		resolved, err := s.Dereference(o)
 		if err != nil {
-			return err
+			return false, site.wrap(err)
 		}
+		// A live reference can resolve to null. A field array member,
+		// unlike an optional dictionary entry, must denote a node.
+		d, ok := resolved.(types.Dict)
+		if !ok || d == nil {
+			return false, site.wrap(refuse(diag.SourceInvalid, diag.FormFieldMemberRequiresDictionary()))
+		}
+		site = site.anchor(o, origins)
 		own, err := textValue(s, d["T"])
 		if err != nil {
-			return err
+			return false, err
 		}
 		name := prefix
 		if own != "" {
@@ -112,47 +118,38 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 		}
 		ownType, e := s.Dereference(d["FT"])
 		if e != nil {
-			return e
+			return false, e
 		}
 		if ownType != nil {
 			ft = ownType
 		}
 		value, err := s.Dereference(d["V"])
 		if err != nil {
-			return err
+			return false, err
 		}
 		if ft == types.Name("Sig") && value != nil {
-			return refuse(diag.SourceSigned, diag.SignatureValuesAreNotSupportedUnsignedSignatureFieldsAreAllowed())
+			return false, refuse(diag.SourceSigned, diag.SignatureValuesAreNotSupportedUnsignedSignatureFieldsAreAllowed())
 		}
 		kids, err := s.DereferenceArray(d["Kids"])
 		if err != nil {
-			return err
+			return false, err
 		}
 		hasFields := false
 		kidSite := site.key("Kids").anchor(d["Kids"], origins)
 		for i, kid := range kids {
-			child, err := s.DereferenceDict(kid)
+			named, err := visit(kid, name, ft, kidSite.index(i), depth+1)
 			if err != nil {
-				return err
+				return false, err
 			}
-			childName, e := textValue(s, child["T"])
-			if e != nil {
-				return e
-			}
-			if childName != "" {
-				hasFields = true
-			}
-			if err = visit(kid, name, ft, kidSite.index(i), depth+1); err != nil {
-				return err
-			}
+			hasFields = hasFields || named
 		}
 		if (own != "" || depth == 0 && ft != nil) && !hasFields {
 			result = append(result, fieldRecord{name: name, dict: d, site: site.key("T")})
 		}
-		return nil
+		return own != "", nil
 	}
 	for i, root := range roots {
-		if err = visit(root, "", nil, base.index(i), 0); err != nil {
+		if _, err = visit(root, "", nil, base.index(i), 0); err != nil {
 			return nil, err
 		}
 	}

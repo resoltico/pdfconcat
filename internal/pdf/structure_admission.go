@@ -168,6 +168,9 @@ func objectLocations(c context.Context, s *model.Context, names bool, visit func
 			return e
 		}
 	}
+	if s.DirectInfoDict != nil {
+		return walk(s.DirectInfoDict, diag.PDFLocation{Path: "Trailer.Info"}, 0)
+	}
 	return nil
 }
 
@@ -250,6 +253,8 @@ func detachSourceStructure(c context.Context, s *model.Context) ([]diag.PDFLocat
 	roots := []types.Object{*s.Root}
 	if s.Info != nil {
 		roots = append(roots, *s.Info)
+	} else if s.DirectInfoDict != nil {
+		roots = append(roots, s.DirectInfoDict)
 	}
 	retained, e := graphReferences(c, s, roots...)
 	if e != nil {

@@ -6,13 +6,57 @@ package files
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	packet "github.com/resoltico/pdfconcat/internal/core"
+	"github.com/resoltico/pdfconcat/internal/core/diag"
 )
+
+func TestStagedReaderUsesOwnedHandleAndFixedLength(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "destination")
+	if err := os.WriteFile(target, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0200); err != nil {
+		t.Fatal(err)
+	}
+	stage, err := Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stage.Abort() })
+	assertPermissionBits(t, stage.Path(), 0200)
+	if _, err := stage.WriteString("staged"); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := stage.Reader(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.Seek(1, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stage.WriteString(" suffix"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := io.ReadAll(reader); err != nil || string(got) != "taged" {
+		t.Fatalf("bounded reader returned %q, %v", got, err)
+	}
+	second, err := stage.Reader(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := io.ReadAll(second); err != nil || string(got) != "staged suffix" {
+		t.Fatalf("fresh reader returned %q, %v", got, err)
+	}
+	assertPermissionBits(t, stage.Path(), 0200)
+}
 
 func TestNoReplacePreservesLateTargetAndAbortCleansTemp(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "output.pdf")
@@ -27,7 +71,7 @@ func TestNoReplacePreservesLateTargetAndAbortCleansTemp(t *testing.T) {
 		t.Fatal(err)
 	}
 	published, err := f.Commit(false)
-	if err == nil || published || f.Published() {
+	if !errors.Is(err, ErrDestinationExists) || !errors.Is(err, fs.ErrExist) || published || f.Published() {
 		t.Fatalf("late target was replaced: published=%v %v", published, err)
 	}
 	if err = f.Abort(); err != nil {
@@ -42,48 +86,146 @@ func TestNoReplacePreservesLateTargetAndAbortCleansTemp(t *testing.T) {
 	}
 }
 
-func TestCommitAndOverwritePreserveMode(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "output.pdf")
-	if err := os.WriteFile(target, []byte("old"), 0640); err != nil {
-		t.Fatal(err)
-	}
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(target, 0640); err != nil {
-			t.Fatal(err)
+func TestPublishUsesFinalObservedPermissions(t *testing.T) {
+	for _, role := range []packet.DestinationRole{packet.OutputDestination, packet.ReportDestination} {
+		for _, tc := range []struct {
+			name           string
+			initial, final fs.FileMode
+		}{
+			{"stable", 0640, 0640},
+			{"chmod", 0644, 0600},
+			{"created", 0, 0600},
+			{"removed", 0600, 0},
+		} {
+			t.Run(fmt.Sprintf("%d/%s", role, tc.name), func(t *testing.T) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "destination")
+				writeMode := func(mode fs.FileMode) {
+					t.Helper()
+					if err := os.WriteFile(target, []byte("old"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chmod(target, mode); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if tc.initial != 0 {
+					writeMode(tc.initial)
+				}
+				roles := Roles{InputsKnown: true, Overwrite: true}
+				if role == packet.OutputDestination {
+					roles.Output = target
+				} else {
+					roles.Report = target
+				}
+				stage, err := Create(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = stage.Abort() })
+				if tc.initial != 0 {
+					assertPermissionBits(t, stage.Path(), tc.initial)
+				}
+				if _, err := stage.WriteString("replacement"); err != nil {
+					t.Fatal(err)
+				}
+				if tc.final == 0 {
+					if err := os.Remove(target); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					writeMode(tc.final)
+				}
+				published, ds, err := roles.Publish(stage, role)
+				if err != nil || len(ds) != 0 || !published || !stage.Published() {
+					t.Fatalf("commit %v %v %v", published, ds, err)
+				}
+				if data, err := os.ReadFile(target); err != nil || string(data) != "replacement" {
+					t.Fatalf("target %q %v", data, err)
+				}
+				want := tc.final
+				if want == 0 {
+					probe := filepath.Join(dir, "umask-probe")
+					if err := os.WriteFile(probe, nil, 0666); err != nil {
+						t.Fatal(err)
+					}
+					info, err := os.Stat(probe)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want = info.Mode().Perm()
+				}
+				assertPermissionBits(t, target, want)
+			})
 		}
-	}
-	f, err := Create(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = f.WriteString("replacement"); err != nil {
-		t.Fatal(err)
-	}
-	published, err := f.Commit(true)
-	if err != nil || !published || !f.Published() {
-		t.Fatalf("commit %v %v", published, err)
-	}
-	if err = f.Abort(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(target)
-	if err != nil || string(data) != "replacement" {
-		t.Fatalf("target %q %v", data, err)
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0640 {
-		t.Fatalf("mode %o", info.Mode().Perm())
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("unexpected temp entries %v %v", entries, err)
 	}
 }
 
+func assertPermissionBits(t *testing.T, path string, want fs.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != want {
+		t.Fatalf("mode %o, want %o", info.Mode().Perm(), want)
+	}
+}
+
+func TestPublishRefusesLateRoleConflicts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		role packet.DestinationRole
+		code diag.Code
+	}{
+		{"input-hardlink", packet.OutputDestination, diag.OutputIsInput},
+		{"output-hardlink", packet.ReportDestination, diag.ReportIsOutput},
+		{"unknown-inputs", packet.ReportDestination, diag.ReportExists},
+		{"no-replace", packet.OutputDestination, diag.OutputExists},
+		{"directory", packet.ReportDestination, diag.ReportNotRegular},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target, protected := filepath.Join(dir, "dest"), filepath.Join(dir, "protected")
+			if err := os.WriteFile(protected, []byte("sentinel"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			roles := Roles{Output: protected, Report: target, InputsKnown: true, Overwrite: true}
+			if tc.role == packet.OutputDestination {
+				roles.Output, roles.Report = target, ""
+				roles.Inputs = []string{protected}
+			}
+			stage, err := Create(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stage.Abort() })
+			switch tc.name {
+			case "directory":
+				err = os.Mkdir(target, 0700)
+			case "unknown-inputs":
+				roles.InputsKnown = false
+				err = os.WriteFile(target, []byte("sentinel"), 0600)
+			case "no-replace":
+				roles.Overwrite = false
+				err = os.WriteFile(target, []byte("sentinel"), 0600)
+			default:
+				err = os.Link(protected, target)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if published, ds, err := roles.Publish(stage, tc.role); err != nil || published || len(ds) != 1 || ds[0].Code != tc.code {
+				t.Fatalf("commit %v %v %v", published, ds, err)
+			}
+			if tc.name != "directory" {
+				if data, err := os.ReadFile(target); err != nil || string(data) != "sentinel" {
+					t.Fatalf("target %q %v", data, err)
+				}
+			}
+		})
+	}
+}
 func TestNewOutputUsesConventionalPermissionsAndAbortRemovesTemp(t *testing.T) {
 	dir := t.TempDir()
 	probe := filepath.Join(dir, "umask-probe")
@@ -236,7 +378,7 @@ func TestLinkFallbackStateAndNoClobber(t *testing.T) {
 		t.Fatal(err)
 	}
 	published, err = publish(temp, target, false, rename, os.Link, os.Remove)
-	if published || err == nil {
+	if published || !errors.Is(err, ErrDestinationExists) || !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("link fallback clobbered target: %v %v", published, err)
 	}
 	if !strings.Contains(err.Error(), "without replacing the destination") {

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-22
+
+- Use plan version 9. Review earlier plans against the current contract before updating their version. [Plan](docs/PLAN.md)
+- Fit supported local bookmarks, links and named destinations to transformed pages. Numeric FitH, FitV, FitBH and FitBV require unrotated targets.
+- Opt in with `optional_content: "flatten-visible-forms"` to retain a proved always-visible Form layer’s artwork and remove its controls. [Plan](docs/PLAN.md#optional-content)
+- Default layer refusals suggest flattening for candidates that pass static checks. Check and Build refuse orphan layer bindings even on omitted pages.
+- Check and Build refuse malformed local GoTo targets, undefined enclosing navigation references, and retained PDF 2.0 local structure destinations.
+- Check and Build refuse undefined references in retained objects, null AcroForm field nodes, occupied xref entry zero, and undefined catalog version references.
+- Source and output readers reject reachable object header mismatches, active xref stream header mismatches, and compressed entries that select a different object.
+- Staged output verification checks reachable references. Live indirect null objects survive composition. [PDF policy](docs/PDF-POLICY.md#source-policy)
+- No-replace races return exit 2 with `output_exists` or `report_exists` and advise choosing a fresh path. [CLI](docs/CLI.md#reports-and-committed-state)
+- PDF and report replacements use permissions observed at the final check. Output verification supports write-only and mode-zero PDF replacements.
+- Fitting and layer diagnostics describe planned changes. Overflow diagnostics show measurements once.
+- The exported plan schema supports Unicode title validation in Python jsonschema and Ajv.
 - Quick install leaves no downloaded script after success on macOS, Linux or Windows. Save a matching installer for offline uninstall. [Installation](docs/INSTALL.md)
 
 ## [0.15.0] - 2026-11-18

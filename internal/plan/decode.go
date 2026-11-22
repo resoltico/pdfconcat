@@ -15,9 +15,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
@@ -28,7 +28,7 @@ import (
 const MaxBytes = 64 << 20
 
 // Version is the supported plan exchange contract.
-const Version = 8
+const Version = 9
 
 // Schema is the editor-facing plan JSON Schema.
 //
@@ -303,6 +303,13 @@ func (p *decoder) document(base string, overrides []packet.PlanOverrides) (packe
 				err = p.fail(diag.PlanValue, "timestamp must be Unix seconds from 0 through 253402300799.")
 			}
 			draft.Timestamp = &n
+		case "optional_content":
+			var value string
+			value, err = p.text()
+			draft.OptionalContent = packet.OptionalContentPolicy(value)
+			if err == nil && !slices.Contains(draft.OptionalContent.Values(), value) {
+				err = p.fail(diag.PlanValue, packet.OptionalContentValueMessage())
+			}
 		case "structure":
 			var value string
 			value, err = p.text()
@@ -483,10 +490,10 @@ func (p *decoder) title() (string, error) {
 	}
 	visible := false
 	for _, r := range value {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+		if packet.TitleRuneForbidden(r) {
 			return "", p.fail(diag.PlanValue, "Titles must be single-line text without control or format characters.")
 		}
-		visible = visible || !unicode.IsSpace(r)
+		visible = visible || !packet.TitleRuneWhitespace(r)
 	}
 	if !visible {
 		return "", p.fail(diag.PlanValue, "Title must not be empty or whitespace-only.")

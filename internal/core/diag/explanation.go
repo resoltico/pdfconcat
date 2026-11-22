@@ -91,10 +91,15 @@ func OutputWritingFailure(reason string) Explanation {
 	return Explanation{text: fmt.Sprintf("Writing the staged output failed: %s.", reason), detail: reason}
 }
 
-// GeneratedTextFailure owns both whole-sentence variants of width attribution.
-func GeneratedTextFailure(reason, widthOrigin string) Explanation {
+// GeneratedTextFailure explains a text preparation failure with its technical detail.
+func GeneratedTextFailure(reason string) Explanation {
+	return Explanation{text: fmt.Sprintf("Generated text could not be prepared: %s.", reason), detail: reason}
+}
+
+// GeneratedTextOverflow presents the measured evidence once, including its remedy.
+func GeneratedTextOverflow(reason, widthOrigin string) Explanation {
 	if widthOrigin == "" {
-		return Explanation{text: fmt.Sprintf("Generated text could not be prepared: %s.", reason), detail: reason}
+		return Explanation{text: fmt.Sprintf("Generated text could not be prepared: %s.", reason)}
 	}
-	return Explanation{text: fmt.Sprintf("Generated text could not be prepared using width from %q: %s.", widthOrigin, reason), detail: reason}
+	return Explanation{text: fmt.Sprintf("Generated text could not be prepared using width from %q: %s.", widthOrigin, reason)}
 }

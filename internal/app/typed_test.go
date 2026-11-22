@@ -25,7 +25,7 @@ func TestTypedAndJSONFullPacket(t *testing.T) {
 	language := "ro"
 	defaults := packet.PageStyle{Size: packet.Setting[packet.Size]{Present: true, Value: size}, Text: packet.TextStyle{Value: packet.Setting[string]{Present: true, Value: "ş"}}}
 	typed := app.Declared{Declaration: packet.Declaration{Metadata: &packet.Metadata{Language: &language}, PageDefaults: defaults, Items: []packet.Item{&packet.ContentsItem{Ref: "/items/0"}, &packet.GroupItem{Ref: "/items/1", Title: "Annex", Divider: &packet.PageStyle{}, Items: []packet.Item{&packet.SourceItem{Ref: "/items/1/items/0", Path: "source.pdf", Selection: []packet.PageRange{{First: 1, Last: 2}}}, &packet.PageItem{Ref: "/items/1/items/1", Count: 2}}}}}}
-	jsonInput := app.PlanBytes{Data: []byte(`{"version":8,"metadata":{"language":"ro"},"page_defaults":{"size":"Letter","text":{"value":"ş"}},"items":[{"contents":{}},{"title":"Annex","divider":{},"items":[{"source":"source.pdf","pages":[[1,2]]},{"page":{},"count":2}]}]}`)}
+	jsonInput := app.PlanBytes{Data: []byte(`{"version":9,"metadata":{"language":"ro"},"page_defaults":{"size":"Letter","text":{"value":"ş"}},"items":[{"contents":{}},{"title":"Annex","divider":{},"items":[{"source":"source.pdf","pages":[[1,2]]},{"page":{},"count":2}]}]}`)}
 	var prior []byte
 	for i, input := range []app.Input{typed, jsonInput} {
 		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1 + i, Operation: app.Build, Input: input, WorkingDir: dir, Output: "packet.pdf", Overwrite: true})
@@ -111,7 +111,7 @@ func TestBareTypedContainerAndExplicitJSONGroupingGrammar(t *testing.T) {
 	if r := app.Execute(t.Context(), req); r.Status != "ok" {
 		t.Fatal(r.Diagnostics)
 	}
-	req.Input = app.PlanBytes{Data: []byte(`{"version":8,"items":[{"items":[{"page":{"size":"300x400"}}]}]}`)}
+	req.Input = app.PlanBytes{Data: []byte(`{"version":9,"items":[{"items":[{"page":{"size":"300x400"}}]}]}`)}
 	if r := app.Execute(t.Context(), req); r.Status != "invalid" || !code(r, "plan_item_shape") {
 		t.Fatal("JSON-only grouping grammar drifted", r)
 	}

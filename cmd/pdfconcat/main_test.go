@@ -39,6 +39,52 @@ func invokeJSON(t *testing.T, args []string, stdin string) (exchange.Result, int
 	return r, exit, stdout.String()
 }
 
+func TestBuildReplacesPDFWithoutReadPermission(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires POSIX permission bits")
+	}
+	const plan = `{"version":9,"items":[{"page":{"size":"300x400pt"}}]}`
+	for _, mode := range []os.FileMode{0200, 0000} {
+		t.Run(strconv.FormatUint(uint64(mode), 8), func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "packet.pdf")
+			if err := os.WriteFile(target, []byte("incumbent"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(target, mode); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.Open(target)
+			if err == nil {
+				if err := f.Close(); err != nil {
+					t.Fatal(err)
+				}
+				t.Skip("account can reopen files without read permission")
+			}
+			if !os.IsPermission(err) {
+				t.Fatal(err)
+			}
+			for _, op := range []string{"check", "build"} {
+				r, exit, _ := invokeJSON(t, []string{op, "--plan", "-", "--base-dir", dir, "--overwrite", "-o", target}, plan)
+				if exit != 0 || r.Output == nil || r.Output.Published != (op == "build") {
+					t.Fatal(exit, r)
+				}
+			}
+			info, err := os.Stat(target)
+			if err != nil || info.Mode().Perm() != mode {
+				t.Fatal(info, err)
+			}
+			// Inspect after checking the published mode.
+			if err := os.Chmod(target, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(target); err != nil || !bytes.HasPrefix(got, []byte("%PDF-")) {
+				t.Fatal(err, "no published PDF")
+			}
+		})
+	}
+}
+
 func validateResult(t *testing.T, data []byte) {
 	t.Helper()
 	var document, value any
@@ -200,7 +246,7 @@ func TestFailedAndRefusedReportsPreservePDFBytes(t *testing.T) {
 					report = filepath.Join(t.TempDir(), "report.json")
 				}
 				if !unreadable {
-					if err := os.WriteFile(planPath, []byte(`{"version":8,"items":[`), 0600); err != nil {
+					if err := os.WriteFile(planPath, []byte(`{"version":9,"items":[`), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -297,7 +343,7 @@ func TestInitiallyAbsentReportAliasRefusedBeforePublication(t *testing.T) {
 func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ text, code string }{{"漢", "text_unsupported_character"}, {"😀", "text_glyph_missing"}} {
-		plan := `{"version":8,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
+		plan := `{"version":9,"items":[{"source":"missing.pdf"},{"page":{"size":"A4","text":{"value":"` + tc.text + `"}}}]}`
 		r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 		if exit != 2 || !hasDiagnostic(r, tc.code) || hasDiagnostic(r, "source_input_invalid") {
 			t.Fatalf("font/text ordering: %+v %d", r, exit)
@@ -305,7 +351,7 @@ func TestTextPolicyPrecedesPDFReadsAndTinyPagesAreExplicit(t *testing.T) {
 	}
 	for _, text := range []string{"", "A"} {
 		out := filepath.Join(dir, "tiny-"+text+".pdf")
-		plan := `{"version":8,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
+		plan := `{"version":9,"items":[{"page":{"size":"1x100pt","text":{"value":"` + text + `","overflow":"allow"}}}]}`
 		r, exit, _ := invokeJSON(t, []string{"build", "--plan", "-", "-o", out}, plan)
 		if text == "" {
 			if exit != 0 || !r.Output.Published {
@@ -330,7 +376,7 @@ func TestNamedInputRolesAndFontEmbeddingRefusal(t *testing.T) {
 		t.Fatalf("directory source: %+v %d", r, exit)
 	}
 	fontPlan := func(path string) string {
-		data, err := json.Marshal(map[string]any{"version": 8, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
+		data, err := json.Marshal(map[string]any{"version": 9, "items": []any{map[string]any{"source": "missing.pdf"}, map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": path}, "value": "A"}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -410,7 +456,7 @@ func TestRefusedReadableSourceRetainsInspectedByteFacts(t *testing.T) {
 
 func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 	dir := t.TempDir()
-	plan := `{"version":8,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
+	plan := `{"version":9,"page_defaults":{"size":"A4","text":{"font":{"file":"missing.ttf"},"value":""}},"items":[{"page":{}}]}`
 	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 	if exit != 2 || !hasDiagnostic(r, "font_input_invalid") {
 		t.Fatalf("empty text bypassed selected-font validation: %+v %d", r, exit)
@@ -420,7 +466,7 @@ func TestEmptyTextStillValidatesSelectedFont(t *testing.T) {
 func TestTextPlanLocationsAndInputContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Rīga-Ελλάδα-Київ.json")
-	input := "{\n  \"version\":8,\n  \"items\":[null]\n}\n"
+	input := "{\n  \"version\":9,\n  \"items\":[null]\n}\n"
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -430,9 +476,9 @@ func TestTextPlanLocationsAndInputContext(t *testing.T) {
 		t.Fatalf("located plan error: %d %q %q", exit, stdout.String(), stderr.String())
 	}
 	for _, tc := range []struct{ input, code, file, item string }{
-		{`{"version":8,"items":[{"source":"missing.pdf"}]}`, "source_input_invalid", filepath.Join(dir, "missing.pdf"), "/items/0"},
-		{`{"version":8,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_input_invalid", filepath.Join(dir, "missing.ttf"), "/items/0"},
-		{`{"version":8,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
+		{`{"version":9,"items":[{"source":"missing.pdf"}]}`, "source_input_invalid", filepath.Join(dir, "missing.pdf"), "/items/0"},
+		{`{"version":9,"items":[{"page":{"size":"A4","text":{"value":"A","font":{"file":"missing.ttf"}}}}]}`, "font_input_invalid", filepath.Join(dir, "missing.ttf"), "/items/0"},
+		{`{"version":9,"items":[{"page":{"size":"10x10pt","text":{"value":"A"}}}]}`, "text_overflow", "", "/items/0"},
 	} {
 		stdout.Reset()
 		stderr.Reset()
@@ -468,6 +514,44 @@ func TestTextLegalControlCharacterSourcePath(t *testing.T) {
 	r, code, _ := invokeJSON(t, []string{"check", source}, "")
 	if code != 2 || len(r.Diagnostics) != 1 || r.Diagnostics[0].File != source {
 		t.Fatalf("JSON path changed: %d %+v", code, r)
+	}
+}
+
+func TestMeasuredOverflowAppearsOnceInTextAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	report := filepath.Join(dir, "report.json")
+	input := `{"version":9,"items":[{"page":{"size":"A4","text":{"value":"` +
+		strings.Repeat("W", 200) + `","width":40}}}]}`
+	args := []string{"check", "--plan", "-", "--base-dir", dir}
+	summary, exit, _ := invokeJSON(t, append(args, "--report", report), input)
+	if exit != 2 {
+		t.Fatal(exit, summary.Diagnostics)
+	}
+	data, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validateResult(t, data)
+	var full exchange.Result
+	if err := json.Unmarshal(data, &full); err != nil {
+		t.Fatal(err)
+	}
+	const measurement = "the box is 40.00 pt"
+	for _, r := range []exchange.Result{summary, full} {
+		if len(r.Diagnostics) != 1 {
+			t.Fatal(r.Diagnostics)
+		}
+		d := r.Diagnostics[0]
+		if d.Code.String() != "text_overflow" || d.Detail != "" || d.Location == nil || d.Location.Ref != "/items/0/page/text/width" ||
+			strings.Count(d.Message, measurement) != 1 || !strings.Contains(d.Message, "shorten or wrap") {
+			t.Fatal(d)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	exit = run(args, strings.NewReader(input), &stdout, &stderr)
+	if exit != 2 || strings.Count(stderr.String(), measurement) != 1 ||
+		!strings.Contains(stderr.String(), "shorten or wrap") || !strings.Contains(stderr.String(), "/items/0/page/text/width") {
+		t.Fatal(exit, stderr.String())
 	}
 }
 
@@ -509,7 +593,7 @@ func TestLanguageSyntaxRefusedBeforePublication(t *testing.T) {
 	for _, tag := range []string{"en-a-foo-a-bar", "en-abcde-abcde", "en-Latn-Latn"} {
 		dir := t.TempDir()
 		output := filepath.Join(dir, "out.pdf")
-		plan := `{"version":8,"metadata":{"language":"` + tag + `"},"items":[{"page":{"size":"A4","text":{"value":"Text"}}}]}`
+		plan := `{"version":9,"metadata":{"language":"` + tag + `"},"items":[{"page":{"size":"A4","text":{"value":"Text"}}}]}`
 		for _, command := range []string{"check", "build"} {
 			r, exit, _ := invokeJSON(t, []string{command, "--plan", "-", "-o", output}, plan)
 			if exit != 2 || r.Status != "invalid" || !hasDiagnostic(r, "plan_value") {
@@ -530,7 +614,7 @@ func TestInitialPlanSyntaxNamedFileAndStdin(t *testing.T) {
 	}{
 		{"empty", "", true, 0}, {"whitespace", " \r\n\t", true, 0},
 		{"BOM", "\ufeff", true, 3}, {"BOM whitespace", "\ufeff\t \n", true, 3},
-		{"truncated", `{"version":8,"items":[`, false, 22}, {"NBSP", "\u00a0", false, 0},
+		{"truncated", `{"version":9,"items":[`, false, 22}, {"NBSP", "\u00a0", false, 0},
 	} {
 		for _, stdin := range []bool{false, true} {
 			t.Run(tc.name+strconv.FormatBool(stdin), func(t *testing.T) {
@@ -577,7 +661,7 @@ func TestInitialPlanSyntaxNamedFileAndStdin(t *testing.T) {
 
 func TestLayoutDiagnosticsLocateEffectiveAuthoredValues(t *testing.T) {
 	input := "\ufeff{\r\n" +
-		"  \"version\": 8,\r\n" +
+		"  \"version\": 9,\r\n" +
 		"  \"page_defaults\": {\"size\": \"A4\", \"text\": {\"width\": 40}},\r\n" +
 		"  \"items\": [\r\n" +
 		"    {\"page\": {\"text\": {\"value\": \"āRepeatedTokenWithoutSpaces\"}}},\r\n" +

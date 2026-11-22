@@ -28,21 +28,22 @@ func DefaultPageNumbers() *PageNumbers {
 
 // Plan is an ordered declaration with a single derived traversal.
 type Plan struct {
-	admitted     bool
-	declaration  *Declaration
-	metadata     *Metadata
-	timestamp    *int64
-	structure    StructurePolicy
-	output       string
-	fitting      *FitPolicy
-	pageNumbers  *PageNumbers
-	pageDefaults PageStyle
-	items        []Item
-	leaves       []Leaf
-	sections     []Section
-	events       []event
-	oddStarts    int
-	hasContents  bool
+	admitted        bool
+	declaration     *Declaration
+	metadata        *Metadata
+	timestamp       *int64
+	structure       StructurePolicy
+	optionalContent OptionalContentPolicy
+	output          string
+	fitting         *FitPolicy
+	pageNumbers     *PageNumbers
+	pageDefaults    PageStyle
+	items           []Item
+	leaves          []Leaf
+	sections        []Section
+	events          []event
+	oddStarts       int
+	hasContents     bool
 }
 
 // Leaf is one derived source, page, divider or contents item.
@@ -298,6 +299,9 @@ func (p Plan) Timestamp() *int64 { return copyValue(p.timestamp) }
 
 // Structure is the admitted structure policy.
 func (p Plan) Structure() StructurePolicy { return p.structure }
+
+// OptionalContent gives the effective PDF visibility-layer policy.
+func (p Plan) OptionalContent() OptionalContentPolicy { return p.optionalContent }
 
 // Output is the resolved output destination.
 func (p Plan) Output() string { return p.output }

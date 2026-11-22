@@ -6,6 +6,7 @@ package files
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -31,39 +32,77 @@ type Roles struct {
 
 // Check checks initial roles/destinations. Input read failures belong to their stages.
 func (f Roles) Check() []diag.Diagnostic {
-	ds := f.checkTarget(f.Output, packet.OutputDestination, true)
-	return append(ds, f.checkReport()...)
+	_, ds := f.inspectTarget(f.Output, packet.OutputDestination, true)
+	return append(ds, f.CheckReport()...)
 }
 
 // CheckOutput checks aliases again against paths as observed at publication.
 func (f Roles) CheckOutput() []diag.Diagnostic {
-	return f.checkTarget(f.Output, packet.OutputDestination, false)
-}
-
-// CheckReport must also run immediately before report publication, after any PDF
-// publication, so initially absent aliases cannot overwrite the published PDF.
-func (f Roles) CheckReport() []diag.Diagnostic { return f.checkReport() }
-
-func (f Roles) checkReport() []diag.Diagnostic {
-	ds := f.checkTarget(f.Report, packet.ReportDestination, false)
-	if f.Report == "" || f.Output == "" || len(ds) > 0 && ds[0].Code != diag.ReportExists {
-		return ds
-	}
-	same, err := samePathOrFile(f.Report, f.Output)
-	if err != nil {
-		d := diag.Report(diag.ReportInspectionFailed, diag.PublicationInspectionFailure(err.Error()))
-		d.File = f.Report
-		return []diag.Diagnostic{d}
-	}
-	if same {
-		return packet.CheckReportSeparation(same, f.Report)
-	}
+	_, ds := f.inspectTarget(f.Output, packet.OutputDestination, false)
 	return ds
 }
 
-func (f Roles) checkTarget(path string, role packet.DestinationRole, preflightPDF bool) []diag.Diagnostic {
+// CheckReport checks the report against inputs and the output.
+func (f Roles) CheckReport() []diag.Diagnostic {
+	_, ds := f.inspectReport()
+	return ds
+}
+
+// Publish validates the destination against its role, applies the permissions
+// from that observation, and commits the stage.
+func (f Roles) Publish(staged *Staged, role packet.DestinationRole) (bool, []diag.Diagnostic, error) {
+	path := f.Output
+	if role == packet.ReportDestination {
+		path = f.Report
+	}
+	if path == "" || path != staged.target {
+		return false, nil, fmt.Errorf("stage does not match publication destination %q", path)
+	}
+	var target pathEntry
+	var ds []diag.Diagnostic
+	if role == packet.ReportDestination {
+		target, ds = f.inspectReport()
+	} else {
+		target, ds = f.inspectTarget(path, role, false)
+	}
+	if len(ds) != 0 {
+		return false, ds, nil
+	}
+	overwrite := packet.MayReplace(role, f.Overwrite, f.InputsKnown)
+	mode := staged.creationMode
+	if overwrite && target.file != nil {
+		mode = target.file.Mode().Perm()
+	}
+	if err := staged.setMode(mode); err != nil {
+		return false, nil, err
+	}
+	published, err := staged.Commit(overwrite)
+	return published, nil, err
+}
+
+func (f Roles) inspectReport() (pathEntry, []diag.Diagnostic) {
+	target, ds := f.inspectTarget(f.Report, packet.ReportDestination, false)
+	if f.Report == "" || f.Output == "" || len(ds) > 0 && ds[0].Code != diag.ReportExists {
+		return target, ds
+	}
+	if filepath.Clean(f.Report) == filepath.Clean(f.Output) {
+		return target, packet.CheckReportSeparation(true, f.Report)
+	}
+	output, err := observeEntry(f.Output, make(map[string]fs.FileInfo))
+	if err != nil {
+		d := diag.Report(diag.ReportInspectionFailed, diag.PublicationInspectionFailure(err.Error()))
+		d.File = f.Report
+		return target, []diag.Diagnostic{d}
+	}
+	if target.aliases(output, true) {
+		return target, packet.CheckReportSeparation(true, f.Report)
+	}
+	return target, ds
+}
+
+func (f Roles) inspectTarget(path string, role packet.DestinationRole, preflightPDF bool) (pathEntry, []diag.Diagnostic) {
 	if path == "" {
-		return nil
+		return pathEntry{}, nil
 	}
 	facts := packet.DestinationFacts{Path: path, Role: role, Overwrite: f.Overwrite, InputsKnown: f.InputsKnown}
 	parent := filepath.Dir(path)
@@ -75,7 +114,7 @@ func (f Roles) checkTarget(path string, role packet.DestinationRole, preflightPD
 		facts.InspectionFailure = err.Error()
 	}
 	if err != nil || facts.InvalidParent != "" {
-		return packet.CheckDestination(facts)
+		return pathEntry{}, packet.CheckDestination(facts)
 	}
 	info, err := os.Lstat(path)
 	if err == nil {
@@ -85,13 +124,13 @@ func (f Roles) checkTarget(path string, role packet.DestinationRole, preflightPD
 		facts.InspectionFailure = err.Error()
 	}
 	if facts.Exists && !facts.Regular {
-		return packet.CheckDestination(facts)
+		return pathEntry{}, packet.CheckDestination(facts)
 	}
 	if facts.Exists {
 		for _, input := range f.AcceptedSources {
 			if os.SameFile(info, input.info) {
 				facts.AliasedInput = input.path
-				return packet.CheckDestination(facts)
+				return pathEntry{}, packet.CheckDestination(facts)
 			}
 		}
 	}
@@ -119,7 +158,7 @@ func (f Roles) checkTarget(path string, role packet.DestinationRole, preflightPD
 			break
 		}
 	}
-	return packet.CheckDestination(facts)
+	return target, packet.CheckDestination(facts)
 }
 
 func missingEntry(err error) bool {

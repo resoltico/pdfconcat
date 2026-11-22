@@ -36,11 +36,11 @@ go test -count=1 ./...
 ```
 
 Independent PDF tests use qpdf and Poppler (`pdftotext`, `pdftoppm`, `pdfinfo`,
-`pdffonts`, `pdftohtml`). The minimum qpdf version for the corpus checks is declared
-in [`internal/oracle/qpdf.version`](internal/oracle/qpdf.version). Install
-`qpdf poppler` with Homebrew. On Linux, install `poppler-utils` with apt and obtain
-a supported qpdf from the [official releases](https://github.com/qpdf/qpdf/releases)
-if the distribution package is older.
+`pdffonts`, `pdftohtml`). Use qpdf at or above the minimum in
+[`internal/oracle/qpdf.version`](internal/oracle/qpdf.version). Install `qpdf`
+and `poppler` with Homebrew. On Linux, install `poppler-utils` with apt and use
+the [official qpdf releases](https://github.com/qpdf/qpdf/releases) if you need
+a newer qpdf than your distribution provides.
 
 Tagged-output machine tests also use veraPDF at the version declared in
 [`internal/oracle/verapdf.version`](internal/oracle/verapdf.version), with Java 17

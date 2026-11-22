@@ -51,6 +51,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	}
 	var dest *model.Context
 	allDests := map[string]destination{}
+	importedNavigation := map[navigationOwner]observedNavigation{}
 	usedNames := map[string]bool{}
 	var importedOutlines []importedOutlineRoot
 	var generatedLinks []generatedLink
@@ -72,7 +73,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		var origins sourceOrigins
 		if part.Source != "" {
 			inspected := part.Occurrence.File
-			s, origins, err = admitSnapshot(c, part, a.Structure)
+			s, origins, err = admitSnapshot(c, part, SourcePolicies{Structure: a.Structure, OptionalContent: a.OptionalContent})
 			if err != nil {
 				return result, err
 			}
@@ -148,12 +149,27 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 		if err != nil {
 			return result, err
 		}
+		if err = checkRetainedSourceReferences(c, s, origins); err != nil {
+			return result, err
+		}
 		detached, renamed, e := detachDestinations(c, s, usedNames, part.FirstPage, origins)
 		if e != nil {
 			return result, e
 		}
 		for name, d := range detached {
 			allDests[name] = d
+		}
+		if part.Source != "" {
+			e = observeNavigation(c, s, detached, func(owner navigationOwner, found observedNavigation) error {
+				if !found.symbolic {
+					found.value.page += int(part.FirstPage) - 1
+				}
+				importedNavigation[owner] = found
+				return nil
+			})
+			if e != nil {
+				return result, e
+			}
 		}
 		for _, rename := range renamed {
 			for _, site := range rename.sites {
@@ -260,6 +276,11 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 	if err = verifyPlannedGeometry(c, dest, a); err != nil {
 		return result, pdfFailure(diag.AssemblyFailed, diag.TheComposedPDFFailedFinalValidation(), err)
 	}
+	navigation, err := captureOutputNavigation(c, dest, importedNavigation, allDests)
+	if err != nil {
+		return result, pdfFailure(diag.AssemblyFailed, diag.TheComposedPDFFailedFinalValidation(), err)
+	}
+	result.navigation = &navigation
 	output := &outputWriter{writer: w}
 	err = serialize(c, dest, output)
 	if output.err != nil {
@@ -286,18 +307,26 @@ func (w *outputWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-var catalogKeys = map[string]bool{"Type": true, "Pages": true, "AcroForm": true, "Names": true, "Dests": true, "Outlines": true, "Version": true, "StructTreeRoot": true, "MarkInfo": true, "Lang": true, "Metadata": true, "ViewerPreferences": true, "PageLabels": true}
+var retainedSourceCatalogKeys = map[string]bool{
+	"Type": true, "Pages": true, "AcroForm": true, "Names": true, "Dests": true, "Outlines": true,
+}
+
+func outputCatalogKey(key string) bool {
+	switch key {
+	case "Version", "StructTreeRoot", "MarkInfo", "Lang", "Metadata", "ViewerPreferences", "PageLabels":
+		return true
+	default:
+		return retainedSourceCatalogKeys[key]
+	}
+}
 
 func cleanCatalog(s *model.Context, version model.Version, needAppearances bool) error {
 	cat, err := s.Catalog()
 	if err != nil {
 		return err
 	}
-	for _, key := range []string{"StructTreeRoot", "MarkInfo", "Lang", "Metadata", "ViewerPreferences", "PageLabels"} {
-		delete(cat, key)
-	}
 	for key := range cat {
-		if !catalogKeys[key] {
+		if !retainedSourceCatalogKeys[key] {
 			delete(cat, key)
 		}
 	}
@@ -318,18 +347,18 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 	s.HeaderVersion = &version
 	s.RootVersion = &version
 	// These caches would otherwise restore removed catalog structures at write time.
-	s.Info = nil
+	s.Info, s.DirectInfoDict = nil, nil
 	return nil
 }
 
 // verify owns reopening, panic classification and the serialized output checks.
-func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly) (err error) {
+func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly, navigation *navigationObservation) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.OutputInvalid, diag.TheComposedPDFCouldNotBeVerified(), fmt.Errorf("%v", value))
 		}
 	}()
-	s, err := readOutputReader(c, reader)
+	s, err := readSerializedOutput(c, reader, navigation)
 	if err != nil {
 		return pdfFailure(diag.OutputInvalid, diag.TheComposedPDFFailedOutputVerification(), err)
 	}
@@ -347,7 +376,7 @@ func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly
 	return nil
 }
 
-func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) (s *model.Context, origins sourceOrigins, err error) {
+func admitSnapshot(c context.Context, part Part, policies SourcePolicies) (s *model.Context, origins sourceOrigins, err error) {
 	changed := func() error {
 		return refuse(diag.SourceChanged, diag.SourceBytesChangedAfterInspectionS(part.Source))
 	}
@@ -379,7 +408,7 @@ func admitSnapshot(c context.Context, part Part, policy packet.StructurePolicy) 
 	}
 	// Re-admission is the fallback for mutable backend graphs. The acquired
 	// bytes are fixed, and the compiled selection facts retain original sites.
-	s, origins, _, err = readSourceReader(c, reader, policy)
+	s, origins, _, err = readSourceReader(c, reader, policies)
 	if err == nil {
 		// The read stage materializes lazy parsed objects before returning.
 		s.Read.RS = nil
@@ -404,5 +433,5 @@ func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, diag.Assembl
 
 // Verify checks serialized page count and catalog policy without authored expectations.
 func Verify(c context.Context, data []byte, expected int64) error {
-	return verify(c, bytes.NewReader(data), expected, nil)
+	return verify(c, bytes.NewReader(data), expected, nil, nil)
 }

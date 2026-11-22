@@ -34,7 +34,7 @@ navigate it or prepare its presentation:
 - Blanks and odd-page starts separate material and control physical page order.
 - Sections, bookmarks, title dividers, linked contents, selective page numbering and authored metadata
   identify material and help readers navigate the combined document.
-- Fitting moves pages outside the absolute tolerance onto the target sheet.
+- Fitting moves pages outside the absolute tolerance onto the target sheet and maps supported local destinations.
   Matching pages keep their native frames. Transformed pages have additional
   [compatibility limits](docs/PDF-POLICY.md#fitting).
 - Simple text pages supply covers, separators, explanatory notes and other
@@ -42,7 +42,7 @@ navigate it or prepare its presentation:
   alignment, wrapping and overflow controls.
 
 Text-page authoring is limited to one styled text block on each declared page.
-Plans containing only generated pages are supported; source PDFs are optional.
+Plans containing only generated pages are supported. Plans can also opt in to removing a [proved visible Form layer](docs/PDF-POLICY.md#optional-content).
 Text wraps within its block but does not flow onto additional pages. Linked
 contents has its own automatic pagination. Rich text, tables, image placement,
 multiple text columns, general-purpose document templates, Markdown/HTML
@@ -197,7 +197,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -240,7 +240,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -256,9 +256,10 @@ use separate source items to repeat or reorder material. The whole source is
 still validated, and omitted content is not guaranteed to be erased. See
 [source selections](docs/PLAN.md#source-selections) for the limits of page selection.
 
-Relative source and output paths resolve beside the saved plan file;
-CLI `-o` and `--report` paths resolve from the current working directory. The
-[plan reference](docs/PLAN.md) explains nested path scopes, layout and fonts.
+Relative plan paths start beside the saved plan file. A top-level or nested
+`dir` changes the scope for source paths inside it. CLI `-o` and `--report` paths
+resolve from the working directory. The [plan reference](docs/PLAN.md#members-and-paths)
+defines the path rules, including where external fonts resolve.
 
 The [repository examples](docs/PLAN.md#examples) include a
 [generated-only plan](examples/plans/generated-only.json) needing no input PDFs
@@ -285,7 +286,7 @@ PDF and report publication are separate operations. A stdout write failure retur
 exit 1 and leaves already-published files saved; inspect publication facts before
 retrying. See [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v8; results and reports use format v10. Print their schemas with:
+Plans use format v9. Results and reports use format v10. Print their schemas with:
 
 ```sh
 pdfconcat schema plan
@@ -307,8 +308,9 @@ reports. Its engine is [pdfcpu](https://github.com/pdfcpu/pdfcpu) with a
 [pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)
 offers merge modes and broader PDF editing commands.
 
-**●** marks built-in support, which can involve several commands and is subject
-to the limits below. **—** marks the absence of a dedicated built-in equivalent.
+**●** marks built-in support, which can involve several commands. The notes
+describe the applicable limits. **—** marks the absence of a dedicated built-in
+equivalent.
 
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
 | --- | :---: | :---: |
@@ -322,8 +324,9 @@ to the limits below. **—** marks the absence of a dedicated built-in equivalen
 | Insert blank pages | ● | ● |
 | Preserve imported source bookmarks [3] | ● | ● |
 | Create bookmarks [3] | ● | ● |
-| Fit pages to a chosen paper size | ● | ● |
-| Keep near-target source sheets unchanged when fitting | — | ● |
+| Preserve supported source structure tags when merging [7] | — | ● |
+| Fit pages to a chosen paper size [8] | ● | ● |
+| Automatically keep sheets within a size tolerance when fitting | — | ● |
 | Generate simple text pages from JSON | ● | ● |
 | Generate Latin, Greek and Cyrillic text with a bundled font [4] | ● | ● |
 | Add physical page numbers [5] | ● | ● |
@@ -336,6 +339,7 @@ to the limits below. **—** marks the absence of a dedicated built-in equivalen
 | Report input SHA-256 hashes and source-to-output page ranges [6] | — | ● |
 | Split a PDF into multiple output files in one command | ● | — |
 | Apply general text, image or PDF stamps and watermarks | ● | — |
+| Opt in to flatten a proved always-visible Form layer during merging [9] | — | ● |
 | Encrypt, decrypt and manage PDF passwords | ● | — |
 | Fill interactive forms | ● | — |
 
@@ -375,6 +379,18 @@ to the limits below. **—** marks the absence of a dedicated built-in equivalen
    overflow, plus an assembly report with input hashes and page mappings.
    `check` can write a report when requested; a successful check does not
    guarantee a later build or publication.
+7. **Structure tags.** The standalone pdfcpu merge command excludes source
+   structure trees. PDFConcat preserves supported source tags by default and
+   reports structural coverage. [pdfcpu merge](https://pdfcpu.io/core/merge/),
+   [PDFConcat structure policy](docs/PLAN.md#structure)
+8. **Fitting.** pdfcpu `resize` can enforce a sheet orientation and can rotate
+   content for best fit. PDFConcat fitting preserves the displayed orientation,
+   keeps frames within the requested tolerance, and remaps supported local
+   destinations on transformed pages. [pdfcpu resize](https://pdfcpu.io/core/resize/),
+   [PDFConcat fitting policy](docs/PDF-POLICY.md#fitting)
+9. **Visibility layers.** PDFConcat accepts the opt-in through a plan and verifies
+   the source before removing its layer controls. The policy covers the
+   [supported always-visible Form profile](docs/PDF-POLICY.md#optional-content).
 
 pdfcpu v0.16.4 sources include
 [document commands](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/document.go),

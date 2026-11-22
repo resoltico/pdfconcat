@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// The upstream material retains the Apache-2.0 terms and notices above.
+
 package validate
 
 import (
@@ -282,7 +285,13 @@ func validateDocumentInfoDict(xRefTable *model.XRefTable, obj types.Object) (has
 }
 
 func validateDocumentInfoObject(xRefTable *model.XRefTable) (err error) {
-	if xRefTable.Info == nil {
+	var info types.Object
+	switch {
+	case xRefTable.Info != nil:
+		info = *xRefTable.Info
+	case xRefTable.DirectInfoDict != nil:
+		info = xRefTable.DirectInfoDict
+	default:
 		return nil
 	}
 
@@ -290,17 +299,18 @@ func validateDocumentInfoObject(xRefTable *model.XRefTable) (err error) {
 		log.Validate.Println("*** validateDocumentInfoObject begin ***")
 	}
 
-	infoObjNr := xRefTable.Info.ObjectNumber.Value()
+	infoObjNr := validationObjectNumber(0, info)
 	defer func() {
 		err = model.WithValidationErrorObject(err, infoObjNr)
 	}()
 
-	hasModDate, specViolations, err := validateDocumentInfoDict(xRefTable, *xRefTable.Info)
+	hasModDate, specViolations, err := validateDocumentInfoDict(xRefTable, info)
 	if err != nil {
 		if xRefTable.ValidationMode != model.ValidationRelaxed || !errors.Is(err, model.ErrExpectedDict) {
 			return err
 		}
 		xRefTable.Info = nil
+		xRefTable.DirectInfoDict = nil
 		model.ShowSkipped("invalid info dict")
 		return nil
 	}

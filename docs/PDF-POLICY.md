@@ -12,30 +12,66 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Signature values, catalog permission structures or document timestamps | Refuse `source_signed`; signatures are not authenticated |
 | Empty unsigned signature fields, including null values | Keep |
 | `NeedsRendering true` | Refuse `source_dynamic_form` |
-| `OCProperties` | Refuse `source_optional_content` |
+| Visibility layers or orphan optional-content bindings | Refuse `source_optional_content` by default. A plan can opt in to [one proved visible Form layer](#optional-content) |
 | Broken page tree or missing/malformed page contents | Refuse `source_damaged` before semantic validation |
 | No recognizable PDF header | Refuse `source_not_pdf`; scanning follows the pinned parser, including displaced headers |
 | Initial absent, denied or nonregular input | Invalid `source_input_invalid`; unexpected read errors remain failed |
 | Source changes/disappears after inspection | Failed `source_changed` against the bytes/state actually used |
+| Undefined references in retained source objects | Refuse `source_invalid` before publication. Object allocation and merging cannot give an undefined source reference a target |
+| Cross-reference and physical object identity | Refuse `source_invalid` for a mismatched reachable object or active stream header, or for a compressed entry that selects the wrong object |
+| Effective cross-reference entry zero | Require a free entry after xref sections are resolved. Refuse an occupied entry as `source_damaged` |
+| Catalog version | Require a live object of the requested generation for an indirect `Version`. A live null supplies no override, and a valid newer version takes precedence over the header |
 | Parse/validation failure | Refuse `source_invalid`, with backend detail and object attribution when available |
 | Unsupported structure or fidelity boundary | Refuse `source_unsupported` |
 | Unexpected backend failure, including recovered panics | Fail `source_processing_failed`; this does not establish source invalidity |
 | Content, ordinary annotations and links | Keep through upstream merge, subject to the limits below |
+| AcroForm field-tree members | Require dictionaries at each `Fields` and `Kids` array entry. Null members are invalid |
 | Static AcroForm fields | Require compatible resolved `/DR`, form-level `/DA` and `/Q`; otherwise `source_form_unsupported` |
 | Later nonempty forms | Backend may namespace fields even when original names do not collide; build reports actual mappings |
 | `NeedAppearances true` | Keep request and warn that viewers may regenerate appearances |
 | XFA alongside static fields | Remove XFA, keep static form and warn |
 | Named and legacy destinations | Detach, rename collisions per occurrence and rebuild |
 | Destination outside its source page tree | Omit with warning and remove unusable references/actions |
-| Source outlines | Preserve direct/named/GoTo/Next targets per occurrence |
+| Source outlines | Preserve direct/named/GoTo/Next targets per occurrence. Refuse retained PDF 2.0 local structure destinations. PDF null in an optional `/SD` entry counts as absent |
 | Tagged structure | Preserve supported source semantics by default; explicit `structure: discard` removes claims and warns |
 | Source page labels and output intents | Remove with warnings; authored numbering generates output labels; no PDF/A/PDF/X claim |
 | Catalog `OpenAction`/`AA` and JavaScript name tree | Remove with warning |
 | Embedded-files index and catalog `AF` | Remove with warning; page FileAttachment annotations remain |
 | Catalog `PageLayout`, `PageMode`, `ViewerPreferences` | Remove before semantic validation, with `source_viewer_settings_removed` per entry |
-| Document Info and catalog-level XMP | Replace/remove; metadata attached to retained pages or other objects may remain |
+| Document Info and catalog-level XMP | Replace/remove. Read PDF 2.0 direct trailer Info without allocating an object number. Metadata attached to retained pages or other objects may remain |
 | Page/annotation actions and scripts | Keep; PDFConcat does not execute them or verify network targets |
 | Catalog URI Base | Remove and warn that retained relative actions may resolve differently |
+
+### Optional content
+
+PDFConcat checks reachable layer bindings in the whole original PDF, including
+pages omitted by selection. This covers group and membership dictionaries,
+layer state actions, visibility properties on annotations and XObjects, and
+alternate-image visibility. Direct null and live indirect null values count as
+absent in visibility slots. An empty catalog dictionary and malformed visibility
+references are refused. Staged output is parsed and checked for surviving layer
+bindings before publication.
+
+The plan setting `"optional_content": "flatten-visible-forms"` allows removal
+of a single proved always-visible Form layer. The default is `"refuse"`, which
+also applies to direct CLI operands. The supported profile has one group and one
+default configuration. Default refusal suggests the opt-in conditionally when
+the group and configuration pass the static profile checks. The opt-in
+still requires the full proof below. BaseState must be absent or ON. An explicit ON list
+may contain the single registered group. Usage is either absent or has explicit
+ON declarations for View, Print and Export with a foreground or background
+PageElement descriptor.
+Any usage applications must match the supported View, Print and Export events
+and the same group. The only supported intent is View. Layer order entries, alternate
+configurations, conditional usage and interactive state changes are refused.
+
+The proof checks the original Form owners and drawing programs, including
+resources on pages outside the selection. It refuses membership expressions,
+optional marked content, scripts, other visibility bindings and unsupported
+roles or streams. The edit removes the catalog entry and the proved Form
+visibility bindings. It preserves the appearance of Form artwork retained after
+page selection. The layer's identity and controls are lost, and the result warns
+once per affected source, even when the selected pages omit that artwork.
 
 ### Admission and viewer settings
 
@@ -152,10 +188,16 @@ gate after rereading and checking the digest.
 
 An exceptional hybrid/xref-stream chain is refused because the original-reference
 proof is limited to exclusively classic revisions. Valid xref-stream and hybrid
-inputs are supported. Other syntax, encryption, signature, content,
-structure, resource and cancellation safeguards remain. Serialized output uses
-ordinary strict reading with the exception disabled. This bounded exception does
-not establish universal producer compatibility.
+inputs are supported. An unreferenced classic xref alias can still be admitted.
+Reachable uncompressed objects must have the number and generation in their xref
+entries. Effective compressed entries must name the object number at the
+selected object-stream ordinal, and each active object stream must have a
+matching header. Every effective uncompressed row pointing to a parsed xref
+stream's physical offset must match the stream header's number and generation.
+Superseded xref rows do not select compressed objects. Other syntax, encryption,
+signature, content, structure, resource and cancellation safeguards remain.
+Serialized output uses ordinary strict reading with the exception disabled.
+This bounded exception does not establish universal producer compatibility.
 The source and provenance of the local reader are in
 [`third_party/pdfcpu`](../third_party/pdfcpu/PROVENANCE.md).
 
@@ -273,19 +315,36 @@ original validation precedes omission. Production-print/imposition fidelity rema
 unsupported. Reports expose actual source and expected output dimensions even on
 later refusal; `output_size` does not mean that publication occurred.
 
-The destination restrictions are:
+Destination positions are expressed in PDF default user space. Fitting uses the
+target page's placement, including its native frame and baked rotation.
 
-| Destination | Fitting behavior |
+| Local destination on a transformed target | Fitting behavior |
 | --- | --- |
-| Explicit numeric position coordinates: XYZ left/top, FitH/FitBH top, FitV/FitBV left, or FitR rectangle coordinates | Refuse `fit_destination_unsupported` only when the retained TARGET page transforms |
-| Whole-page Fit/FitB, null-only position coordinates, or zoom-only XYZ | Supported |
-| Remote destinations, removed catalog actions, or omitted out-of-tree named definitions | Do not trigger the coordinate guard |
+| XYZ | Map numeric left and top, including zero. Quarter turns exchange the axes and their nullable positions. Preserve authored zoom, including zero or null for the reader's current zoom. |
+| FitR | Map a finite, positive rectangle to its enclosing bounds. Refuse reversed, collapsed or unrepresentable bounds. |
+| FitH, FitBH, FitV, FitBV | Map a numeric axis coordinate on an unrotated target. Refuse numeric positions on rotated targets. Null positions retain their mode. |
+| Fit, FitB | Preserve the mode relative to the composed page or its content bounds. |
 
-The coordinate guard covers retained named definitions, including unused ones,
-legacy names, direct/indirect targets, links, outlines and chained local GoTo
-actions. It follows target disposition, never the originating link page. Numeric
-tails targeting kept pages remain unchanged apart from page-reference rebinding. Print-box, bleed and imposition fidelity beyond these
-limits is not guaranteed.
+Remapping covers retained named definitions, including unused ones, legacy
+names, and direct link, outline and local GoTo targets. Numeric positions can
+lie outside the page frame. For large coordinates, fitting uses the exact parsed
+integer or real value. It preserves results representable as PDF integers or
+binary64 reals and refuses large-coordinate transforms that would lose precision.
+The reader controls viewport clamping. Kept target pages retain authored operands
+and receive normal page-reference rebinding.
+Indirect modes and operands resolve by object number and generation before
+merge. Optional positions and zoom resolve to PDF null when the operand is null
+or its reference is undefined. Null is refused for a required mode or FitR
+coordinate. Retained local destination slots carry the resolved scalars.
+References in the enclosing local navigation graph must identify a live object
+by number and generation. This covers destination bindings, retained action
+chains and named-destination trees. A live null in an optional navigation slot,
+including an annotation or form container, counts as absent. A local GoTo action requires a destination array
+or name. Selection can still remove bindings to omitted pages and retain their
+independently valid action siblings.
+Remote targets and selection omissions keep their existing behavior. Warnings
+identify changed original bindings. Verification reads the staged bytes and
+checks their local destinations against the composed page occurrences.
 
 Fitting interprets annotation Rect and appearance BBox opposite corners in
 either order, preserving their displayed orientation. It uses the effective source frame: CropBox intersected with MediaBox,
@@ -469,16 +528,23 @@ writing: output is at least PDF 1.7, or PDF 2.0 if any source is 2.0.
 
 ### Output verification
 
-The staged, serialized PDF is reopened with strict validation and without source
-normalization. Its catalog and name-tree policy is checked before semantic
-validation can change the document. Encryption, forbidden catalog entries, XFA,
-broken page trees, reported repairs and changes to page/content identity are
-rejected. Page count must match the resolved packet before publication. Reopened
-metadata, timestamp, viewer preference, numbering spans, structure policy and
-coverage must also match resolved expectations. This check is independent of
-source admission policy, but uses the same PDF engine; the test suite also uses
-qpdf and Poppler for independent structural and rendering evidence. Strict
-validation is not a complete PDF conformance or arbitrary-input fidelity proof.
+The verifier reads the completed PDF through an independent, length-bounded
+reader on the owned staging handle. It can read that handle even when the
+inherited mode has no read bits. It parses with strict validation. Every
+reference reachable from the effective trailer must resolve by object number
+and generation to a matching physical object. Live indirect nulls satisfy that
+check. The reader also checks xref stream headers and compressed object-stream
+entries.
+
+The verifier checks catalog and name-tree policy before semantic validation can
+change the document. It rejects encryption, forbidden catalog entries, XFA,
+broken page trees, reported repairs, and changes to page or content identity.
+Page count, metadata, timestamp, viewer preference, numbering spans, structure
+policy, and coverage must match resolved expectations before publication. The
+check uses the same PDF engine as source admission with a separate output
+policy. Tests also use qpdf and Poppler for independent structural and rendering
+evidence. Strict validation does not prove complete PDF conformance or fidelity
+for arbitrary inputs.
 
 ## Text and pruning
 

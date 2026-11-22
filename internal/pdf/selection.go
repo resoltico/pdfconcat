@@ -27,11 +27,11 @@ type SelectionRequest struct {
 // Inspect reads and validates a whole source once. Each ephemeral view
 // owns its containers; stream bytes stay immutable and shared during inspection.
 func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
-	return InspectReader(c, bytes.NewReader(data), sha256.Sum256(data), int64(len(data)), policy, requests)
+	return InspectReader(c, bytes.NewReader(data), sha256.Sum256(data), int64(len(data)), SourcePolicies{Structure: policy}, requests)
 }
 
 // InspectReader admits a seekable snapshot with its acquisition facts.
-func InspectReader(c context.Context, reader io.ReadSeeker, digest [32]byte, size int64, policy packet.StructurePolicy, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
+func InspectReader(c context.Context, reader io.ReadSeeker, digest [32]byte, size int64, policies SourcePolicies, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
 	occurrences = make([]*OccurrenceFacts, len(requests))
 	defer func() {
 		facts.SHA256 = digest
@@ -42,7 +42,8 @@ func InspectReader(c context.Context, reader io.ReadSeeker, digest [32]byte, siz
 			ds = append(ds, d)
 		}
 	}()
-	s, origins, findings, err := readSourceReader(c, reader, policy)
+	s, origins, findings, err := readSourceReader(c, reader, policies)
+	policy := policies.Structure
 	ds = append(ds, findings...)
 	if err != nil {
 		if s != nil && s.XRefTable != nil {
@@ -201,37 +202,48 @@ func analyzeSelection(c context.Context, s *model.Context, origins sourceOrigins
 		ds = append(ds, d)
 		return facts, ds
 	}
+	navigation, e := planFittedNavigation(c, view, geometries, selectedFacts.fitting, origins)
+	if e != nil {
+		return facts, append(ds, diagnostic(e, diag.SourceInvalid))
+	}
+	selectedFacts.fitFindings = append(selectedFacts.fitFindings, navigation.findings...)
 	ds = append(ds, selectedFacts.fitFindings...)
 	if diag.Outcome(selectedFacts.fitFindings) != "ok" {
 		return facts, ds
 	}
+	var tagged bool
 	if policy != packet.StructureDiscard {
-		root, e := structureRoot(view)
-		if e == nil && root != nil {
+		var root types.Dict
+		root, e = structureRoot(view)
+		tagged = root != nil
+		if e == nil && tagged {
 			e = pruneStructure(c, view)
-			if e == nil && fitting != nil {
-				e = fitContext(c, view, selectedFacts.fitting, origins)
-			}
-			if e == nil && fitting != nil {
-				root, e = structureRoot(view)
-				if e == nil {
-					var part structurePart
-					part, e = captureStructurePart(view, root)
-					if e == nil {
-						e = combineStructure(c, view, []structurePart{part})
-					}
-				}
-			}
-			if e == nil && fitting != nil {
-				e = validateStructure(c, view)
-			}
-		}
-		if e != nil {
-			d := diagnostic(e, diag.SourceInvalid)
-			ds = append(ds, d)
-			return facts, ds
 		}
 	}
+	if e == nil && fitting != nil && (tagged || len(origins.undefinedReferences) > 0) {
+		e = applyFitting(c, view, geometries, selectedFacts.fitting, navigation)
+	}
+	if e == nil {
+		e = checkRetainedSourceReferences(c, view, origins)
+	}
+	if e == nil && tagged && fitting != nil {
+		var root types.Dict
+		root, e = structureRoot(view)
+		if e == nil {
+			var part structurePart
+			part, e = captureStructurePart(view, root)
+			if e == nil {
+				e = combineStructure(c, view, []structurePart{part})
+			}
+		}
+		if e == nil {
+			e = validateStructure(c, view)
+		}
+	}
+	if e != nil {
+		ds = append(ds, diagnostic(e, diag.SourceInvalid))
+	}
+
 	return facts, ds
 }
 
@@ -285,6 +297,9 @@ func selectionView(c context.Context, s *model.Context) (*model.Context, error) 
 		xref.Size = &size
 	}
 	xref.RootDict = nil
+	if s.DirectInfoDict != nil {
+		xref.DirectInfoDict = clonedDirectDict(s.DirectInfoDict)
+	}
 	xref.Names = map[string]*model.Node{}
 	xref.Dests = nil
 	xref.NameRefs = map[string]model.NameMap{}

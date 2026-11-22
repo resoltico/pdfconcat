@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// PDFConcat modifications: Copyright (c) 2026 Ervins Strauhmanis, AGPL-3.0-only.
+// Upstream material retains the Apache-2.0 terms above.
+
 package types
 
 import (
@@ -235,6 +238,7 @@ type ObjectStreamDict struct {
 	FirstObjOffset int
 	MaxDecodeBytes int64
 	ObjArray       Array
+	ObjectNumbers  []int // Prolog object numbers in ordinal order, populated by the reader.
 }
 
 // NewObjectStreamDict creates a new ObjectStreamDict object.

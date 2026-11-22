@@ -61,39 +61,32 @@ func build(c context.Context, j packet.Plan, composition *composition, roles fil
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
 	}
-	reader, readErr := files.OpenRegular(c, staged.Path(), 0)
-	if readErr != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputInvalid, readErr, j.Output()))
-		return out
-	}
-	err = pdf.VerifyAssemblyReader(c, reader, layout.TotalPages, assembly)
-	closeErr := reader.Close()
-	if err != nil {
-		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
-		return out
-	}
-	if closeErr != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputInvalid, closeErr, j.Output()))
-		return out
-	}
-	if err = c.Err(); err != nil {
-		out.diagnostics = append(out.diagnostics, diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error())))
-		return out
-	}
-	if ds := roles.CheckOutput(); hasErrors(ds) {
-		out.diagnostics = append(out.diagnostics, ds...)
-		return out
-	}
-	published, err := staged.Commit(roles.Overwrite)
+	published, findings := verifyAndPublishPDF(c, staged, roles, assembled, layout.TotalPages, assembly)
+	out.diagnostics = append(out.diagnostics, findings...)
 	out.output.Published = published
 	if published {
 		out.output.SHA256 = hex.EncodeToString(hash.Sum(nil))
 		out.output.Bytes = knownCount(counter.n)
 	}
-	if err != nil {
-		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputPublishFailed, err, j.Output()))
-	}
 	return out
+}
+
+func verifyAndPublishPDF(c context.Context, staged *files.Staged, roles files.Roles, assembled pdf.Assembled, pages int64, assembly pdf.Assembly) (bool, []diag.Diagnostic) {
+	reader, err := staged.Reader(c)
+	if err != nil {
+		return false, []diag.Diagnostic{ioDiagnostic(diag.OutputInvalid, err, roles.Output)}
+	}
+	if err = assembled.VerifyReader(c, reader, pages, assembly); err != nil {
+		return false, []diag.Diagnostic{pdf.Diagnostic(err)}
+	}
+	if err = c.Err(); err != nil {
+		return false, []diag.Diagnostic{diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error()))}
+	}
+	published, findings, err := roles.Publish(staged, packet.OutputDestination)
+	if err != nil {
+		findings = append(findings, publicationDiagnostic(packet.OutputDestination, roles.Output, roles.InputsKnown, published, err))
+	}
+	return published, findings
 }
 
 type countWriter struct {

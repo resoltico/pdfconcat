@@ -13,12 +13,48 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 
 	"github.com/resoltico/pdfconcat/internal/cli"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/plan"
 )
+
+// Encode class members as JSON escapes so regex engines receive literal code
+// points. Encode supplementary characters as JSON surrogate pairs.
+func unicodeClass(contains func(rune) bool, negate bool) json.RawMessage {
+	var b strings.Builder
+	b.WriteString(`"[`)
+	if negate {
+		b.WriteByte('^')
+	}
+	write := func(r rune) {
+		if r <= 0xffff {
+			fmt.Fprintf(&b, "\\u%04x", r)
+		} else {
+			high, low := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, "\\u%04x\\u%04x", high, low)
+		}
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if !contains(r) {
+			continue
+		}
+		first := r
+		for r < unicode.MaxRune && contains(r+1) {
+			r++
+		}
+		write(first)
+		if r != first {
+			b.WriteByte('-')
+			write(r)
+		}
+	}
+	b.WriteString(`]"`)
+	return json.RawMessage(b.String())
+}
 
 func schema(data []byte, values map[string]any) ([]byte, error) {
 	var document map[string]any
@@ -64,6 +100,9 @@ func generated(root string) (map[string][]byte, error) {
 		"$defs/page/properties/text/properties/overflow/enum": packet.Overflow("").Values(),
 	}
 	values["properties/version/const"] = plan.Version
+	values["properties/optional_content/enum"] = packet.OptionalContentRefuse.Values()
+	values["properties/optional_content/default"] = packet.OptionalContentRefuse
+	values["properties/optional_content/description"] = packet.OptionalContentDescription()
 	values["properties/fitting/description"] = strings.Join([]string{
 		packet.FittingDescription(), packet.FittingNavigationDescription(),
 		packet.FittingAppearanceDescription(), packet.FittingHitAreaDescription(),
@@ -84,6 +123,8 @@ func generated(root string) (map[string][]byte, error) {
 		values["properties/metadata/properties/"+field+"/maxLength"] = packet.MaxAuthoredFieldRunes
 	}
 	values["$defs/title/maxLength"] = packet.MaxAuthoredFieldRunes
+	values["$defs/title/allOf/0/pattern"] = unicodeClass(packet.TitleRuneWhitespace, true)
+	values["$defs/title/allOf/1/not/pattern"] = unicodeClass(packet.TitleRuneForbidden, false)
 	values["$defs/page/properties/text/properties/value/maxLength"] = packet.MaxAuthoredFieldRunes
 	for _, kind := range []string{"length", "nonnegativeLength", "positiveLength"} {
 		values["$defs/"+kind+"/oneOf/0/maximum"] = packet.MaxSide

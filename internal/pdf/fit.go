@@ -66,13 +66,25 @@ func fitGeometries(c context.Context, s *model.Context, geometries []pageGeometr
 	if e != nil {
 		return e
 	}
+	navigation, e := planFittedNavigation(c, s, geometries, plans, origins)
+	if e != nil {
+		return e
+	}
+	findings = append(findings, navigation.findings...)
 	for _, d := range findings {
 		if d.Severity == diag.Error {
 			return &policyError{finding: d}
 		}
 	}
+	return applyFitting(c, s, geometries, plans, navigation)
+}
+
+func applyFitting(c context.Context, s *model.Context, geometries []pageGeometry, plans fittingPlan, navigation fittedNavigation) error {
 	if !anyTransform(plans) {
 		return c.Err()
+	}
+	if err := navigation.apply(c, s); err != nil {
+		return err
 	}
 	contents, err := capturePageContent(c, s)
 	if err != nil {

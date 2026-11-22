@@ -152,10 +152,6 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 	inspectSelection(t, pdffixture.Form("whole"), []SelectionRequest{{Item: "full", Pages: []packet.PageRange{{First: 1, Last: 2}}}})
 
 	doc := pdffixture.Links("links")
-	source, views := inspectSelection(t, doc, []SelectionRequest{{Item: "one", Pages: []packet.PageRange{{First: 1, Last: 1}}}, {Item: "two", Pages: []packet.PageRange{{First: 2, Last: 2}}}})
-	if len(source.CoordinateDestinations) == 0 || (len(views["one"].CoordinateDestinations) > 0) || (len(views["two"].CoordinateDestinations) > 0) {
-		t.Fatalf("omitted links still restrict fitting: %+v", views)
-	}
 	_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "one", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}, &packet.SourceItem{Ref: "two", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 	if len(ds) > 0 {
 		t.Fatal(ds)
@@ -165,7 +161,7 @@ func TestPartialSelectionSafetyAndSelectedCompatibility(t *testing.T) {
 	last := bytes.LastIndex(d.Objs[3], []byte(">>"))
 	d.Objs[3] = append(append(append([]byte{}, d.Objs[3][:last]...), []byte(" /Annots [8 0 R] ")...), d.Objs[3][last:]...)
 	d.Objs = append(d.Objs, []byte("<< /Subtype /Text /Rect [10 10 20 20] >>"))
-	_, views = inspectSelection(t, d, []SelectionRequest{{Item: "omit", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "retain", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
+	_, views := inspectSelection(t, d, []SelectionRequest{{Item: "omit", Pages: []packet.PageRange{{First: 2, Last: 2}}}, {Item: "retain", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
 	if views["omit"].PDF20AppearanceIssue.Present() || views["retain"].PDF20AppearanceIssue.Present() == false {
 		t.Fatal(views)
 	}
@@ -516,10 +512,6 @@ func TestSelectedAdditionalActionsDoNotRetainNumericFitRestriction(t *testing.T)
 	for _, owner := range []string{"page", "screen"} {
 		t.Run(owner, func(t *testing.T) {
 			doc := additionalActionSelection(owner, "indirect", false)
-			whole, views := inspectSelection(t, doc, []SelectionRequest{{Item: "selected", Pages: []packet.PageRange{{First: 1, Last: 1}}}})
-			if len(whole.CoordinateDestinations) == 0 || (len(views["selected"].CoordinateDestinations) > 0) {
-				t.Fatalf("omitted additional action still restricts fitting: %+v", views)
-			}
 			_, ds := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{Ref: "selected", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}}}, packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}))
 			if len(ds) > 0 {
 				t.Fatal(ds)

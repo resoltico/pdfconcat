@@ -34,12 +34,9 @@ func serialize(c context.Context, s *model.Context, w io.Writer) error {
 	for next < len(e.order) {
 		ref := e.order[next]
 		next++
-		value, err := s.Dereference(ref)
+		value, err := e.indirectObject(ref)
 		if err != nil {
 			return err
-		}
-		if value == nil {
-			return fmt.Errorf("dangling output object %d", ref.ObjectNumber.Value())
 		}
 		if err := e.object(value, 0); err != nil {
 			return err
@@ -57,7 +54,7 @@ func serialize(c context.Context, s *model.Context, w io.Writer) error {
 		offsets[i] = out.n + int64(e.sink.Buffered())
 		e.integer(int64(i + 1))
 		e.text(" 0 obj\n")
-		value, err := s.Dereference(ref)
+		value, err := e.indirectObject(ref)
 		if err != nil {
 			return err
 		}
@@ -111,6 +108,15 @@ type encoder struct {
 	order  []types.IndirectRef
 	sink   *bufio.Writer
 	err    error
+}
+
+// A live indirect object can contain null. Validate object identity before
+// dereferencing so discovery and emission use the same reference rules.
+func (e *encoder) indirectObject(ref types.IndirectRef) (types.Object, error) {
+	if !liveReference(e.source, ref) {
+		return nil, fmt.Errorf("dangling output object %d %d R", ref.ObjectNumber.Value(), ref.GenerationNumber.Value())
+	}
+	return e.source.Dereference(ref)
 }
 
 func (e *encoder) text(s string) {

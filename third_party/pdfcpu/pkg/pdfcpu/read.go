@@ -56,6 +56,9 @@ var (
 	// ErrCorruptHeader reports a missing or malformed PDF header.
 	ErrCorruptHeader = errors.New("no header version available")
 
+	// ErrOccupiedFreeListHead reports an in-use entry for object zero.
+	ErrOccupiedFreeListHead = errors.New("cross-reference entry zero must be free")
+
 	// ErrEmptyInput reports an empty input stream passed to the PDF reader.
 	ErrEmptyInput = errors.New("the file could not be opened because it is empty")
 
@@ -426,6 +429,13 @@ func parseXRefTableEntry(xRefTable *model.XRefTable, fields []string, objNr int,
 	offset, generation, entryType, err := decodeSubsection(fields)
 	if err != nil {
 		return err
+	}
+
+	// Keep the effective row's original classification in strict mode.
+	// The table-level check rejects an in-use head after subsection resolution.
+	if objNr == 0 && entryType == "n" && xRefTable.ValidationMode == model.ValidationStrict {
+		xRefTable.Table[0] = &model.XRefTableEntry{Offset: &offset, Generation: &generation, Incr: incr}
+		return nil
 	}
 
 	if entryType == "n" && objNr > 0 && offset == 0 {
@@ -811,6 +821,14 @@ func parseObjectStreamWithBudget(c context.Context, osd *types.ObjectStreamDict,
 	}
 
 	osd.ObjArray = objArray
+	if validationMode == model.ValidationStrict {
+		osd.ObjectNumbers = make([]int, entryCount)
+		for i := range osd.ObjectNumbers {
+			if number, err := strconv.Atoi(objs[2*i]); err == nil {
+				osd.ObjectNumbers[i] = number
+			}
+		}
+	}
 
 	if log.ReadEnabled() {
 		log.Read.Println("parseObjectStream end")
@@ -1057,7 +1075,7 @@ func xRefStreamDict(c context.Context, ctx *model.Context, o types.Object, objNr
 	return xsd, nil
 }
 
-func processXRefStream(ctx *model.Context, xsd *types.XRefStreamDict, objNr *int, offset *int64, offExtra int64, incr int) (prevOffset *int64, err error) {
+func processXRefStream(ctx *model.Context, xsd *types.XRefStreamDict, objNr, genNr int, offset *int64, offExtra int64, incr int) (prevOffset *int64, err error) {
 	if log.ReadEnabled() {
 		log.Read.Println("processXRefStream: begin")
 	}
@@ -1071,11 +1089,16 @@ func processXRefStream(ctx *model.Context, xsd *types.XRefStreamDict, objNr *int
 		return nil, err
 	}
 
-	*offset += offExtra
-
-	if entry, ok := ctx.Table[*objNr]; ok && entry.Offset != nil && *entry.Offset == *offset {
+	if ctx.XRefTable.ValidationMode == model.ValidationStrict {
+		if ctx.Read.XRefStreamHeaders == nil {
+			ctx.Read.XRefStreamHeaders = make(map[int64]types.IndirectRef)
+		}
+		ctx.Read.XRefStreamHeaders[*offset] = *types.NewIndirectRef(objNr, genNr)
+	}
+	if entry := ctx.Table[objNr]; uncompressedXRefEntry(entry) && *entry.Offset == *offset {
 		entry.Object = *xsd
 	}
+	*offset += offExtra
 
 	prevOffset = xsd.PreviousOffset
 
@@ -1138,7 +1161,43 @@ func parseXRefStream(c context.Context, ctx *model.Context, rd io.Reader, offset
 		return nil, err
 	}
 
-	return processXRefStream(ctx, xsd, objNr, offset, offExtra, incr)
+	return processXRefStream(ctx, xsd, *objNr, *genNr, offset, offExtra, incr)
+}
+
+func uncompressedXRefEntry(entry *model.XRefTableEntry) bool {
+	return entry != nil && !entry.Free && !entry.Compressed &&
+		entry.Offset != nil && entry.Generation != nil
+}
+
+// A parsed xref stream participates in the reader independently of graph
+// references. Effective rows at its physical offset must name its header.
+func checkXRefStreamHeaders(c context.Context, ctx *model.Context) error {
+	headers := ctx.Read.XRefStreamHeaders
+	ctx.Read.XRefStreamHeaders = nil
+	if len(headers) == 0 {
+		return nil
+	}
+	var mismatch *ObjectIdentityError
+	for number, entry := range ctx.Table {
+		if err := c.Err(); err != nil {
+			return err
+		}
+		if !uncompressedXRefEntry(entry) {
+			continue
+		}
+		actual, found := headers[*entry.Offset]
+		if !found {
+			continue
+		}
+		expected := *types.NewIndirectRef(number, *entry.Generation)
+		if expected != actual && (mismatch == nil || number < mismatch.Expected.ObjectNumber.Value()) {
+			mismatch = &ObjectIdentityError{Expected: expected, Actual: actual}
+		}
+	}
+	if mismatch != nil {
+		return mismatch
+	}
+	return nil
 }
 
 // Parse an xRefStream for a hybrid PDF file.
@@ -1248,6 +1307,10 @@ func materializeDirectInfoDict(xRefTable *model.XRefTable) error {
 		xRefTable.DirectInfoDict = nil
 		return nil
 	}
+	if xRefTable.Conf != nil && xRefTable.Conf.KeepDirectInfo {
+		return nil
+	}
+
 	if xRefTable.Size == nil {
 		// All existing objects have been read; allocate beyond their highest object number.
 		size := xRefTable.MaxObjNr + 1
@@ -1314,6 +1377,15 @@ func parseTrailerID(xRefTable *model.XRefTable, d types.Dict) error {
 func parseTrailer(xRefTable *model.XRefTable, d types.Dict) error {
 	if log.ReadEnabled() {
 		log.Read.Println("parseTrailer begin")
+	}
+
+	if xRefTable.OriginalTrailer == nil {
+		xRefTable.OriginalTrailer = types.Dict{}
+	}
+	for key, value := range d {
+		if _, exists := xRefTable.OriginalTrailer[key]; !exists {
+			xRefTable.OriginalTrailer[key] = value
+		}
 	}
 
 	if indRef := d.IndirectRefEntry("Encrypt"); indRef != nil {
@@ -1472,14 +1544,6 @@ func parseTrailerDict(c context.Context, ctx *model.Context, trailerDict types.D
 	}
 
 	xRefTable := ctx.XRefTable
-	if xRefTable.OriginalTrailer == nil {
-		xRefTable.OriginalTrailer = types.Dict{}
-	}
-	for key, value := range trailerDict {
-		if _, exists := xRefTable.OriginalTrailer[key]; !exists {
-			xRefTable.OriginalTrailer[key] = value
-		}
-	}
 
 	if err := parseTrailer(xRefTable, trailerDict); err != nil {
 		return nil, err
@@ -2340,6 +2404,15 @@ func readXRefTable(c context.Context, ctx *model.Context) (err error) {
 		return
 	}
 
+	// Check the effective table, after resolving classic, stream and hybrid
+	// sections and older revisions. A missing head is supplied below.
+	if head := ctx.Table[0]; head != nil && !head.Free {
+		return ErrOccupiedFreeListHead
+	}
+	if err := checkXRefStreamHeaders(c, ctx); err != nil {
+		return err
+	}
+
 	//Log list of free objects (not the "free list").
 	//log.Read.Printf("freelist: %v\n", ctx.freeObjects())
 
@@ -2922,6 +2995,28 @@ func bufferedObject(c context.Context, ctx *model.Context, rd io.Reader) ([]byte
 	return buf, endInd, streamInd, streamOffset, nil
 }
 
+// ObjectIdentityError reports a disagreement between an effective xref entry
+// and the object header or object-stream directory at its location.
+type ObjectIdentityError struct {
+	Expected, Actual types.IndirectRef
+}
+
+func (e *ObjectIdentityError) Error() string {
+	return fmt.Sprintf("xref identity %s points to physical object %s", e.Expected.PDFString(), e.Actual.PDFString())
+}
+
+func recordObjectHeader(read *model.ReadContext, number, generation, actualNumber, actualGeneration int) {
+	expected := *types.NewIndirectRef(number, generation)
+	if number == actualNumber && generation == actualGeneration {
+		delete(read.MismatchedObjectHeaders, expected)
+		return
+	}
+	if read.MismatchedObjectHeaders == nil {
+		read.MismatchedObjectHeaders = make(map[types.IndirectRef]types.IndirectRef)
+	}
+	read.MismatchedObjectHeaders[expected] = *types.NewIndirectRef(actualNumber, actualGeneration)
+}
+
 func object(c context.Context, ctx *model.Context, offset int64, objNr, genNr int) (o types.Object, endInd, streamInd int, streamOffset int64, err error) {
 	var rd io.Reader
 
@@ -2984,6 +3079,7 @@ func object(c context.Context, ctx *model.Context, offset int64, objNr, genNr in
 	if objectNr, generationNr, err = model.ParseObjectAttributes(&l); err != nil {
 		return nil, 0, 0, 0, err
 	}
+	recordObjectHeader(ctx.Read, objNr, genNr, *objectNr, *generationNr)
 
 	if objNr != *objectNr || genNr != *generationNr {
 		// This is suspicious, but ok if two object numbers point to same offset and only one of them is used
@@ -3643,6 +3739,13 @@ func decompressXRefTableEntry(xRefTable *model.XRefTable, objNr int, entry *mode
 	if err != nil {
 		return fmt.Errorf("decompressXRefTableEntry: problem dereferencing object stream %d: %w", *entry.ObjectStream, err)
 	}
+	if xRefTable.ValidationMode == model.ValidationStrict {
+		index := *entry.ObjectStreamInd
+		if number := sd.ObjectNumbers[index]; number != objNr {
+			err := &ObjectIdentityError{Expected: *types.NewIndirectRef(objNr, 0), Actual: *types.NewIndirectRef(number, 0)}
+			return fmt.Errorf("object stream %d index %d: %w", *entry.ObjectStream, index, err)
+		}
+	}
 
 	// Save object to XRefRableEntry.
 	g := 0
@@ -3747,6 +3850,12 @@ func decodeObjectStream(c context.Context, ctx *model.Context, objNr int, budget
 	o, err := ParseObject(c, ctx, *entry.Offset, objNr, *entry.Generation)
 	if err != nil {
 		return fmt.Errorf("object stream obj#%d: parse object: %w", objNr, err)
+	}
+	if ctx.XRefTable.ValidationMode == model.ValidationStrict {
+		ref := *types.NewIndirectRef(objNr, *entry.Generation)
+		if actual, mismatched := ctx.Read.MismatchedObjectHeaders[ref]; mismatched {
+			return &ObjectIdentityError{Expected: ref, Actual: actual}
+		}
 	}
 	if o == nil {
 		return fmt.Errorf("object stream obj#%d: %w", objNr, errCorruptObjectStream)

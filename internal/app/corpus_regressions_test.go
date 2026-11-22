@@ -26,7 +26,7 @@ func TestPlanBytesLabelIsNotAPhysicalInput(t *testing.T) {
 	label := filepath.Join(dir, "virtual.json")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	r := app.Execute(ctx, app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.PlanBytes{Data: []byte(`{"version":8,"items":[{"source":"missing.pdf"}]}`), Label: label}, WorkingDir: dir, Report: label})
+	r := app.Execute(ctx, app.Request{InspectionWorkers: 1, Operation: app.Check, Input: app.PlanBytes{Data: []byte(`{"version":9,"items":[{"source":"missing.pdf"}]}`), Label: label}, WorkingDir: dir, Report: label})
 	if r.Status != "interrupted" || !r.Report.Written || code(r, "report_is_input") {
 		t.Fatal(r)
 	}

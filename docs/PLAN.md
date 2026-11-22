@@ -1,6 +1,6 @@
-# Plan v8
+# Plan v9
 
-A plan is one UTF-8 JSON object with `version: 8`. Use source objects to select
+A plan is one UTF-8 JSON object with `version: 9`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
@@ -13,7 +13,7 @@ packet; its input paths are relative to the directory where you save the plan.
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -71,7 +71,7 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `8` |
+| `version` | Required integer token `9` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
@@ -80,6 +80,7 @@ composition example uses titled groups and `divider` for that purpose.
 | `page_numbers` | Optional numbering, labels and overlay placement |
 | `metadata` | Optional authored `title`, `author`, `subject`, `language` |
 | `timestamp` | Optional nonnegative UTC Unix seconds, through 253402300799 |
+| `optional_content` | `refuse` (default) or `flatten-visible-forms` |
 | `structure` | `preserve` (default) or explicit `discard` |
 | `$schema` | Optional editor schema URL; ignored string |
 
@@ -126,7 +127,7 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "output": "reordered.pdf",
   "items": [
     { "source": "source.pdf", "pages": [[3, 3]] },
@@ -257,6 +258,17 @@ when painted ink fits. Numbers may overlap existing source content; there is no
 source-content overlap detector or reflow. Generated text is laid out within the
 reserved interval; explicit `overflow: allow` still warns about overflow.
 Unfitted source content and geometry remain intact outside the overlay.
+
+## Optional content
+
+The packet-level `optional_content` setting applies to all source admissions,
+including the full original PDF when the plan selects only some pages. Use
+`"optional_content": "flatten-visible-forms"` to accept removal of the identity
+and controls of a [proved always-visible Form layer](PDF-POLICY.md#optional-content).
+Retained Form artwork stays visible for View, Print and Export. Check and Build
+report a warning identifying the original group and affected items, including
+when an item selects pages without that artwork. Plain sources and generated
+pages work with either policy.
 
 ## Document identity, time and structure
 
@@ -392,7 +404,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
@@ -430,7 +442,7 @@ contents or page-number overlay layout. For example, a generated page can declar
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "items": [{ "page": {
     "size": "A4",
     "text": {
@@ -487,7 +499,7 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 8 is supported; version checks follow the same first-fault order.
+version 9 is supported; version checks follow the same first-fault order.
 
 After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
 `plan_syntax`; supply a JSON plan object.
@@ -507,7 +519,9 @@ rejected. Missing/unsupported version is
 `plan_version_unsupported`; missing items is `plan_type`; empty arrays and low
 counts are `plan_value`; excessive/overflowing counts are `plan_limit`.
 
-`pdfconcat schema plan` prints the editor schema. Standard JSON Schema cannot
+`pdfconcat schema plan` prints the editor schema. Its title patterns use
+Unicode character classes derived from the same rules as the decoder.
+Standard JSON Schema cannot
 distinguish integer lexemes such as `3` and `3.0`; encoding, duplicate members,
 converted unit bounds, platform paths and aggregate limits also require the
 decoder. Schema validity alone is not a successful check of a packet.

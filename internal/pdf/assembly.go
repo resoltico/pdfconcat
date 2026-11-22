@@ -38,16 +38,17 @@ type SourceInput interface {
 
 // Assembly is the complete ordered packet and its shared resources.
 type Assembly struct {
-	Coverage     string
-	Numbering    []packet.NumberSpan
-	Metadata     *packet.Metadata
-	Timestamp    *int64
-	Structure    packet.StructurePolicy
-	Parts        []Part
-	Sections     []packet.Section
-	Fitting      *packet.FitPolicy
-	NumberLayout *compose.PageNumberLayout
-	Fonts        map[typeset.Digest]typeset.EmbeddedFont
+	Coverage        string
+	Numbering       []packet.NumberSpan
+	Metadata        *packet.Metadata
+	Timestamp       *int64
+	Structure       packet.StructurePolicy
+	OptionalContent packet.OptionalContentPolicy
+	Parts           []Part
+	Sections        []packet.Section
+	Fitting         *packet.FitPolicy
+	NumberLayout    *compose.PageNumberLayout
+	Fonts           map[typeset.Digest]typeset.EmbeddedFont
 }
 
 // PartResult reports established assembly facts for one physical span.
@@ -58,6 +59,7 @@ type PartResult struct {
 
 // Assembled binds actual facts to owners; absent or unestablished entries are unknown.
 type Assembled struct {
+	navigation  *navigationObservation
 	Parts       map[packet.PartIdentity]PartResult
 	Diagnostics []diag.Diagnostic
 }

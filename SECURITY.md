@@ -73,9 +73,12 @@ The backend retains its format-specific cryptographic implementations, but
 PDFConcat supplies no password interface and does not create encrypted output.
 
 Encrypted sources (including empty-password encryption), signature values,
-catalog permission structures, timestamps, dynamic forms, optional content and
-known content-dropping page-tree shapes are refused. Empty
-unsigned signature fields remain supported. Signatures are not authenticated.
+catalog permission structures, timestamps, dynamic forms and known
+content-dropping page-tree shapes are refused. Empty unsigned signature fields
+remain supported. Signatures are not authenticated. Optional-content bindings
+are refused by default. A plan can explicitly admit a [proved visible Form
+layer](docs/PDF-POLICY.md#optional-content) and remove its controls. This
+admission requires whole-source proof and retains the general source safeguards.
 Viewer directives are removed from imported catalogs after original-file checks;
 this does not sanitize retained content. Serialized output is checked separately
 with strict validation and without source normalization before publication.
@@ -110,35 +113,22 @@ Output and report destinations need an existing parent directory, reject
 nonregular targets and protect known plans, fonts and sources by native file
 identity and a conservative comparison for absent names. The same role check
 keeps output and report separate. Existing regular destinations require
-`--overwrite`. Reports are rechecked after PDF publication.
+`--overwrite`. Reports are rechecked after PDF publication and report serialization.
 With undecoded plans, a report can only create a new path even if
 overwrite was requested. A trailing error does not erase the fact that an output
 has already been saved; do not blindly retry a result with `output.published: true`.
 
-Files use ordinary umask permissions; replacements retain their old mode. No
-private ACL or recovery-copy guarantee is made. Temporary files are siblings of
-the target during publication. Large source snapshots spill to private files in
-the operating system's temporary directory. Without overwrite, native no-replace rename has a hard-link fallback;
-with overwrite, publication uses a replacing rename. Some network/share
-filesystems do not support these semantics or directory durability. There is no
-universal network-filesystem guarantee. A backend/output/report failure never
-intentionally rolls back an already-published PDF. See
+New files use ordinary umask permissions. Replacements use the mode observed at
+the final destination check. PDFConcat stages output next to its destination
+and verifies PDF bytes through the owned handle. Large source snapshots spill
+to private files in the operating system's temporary directory. Publication
+requires native rename or hard-link semantics and, on Unix, directory sync.
+Network shares may lack those guarantees. PDFConcat makes no private ACL or
+recovery-copy guarantee. Output and report publication are independent. See
 [saved-output and report behaviour](docs/CLI.md#reports-and-committed-state)
 for the result fields that record these outcomes.
 
-The source-only zero-offset xref exception is bounded by original typed-reference
-checks and revision tombstones. It does not enable relaxed input parsing or
-runtime repair programs. Exceptional hybrid/xref-stream chains remain refused.
-Original input reservations include every consumed external font and protect
-both publication destinations; undecoded plans keep create-new-only reports.
-
-Selective fitting never bypasses whole-source admission or PDF2 output checks.
-Only transformed target pages impose numeric-destination guards. A shared annotation
-dictionary refuses when any of its bindings transforms. Widgets require proved
-kept-page ownership when other pages transform; unresolved ownership refuses
-before fitting mutation.
-Kept frames retain source clipping and coordinate systems; transformed optional
-printing boxes are explicitly omitted with located warnings. This is not a
-production-print or redaction guarantee. Native/displayed output geometry is
-verified exactly, using finite round-trip scalar serialization rather than a
-physical-size epsilon. See [fitting](docs/PDF-POLICY.md#fitting).
+Whole-source admission applies before selective fitting, and PDF 2.0 policy
+applies to the composed output. The [fitting policy](docs/PDF-POLICY.md#fitting)
+defines destination and annotation ownership checks, source clipping, omitted
+printing boxes, and the exact geometry checks at publication.

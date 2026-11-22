@@ -39,12 +39,11 @@ func uriBaseWarnings(c context.Context, s *model.Context, origins sourceOrigins,
 		selected[page.ref] = true
 	}
 	var findings []diag.Diagnostic
-	e = walkRetained(c, s, origins, nil, func(d types.Dict, key string, _ sourceSite, _ sourceSite) (bool, error) {
-		return localTarget(s, d[key], named, selected)
-	}, func(d types.Dict, site sourceSite) error {
-		kind, e := nameValue(s, d["S"])
-		if e != nil || kind != "URI" {
-			return e
+	e = walkRetained(c, s, origins, nil, func(binding retainedTarget) (bool, error) {
+		return localTarget(binding.value, named, selected)
+	}, func(d types.Dict, site sourceSite, kind types.Name) error {
+		if kind != "URI" {
+			return nil
 		}
 		text, e := textValue(s, d["URI"])
 		if e != nil {

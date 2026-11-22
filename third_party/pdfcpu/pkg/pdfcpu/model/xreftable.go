@@ -157,7 +157,7 @@ type XRefTable struct {
 	// Document information section
 	ID             types.Array        // from trailer
 	Info           *types.IndirectRef // reference of info dict object
-	DirectInfoDict types.Dict         // direct trailer info dict pending PDF version identification
+	DirectInfoDict types.Dict         // direct trailer Info pending version identification or retained by configuration
 	Title          string
 	Subject        string
 	Author         string
@@ -275,13 +275,32 @@ func (xRefTable *XRefTable) VersionString() string {
 	return xRefTable.Version().String()
 }
 
-// ParseRootVersion returns a string representation for an optional Version entry in the root object.
-// This entry overrides the header version.
-// An unresolved catalog reference has no version override.
+// ErrInvalidRootVersionReference reports an undefined catalog Version reference.
+var ErrInvalidRootVersionReference = errors.New("catalog Version references an undefined object")
+
+// ParseRootVersion returns the optional catalog version. A live null contributes no override.
 func (xRefTable *XRefTable) ParseRootVersion() (v *string, err error) {
 	rootDict, err := xRefTable.catalogDict()
 	if err != nil || rootDict == nil {
 		return nil, err
+	}
+
+	// The general backend lookup selects by number. Qualify this edge before
+	// it can set validation policy for the entire PDF.
+	raw, _ := rootDict.Find("Version")
+	if ref, ok := raw.(types.IndirectRef); ok {
+		entry, _ := xRefTable.Find(ref.ObjectNumber.Value())
+		generation := 0
+		if entry != nil && entry.Generation != nil {
+			generation = *entry.Generation
+		}
+		if entry == nil || entry.Free || generation != ref.GenerationNumber.Value() {
+			err := fmt.Errorf("%w: %s", ErrInvalidRootVersionReference, ref.PDFString())
+			if xRefTable.Root != nil {
+				err = WithValidationErrorObject(err, xRefTable.Root.ObjectNumber.Value())
+			}
+			return nil, err
+		}
 	}
 
 	n, _, err := xRefTable.DereferenceNameEntry(rootDict, "Version")

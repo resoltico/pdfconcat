@@ -9,58 +9,8 @@ Use an installer and payload from the same qualified build, with its matching
 documentation. The [README quick install](../README.md#install) keeps no script
 after a successful run. To inspect the installer before running it or keep it
 for offline removal, save it using the instructions below.
-Published installers link to this guide at their build's Git commit; source
-installers link to the current `main` guide.
-
-## Existing executable without an installer receipt
-
-`Existing executable has no installer receipt` means a file already exists at
-the printed path, but this installer has no record of managing it. It does not
-establish how that file was installed. No program or PATH entry was changed by
-this refusal.
-
-**Replace the existing executable:** use the complete command printed by the
-installer. It preserves your selected directory, explicit release pin and
-no-PATH option. The original executable is kept in a recovery backup outside
-the install directory; the installer prints its exact location. Keep that backup
-until you have verified the replacement. Existing PATH entries and directories
-are not adopted.
-
-For the saved installer and default directory, the replacement commands are:
-
-```sh
-sh ./install-pdfconcat.sh --install-dir "$HOME/.local/bin" --replace-unmanaged
-```
-
-```powershell
-powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -InstallDir "$env:LOCALAPPDATA\Programs\PDFConcat" -ReplaceUnmanaged
-if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
-```
-
-Use your printed directory if it differs, including when `XDG_BIN_HOME` is set.
-Retain any `--version` / `-Version` and `--no-modify-path` / `-NoModifyPath`
-choices. If you ran the installer through stdin or a script expression, first
-save and review the matching installer using the download instructions below;
-the fallback example is not an automatically located saved file.
-
-**Keep the existing executable:** install into a different absolute directory
-with `--install-dir` / `-InstallDir` and `--no-modify-path` / `-NoModifyPath`.
-Use the new program's printed full path so the existing command remains selected.
-
-After replacement, run the new executable's printed full path with `--version`
-and `--help`. To restore the original later, first uninstall the new managed
-copy using the same saved installer and install directory. Then move the exact
-reported backup to the original executable path, after confirming that path is
-vacant. Review PATH separately. Uninstall does not remove the recovery backup.
-
-For an **uninstall refusal**, use the method that installed the existing file
-to remove it. If its origin is unknown, preserve it and inspect the exact file
-before deciding what to remove; installing a replacement is not required.
-
-Replacement is install-only and cannot bypass changed managed files, corrupt
-state, symlinks or inaccessible targets. If activation reports incomplete
-restoration, preserve all reported recovery paths and inspect them before
-retrying. See [ownership and recovery](#ownership-and-recovery) for details.
+Release installers link to this guide at the build's Git commit. Installers
+from the source tree link to the guide on `main`.
 
 ## Download, inspect and install
 
@@ -131,6 +81,56 @@ use the quoted full executable path printed by the installer while this terminal
 keeps its current PATH, or open a new terminal after successful persistence.
 `--no-modify-path` / `-NoModifyPath` leaves persistent and current-session PATH
 unchanged.
+
+## Existing executable without an installer receipt
+
+`Existing executable has no installer receipt` means a file already exists at
+the printed path, but this installer has no record of managing it. It does not
+establish how that file was installed. No program or PATH entry was changed by
+this refusal.
+
+**Replace the existing executable:** use the complete command printed by the
+installer. It preserves your selected directory, explicit release pin and
+no-PATH option. The original executable is kept in a recovery backup outside
+the install directory; the installer prints its exact location. Keep that backup
+until you have verified the replacement. Existing PATH entries and directories
+are not adopted.
+
+For the saved installer and default directory, the replacement commands are:
+
+```sh
+sh ./install-pdfconcat.sh --install-dir "$HOME/.local/bin" --replace-unmanaged
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy ByPass -File (Join-Path $HOME 'install-pdfconcat.ps1') -InstallDir "$env:LOCALAPPDATA\Programs\PDFConcat" -ReplaceUnmanaged
+if ($LASTEXITCODE -ne 0) { throw "Installer failed ($LASTEXITCODE)." }
+```
+
+Use your printed directory if it differs, including when `XDG_BIN_HOME` is set.
+Retain any `--version` / `-Version` and `--no-modify-path` / `-NoModifyPath`
+choices. If you ran the installer through stdin or a script expression, first
+save and review the matching installer using the download instructions below;
+the fallback example is not an automatically located saved file.
+
+**Keep the existing executable:** install into a different absolute directory
+with `--install-dir` / `-InstallDir` and `--no-modify-path` / `-NoModifyPath`.
+Use the new program's printed full path so the existing command remains selected.
+
+After replacement, run the new executable's printed full path with `--version`
+and `--help`. To restore the original later, first uninstall the new managed
+copy using the same saved installer and install directory. Then move the exact
+reported backup to the original executable path, after confirming that path is
+vacant. Review PATH separately. Uninstall does not remove the recovery backup.
+
+For an **uninstall refusal**, use the method that installed the existing file
+to remove it. If its origin is unknown, preserve it and inspect the exact file
+before deciding what to remove; installing a replacement is not required.
+
+Replacement is install-only and cannot bypass changed managed files, corrupt
+state, symlinks or inaccessible targets. If activation reports incomplete
+restoration, preserve all reported recovery paths and inspect them before
+retrying. See [ownership and recovery](#ownership-and-recovery) for details.
 
 ## Update and choose a release
 
@@ -252,14 +252,14 @@ PATH changes. Reuse the same custom directory for update and uninstall.
 
 ## Ownership and recovery
 
-Only the current receipt format and complete current file inventory are accepted.
-An incompatible receipt is refused without changes; no conversion is provided.
-Use its matching installer for removal, or choose a fresh directory.
+The installer requires a supported receipt and its complete managed-file
+inventory. It refuses incompatible receipts without changes. Use the installer
+matching the receipt for removal, or choose a fresh directory.
 
-The current installer uses `.pdfconcat-install` beside the executable
-for ownership receipts and managed data. It verifies managed file hashes before
-update or removal. It refuses unowned files by default and refuses changed
-managed files. It does not adopt unowned installs from their filename, version output or PATH settings.
+The installer stores ownership receipts and managed data in `.pdfconcat-install`
+beside the executable. Before update or removal, it verifies the hashes in the
+receipt. Unowned files are refused by default, and changed managed files are
+refused. Ownership comes from the receipt.
 
 Never delete an entire shared bin directory, copy a receipt from another
 directory or edit hashes to bypass an ownership refusal.

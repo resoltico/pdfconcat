@@ -9,36 +9,46 @@ import (
 	"errors"
 	"io"
 
-	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
-// readOutput checks serialized output without source normalization. Catalog
-// policy is checked before validation, which may otherwise alter the document.
 func readOutput(c context.Context, data []byte) (*model.Context, error) {
-	return readOutputReader(c, bytes.NewReader(data))
+	return readSerializedOutput(c, bytes.NewReader(data), nil)
 }
 
-func readOutputReader(c context.Context, reader io.ReadSeeker) (*model.Context, error) {
+// Check raw reference, catalog, layer and navigation evidence before semantic validation.
+func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *navigationObservation) (*model.Context, error) {
 	conf, err := configuration()
 	if err != nil {
 		return nil, err
 	}
 	conf.ValidationMode = model.ValidationStrict
-	s, err := api.ReadContext(c, reader, conf)
+	s, err := readPDFContext(c, reader, conf)
 	if err != nil {
 		return nil, err
 	}
 	if s.Encrypt != nil {
 		return nil, errors.New("composed output must be unencrypted")
 	}
+	if err := checkReadReferences(c, s, true); err != nil {
+		return nil, err
+	}
 	cat, err := s.Catalog()
 	if err != nil {
 		return nil, err
 	}
 	for key := range cat {
-		if !catalogKeys[key] {
+		if key == "OCProperties" {
+			value, e := layerValue(s, cat[key], catalogSite(s).key(key))
+			if e != nil {
+				return nil, e
+			}
+			if value == nil {
+				continue
+			}
+		}
+		if !outputCatalogKey(key) {
 			return nil, errors.New("unexpected output catalog key: " + key)
 		}
 	}
@@ -67,6 +77,22 @@ func readOutputReader(c context.Context, reader io.ReadSeeker) (*model.Context, 
 	pages, err := rawPages(c, s)
 	if err != nil {
 		return nil, err
+	}
+	if err = scanLayerGraph(c, s, pages, &visibleLayer{}); err != nil {
+		return nil, err
+	}
+	if navigation != nil {
+		if err = navigation.verify(c, s); err != nil {
+			return nil, err
+		}
+	}
+	if navigation == nil {
+		if _, err = readDestinations(c, s); err != nil {
+			return nil, err
+		}
+		if err = inspectRetainedDestinations(c, s, pages, false); err != nil {
+			return nil, err
+		}
 	}
 	if err = checkDocument(c, s, pages); err != nil {
 		return nil, err

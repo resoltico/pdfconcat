@@ -125,8 +125,8 @@ func TestSelectiveFitIndependentNativeAndRasterWitnesses(t *testing.T) {
 		refuse       bool
 	}{
 		{"exact-letter", "Letter", true, false}, {"crop-letter", "Letter", true, false}, {"rounded-a4", "A4", true, false},
-		{"integer-a4", "A4", false, true}, {"rotated-letter", "Letter", true, false}, {"unit-letter", "Letter", true, false},
-		{"mixed-to-kept", "100x100", false, false}, {"mixed-to-transform", "100x100", false, true},
+		{"integer-a4", "A4", false, false}, {"rotated-letter", "Letter", true, false}, {"unit-letter", "Letter", true, false},
+		{"mixed-to-kept", "100x100", false, false}, {"mixed-to-transform", "100x100", false, false},
 		{"tiny-raw-large-unit", "", true, false}, {"large-origin", "A4", false, true}, {"large-origin", "600x800", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -308,7 +308,7 @@ func TestSourceSizeSchemaDomainIncludesPositiveSubpointAndLargeDimensions(t *tes
 
 func fmtBox(side float64) string { return fmt.Sprintf("[0 0 %.17g %.17g]", side, side) }
 
-func TestNumericDestinationGuardFollowsRetainedTargetAcrossTopologies(t *testing.T) {
+func TestDestinationFittingFollowsRetainedTargetAcrossTopologies(t *testing.T) {
 	for _, topology := range []string{"direct", "indirect", "named", "legacy", "goto", "next", "outline", "unused-name"} {
 		for _, targetKept := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/kept=%v", topology, targetKept), func(t *testing.T) {
@@ -347,16 +347,17 @@ func TestNumericDestinationGuardFollowsRetainedTargetAcrossTopologies(t *testing
 				}
 				insertEntry(d, 6, entry)
 				result, _, output := selectiveRequest(t, d.Bytes(), "100x100", app.Build)
-				if !targetKept {
-					if result.Status != "invalid" || !codePresent(result.Diagnostics, diag.FitDestinationUnsupported) {
-						t.Fatal(result.Diagnostics)
-					}
-					return
-				}
 				if result.Status != "ok" {
 					t.Fatal(result.Diagnostics)
 				}
 				qpdfCheck(t, output)
+				wantPage, wantX, wantY := 1, 20.0, 30.0
+				if !targetKept {
+					wantPage, wantX, wantY = 2, 10, 40
+				}
+				if codePresent(result.Diagnostics, diag.FitDestinationMapped) == targetKept {
+					t.Fatalf("mapping warning disagrees with target geometry: %+v", result.Diagnostics)
+				}
 				if topology != "unused-name" && topology != "outline" {
 					tools := oracle.RequireTools(t)
 					doc, e := oracle.Load(tools, output)
@@ -364,16 +365,23 @@ func TestNumericDestinationGuardFollowsRetainedTargetAcrossTopologies(t *testing
 						t.Fatal(e)
 					}
 					targets, e := doc.ActionTargets(origin + 1)
-					if e != nil || !reflect.DeepEqual(targets, []int{1}) {
+					if e != nil || !reflect.DeepEqual(targets, []int{wantPage}) {
 						t.Fatalf("wrong physical target %v %v", targets, e)
 					}
 				}
-				// Every explicit XYZ tail remains unmodified while references are rebound.
+				// Check the actual tail and resolved target independently of the link origin.
+				raw := run(t, qpdfTool, "--json", output)
+				var physical struct {
+					Pages []struct{ Object string } `json:"pages"`
+				}
+				if err := json.Unmarshal(raw, &physical); err != nil {
+					t.Fatal(err)
+				}
 				tails := 0
-				visitQPDFValues(t, run(t, qpdfTool, "--json", output), func(v any) {
+				visitQPDFValues(t, raw, func(v any) {
 					if a, ok := v.([]any); ok && len(a) == 5 && a[1] == "/XYZ" {
 						tails++
-						if a[2] != float64(20) || a[3] != float64(30) || a[4] != nil {
+						if a[0] != physical.Pages[wantPage-1].Object || a[2] != wantX || a[3] != wantY || a[4] != nil {
 							t.Fatal("coordinate tail changed", a)
 						}
 					}

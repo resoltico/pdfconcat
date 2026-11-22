@@ -65,6 +65,18 @@ const (
 
 func knownCount(n int64) *int64           { return &n }
 func hasErrors(ds []diag.Diagnostic) bool { status := diag.Outcome(ds); return status != "ok" }
+
+func publicationDiagnostic(role packet.DestinationRole, path string, inputsKnown, published bool, err error) diag.Diagnostic {
+	if !published && errors.Is(err, files.ErrDestinationExists) {
+		return packet.PublicationDestinationExists(role, path, inputsKnown)
+	}
+	code := diag.OutputPublishFailed
+	if role == packet.ReportDestination {
+		code = diag.ReportWriteFailed
+	}
+	return ioDiagnostic(code, err, path)
+}
+
 func ioDiagnostic(code diag.Code, err error, file string) diag.Diagnostic {
 	if d, ok := diag.SourceScratchDiagnostic(err, file); ok {
 		return d

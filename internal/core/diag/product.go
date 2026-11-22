@@ -218,9 +218,31 @@ func ExpectedDOutputPagesFoundD(expectedPages int64, actualPages int64) Explanat
 	return explain("ExpectedDOutputPagesFoundD", fmt.Sprintf("Expected %d output pages; found %d.", expectedPages, actualPages), strconv.FormatInt(expectedPages, 10), strconv.FormatInt(actualPages, 10))
 }
 
-// FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported renders the core-owned explanation.
-func FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported() Explanation {
-	return explain("FittingInternalPageDestinationsWithNumericPositionCoordinatesIsUnsupported", "A retained local destination has numeric position coordinates on a page that transforms; use original page sizes or a destination without position coordinates.")
+// FittingDestinationUnrepresentable explains a destination that cannot be mapped safely.
+func FittingDestinationUnrepresentable() Explanation {
+	return explain("FittingDestinationUnrepresentable", "The local destination coordinates cannot be represented after fitting.")
+}
+
+// FittingAxisDestinationRotated explains the rotated-target refusal.
+func FittingAxisDestinationRotated() Explanation {
+	return explain("FittingAxisDestinationRotated", "Fitting cannot preserve the edge alignment of this destination on a rotated target.")
+}
+
+// FittingDestinationMapped reports the verified fitting disposition.
+func FittingDestinationMapped() Explanation {
+	return explain("FittingDestinationMapped", "The fitting plan maps local destination coordinates to the fitted target page.")
+}
+
+// FittingDestinationTarget identifies the original target behind an edited binding.
+func FittingDestinationTarget(page, object, generation int64) Explanation {
+	return explain("fitted_destination_target",
+		fmt.Sprintf("Target original source page %d is object %d %d.", page, object, generation),
+		strconv.FormatInt(page, 10), strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10))
+}
+
+// StructureDestinationUnsupported explains a retained PDF 2.0 navigation refusal.
+func StructureDestinationUnsupported() Explanation {
+	return explain("StructureDestinationUnsupported", "The retained structure destination cannot be preserved.")
 }
 
 // FittingSourceFormWidgetsIsUnsupported renders the core-owned explanation.
@@ -236,6 +258,11 @@ func FontPostScriptNameQContainsALiteralHashFollowedBy(postScriptName string) Ex
 // FormDefaultResourcesAreNestedTooDeeplyForCompatibilityComparison renders the core-owned explanation.
 func FormDefaultResourcesAreNestedTooDeeplyForCompatibilityComparison() Explanation {
 	return explain("FormDefaultResourcesAreNestedTooDeeplyForCompatibilityComparison", "Form default resources are nested too deeply for compatibility comparison.")
+}
+
+// FormFieldMemberRequiresDictionary explains a malformed required field node.
+func FormFieldMemberRequiresDictionary() Explanation {
+	return explain("form_field_member_requires_dictionary", "A form field tree member must resolve to a dictionary.")
 }
 
 // FormFieldTreeExceedsTheSupportedDepthOf renders the core-owned explanation.
@@ -621,6 +648,40 @@ func UnboundSourceMarkedContentIDsAreIgnoredByExplicitStructure() Explanation {
 	return explain("UnboundSourceMarkedContentIDsAreIgnoredByExplicitStructure", "Unbound source marked-content IDs are ignored by explicit structure discard; streams are unchanged.")
 }
 
+// PDFObjectZeroMustBeFree explains an invalid free-list head.
+func PDFObjectZeroMustBeFree() Explanation {
+	return explain("pdf_object_zero_must_be_free", "PDF cross-reference entry zero must be free.")
+}
+
+// UndefinedRetainedSourceReference explains an unbound edge in the composed source graph.
+func UndefinedRetainedSourceReference(object, generation int64) Explanation {
+	return explain("undefined_retained_source_reference",
+		fmt.Sprintf("A retained source reference points to undefined PDF object %d %d.", object, generation),
+		strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10))
+}
+
+// UndefinedNavigationReference explains an unresolved enclosing navigation edge.
+func UndefinedNavigationReference(object, generation int64) Explanation {
+	return explain("undefined_navigation_reference",
+		fmt.Sprintf("The navigation binding references undefined PDF object %d %d.", object, generation),
+		strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10))
+}
+
+// InvalidNavigationBinding explains an unexpected object in a navigation slot.
+func InvalidNavigationBinding() Explanation {
+	return explain("invalid_navigation_binding", "The navigation binding has an invalid value.")
+}
+
+// InvalidLocalGoToDestination explains a missing or malformed required action destination.
+func InvalidLocalGoToDestination() Explanation {
+	return explain("invalid_local_goto_destination", "A local GoTo action requires a destination array or name.")
+}
+
+// InvalidExplicitDestination explains missing or invalid required destination syntax.
+func InvalidExplicitDestination() Explanation {
+	return explain("invalid_explicit_destination", "The local destination has an invalid mode or operand list.")
+}
+
 // UnsupportedDestinationCoordinateValue renders the core-owned explanation.
 func UnsupportedDestinationCoordinateValue() Explanation {
 	return explain("UnsupportedDestinationCoordinateValue", "Unsupported destination coordinate value.")
@@ -663,7 +724,32 @@ func DocumentTimestampsRefused() Explanation {
 
 // OptionalContentRefused explains unsupported visibility-layer assurance.
 func OptionalContentRefused() Explanation {
-	return explain("optional_content", "The source declares optional-content settings (visibility layers), whose display state composition does not preserve. Deliver the original separately.")
+	return explain("optional_content", "The source has optional-content settings or bindings outside the composition policy for visibility layers. Deliver the original separately.")
+}
+
+// OptionalContentDefaultRefusal describes the guarded plan option before proof.
+func OptionalContentDefaultRefusal(option string) Explanation {
+	return explain("optional_content_default", fmt.Sprintf("The default policy refuses visibility layers. If the source qualifies for always-visible Form layer flattening, use the plan setting \"optional_content\": %q. Deliver the original separately if its visibility controls must be preserved.", option), option)
+}
+
+// OptionalContentProfileUnproved explains a refusal to flatten a layer graph.
+func OptionalContentProfileUnproved() Explanation {
+	return explain("optional_content_profile", "The source does not match the supported always-visible Form layer profile.")
+}
+
+// OptionalContentProgramUnproved identifies drawing programs that cannot be proved independent.
+func OptionalContentProgramUnproved() Explanation {
+	return explain("optional_content_program", "The drawing stream could not be proved independent of optional content.")
+}
+
+// OptionalContentFlattened explains the deliberate removal of layer controls.
+func OptionalContentFlattened() Explanation {
+	return explain("optional_content_flattened", "The layer qualifies for flattening. The composition plan removes its visibility controls and preserves the appearance of Form artwork retained after page selection.")
+}
+
+// OptionalContentGroupName identifies the original group in the warning.
+func OptionalContentGroupName(name string) Explanation {
+	return explain("optional_content_group_name", fmt.Sprintf("Original visibility group %q.", name), name)
 }
 
 // NavigationEvidence records a complete explanation and all original binding facts.

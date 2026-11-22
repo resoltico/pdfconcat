@@ -37,7 +37,7 @@ func TestLocatedWarningsSurviveIndependentSummaryCapsAndLaterFailure(t *testing.
 	for range 22 {
 		items = append(items, map[string]any{"source": "source.pdf", "pages": [][2]int{{2, 2}}})
 	}
-	plan := map[string]any{"version": 8, "items": items}
+	plan := map[string]any{"version": 9, "items": items}
 	for _, laterFailure := range []bool{false, true} {
 		if laterFailure {
 			if err := os.WriteFile(filepath.Join(dir, "bad.pdf"), []byte("not a PDF"), 0600); err != nil {
@@ -109,7 +109,7 @@ func TestRenamePredictionsUseOnlyRetainedOriginalSourceSites(t *testing.T) {
 	if e := pdffixture.NamedDests("PREDICT").WriteFile(source); e != nil {
 		t.Fatal(e)
 	}
-	input := `{"version":8,"items":[{"source":"named.pdf","pages":[[1,1]]},{"source":"named.pdf","pages":[[2,2]]},{"source":"named.pdf","pages":[[2,2]]}]}`
+	input := `{"version":9,"items":[{"source":"named.pdf","pages":[[1,1]]},{"source":"named.pdf","pages":[[2,2]]},{"source":"named.pdf","pages":[[2,2]]}]}`
 	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, input)
 	if exit != 0 {
 		t.Fatal(r.Diagnostics)
@@ -131,7 +131,7 @@ func TestRenamePredictionsUseOnlyRetainedOriginalSourceSites(t *testing.T) {
 	if e := pdffixture.Form("FORM").WriteFile(form); e != nil {
 		t.Fatal(e)
 	}
-	r, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, `{"version":8,"items":[{"source":"form.pdf"},{"source":"form.pdf"}]}`)
+	r, exit, _ = invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, `{"version":9,"items":[{"source":"form.pdf"},{"source":"form.pdf"}]}`)
 	if exit != 0 {
 		t.Fatal(r.Diagnostics)
 	}

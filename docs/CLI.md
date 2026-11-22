@@ -218,21 +218,33 @@ after PDF publication and report serialization, including when the output was
 initially absent. A destination can still fail to write after its parent passes
 preflight.
 
-Large source PDFs use private snapshots in the operating system's temporary
-directory during inspection and assembly. Allow space for concurrent source
-inspections and the largest individual assembly source. A temporary-storage
-failure reports `source_unreadable` in either stage, with the input and the
-scratch operation. Each spill stays bound to its original directory for
-reopening and cleanup. PDF assembly verifies the completed staged bytes through
-the owned file handle before publication, including for destinations with no
-read permission bits.
+Each invocation starts without saved PDFConcat settings, caches, or job
+history. Large source PDFs use private snapshots in the operating system's
+temporary directory during inspection and assembly. Allow space for concurrent
+source inspections and the largest individual assembly source. A
+temporary-storage failure reports `source_unreadable` in either stage, with the
+input and the scratch operation. Each spill stays bound to its original
+directory for reopening and cleanup. The PDF verifier reopens the completed
+stage through the owned file handle, including for destinations with no read
+permission bits. Before publication, a bounded sequential read verifies that
+the staged length and SHA-256 match the assembler's emitted bytes.
 
 New output and report files use ordinary umask permissions. Replacements use
 the permission bits observed during the final destination check. The empty
 sibling stage adopts any incumbent's permissions before data is written, and
 publication applies the final permissions before syncing the open file. The
 stage's bounded name leaves the full filesystem filename limit available for
-the destination.
+the destination. PDF and report stages stay bound to their original parent
+directory for cleanup. An observed parent replacement prevents publication.
+
+A crash or forced termination can leave source snapshots and sibling PDF or
+report stages containing document bytes on disk. Later invocations leave these
+files in place. For sensitive jobs, use a private per-job workspace for the
+PDF and report destinations and the temporary directory. Before launching
+PDFConcat, point `TMPDIR` on macOS and Linux or `TMP` on Windows to the
+workspace's temporary directory. Each output or report stage stays beside its
+own destination. After the process exits, retain the published files you need
+and clean up the workspace.
 
 Without `--overwrite`, publication uses a no-replace rename with a hard-link
 fallback. With `--overwrite`, publication uses a replacing rename when the
@@ -461,7 +473,10 @@ status `invalid`; a processing failure selects `failed`.
 
 `source_xref_structure_reference_discarded` locates the original discarded
 structure index and identifies the matching classic xref row. It accompanies
-the structure-discard warning. [Classic xref input policy](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+the structure-discard warning. Check and Build keep `source_invalid` and
+exit 2 under preserve when a proved unwritten structure index prevents
+admission. The refusal can name the v10 discard setting and locate the
+proved index. [Classic xref input policy](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
 
 ## Diagnostic codes
 
@@ -540,10 +555,10 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `fit_form_unsupported` | error | invalid | a widget transforms or its page ownership is unresolved or conflicting while other pages transform |
 | `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
 | `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |
-| `output_invalid` | error | failed | the written output did not validate |
+| `output_invalid` | error | failed | the staged PDF failed structural or byte verification |
 | `output_page_count_mismatch` | error | failed | written page count ≠ expected |
-| `output_publish_failed` | error | failed | the final rename failed (incl. no-replace unsupported and link fallback failed) |
-| `report_write_failed` | error | failed | writing or publishing the report failed |
+| `output_publish_failed` | error | failed | output publication or staged cleanup failed |
+| `report_write_failed` | error | failed | report writing, publication or staged cleanup failed |
 | `interrupted` | error | interrupted | cancelled by a signal |
 | `text_overflow_allowed` | warning | — | `overflow: allow` and measured text extends past the page or block |
 | `form_fields_renamed` | warning | — | pdfcpu namespaces later nonempty forms even without collisions; build reports actual names |

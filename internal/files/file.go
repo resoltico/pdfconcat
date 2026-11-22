@@ -18,47 +18,64 @@ import (
 // Staged owns its temporary name. Published state is independent of later errors.
 type Staged struct {
 	*os.File
-	target, temp string
-	creationMode fs.FileMode
-	mode         fs.FileMode
-	published    bool
-	closed       bool
+	target, temp   string
+	parent         *os.Root
+	parentIdentity fs.FileInfo
+	fileIdentity   fs.FileInfo
+	name           string
+	creationMode   fs.FileMode
+	mode           fs.FileMode
+	published      bool
+	closed         bool
 }
 
 // ErrDestinationExists identifies rejection by an atomic no-replace operation.
 var ErrDestinationExists = errors.New("publication destination exists")
 
+// ErrStageParentChanged identifies an observed destination directory replacement.
+var ErrStageParentChanged = errors.New("destination parent directory changed during staging")
+
 // Create uses conventional permissions (0666 minus umask). If an incumbent
 // exists, the empty stage adopts its permissions before any bytes are written.
+// Abort releases the owned resources after a failed or abandoned stage.
 func Create(target string) (*Staged, error) {
+	parentPath := filepath.Dir(target)
+	parent, err := os.OpenRoot(parentPath)
+	if err != nil {
+		return nil, err
+	}
+	parentIdentity, err := parent.Stat(".")
+	if err != nil {
+		return nil, errors.Join(err, closeStageParent(parent))
+	}
 	var mode fs.FileMode
-	existing, err := os.Lstat(target)
+	existing, err := parent.Lstat(filepath.Base(target))
 	if err == nil {
 		if !existing.Mode().IsRegular() {
-			return nil, fmt.Errorf("target is not a regular file: %s", target)
+			return nil, errors.Join(fmt.Errorf("target is not a regular file: %s", target), closeStageParent(parent))
 		}
 		mode = existing.Mode().Perm()
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+		return nil, errors.Join(err, closeStageParent(parent))
 	}
 	// Keep the sibling name independent of the target's filesystem name budget.
-	temp := filepath.Join(filepath.Dir(target), ".pdfconcat."+rand.Text()+".tmp")
-	f, err := os.OpenFile(temp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+	name := ".pdfconcat." + rand.Text() + ".tmp"
+	f, err := parent.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, closeStageParent(parent))
 	}
-	result := &Staged{File: f, target: target, temp: temp}
+	result := &Staged{File: f, target: target, temp: filepath.Join(parentPath, name),
+		parent: parent, parentIdentity: parentIdentity, name: name}
 	info, err := f.Stat()
 	if err != nil {
-		_ = result.Abort()
-		return nil, err
+		return nil, errors.Join(err, result.Abort())
 	}
+	result.fileIdentity = info
 	result.creationMode = info.Mode().Perm()
 	result.mode = result.creationMode
 	if existing != nil {
 		if err = result.setMode(mode); err != nil {
-			_ = result.Abort()
-			return nil, err
+			return nil, errors.Join(err, result.Abort())
 		}
 	}
 	return result, nil
@@ -75,7 +92,7 @@ func (f *Staged) setMode(mode fs.FileMode) error {
 	return nil
 }
 
-// Path identifies the owned temporary file.
+// Path is the stage's original path. Cleanup uses the owned directory handle.
 func (f *Staged) Path() string { return f.temp }
 
 // Reader reads the completed stage through the owned handle. It starts at zero,
@@ -104,13 +121,32 @@ func (f *Staged) Commit(overwrite bool) (bool, error) {
 	if err := f.Sync(); err != nil {
 		return false, err
 	}
-	err := f.Close()
-	f.closed = true
-	if err != nil {
+	if err := f.closeFile(); err != nil {
 		return false, err
 	}
-	published, err := publish(f.temp, f.target, overwrite, renameNoReplace, os.Link, os.Remove)
-	return f.finishCommit(published, err, func() error { return syncDirectory(filepath.Dir(f.target)) })
+	info, err := os.Stat(filepath.Dir(f.target))
+	if err != nil {
+		return false, fmt.Errorf("inspect destination parent before publication: %w", err)
+	}
+	if !os.SameFile(info, f.parentIdentity) {
+		return false, ErrStageParentChanged
+	}
+	if err := f.checkOwnedName(); err != nil {
+		return false, err
+	}
+	published, err := publish(f.temp, f.target, overwrite, renameNoReplace, os.Link, func(string) error {
+		return f.removeOwnedName()
+	})
+	if published && err == nil {
+		// A native rename consumed the name. A successful fallback already
+		// removed it through the owned directory.
+		f.name = ""
+	}
+	published, err = f.finishCommit(published, err, func() error { return syncDirectory(f.parent) })
+	if f.name == "" {
+		err = errors.Join(err, f.closeParent())
+	}
+	return published, err
 }
 
 func (f *Staged) finishCommit(published bool, publishErr error, syncDir func() error) (bool, error) {
@@ -159,14 +195,58 @@ func noReplaceFailure(err error) error {
 
 // Abort closes/removes only the owned temporary name, never the target.
 func (f *Staged) Abort() error {
-	var closeErr error
-	if !f.closed {
-		closeErr = f.Close()
-		f.closed = true
+	return errors.Join(f.closeFile(), f.removeOwnedName(), f.closeParent())
+}
+
+func (f *Staged) closeFile() error {
+	if f.closed {
+		return nil
 	}
-	err := os.Remove(f.temp)
-	if errors.Is(err, fs.ErrNotExist) {
-		err = nil
+	f.closed = true
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close staged file: %w", err)
 	}
-	return errors.Join(closeErr, err)
+	return nil
+}
+
+func (f *Staged) checkOwnedName() error {
+	info, err := f.parent.Lstat(f.name)
+	if err != nil {
+		return err
+	}
+	if f.fileIdentity != nil && !os.SameFile(info, f.fileIdentity) {
+		return errors.New("staged filename no longer identifies the owned file")
+	}
+	return nil
+}
+
+func (f *Staged) removeOwnedName() error {
+	if f.parent == nil || f.name == "" {
+		return nil
+	}
+	err := f.checkOwnedName()
+	if err == nil {
+		err = f.parent.Remove(f.name)
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove staged file: %w", err)
+	}
+	f.name = ""
+	return nil
+}
+
+func (f *Staged) closeParent() error {
+	if f.parent == nil {
+		return nil
+	}
+	err := closeStageParent(f.parent)
+	f.parent = nil
+	return err
+}
+
+func closeStageParent(parent *os.Root) error {
+	if err := parent.Close(); err != nil {
+		return fmt.Errorf("close stage directory: %w", err)
+	}
+	return nil
 }

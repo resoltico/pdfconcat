@@ -163,6 +163,26 @@ func markedContent(c context.Context, s *model.Context) (markedFacts, error) {
 				}
 			}
 			switch op {
+			case "Tf":
+				if len(args) == 2 {
+					name, named := args[0].(types.Name)
+					switch args[1].(type) {
+					case types.Integer, types.Float:
+						if named {
+							fonts, e := s.DereferenceDict(resources["Font"])
+							if e != nil {
+								return e
+							}
+							font, e := s.RequiredResourceBinding(fonts, string(name))
+							if e != nil {
+								return e
+							}
+							if font == nil {
+								return refuse(diag.SourceInvalid, diag.MissingFontResource(string(name)))
+							}
+						}
+					}
+				}
 			case "BMC", "BDC":
 				if len(args) < 1 {
 					return errors.New("marked-content operator lacks a tag")

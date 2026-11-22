@@ -68,6 +68,9 @@ func (f Roles) Publish(staged *Staged, role packet.DestinationRole) (bool, []dia
 	if len(ds) != 0 {
 		return false, ds, nil
 	}
+	if !os.SameFile(target.parent, staged.parentIdentity) {
+		return false, nil, ErrStageParentChanged
+	}
 	overwrite := packet.MayReplace(role, f.Overwrite, f.InputsKnown)
 	mode := staged.creationMode
 	if overwrite && target.file != nil {

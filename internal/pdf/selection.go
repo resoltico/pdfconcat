@@ -24,8 +24,10 @@ type SelectionRequest struct {
 	Fitting *packet.FitPolicy
 }
 
-// Inspect reads and validates a whole source once. Each ephemeral view
-// owns its containers; stream bytes stay immutable and shared during inspection.
+// Inspect normally reads and validates the whole source once. A possible
+// zero-offset structure index can trigger one discard replay for a preserve
+// refusal hint. Each ephemeral view owns its containers, with stream bytes
+// immutable and shared during inspection.
 func Inspect(c context.Context, data []byte, policy packet.StructurePolicy, requests []SelectionRequest) (facts SourceFacts, occurrences []*OccurrenceFacts, ds []diag.Diagnostic) {
 	return InspectReader(c, bytes.NewReader(data), sha256.Sum256(data), int64(len(data)), SourcePolicies{Structure: policy}, requests)
 }
@@ -52,13 +54,9 @@ func InspectReader(c context.Context, reader io.ReadSeeker, digest [32]byte, siz
 				facts.Version = s.XRefTable.Version().String()
 			}
 		}
-		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))
+		return facts, occurrences, append(ds, diagnostic(proveZeroOffsetDiscardHint(c, reader, policies, err), diag.SourceInvalid))
 	}
-	sourceGeometry, e := pageGeometries(c, s)
-	if e != nil {
-		return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
-	}
-	facts, findings, err = observe(c, s, origins, nil, sourceGeometry)
+	facts, findings, err = observeSource(c, s, origins)
 	ds = append(ds, findings...)
 	if err != nil {
 		return facts, occurrences, append(ds, diagnostic(err, diag.SourceInvalid))

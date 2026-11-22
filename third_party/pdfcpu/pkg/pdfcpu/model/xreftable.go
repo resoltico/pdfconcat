@@ -2402,7 +2402,7 @@ func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string,
 }
 
 // The page content parser does not descend into Forms. A legacy Form that
-// borrows page resources can use properties the page program never names.
+// borrows page resources can use bindings the page program never names.
 func (xRefTable *XRefTable) formBorrowsPageResources(resources types.Dict) (bool, error) {
 	scopes := []types.Dict{resources}
 	seen := map[types.IndirectRef]bool{}
@@ -2445,16 +2445,17 @@ func (xRefTable *XRefTable) formBorrowsPageResources(resources types.Dict) (bool
 }
 
 func (xRefTable *XRefTable) consolidateResourceDict(d types.Dict, prn PageResourceNames, pageNr int) error {
-	keepProperties := false
-	if d["Properties"] != nil {
+	borrowed := false
+	if d["Properties"] != nil || d["Font"] != nil {
 		var err error
-		keepProperties, err = xRefTable.formBorrowsPageResources(d)
+		borrowed, err = xRefTable.formBorrowsPageResources(d)
 		if err != nil {
 			return err
 		}
 	}
 	for _, k := range resourceTypes {
-		if err := xRefTable.consolidateResourceSubDict(d, k, prn, pageNr, k == "Properties" && keepProperties); err != nil {
+		keepUnused := borrowed && (k == "Properties" || k == "Font")
+		if err := xRefTable.consolidateResourceSubDict(d, k, prn, pageNr, keepUnused); err != nil {
 			return err
 		}
 	}

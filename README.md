@@ -6,7 +6,8 @@ contents and page numbers. Check the packet before building and save a report
 with input SHA-256 hashes and source-to-output page mappings.
 
 The standalone CLI uses bundled Noto Sans and runs without external PDF tools,
-font installation or a configuration directory.
+font installation or a configuration directory. It keeps no application state
+between runs. See [temporary files and saved outputs](docs/CLI.md#reports-and-committed-state).
 
 - [Understand the scope](#scope-and-boundaries)
 - [Install and verify](#install)

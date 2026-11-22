@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
@@ -351,9 +352,17 @@ func TestPublicationStatePrecedesTrailingErrors(t *testing.T) {
 
 func TestLinkFallbackStateAndNoClobber(t *testing.T) {
 	dir := t.TempDir()
-	temp := filepath.Join(dir, "temp")
 	target := filepath.Join(dir, "target")
-	if err := os.WriteFile(temp, []byte("complete"), 0600); err != nil {
+	f, err := Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Abort() })
+	temp := f.Path()
+	if _, err := f.WriteString("complete"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.closeFile(); err != nil {
 		t.Fatal(err)
 	}
 	unsupported := unsupportedError()
@@ -366,12 +375,15 @@ func TestLinkFallbackStateAndNoClobber(t *testing.T) {
 	if data, e := os.ReadFile(target); e != nil || string(data) != "complete" {
 		t.Fatalf("linked target %q %v", data, e)
 	}
-	f := &Staged{target: target, temp: temp, closed: true, published: published}
+	f.recordPublication(published)
 	if err = f.Abort(); err != nil {
 		t.Fatal(err)
 	}
 	if data, e := os.ReadFile(target); e != nil || string(data) != "complete" {
 		t.Fatalf("abort undid publication %q %v", data, e)
+	}
+	if _, err := os.Stat(temp); !errors.Is(err, fs.ErrNotExist) || !f.Published() {
+		t.Fatalf("trailing cleanup did not preserve published state and remove the owned name: %v", err)
 	}
 	// The real link boundary also refuses an existing target.
 	if err = os.WriteFile(temp, []byte("different"), 0600); err != nil {
@@ -383,5 +395,94 @@ func TestLinkFallbackStateAndNoClobber(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "without replacing the destination") {
 		t.Fatalf("fallback failure is not actionable: %v", err)
+	}
+}
+
+func TestStageFollowsOwnedParentAfterMove(t *testing.T) {
+	base := t.TempDir()
+	parent, moved := filepath.Join(base, "parent"), filepath.Join(base, "moved")
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "output.pdf")
+	stage, err := Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stage.Abort() })
+	if _, err := stage.WriteString("staged bytes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(parent, moved); err != nil {
+		// Windows filesystems can refuse directory renames while children
+		// are open. Exercise rooted cleanup in the original directory then.
+		const windowsSharingViolation = syscall.Errno(32)
+		if runtime.GOOS != "windows" || (!errors.Is(err, fs.ErrPermission) && !errors.Is(err, windowsSharingViolation)) {
+			t.Fatal(err)
+		}
+		t.Logf("native Windows directory move blocked while stage was open: %v", err)
+		if abortErr := stage.Abort(); abortErr != nil {
+			t.Fatal(abortErr)
+		}
+		if _, err := os.Stat(stage.Path()); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("stage stayed in the original directory: %v", err)
+		}
+		return
+	}
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const sentinel = "unrelated replacement directory file"
+	for _, name := range []string{target, stage.Path()} {
+		if err := os.WriteFile(name, []byte(sentinel), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roles := Roles{Output: target, Overwrite: true, InputsKnown: true}
+	if published, ds, err := roles.Publish(stage, packet.OutputDestination); published || len(ds) != 0 || !errors.Is(err, ErrStageParentChanged) {
+		t.Fatalf("publication into a replacement directory: %v %v %v", published, ds, err)
+	}
+	if published, err := stage.Commit(true); published || !errors.Is(err, ErrStageParentChanged) {
+		t.Fatalf("direct commit into a replacement directory: %v %v", published, err)
+	}
+	for range 2 {
+		if err := stage.Abort(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(moved, filepath.Base(stage.Path()))); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("staged file stayed with the moved directory: %v", err)
+	}
+	for _, name := range []string{target, stage.Path()} {
+		got, err := os.ReadFile(name)
+		if err != nil || string(got) != sentinel {
+			t.Fatalf("replacement directory file changed: %q %v", got, err)
+		}
+	}
+}
+
+func TestStageRenameReleasesTemporaryName(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "output.pdf")
+	stage, err := Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stage.Abort() })
+	if _, err := stage.WriteString("published"); err != nil {
+		t.Fatal(err)
+	}
+	if published, err := stage.Commit(true); err != nil || !published {
+		t.Fatalf("native rename: %v %v", published, err)
+	}
+	const sentinel = "subsequent file at the former stage path"
+	if err := os.WriteFile(stage.Path(), []byte(sentinel), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := stage.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(stage.Path())
+	if err != nil || string(got) != sentinel || !stage.Published() {
+		t.Fatalf("renamed stage retained ownership: %q %v", got, err)
 	}
 }

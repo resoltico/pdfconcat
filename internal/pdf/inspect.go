@@ -526,6 +526,14 @@ func walkObjects(c context.Context, s *model.Context, visit func(types.Dict) err
 	return objectLocations(c, s, true, func(d types.Dict, _ diag.PDFLocation) error { return visit(d) })
 }
 
+func observeSource(c context.Context, s *model.Context, origins sourceOrigins) (SourceFacts, []diag.Diagnostic, error) {
+	geometries, err := pageGeometries(c, s)
+	if err != nil {
+		return SourceFacts{}, nil, err
+	}
+	return observe(c, s, origins, nil, geometries)
+}
+
 func observe(c context.Context, s *model.Context, origins sourceOrigins, policy *packet.FitPolicy, geometries []pageGeometry) (SourceFacts, []diag.Diagnostic, error) {
 	facts := SourceFacts{OccurrenceFacts: OccurrenceFacts{SourceFacts: packet.SourceFacts{Pages: s.PageCount}}, Version: s.XRefTable.Version().String()}
 	if policy != nil {

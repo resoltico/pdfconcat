@@ -836,6 +836,11 @@ func MissingMarkedContentProperty(name string) Explanation {
 	return explain("missing_marked_content_property", fmt.Sprintf("The marked-content operator requires property %q in its resource scope.", name), name)
 }
 
+// MissingFontResource identifies an unresolved font selected in a known scope.
+func MissingFontResource(name string) Explanation {
+	return explain("missing_font_resource", fmt.Sprintf("The Tf operator requires font %q in its resource scope.", name), name)
+}
+
 // OptionalWrapperPreludeReason identifies the failed condition of the prelude proof.
 type OptionalWrapperPreludeReason uint8
 
@@ -886,4 +891,9 @@ func OptionalWrapperShape(operator string, offset int64) Explanation {
 // OptionalWrapperDefaultRefusal names the plan setting for a proved wrapper.
 func OptionalWrapperDefaultRefusal(option string) Explanation {
 	return explain("optional_wrapper_default", fmt.Sprintf(`The undeclared page wrapper qualifies for removal with the plan setting "optional_content": %q. The default policy refuses it.`, option), option)
+}
+
+// ProvedZeroOffsetDiscardHint explains the preserve refusal and the packet policy choice.
+func ProvedZeroOffsetDiscardHint() Explanation {
+	return explain("proved_zero_offset_discard_hint", `A structure index refers to an unwritten object. Use a v10 plan with "structure": "discard" only if untagged output for the whole packet is acceptable.`)
 }

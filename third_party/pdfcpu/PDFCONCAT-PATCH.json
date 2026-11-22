@@ -66,7 +66,7 @@
     },
     {
       "path": "pkg/pdfcpu/model/xreftable.go",
-      "sha256": "ac68bb13b44bc0d8effc7f88e7f132690cb784d236ff9f7b78967fd6df79a7c8",
+      "sha256": "7907e8e09e67c924764a8e79262bc2f46e02df8fad422134243004a1ba70089c",
       "upstream_sha256": "05433cb1782d3b88efe95b5e66669b6a84026aae944470b1b27742623904413d"
     },
     {
@@ -101,7 +101,7 @@
     },
     {
       "path": "pkg/pdfcpu/zero_offset.go",
-      "sha256": "ac0142767109ac36d24e6ba46b4df74c4fe7437bfeb8518bc50c1fa22597eb38",
+      "sha256": "b67b601e738d32c643a2e3e38fc8364e1ef364d12f6d1b68f21cb5baa53b0aca",
       "upstream_sha256": null
     },
     {

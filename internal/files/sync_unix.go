@@ -15,8 +15,8 @@ import (
 func unsupportedRename(err error) bool {
 	return errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.ENOSYS)
 }
-func syncDirectory(path string) error {
-	f, err := os.Open(path)
+func syncDirectory(parent *os.Root) error {
+	f, err := parent.Open(".")
 	if err != nil {
 		return err
 	}

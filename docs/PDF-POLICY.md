@@ -199,11 +199,12 @@ are available, they must agree. Payload bytes stay opaque. Cases without a
 provable byte count use a bounded lexical search that refuses ambiguous image
 endings.
 
-Check and Build resolve named `BDC` and `DP` properties in the effective drawing
-scope. A missing required property produces a located `source_invalid` finding.
-An invoked Form uses its explicit resource dictionary when present. A Form
-without its own resources uses the page scope, including when invoked from
-another Form. Resource pruning preserves page properties needed by these Forms.
+Check and Build resolve named `Tf` fonts and `BDC` and `DP` properties in the
+effective drawing scope. A missing required binding produces a located
+`source_invalid` finding. An invoked Form uses its explicit resource dictionary
+when present. A Form without its own resources uses the page scope, including
+when invoked from another Form. Resource pruning preserves page fonts and
+properties that these Forms can use.
 
 ### Structural rejection rules
 
@@ -237,8 +238,12 @@ must establish that the typed root and its structure hierarchy have no
 owner outside the catalog structure edge. Internal backlinks must match
 their full identities. Each proved slot produces
 `source_xref_structure_reference_discarded` alongside the structure discard
-warning. Preserve mode refuses the same referenced rows. Assembly rereads
-the original bytes, checks their digest, and repeats the proof.
+warning. Preserve mode refuses the same referenced rows with
+`source_invalid`. A possible structure-index refusal receives the
+`structure: discard` hint only when the original source passes the
+discard proof and source admission. The hint applies to a choice of
+untagged output for the whole packet. Assembly rereads the original bytes,
+checks their digest, and repeats the proof.
 
 An exceptional hybrid/xref-stream chain is refused because the original-reference
 proof is limited to exclusively classic revisions. Valid xref-stream and hybrid

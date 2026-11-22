@@ -876,6 +876,25 @@ try {
         Check 'installed executable builds a PDF' ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $pdf))
         Check 'installation reported' ((Get-Output) -match 'is installed')
         Check 'custom uninstall path is quoted' ((Get-Output).Contains("-InstallDir '" + $dir.Replace("'", "''") + "'"))
+
+        Write-Host '--- competing executable on PATH'
+        $sessionPath = $env:Path
+        $competingDir = Join-Path $work "$shellName-other copy"
+        [void][IO.Directory]::CreateDirectory($competingDir)
+        $competingExe = Join-Path $competingDir ($command + '.exe')
+        [IO.File]::Copy($shell, $competingExe)
+        $competingHash = (Get-FileHash -LiteralPath $competingExe).Hash
+        $shadowWarning = "The installer session finds another $command.exe: "
+        $explicitCommand = "& '" + $exe.Replace("'", "''") + "' --help"
+        try {
+            $env:Path = "$competingDir;$dir;$sessionPath"
+            Check 'reinstall succeeds when another copy wins on PATH' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
+            Check 'warning names the winning executable and prints the explicit command to run the installed one' ((Get-Output).Contains($shadowWarning + $competingExe) -and (Get-Output).Contains($explicitCommand))
+            $env:Path = "$dir;$competingDir;$sessionPath"
+            Check 'reinstall succeeds when the installed copy wins on PATH' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
+            Check 'no shadowing warning when the installed copy wins' (-not (Get-Output).Contains($shadowWarning))
+            Check 'competing executable is preserved' ((Get-FileHash -LiteralPath $competingExe).Hash -ceq $competingHash)
+        } finally { $env:Path = $sessionPath }
         Check 'reinstall succeeds' ((Invoke-Installer $shell @('-InstallDir', $dir, '-NoModifyPath')) -eq 0)
         Check 'reinstall reported' ((Get-Output) -match 'reinstalled')
         Remove-Item -LiteralPath $exe

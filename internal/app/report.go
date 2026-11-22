@@ -26,7 +26,7 @@ func writeReport(r *outcome.Result, roles files.Roles, records resultRecords) {
 	full.Report = &report
 	staged, err := files.Create(roles.Report)
 	if err == nil {
-		defer staged.Abort()
+		defer abortStage(staged, packet.ReportDestination, roles.Report, &r.Diagnostics)
 		err = result.WriteReport(staged, full, records.partRecords(records.parts), records.sectionRecords(records.sections))
 		if err == nil {
 			var refusals []diag.Diagnostic
@@ -41,5 +41,15 @@ func writeReport(r *outcome.Result, roles files.Roles, records resultRecords) {
 	if err != nil {
 		d := ioDiagnostic(diag.ReportWriteFailed, err, roles.Report)
 		r.Diagnostics = append(r.Diagnostics, d)
+	}
+}
+
+func abortStage(staged *files.Staged, role packet.DestinationRole, path string, findings *[]diag.Diagnostic) {
+	if err := staged.Abort(); err != nil {
+		code := diag.OutputPublishFailed
+		if role == packet.ReportDestination {
+			code = diag.ReportWriteFailed
+		}
+		*findings = append(*findings, diag.StageCleanupFailure(code, path, err.Error()))
 	}
 }

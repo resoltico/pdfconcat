@@ -199,12 +199,13 @@ are available, they must agree. Payload bytes stay opaque. Cases without a
 provable byte count use a bounded lexical search that refuses ambiguous image
 endings.
 
-Check and Build resolve named `Tf` fonts and `BDC` and `DP` properties in the
-effective drawing scope. A missing required binding produces a located
-`source_invalid` finding. An invoked Form uses its explicit resource dictionary
-when present. A Form without its own resources uses the page scope, including
-when invoked from another Form. Resource pruning preserves page fonts and
-properties that these Forms can use.
+Check and Build resolve font names selected by `Tf` with a numeric size and
+property names selected by `BDC` and `DP` in the effective drawing scope. A
+missing required binding produces a located `source_invalid` finding. An
+invoked Form uses its explicit resource dictionary when present. A Form without
+its own resources uses the page scope, including when invoked from another
+Form. Resource pruning preserves page fonts and properties that these Forms can
+use.
 
 ### Structural rejection rules
 
@@ -604,9 +605,11 @@ broken page trees, reported repairs, and changes to page or content identity.
 Page count, metadata, timestamp, viewer preference, numbering spans, structure
 policy, and coverage must match resolved expectations before publication. The
 check uses the same PDF engine as source admission with a separate output
-policy. Tests also use qpdf and Poppler for independent structural and rendering
-evidence. Strict validation does not prove complete PDF conformance or fidelity
-for arbitrary inputs.
+policy. Before publication, a separate read through the same staging handle
+checks that the staged length and SHA-256 match the bytes emitted by the
+assembler. Tests also use qpdf and Poppler for independent structural and
+rendering evidence. Strict validation does not prove complete PDF conformance
+or fidelity for arbitrary inputs.
 
 ## Text and pruning
 
@@ -755,10 +758,10 @@ bookkeeping can still be normalized. Compatibility validation remains relaxed,
 so ancillary producer differences do not become blanket source refusals. Some
 legal comment-separated indirect-reference spellings remain unsupported and
 return `source_invalid`. Successful parsing or validation does not establish that
-arbitrary malformed input retains its meaning. Content-operator resource binding
-is not exhaustively validated: a malformed source using an undefined font can be
-accepted and render differently across readers or fitting. Supply a reviewed
-valid source; composition does not reconstruct missing font bindings.
+arbitrary malformed input retains its meaning. The
+[drawing-program checks](#drawing-programs-and-resource-bindings) cover specific
+resource-binding rules. Review the rendered result when the source's behavior
+varies across readers.
 
 Decoded finite float64 model reals serialize as non-exponent round-trip decimals,
 with a decimal marker for nonzero integral-valued reals and canonical numeric zero.

@@ -429,19 +429,21 @@ Open a new terminal after a saved PATH change.
 
 When another executable comes first on the installer's PATH, the installer
 reports its path. Use the quoted full path printed by the installer to run the
-new copy. To check your own shell, use `command -v pdfconcat` on macOS or Linux,
-or `Get-Command pdfconcat.exe` in PowerShell. Remove a conflicting installation
-using the method that installed it.
+new copy. On Windows, the check uses the installer session's PATH after any
+session update. To check what your terminal resolves, use `command -v pdfconcat`
+on macOS or Linux, or `Get-Command pdfconcat.exe` in PowerShell. Remove a
+conflicting installation using the method that installed it.
 
 On macOS, the installer reports a recognizable system-managed copy at
-`/usr/local/bin/pdfconcat` regardless of PATH order. When a parent path fails
-ownership, permission or ACL checks, the installer reports a candidate and
-links to the guide. On trusted paths the installer reports a verified version
-after matching the executable to its receipt. A mismatch identifies the
-receipt's version and links to the guide.
-The installer prints a removal command only after verifying the executable
-and removal helper. The advisory is read-only. For removal instructions, see
-the [system-managed installation guide](https://github.com/resoltico/pdfconcat/blob/v0.6.2/docs/MACOS.md#uninstall-pdfconcat).
+`/usr/local/bin/pdfconcat` even when it is absent from PATH. A candidate warning
+means a parent directory failed its trust checks or the executable could not
+be verified against its receipt. The installer may skip unrecognizable layouts
+or a receipt whose digest fails verification. It reports a verified version if
+the executable matches the receipt and prints a removal command only after
+also verifying the removal helper. The advisory only reports findings. If the
+installer gives no removal command, have an administrator inspect the system
+installation before using a removal helper. See the
+[system-managed installation guide](https://github.com/resoltico/pdfconcat/blob/v0.6.2/docs/MACOS.md#uninstall-pdfconcat).
 
 ## Archive names
 

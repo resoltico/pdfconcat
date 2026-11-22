@@ -100,7 +100,8 @@ add its directory to your development shell's PATH.
 
 Keep development executables separate from the installed release in
 `~/.local/bin` or `%LOCALAPPDATA%\Programs\PDFConcat`. Check which copy a bare
-`pdfconcat` selects with `command -v pdfconcat` or `Get-Command pdfconcat`.
+`pdfconcat` selects with `command -v pdfconcat` on macOS or Linux. Use
+`Get-Command pdfconcat.exe` to check executable resolution in PowerShell.
 
 ## Stock tools
 

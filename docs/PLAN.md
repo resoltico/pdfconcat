@@ -333,6 +333,10 @@ are artifacts. `structure: "discard"` explicitly removes structure claims and
 ownership before tag validation, with source-loss warnings. This permits unusable
 tags. The [classic-xref exception](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
 admits proved zero-offset index references and reports each discarded slot.
+When a preserve refusal suggests discard for such a reference, the hint
+confirms only the affected source's discard admission. Choosing discard
+removes structure from the whole packet, including other sources and
+generated pages.
 Page, content, encoding, security, signature, encryption, form and publication
 safeguards still apply. Inspection and build re-admission apply the same
 effective policy to the actual source bytes.

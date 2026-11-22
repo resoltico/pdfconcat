@@ -49,8 +49,8 @@ and schedules inspection by estimated parser work and the host worker count.
 The estimate governs scheduling and the PDF backend enforces its own per-input
 limits. Assembly rechecks source digests and independently admits mutable
 graphs. Its serializer discovers references before encoding to the staged sink.
-The files adapter gives strict verification an independent, length-bounded
-reader on the open staging handle.
+The files adapter gives the strict verifier and the application's byte-identity
+check separate, length-bounded readers on the same open staging handle.
 
 ## Frontend contract
 
@@ -128,13 +128,18 @@ Both producers share semantic admission and aggregate text/node limits.
 3. Composition prepares contents, resolves physical layout, checks compatibility
    and number overlays, and lays out generated text. Findings can identify the
    authored setting responsible for a layout problem.
-4. Build prepares font resources, stages the PDF, assembles, verifies and publishes.
+4. Build prepares font resources and assembles into a sibling stage. It checks
+   the staged PDF structure and byte identity before publishing.
 5. Projection creates the result from observed stage facts. When plan decoding
    recorded coordinates for an implicated setting, projection adds that location
    to the finding. The shared [diagnostic priority](CLI.md#output) preserves
    stage and first-use order within each precedence class.
 6. Report publication serializes the report after any PDF publication, then
    rechecks destination roles before committing the report.
+
+PDF and report stages retain handles to their original parent directories for
+cleanup. Publication still uses the native namespace transition and reports
+whether it took effect independently of later cleanup and durability errors.
 
 Private source sites retain full source refs, original page ordinals and paths.
 Admission captures catalogue/navigation sites before backend normalization;

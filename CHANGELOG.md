@@ -2,10 +2,12 @@
 
 ## [Unreleased]
 
-- Name the discard option in preserve refusals for a proved unwritten structure index when the source passes discard admission. [PDF policy](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance)
-- Refuse missing fonts selected by `Tf` during source admission and preserve page fonts used by legacy Forms.
-- Verify staged PDF size and SHA-256 against the assembler’s output before publication.
-- Clean up PDF and report stages through their original directories. Refuse publication after an observed parent replacement and report cleanup failures.
+## [0.19.0] - 2026-11-23
+
+- Suggest packet-wide `structure: discard` for a proved unwritten structure index when the source passes discard admission. [PDF policy](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+- Refuse missing fonts selected by `Tf` during source admission. Preserve page fonts used by Forms without their own resources.
+- Refuse to publish a staged PDF whose size or SHA-256 differs from the assembler’s output.
+- Clean up PDF and report stages through their original directories. Refuse publication after an observed parent replacement and report cleanup failures separately.
 - The Windows installer reports when another PDFConcat executable comes first on its PATH. [Installation](docs/INSTALL.md#troubleshooting)
 
 ## [0.18.0] - 2026-11-22

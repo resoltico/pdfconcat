@@ -158,6 +158,9 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	}
 	conf.ValidationMode = model.ValidationStrict
 	conf.ZeroOffsetPolicy = model.AdmitUnreferencedZeroOffsets
+	if policies.Structure == packet.StructureDiscard {
+		conf.ZeroOffsetPolicy = model.AdmitDiscardedStructureZeroOffsets
+	}
 	nulls := layerNullEvidence{}
 	defer func() { nulls = nil }()
 	readContext := model.WithDictionaryNullObserver(c, func(d types.Dict, _ string) {
@@ -177,7 +180,14 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 			return s, origins, ds, err
 		}
 	}
+	discardedRows := map[int]bool{}
+	for _, ref := range s.Read.DiscardedZeroOffsetReferences {
+		discardedRows[ref.Entry.Object] = true
+	}
 	for _, entry := range s.ZeroOffsetEntries {
+		if discardedRows[entry.Object] {
+			continue
+		}
 		ds = append(ds, diag.IgnoredXRefEntry(diag.XRefEntry{Object: entry.Object, Generation: entry.Generation, Revision: entry.Revision, Offset: entry.XRefOffset}))
 	}
 	pages, e := rawPages(c, s)
@@ -190,6 +200,9 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 		return s, origins, ds, e
 	}
 	if e = originalSignatureChecks(c, s); e != nil {
+		return s, origins, ds, e
+	}
+	if e = detachProvedZeroOffsetStructure(s); e != nil {
 		return s, origins, ds, e
 	}
 	if e = inspectRetainedDestinations(c, s, pages, true); e != nil {
@@ -239,6 +252,11 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	ds = append(ds, findings...)
 	if e != nil {
 		return s, origins, ds, pdfFailure(diag.SourceInvalid, diag.TheDeclaredSourceStructureCannotBePreservedUseStructureDiscard(), e)
+	}
+	for _, reference := range s.Read.DiscardedZeroOffsetReferences {
+		entry := reference.Entry
+		ds = append(ds, diag.DiscardedZeroOffsetStructureReference(reference.Root.ObjectNumber.Value(), reference.Slot,
+			diag.XRefEntry{Object: entry.Object, Generation: entry.Generation, Revision: entry.Revision, Offset: entry.XRefOffset}))
 	}
 	pages, err = rawPages(c, s)
 	if err != nil {

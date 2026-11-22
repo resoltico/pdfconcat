@@ -78,3 +78,13 @@ func IgnoredXRefEntry(entry XRefEntry) Diagnostic {
 	d.PDFLocation = &PDFLocation{Object: entry.Object, Path: fmt.Sprintf("xref/%d/revision/%d/generation/%d", entry.Offset, entry.Revision, entry.Generation)}
 	return d
 }
+
+// DiscardedZeroOffsetStructureReference records the index slot and original xref evidence.
+func DiscardedZeroOffsetStructureReference(root int, slot string, entry XRefEntry) Diagnostic {
+	d := Report(SourceXRefStructureReferenceDiscarded, explain("discarded_structure_xref_reference",
+		fmt.Sprintf("The discarded structure index referenced zero-offset object %d generation %d in xref revision %d at offset %d.", entry.Object, entry.Generation, entry.Revision, entry.Offset),
+		strconv.Itoa(entry.Object), strconv.Itoa(entry.Generation), strconv.Itoa(entry.Revision), strconv.FormatInt(entry.Offset, 10)))
+	d.Identity.Phase = "source_admission"
+	d.PDFLocation = &PDFLocation{Object: root, Path: slot}
+	return d
+}

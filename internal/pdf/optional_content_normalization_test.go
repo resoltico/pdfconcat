@@ -8,6 +8,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -425,5 +426,60 @@ func TestOptionalContentSharedProgramChecksEachResourceScope(t *testing.T) {
 	err = verifySerializedWrapperPages(t.Context(), s, pages, content, []int64{1, 2}, evidence)
 	if !optionalContentRefusal(err) || Diagnostic(err).PDFLocation.Page != 2 || len(evidence.pages) != 1 {
 		t.Fatalf("reused lexical proof hid an unresolved second-page property: %v", err)
+	}
+}
+
+func TestOptionalContentWrapperAdmitsOnlyProvedPrelude(t *testing.T) {
+	const binding = "/Properties << /Pr12 " + testBareGroup + " >>"
+	const intent = "/ExtGState << /GS << /Type /ExtGState /RI /RelativeColorimetric >> >>"
+	const prelude = "1.0000 0 0 1 0 0 cm\n/GS gs\n"
+	const artwork = testRectangle + "\n"
+	const wrapper = "/OC /Pr12 BDC\n" + artwork + "EMC"
+	for _, tc := range []struct {
+		name, resources, drawing, detail string
+	}{
+		{"identity and intent", binding + " " + intent, prelude + wrapper, ""},
+		{"unchanged mark-first", binding, wrapper, ""},
+		{"unproved near identity", binding, "1.000000000000000000001 0 0 1 0 0 cm\n" + wrapper, "must be an exact identity"},
+		{"transformed", binding, "1 0 0 1 1 0 cm\n" + wrapper, "must be an exact identity"},
+		{"painting", binding, "20 20 60 60 re f\n" + wrapper, "prelude operator \"re\""},
+		{"state-bearing gs", binding + " /ExtGState << /GS << /RI /Perceptual /ca 0.5 >> >>", prelude + wrapper, "contains an entry other than /RI or /Type"},
+		{"explicit null", binding + " /ExtGState << /GS << /RI /Perceptual /ca null >> >>", prelude + wrapper, "explicit null entry"},
+		{"invalid intent", binding + " /ExtGState << /GS << /RI /Unknown >> >>", prelude + wrapper, "requires a valid /RI rendering intent"},
+		{"invalid type", binding + " /ExtGState << /GS << /Type /Group /RI /Perceptual >> >>", prelude + wrapper, "/Type must be /ExtGState"},
+		{"missing state", binding, prelude + wrapper, "resource could not be resolved"},
+		{"repeat", binding + " " + intent, prelude + "/GS gs\n" + wrapper, "can appear once"},
+		{"matrix after intent", binding + " " + intent, "/GS gs\n1 0 0 1 0 0 cm\n" + wrapper, "with the matrix before"},
+		{"suffix", binding + " " + intent, prelude + wrapper + "\nq Q", "decoded byte"},
+		{"second mark", binding + " " + intent, prelude + wrapper + "\n" + wrapper, "decoded byte"},
+		{"group used by ordinary mark", binding + " " + intent, prelude + "/OC /Pr12 BDC /Span /Pr12 DP " + artwork + "EMC", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := layerTestPDF("", tc.resources, tc.drawing).Bytes()
+			accepted := tc.name == "identity and intent" || tc.name == "unchanged mark-first"
+			_, _, _, err := readSourceReader(t.Context(), bytes.NewReader(data), SourcePolicies{OptionalContent: packet.OptionalContentRefuse})
+			if !optionalContentRefusal(err) || strings.Contains(err.Error(), "flatten-visible-content") != accepted {
+				t.Fatalf("default proof/hint: %v", err)
+			}
+			s, _, findings, err := readSourceReader(t.Context(), bytes.NewReader(data), SourcePolicies{OptionalContent: packet.OptionalContentFlattenVisibleContent})
+			if !accepted {
+				if !optionalContentRefusal(err) || !strings.Contains(err.Error(), tc.detail) || len(findings) != 0 {
+					t.Fatalf("opt-in refusal: %v, %v", err, findings)
+				}
+				return
+			}
+			if err != nil || len(findings) != 1 || findings[0].Code != diag.SourceOptionalContentWrappersRemoved {
+				t.Fatalf("opt-in admission: %v, %v", err, findings)
+			}
+			pages, err := rawPages(t.Context(), s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			program, err := s.PageContent(pages[0].dict, 1)
+			expected := strings.TrimSuffix(tc.drawing, wrapper) + "             \n" + artwork + "   "
+			if err != nil || string(program) != expected {
+				t.Fatalf("mask altered prelude or artwork: got %q, want %q (%v)", program, expected, err)
+			}
+		})
 	}
 }

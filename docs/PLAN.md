@@ -268,10 +268,12 @@ and report a source warning. Direct CLI operands use the default `refuse` policy
 
 Set `"optional_content": "flatten-visible-content"` to opt in to removal of
 proved always-visible Form controls or bare undeclared whole-page wrappers.
-PDFConcat checks the entire original source, including pages outside an item's
-selection. Check and Build identify the original PDF location and affected
-items. The packet preserves the artwork on retained pages and removes the
-admitted visibility controls.
+A wrapper can have the proved identity-matrix and rendering-intent prelude
+described in the [PDF policy](PDF-POLICY.md#optional-content). PDFConcat checks
+the entire original source, including pages outside an item's selection. Check
+and Build identify the original PDF location and affected items. The packet
+preserves the artwork on retained pages and removes the admitted visibility
+controls.
 
 ## Document identity, time and structure
 
@@ -329,9 +331,11 @@ normalization rules.
 Generated meaningful text is tagged; backgrounds, padding and overlay numbers
 are artifacts. `structure: "discard"` explicitly removes structure claims and
 ownership before tag validation, with source-loss warnings. This permits unusable
-tags without relaxing syntax, page/content, encoding, security, signature,
-encryption, form or publication safeguards. Inspection and build re-admission
-apply the same effective policy to the actual source bytes.
+tags. The [classic-xref exception](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+admits proved zero-offset index references and reports each discarded slot.
+Page, content, encoding, security, signature, encryption, form and publication
+safeguards still apply. Inspection and build re-admission apply the same
+effective policy to the actual source bytes.
 
 A preserved table selection must retain every referenced header element.
 Otherwise check and build refuse it before staging; include the header pages,

@@ -245,6 +245,10 @@ var (
 	SourceOptionalContentWrappersRemoved = define("source_optional_content_wrappers_removed", Warning, NoClass, "composition removes proved undeclared whole-page visibility wrappers and preserves retained artwork")
 )
 
+// SourceXRefStructureReferenceDiscarded reports a proved discarded index edge.
+var SourceXRefStructureReferenceDiscarded = define("source_xref_structure_reference_discarded", Warning, NoClass,
+	"a discarded structure index referenced a proved zero-offset classic xref entry")
+
 // New constructs a diagnostic using its fixed registry severity.
 func New(code Code, message string, items ...string) Diagnostic {
 	definition := code.definition

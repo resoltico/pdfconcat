@@ -459,6 +459,10 @@ a supported-fidelity boundary was reached. `source_processing_failed` is a backe
 failure, not proof of invalid input. Both invalid and unsupported input select
 status `invalid`; a processing failure selects `failed`.
 
+`source_xref_structure_reference_discarded` locates the original discarded
+structure index and identifies the matching classic xref row. It accompanies
+the structure-discard warning. [Classic xref input policy](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+
 ## Diagnostic codes
 
 The [diagnostic registry](../internal/core/diag/codes.go) is authoritative.
@@ -559,6 +563,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `report_inspection_failed` | error | failed | The report destination could not be inspected |
 | `source_optional_content_empty_removed` | warning | — | composition removes proved-empty optional-content settings |
 | `source_optional_content_wrappers_removed` | warning | — | composition removes proved undeclared whole-page visibility wrappers and preserves retained artwork |
+| `source_xref_structure_reference_discarded` | warning | — | a discarded structure index referenced a proved zero-offset classic xref entry |
 | `usage_unknown_command` | error | invalid | first argument is not a command |
 | `usage_unknown_option` | error | invalid | option not defined for the command |
 | `usage_missing_value` | error | invalid | option needs a value |

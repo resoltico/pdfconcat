@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-22
+
+- Accept proved bare wrappers with an optional identity `cm` followed by an optional rendering-intent-only `gs`. Default refusals name `flatten-visible-content` for proved candidates.
+- Explain the failed condition for a refused wrapper prelude and identify its operator and decoded byte position.
+- Under `structure: discard`, accept proved zero-offset `ParentTree` and `IDTree` references and report `source_xref_structure_reference_discarded`. [PDF policy](docs/PDF-POLICY.md)
+- Identify retired macOS installs in either PATH order. Flag receipt mismatches and show the removal command only after verification. [Installation](docs/INSTALL.md#troubleshooting)
+
 ## [0.17.0] - 2026-11-22
 
 - Use plan version 10 and replace `flatten-visible-forms` with `flatten-visible-content`. [Plan](docs/PLAN.md#optional-content)

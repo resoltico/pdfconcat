@@ -79,7 +79,12 @@ additional profiles:
   and inspection finds no conflicting binding or optional marked operator.
   The opt-in still requires full drawing-program proof.
 - A PDF 1.5 or later page wrapped by one outer `/OC /Name BDC` and matching final
-  `EMC`, with absent or null catalog layer settings. The named effective page
+  `EMC`, with absent or null catalog layer settings. The only supported
+  prelude is an optional exact identity `cm` followed by an optional `gs`
+  whose effective ExtGState contains only a valid `RI` rendering intent and
+  optional `Type /ExtGState`. A proved wrapper receives an opt-in hint under the
+  default policy. Prelude refusals identify the original operator, its decoded
+  byte position and the failed condition when known. The named effective page
   resource must be a bare OCG with only `Type` and a text `Name`. PDFConcat proves
   the binding's uses across the original document, including inherited resources
   and ordinary marked content. The edit masks the four wrapper tokens and
@@ -218,13 +223,22 @@ that other role. These checks do not constitute a general PDF repair detector.
 ### Narrow classic-xref input tolerance
 
 Original sources may contain an in-use classic xref entry for a positive object
-number whose literal offset is zero. The modified strict reader accepts it only
-when no original effective live object or effective trailer references that
-object number, including references with another generation. It retains a
-revision tombstone so an older definition cannot return. Each admitted entry
+number whose literal offset is zero. The modified strict reader records a
+revision tombstone so an older definition cannot return. An unreferenced row
 produces `source_xref_entry_ignored` with original xref/object evidence and
-consuming items. Original bytes and hashes are unchanged; assembly repeats the
-gate after rereading and checking the digest.
+consuming items.
+
+With `structure: discard`, the reader also admits a matching-generation
+reference in `ParentTree` or `IDTree` on the effective catalog's indirect,
+typed `StructTreeRoot`. It checks the original syntax of all effective live
+objects, including unreachable objects, and the effective trailer. Only
+those index slots may reference the tombstone. An original-syntax rescan
+must establish that the typed root and its structure hierarchy have no
+owner outside the catalog structure edge. Internal backlinks must match
+their full identities. Each proved slot produces
+`source_xref_structure_reference_discarded` alongside the structure discard
+warning. Preserve mode refuses the same referenced rows. Assembly rereads
+the original bytes, checks their digest, and repeats the proof.
 
 An exceptional hybrid/xref-stream chain is refused because the original-reference
 proof is limited to exclusively classic revisions. Valid xref-stream and hybrid
@@ -234,8 +248,9 @@ entries. Effective compressed entries must name the object number at the
 selected object-stream ordinal, and each active object stream must have a
 matching header. Every effective uncompressed row pointing to a parsed xref
 stream's physical offset must match the stream header's number and generation.
-Superseded xref rows do not select compressed objects. Other syntax, encryption,
-signature, content, structure, resource and cancellation safeguards remain.
+Superseded xref rows do not select compressed objects. Repeated trailer keys,
+including `Info`, are refused. Other syntax, encryption, signature, content,
+structure, resource and cancellation safeguards remain.
 Serialized output uses ordinary strict reading with the exception disabled.
 This bounded exception does not establish universal producer compatibility.
 The source and provenance of the local reader are in

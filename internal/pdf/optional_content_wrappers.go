@@ -11,6 +11,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -125,7 +126,9 @@ func planPageWrappers(c context.Context, s *model.Context, pages []pageRef, cont
 		data, ends, err := programs.page(c, s, content[i], contents)
 		var name types.Name
 		var tokens [4]layerSpan
-		started, closed, sawOptional := false, false, false
+		closed, sawOptional := false, false
+		sawMatrix, sawIntent := false, false
+		var preludeErr error
 		depth := 0
 		var names []types.Name
 		if err == nil {
@@ -143,27 +146,62 @@ func planPageWrappers(c context.Context, s *model.Context, pages []pageRef, cont
 						return err
 					}
 				}
+				if closed {
+					return layerRefusal(contents, diag.OptionalWrapperShape(op.name, int64(op.start)))
+				}
 				if optional {
+					repeated := sawOptional
 					sawOptional = true
+					if preludeErr != nil {
+						return preludeErr
+					}
 					var named bool
 					name, named = layerPropertyName(op)
-					if started || op.name != "BDC" || !named {
-						return bad
+					if repeated || op.name != "BDC" || !named || depth != 0 {
+						return layerRefusal(contents, diag.OptionalWrapperShape(op.name, int64(op.start)))
 					}
 					tokens[0], tokens[1], tokens[2] = op.args[0].layerSpan, op.args[1].layerSpan, op.layerSpan
-				} else if name, named := layerPropertyName(op); named {
-					names = append(names, name)
+				} else {
+					if !sawOptional && preludeErr == nil {
+						reason := diag.OptionalPreludeOperator
+						switch op.name {
+						case "cm":
+							switch {
+							case sawMatrix || sawIntent:
+								reason = diag.OptionalPreludeOrder
+							case !identityPreludeMatrix(data, op.args):
+								reason = diag.OptionalPreludeNonidentity
+							default:
+								sawMatrix, reason = true, diag.OptionalPreludeAllowed
+							}
+						case "gs":
+							if sawIntent {
+								reason = diag.OptionalPreludeOrder
+							} else {
+								reason, preludeErr = renderingIntentPrelude(s, page, site, op.args, nulls)
+								if optionalContentRefusal(preludeErr) {
+									preludeErr = nil
+								}
+								sawIntent = preludeErr == nil && reason == diag.OptionalPreludeAllowed
+							}
+						}
+						if preludeErr == nil && reason != diag.OptionalPreludeAllowed {
+							preludeErr = layerRefusal(contents, diag.OptionalWrapperPrelude(op.name, int64(op.start), reason))
+						}
+					}
+					if name, named := layerPropertyName(op); named {
+						names = append(names, name)
+					}
 				}
-				if closed {
-					return bad
-				}
-				started = true
 				switch op.name {
 				case "BDC", "BMC":
 					depth++
 				case "EMC":
 					depth--
 					if depth < 0 || len(op.args) != 0 {
+						if sawOptional {
+							return layerRefusal(contents, diag.OptionalWrapperShape(op.name, int64(op.start)))
+						}
 						return bad
 					}
 					if sawOptional && depth == 0 {
@@ -175,6 +213,9 @@ func planPageWrappers(c context.Context, s *model.Context, pages []pageRef, cont
 		}
 		if err == nil && depth != 0 {
 			err = bad
+			if sawOptional {
+				err = layerRefusal(contents, diag.OptionalWrapperShape("BDC", int64(tokens[2].start)))
+			}
 		}
 		if err != nil {
 			if c.Err() != nil {
@@ -245,6 +286,91 @@ func planPageWrappers(c context.Context, s *model.Context, pages []pageRef, cont
 		}
 	}
 	return plan, nil
+}
+
+func identityPreludeMatrix(data []byte, args []layerOperand) bool {
+	if len(args) != 6 {
+		return false
+	}
+	for i, arg := range args {
+		switch arg.value.(type) {
+		case types.Integer, types.Float:
+		default:
+			return false
+		}
+		token := string(data[arg.start:arg.end])
+		negative := strings.HasPrefix(token, "-")
+		token = strings.TrimPrefix(strings.TrimPrefix(token, "-"), "+")
+		whole, fraction, _ := strings.Cut(token, ".")
+		if strings.Trim(fraction, "0") != "" {
+			return false
+		}
+		whole = strings.TrimLeft(whole, "0")
+		if i == 0 || i == 3 {
+			if negative || whole != "1" {
+				return false
+			}
+		} else if whole != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func renderingIntentPrelude(s *model.Context, page pageRef, site sourceSite, args []layerOperand, nulls layerNullEvidence) (diag.OptionalWrapperPreludeReason, error) {
+	if len(args) != 1 {
+		return diag.OptionalPreludeStateUnresolved, nil
+	}
+	name, ok := args[0].value.(types.Name)
+	if !ok {
+		return diag.OptionalPreludeStateUnresolved, nil
+	}
+	resources, err := effectiveLayerResources(s, page, site)
+	if err != nil {
+		return diag.OptionalPreludeStateUnresolved, err
+	}
+	where := site.key("Resources").key("ExtGState")
+	raw, err := layerValue(s, resources["ExtGState"], where)
+	if err != nil {
+		return diag.OptionalPreludeStateUnresolved, err
+	}
+	states, _ := raw.(types.Dict)
+	where = where.key(string(name))
+	raw, err = layerValue(s, states[string(name)], where)
+	if err != nil || raw == nil {
+		return diag.OptionalPreludeStateUnresolved, err
+	}
+	state, ok := raw.(types.Dict)
+	if !ok {
+		return diag.OptionalPreludeStateIneligible, nil
+	}
+	if nulls.hasNull(state) {
+		return diag.OptionalPreludeStateNullEntry, nil
+	}
+	if state["RI"] == nil {
+		return diag.OptionalPreludeStateInvalidIntent, nil
+	}
+	for key := range state {
+		if key != "Type" && key != "RI" {
+			return diag.OptionalPreludeStateExtraEntry, nil
+		}
+	}
+	if raw, present := state["Type"]; present {
+		kind, err := layerValue(s, raw, where.key("Type"))
+		if err != nil || kind != types.Name("ExtGState") {
+			return diag.OptionalPreludeStateInvalidType, err
+		}
+	}
+	ri, err := layerValue(s, state["RI"], where.key("RI"))
+	if err != nil {
+		return diag.OptionalPreludeStateInvalidIntent, err
+	}
+	switch ri {
+	case types.Name("AbsoluteColorimetric"), types.Name("RelativeColorimetric"), types.Name("Saturation"), types.Name("Perceptual"):
+		return diag.OptionalPreludeAllowed, nil
+	default:
+		return diag.OptionalPreludeStateInvalidIntent, nil
+	}
 }
 
 // A reader may follow Parent for inherited resources. Its ancestry must

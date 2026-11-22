@@ -349,7 +349,8 @@ commands. A dash indicates no dedicated built-in workflow.
    [PDFConcat results and reports](docs/CLI.md#reports-and-committed-state)
 6. **Visibility layers.** Both PDFConcat plan policies remove proved-empty
    optional-content settings and report a warning. The `flatten-visible-content`
-   opt-in also admits the two proved profiles listed in the table.
+   opt-in also admits the two proved profiles listed in the table, including
+   page wrappers with the supported graphics-state prelude.
    [PDFConcat visibility policy](docs/PDF-POLICY.md#optional-content)
 
 ## Limits
@@ -361,7 +362,7 @@ output. See the [structure policy](docs/PLAN.md#structure).
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
-- A narrow strict-reader exception admits unreferenced zero-offset classic xref entries with located warnings. It does not establish universal producer compatibility. See [input tolerance](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).
+- Zero-offset classic xref entries have a narrow exception for unreferenced entries and proved references from discarded structure indexes. See [input tolerance](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).
 - Fitting checks destination targets, annotation/widget ownership and geometry, and placement accuracy. See [PDF compatibility](docs/PDF-POLICY.md#forms-fitting-and-catalog) before relying on interactive features.
 - Page-number overlays may cover source content; there is no overlap detector. See [page numbers](docs/PLAN.md#page-numbering).

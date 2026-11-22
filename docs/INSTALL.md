@@ -430,6 +430,16 @@ open a new terminal after successful persistence. For shell shadowing use
 `command -v pdfconcat`; in PowerShell use `Get-Command pdfconcat` and remove a
 conflicting installation using the method that installed it.
 
+On macOS, the installer reports a recognizable system-managed copy at
+`/usr/local/bin/pdfconcat` regardless of PATH order. When a parent path fails
+ownership, permission or ACL checks, the installer reports a candidate and
+links to the guide. On trusted paths the installer reports a verified version
+after matching the executable to its receipt. A mismatch identifies the
+receipt's version and links to the guide.
+The installer prints a removal command only after verifying the executable
+and removal helper. The advisory is read-only. For removal instructions, see
+the [system-managed installation guide](https://github.com/resoltico/pdfconcat/blob/v0.6.2/docs/MACOS.md#uninstall-pdfconcat).
+
 ## Archive names
 
 Choose the release tag first because the archive names are unversioned.

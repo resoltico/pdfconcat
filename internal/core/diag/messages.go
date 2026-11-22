@@ -26,6 +26,8 @@ func IOFailure(code Code, facts IOCause) Diagnostic {
 		message = fmt.Sprintf("Cannot read source file: %s.", facts.Reason)
 	case OutputWriteFailed:
 		message = fmt.Sprintf("Cannot write output PDF: %s.", facts.Reason)
+	case OutputInvalid:
+		message = fmt.Sprintf("Cannot verify staged output PDF: %s.", facts.Reason)
 	case OutputPublishFailed:
 		message = fmt.Sprintf("Output publication reported an error: %s.", facts.Reason)
 	case ReportWriteFailed:
@@ -38,6 +40,18 @@ func IOFailure(code Code, facts IOCause) Diagnostic {
 	d := New(code, message)
 	d.Detail = strings.ToValidUTF8(facts.NativeDetail, "�")
 	d.File = facts.File
+	return d
+}
+
+// StageCleanupFailure reports the cleanup operation independently of whether
+// the destination was published.
+func StageCleanupFailure(code Code, file, detail string) Diagnostic {
+	message := "Could not clean up the staged output PDF."
+	if code == ReportWriteFailed {
+		message = "Could not clean up the staged report."
+	}
+	d := New(code, message)
+	d.Detail, d.File = strings.ToValidUTF8(detail, "�"), file
 	return d
 }
 

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Name the discard option in preserve refusals for a proved unwritten structure index when the source passes discard admission. [PDF policy](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+- Refuse missing fonts selected by `Tf` during source admission and preserve page fonts used by legacy Forms.
+- Verify staged PDF size and SHA-256 against the assembler’s output before publication.
+- Clean up PDF and report stages through their original directories. Refuse publication after an observed parent replacement and report cleanup failures.
+- The Windows installer reports when another PDFConcat executable comes first on its PATH. [Installation](docs/INSTALL.md#troubleshooting)
+
 ## [0.18.0] - 2026-11-22
 
 - Accept proved bare wrappers with an optional identity `cm` followed by an optional rendering-intent-only `gs`. Default refusals name `flatten-visible-content` for proved candidates.

@@ -215,10 +215,10 @@ var (
 	FitFormUnsupported                  = define("fit_form_unsupported", Error, Invalid, "a widget transforms or its page ownership is unresolved or conflicting while other pages transform")
 	AssemblyFailed                      = define("assembly_failed", Error, Failed, "PDF/text backend failed during assembly or shaping (including recovered panics)")
 	OutputWriteFailed                   = define("output_write_failed", Error, Failed, "writing the staged output failed (disk full, permissions)")
-	OutputInvalid                       = define("output_invalid", Error, Failed, "the written output did not validate")
+	OutputInvalid                       = define("output_invalid", Error, Failed, "the staged PDF failed structural or byte verification")
 	OutputPageCountMismatch             = define("output_page_count_mismatch", Error, Failed, "written page count \u2260 expected")
-	OutputPublishFailed                 = define("output_publish_failed", Error, Failed, "the final rename failed (incl. no-replace unsupported and link fallback failed)")
-	ReportWriteFailed                   = define("report_write_failed", Error, Failed, "writing or publishing the report failed")
+	OutputPublishFailed                 = define("output_publish_failed", Error, Failed, "output publication or staged cleanup failed")
+	ReportWriteFailed                   = define("report_write_failed", Error, Failed, "report writing, publication or staged cleanup failed")
 	Interrupted                         = define("interrupted", Error, ClassInterrupted, "cancelled by a signal")
 	TextOverflowAllowed                 = define("text_overflow_allowed", Warning, NoClass, "`overflow: allow` and measured text extends past the page or block")
 	FormFieldsRenamed                   = define("form_fields_renamed", Warning, NoClass, "pdfcpu namespaces later nonempty forms even without collisions; build reports actual names")
@@ -284,8 +284,7 @@ func outcomeOf(d Diagnostic) diagnosticOutcome {
 
 // Priority keeps publication failures visible before outcome-ranked diagnostics.
 // Their visibility/publication consequences matter independently of overall
-// cancellation or input failure. Execution emits at most one failure per output
-// publication/report role. Equal priorities retain their original order.
+// cancellation or input failure. Equal priorities retain their original order.
 func Priority(d Diagnostic) int {
 	if d.Severity == Error && (d.Code == ReportWriteFailed || d.Code == OutputPublishFailed) {
 		return 4

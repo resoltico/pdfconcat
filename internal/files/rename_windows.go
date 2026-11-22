@@ -5,6 +5,7 @@ package files
 
 import (
 	"errors"
+	"os"
 
 	"golang.org/x/sys/windows"
 )
@@ -23,4 +24,4 @@ func renameNoReplace(from, to string) error {
 func unsupportedRename(err error) bool {
 	return errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_INVALID_PARAMETER) || errors.Is(err, windows.ERROR_CALL_NOT_IMPLEMENTED)
 }
-func syncDirectory(string) error { return nil }
+func syncDirectory(*os.Root) error { return nil }

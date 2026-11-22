@@ -5,6 +5,7 @@ package pdfcpu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -59,6 +60,9 @@ func guardZeroOffsetReferences(c context.Context, ctx *model.Context, o types.Ob
 				return nil
 			}
 		}
+		if refusal := potentialZeroOffsetStructureIndex(ctx, o, owner, depth, slot, value); refusal != nil {
+			return refusal
+		}
 		return zeroOffsetReferenceError(owner, value)
 	})
 }
@@ -94,7 +98,50 @@ func walkOriginalZeroOffsetRefs(c context.Context, ctx *model.Context, o types.O
 }
 
 func zeroOffsetReferenceError(owner int, ref types.IndirectRef) error {
-	return model.WithValidationErrorObject(fmt.Errorf("original reference to zero-offset object %d (generation %d)", ref.ObjectNumber, ref.GenerationNumber), owner)
+	return model.WithValidationErrorObject(errors.New(zeroOffsetReferenceMessage(ref)), owner)
+}
+
+func zeroOffsetReferenceMessage(ref types.IndirectRef) string {
+	return fmt.Sprintf("original reference to zero-offset object %d (generation %d)", ref.ObjectNumber, ref.GenerationNumber)
+}
+
+// PossibleZeroOffsetStructureIndex is a refused reference in the original
+// syntax of a possible structure root. It establishes neither effective
+// catalog ownership nor eligibility for discard.
+type PossibleZeroOffsetStructureIndex struct {
+	Owner  types.IndirectRef
+	Slot   string
+	Target types.IndirectRef
+}
+
+func (e *PossibleZeroOffsetStructureIndex) Error() string {
+	return zeroOffsetReferenceMessage(e.Target)
+}
+
+func potentialZeroOffsetStructureIndex(ctx *model.Context, raw types.Object, owner, depth int, slot string, target types.IndirectRef) error {
+	if ctx.Conf.ZeroOffsetPolicy != model.AdmitUnreferencedZeroOffsets ||
+		ctx.Read.Hybrid || ctx.Read.UsingXRefStreams || owner <= 0 || depth != 1 ||
+		(slot != "ParentTree" && slot != "IDTree") {
+		return nil
+	}
+	d, ok := raw.(types.Dict)
+	if !ok || d["Type"] != types.Name("StructTreeRoot") {
+		return nil
+	}
+	entry := ctx.Table[owner]
+	if entry == nil || entry.Generation == nil || entry.Compressed {
+		return nil
+	}
+	ref := *types.NewIndirectRef(owner, *entry.Generation)
+	if !originalZeroOffsetLive(ctx, ref) {
+		return nil
+	}
+	for _, row := range ctx.ZeroOffsetEntries {
+		if row.Object == target.ObjectNumber.Value() && row.Generation == target.GenerationNumber.Value() {
+			return model.WithValidationErrorObject(&PossibleZeroOffsetStructureIndex{Owner: ref, Slot: slot, Target: target}, owner)
+		}
+	}
+	return nil
 }
 
 type zeroOffsetStructureAuditKey struct{}

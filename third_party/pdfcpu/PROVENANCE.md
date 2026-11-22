@@ -129,9 +129,10 @@ delimiter at the established boundary and retains fallback paths for other
 encodings.
 
 Required resource binding lookup is shared between page resource consolidation
-and PDFConcat admission. Consolidation retains page Properties when a legacy
-Form, including a nested Form, can borrow them from the physical page scope.
-Page-only resource extraction cannot see the Form's named uses.
+and PDFConcat admission. Consolidation retains page Font and Properties
+bindings when a legacy Form, including a nested Form, can borrow them from
+the physical page scope. Page-only resource extraction cannot see the Form's
+named uses.
 
 A separate runtime read policy supports sources whose structure is explicitly
 discarded. The original-reference guard can defer at most two matching
@@ -142,3 +143,9 @@ returning typed proof. The second pass uses the original object-read budget.
 The source adapter removes those exact invalid edges before ordinary
 structure discard. Preserve and serialized-output readers do not enable
 this policy.
+
+When the unreferenced-only source policy refuses a possible structure-index
+reference, the guard reports a typed cause for an optional source-admission
+probe. The cause indicates a top-level index slot on a typed dictionary and
+a matching tombstone generation. The discard reader still establishes the
+effective root, exclusive ownership and allowed uses independently.

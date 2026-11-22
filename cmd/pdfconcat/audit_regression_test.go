@@ -6,7 +6,9 @@ package main
 import (
 	"bytes"
 	"encoding/json/v2"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -202,5 +204,169 @@ func TestWrapperPreludeRefusalIncludesResolvedReasonAndLocation(t *testing.T) {
 		!strings.Contains(d.Message, `"gs" at decoded byte 19`) ||
 		!strings.Contains(d.Message, "resource could not be resolved") {
 		t.Fatal(raw)
+	}
+}
+
+func TestZeroOffsetDiscardHintCheckAndBuild(t *testing.T) {
+	dir := t.TempDir()
+	source, out := filepath.Join(dir, "index.pdf"), filepath.Join(dir, "packet.pdf")
+	doc := pdffixture.Plain("zero-offset structure index")
+	doc.Objs[0] = []byte("<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R >>")
+	doc.Objs = append(doc.Objs, []byte("<< /Type /StructTreeRoot /ParentTree 7 0 R >>"), []byte("null"))
+	data := doc.Bytes()
+	body := bytes.Index(data, []byte("7 0 obj\n"))
+	row := fmt.Appendf(nil, "%010d 00000 n ", body)
+	if body <= 0 || bytes.Count(data, row) != 1 {
+		t.Fatal("missing independent xref row")
+	}
+	data = bytes.Replace(data, row, []byte("0000000000 00000 n "), 1)
+	if err := os.WriteFile(source, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []string{"direct", "preserve", "discard"} {
+		t.Run(policy, func(t *testing.T) {
+			const incumbent = "keep prior output"
+			if err := os.WriteFile(out, []byte(incumbent), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, operation := range []string{"check", "build"} {
+				args := []string{operation}
+				var input string
+				if policy == "direct" {
+					args = append(args, source)
+				} else {
+					args = append(args, "--plan", "-", "--base-dir", dir)
+					input = fmt.Sprintf(`{"version":10,"structure":%q,"items":[{"source":"index.pdf"}]}`, policy)
+				}
+				if operation == "build" {
+					args = append(args, "--overwrite", "-o", out)
+				}
+				r, code, raw := invokeJSON(t, args, input)
+				if policy == "discard" {
+					if code != 0 || !hasDiagnostic(r, "source_structure_removed") {
+						t.Fatal(raw)
+					}
+					found := false
+					for _, d := range r.Diagnostics {
+						if d.Code.String() == "source_xref_structure_reference_discarded" {
+							found = d.PDFLocation != nil && d.PDFLocation.Object == 6 && d.PDFLocation.Path == "ParentTree" &&
+								strings.Contains(d.Message, "discarded structure index referenced zero-offset object 7")
+						}
+					}
+					if !found || operation == "build" && (r.Output == nil || !r.Output.Published) {
+						t.Fatal(raw)
+					}
+					continue
+				}
+				if code != 2 || r.Status != "invalid" || len(r.Diagnostics) != 1 {
+					t.Fatal(raw)
+				}
+				d := r.Diagnostics[0]
+				if d.Code.String() != "source_invalid" || d.File != source || len(d.Items) != 1 || d.PDFLocation == nil ||
+					d.PDFLocation.Object != 6 || d.PDFLocation.Path != "ParentTree" ||
+					!strings.Contains(d.Message, `v10 plan with "structure": "discard"`) ||
+					!strings.Contains(d.Message, "untagged output for the whole packet") ||
+					!strings.Contains(d.Detail, "original reference to zero-offset object 7") {
+					t.Fatal(raw)
+				}
+				if operation == "build" {
+					if r.Output == nil || r.Output.Published {
+						t.Fatal(raw)
+					}
+					if got, err := os.ReadFile(out); err != nil || string(got) != incumbent {
+						t.Fatalf("preserve replaced the incumbent: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRequiredFontBindingsUseOriginalDrawingScope(t *testing.T) {
+	tools := oracle.RequireTools(t)
+	const text = "BT /F1 14 Tf 20 50 Td (BOUND FONT) Tj ET"
+	const fonts = "/Font << /F1 5 0 R >>"
+	const otherFont = "/Font << /F1 7 0 R >>"
+	const xobjects = "/XObject << /Art 6 0 R >> "
+	const noForm = "-"
+	const opaque = "/FMissing 10 Tf"
+	for _, tc := range []struct {
+		name, pageResources, formResources, drawing string
+		missingOwner                                int
+	}{
+		{"missing page font", "", noForm, text, 3},
+		{"inherited page font", fonts, noForm, text, 0},
+		{"legacy Form borrows font", xobjects + fonts, "", "/Art Do", 0},
+		{"explicit Form shadows page", xobjects + fonts, "<< >>", "/Art Do", 6},
+		{"same name in separate scopes", xobjects + fonts, "<< " + otherFont + " >>", "q 1 0 0 1 0 40 cm /Art Do Q " + text, 0},
+		{"opaque font lookalikes", fonts, noForm, "% " + opaque + "\n" + text + " BT /F1 10 Tf 20 30 Td (" + opaque +
+			") Tj ET\n" + fmt.Sprintf("BI /W %d /H 1 /BPC 8 /CS /G ID %s EI", len(opaque), opaque), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source, output := filepath.Join(dir, "input.pdf"), filepath.Join(dir, "packet.pdf")
+			stream := func(entries, program string) []byte {
+				return fmt.Appendf(nil, "<< /Length %d %s >>\nstream\n%s\nendstream", len(program), entries, program)
+			}
+			d := &pdffixture.Doc{Version: "1.7", Objs: [][]byte{
+				[]byte("<< /Type /Catalog /Pages 2 0 R >>"),
+				fmt.Appendf(nil, "<< /Type /Pages /Kids [3 0 R] /Count 1 /Resources << %s >> >>", tc.pageResources),
+				[]byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 220 160] /Contents 4 0 R >>"),
+				stream("", tc.drawing),
+				[]byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"),
+			}}
+			if tc.formResources != noForm {
+				entries := "/Type /XObject /Subtype /Form /BBox [0 0 220 160]"
+				if tc.formResources != "" {
+					entries += " /Resources " + tc.formResources
+				}
+				d.Objs = append(d.Objs, stream(entries, text),
+					[]byte("<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>"))
+			}
+			if err := d.WriteFile(source); err != nil {
+				t.Fatal(err)
+			}
+			const incumbent = "prior output"
+			for _, fit := range []bool{false, true} {
+				if err := os.WriteFile(output, []byte(incumbent), 0600); err != nil {
+					t.Fatal(err)
+				}
+				for _, op := range []string{"check", "build"} {
+					args := []string{op, source}
+					if fit {
+						args = append(args, "--fit-to", "A4")
+					}
+					if op == "build" {
+						args = append(args, "--overwrite", "-o", output)
+					}
+					r, code, raw := invokeJSON(t, args, "")
+					if tc.missingOwner == 0 {
+						if code != 0 || op == "build" && (r.Output == nil || !r.Output.Published) {
+							t.Fatal(raw)
+						}
+						continue
+					}
+					if code != 2 || len(r.Diagnostics) != 1 {
+						t.Fatal(raw)
+					}
+					finding := r.Diagnostics[0]
+					loc := finding.PDFLocation
+					if finding.Code.String() != "source_invalid" || finding.File != source || len(finding.Items) != 1 ||
+						loc == nil || loc.Page != 1 || loc.Object != tc.missingOwner || loc.Path != "Content.Tf" {
+						t.Fatal(raw)
+					}
+					got, err := os.ReadFile(output)
+					if err != nil || string(got) != incumbent || r.Output != nil && r.Output.Published {
+						t.Fatalf("font refusal replaced the incumbent: %q, %v", got, err)
+					}
+				}
+				if tc.missingOwner == 0 {
+					extracted, err := exec.CommandContext(t.Context(), tools.PDFToText, output, "-").Output()
+					if err != nil || !bytes.Contains(extracted, []byte("BOUND FONT")) {
+						t.Fatalf("output lost bound text: %q, %v", extracted, err)
+					}
+				}
+			}
+		})
 	}
 }

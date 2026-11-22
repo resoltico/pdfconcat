@@ -5,10 +5,15 @@ package pdf
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +21,7 @@ import (
 	"github.com/resoltico/pdfconcat/internal/oracle"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 )
@@ -359,5 +365,144 @@ func TestProvedZeroOffsetDiscardKeepsOriginalSignatureRefusal(t *testing.T) {
 	_, _, findings, err := readSource(t.Context(), input, packet.StructureDiscard)
 	if err == nil || diagnostic(err, diag.SourceInvalid).Code != diag.SourceSigned || len(findings) != 0 {
 		t.Fatalf("signature priority changed: %v, %v", err, findings)
+	}
+}
+
+func TestZeroOffsetDiscardHintRequiresSuccessfulSourceProof(t *testing.T) {
+	const owner = "/StructTreeRoot 7 0 R"
+	for _, tc := range []struct {
+		name, index, stream, catalog string
+		ownerSlot                    string
+		probe                        bool
+	}{
+		{"ParentTree", "/ParentTree 6 0 R", "", owner, "ParentTree", true},
+		{"IDTree", "/IDTree 6 0 R", "", owner, "IDTree", true},
+		{"owner alias", "/ParentTree 6 0 R", "", owner + " /Alias 7 0 R", "", true},
+		{"wrong generation", "/ParentTree 6 1 R", "", owner, "", false},
+		{"retained reference", "/ParentTree 6 0 R", "/Private 6 0 R", owner, "", false},
+		{"signature found on replay", "/ParentTree 6 0 R /Private << /Type /Sig >>", "", owner, "", true},
+		{"unreachable typed owner", "/ParentTree 6 0 R", "", "", "", true},
+		{"nested index key", "/Private << /ParentTree 6 0 R >>", "", owner, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := zeroReferenceFixture("<< /Type /StructTreeRoot "+tc.index+" >>", tc.stream, "", tc.catalog)
+			initial := &hintSnapshotReader{Reader: bytes.NewReader(input)}
+			_, _, _, original := readSourceReader(t.Context(), initial, SourcePolicies{})
+			var candidate *pdfcpu.PossibleZeroOffsetStructureIndex
+			if original == nil || errors.As(original, &candidate) != tc.probe {
+				t.Fatalf("candidate classifier: %v", original)
+			}
+			reader := &hintSnapshotReader{Reader: bytes.NewReader(input)}
+			facts, _, ds := InspectReader(t.Context(), reader, sha256.Sum256(input), int64(len(input)), SourcePolicies{}, nil)
+			if len(ds) != 1 || ds[0].Code != diag.SourceInvalid || ds[0].Detail != original.Error() || facts.Pages != 0 {
+				t.Fatalf("initial refusal or original evidence changed: %+v", ds)
+			}
+			if tc.probe != (reader.rewinds > initial.rewinds) {
+				t.Fatalf("unexpected replay decision: initial %d, inspection %d", initial.rewinds, reader.rewinds)
+			}
+			hint := strings.Contains(ds[0].Message, `"structure": "discard"`)
+			if hint != (tc.ownerSlot != "") {
+				t.Fatal(ds)
+			}
+			if !hint {
+				return
+			}
+			if ds[0].PDFLocation == nil || ds[0].PDFLocation.Object != 7 || ds[0].PDFLocation.Path != tc.ownerSlot ||
+				!strings.Contains(ds[0].Message, "untagged output for the whole packet") {
+				t.Fatal(ds)
+			}
+			discard := &hintSnapshotReader{Reader: bytes.NewReader(input)}
+			if _, _, _, err := readSourceReader(t.Context(), discard, SourcePolicies{Structure: packet.StructureDiscard}); err != nil {
+				t.Fatal(err)
+			}
+			if reader.rewinds != initial.rewinds+1+discard.rewinds {
+				t.Fatalf("expected one rewind and one discard replay, got %d rewinds", reader.rewinds)
+			}
+		})
+	}
+}
+
+type hintSnapshotReader struct {
+	*bytes.Reader
+	rewinds, atReplay int
+	seekErr, readErr  error
+	cancel            context.CancelFunc
+}
+
+func (r *hintSnapshotReader) Seek(offset int64, whence int) (int64, error) {
+	if offset == 0 && whence == io.SeekStart {
+		r.rewinds++
+		if r.rewinds == r.atReplay {
+			if r.cancel != nil {
+				r.cancel()
+			}
+			if r.seekErr != nil {
+				return 0, r.seekErr
+			}
+		}
+	}
+	return r.Reader.Seek(offset, whence)
+}
+
+func (r *hintSnapshotReader) Read(p []byte) (int, error) {
+	if r.atReplay > 0 && r.rewinds >= r.atReplay && r.readErr != nil {
+		return 0, r.readErr
+	}
+	return r.Reader.Read(p)
+}
+
+func TestZeroOffsetDiscardHintReplayInterruptionAndIO(t *testing.T) {
+	input := zeroReferenceFixture("<< /Type /StructTreeRoot /ParentTree 6 0 R >>", "", "", "/StructTreeRoot 7 0 R")
+	const detail = "synthetic replay I/O failure"
+	for _, kind := range []string{"seek", "read", "cancel"} {
+		t.Run(kind, func(t *testing.T) {
+			c, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			initial := &hintSnapshotReader{Reader: bytes.NewReader(input)}
+			_, _, _, refusal := readSourceReader(c, initial, SourcePolicies{})
+			if refusal == nil {
+				t.Fatal("missing preserve refusal")
+			}
+			reader := &hintSnapshotReader{Reader: bytes.NewReader(input), atReplay: initial.rewinds + 1}
+			expected := diag.SourceInvalid
+			switch kind {
+			case "seek":
+				reader.seekErr = errors.New(detail)
+			case "read":
+				reader.readErr = errors.New(detail)
+			case "cancel":
+				reader.cancel, expected = cancel, diag.Interrupted
+			}
+			_, _, ds := InspectReader(c, reader, sha256.Sum256(input), int64(len(input)), SourcePolicies{}, nil)
+			if len(ds) != 1 || ds[0].Code != expected || strings.Contains(ds[0].Message, `"structure": "discard"`) ||
+				(kind != "cancel" && ds[0].Detail != detail) {
+				t.Fatalf("replay failure: %+v", ds)
+			}
+		})
+	}
+}
+
+func TestZeroOffsetDiscardHintRequiresWholeSourceObservation(t *testing.T) {
+	input := zeroReferenceFixture("<< /Type /StructTreeRoot /ParentTree 6 0 R >>", "", "", "/StructTreeRoot 7 0 R")
+	before := []byte("BT /F1 12 Tf 50 700 Td (Synthetic xref evidence) Tj ET\n% 6 0 R\n")
+	open := []byte("/Span BMC\n")
+	if bytes.Count(input, before) != 1 {
+		t.Fatal("missing original drawing fixture")
+	}
+	// Preserve every object and xref offset while adding an unclosed mark.
+	input = bytes.Replace(input, before, append(open, bytes.Repeat([]byte{' '}, len(before)-len(open))...), 1)
+	_, _, _, err := readSource(t.Context(), input, packet.StructureDiscard)
+	if err != nil {
+		t.Fatalf("expected the discard reader to establish the index proof: %v", err)
+	}
+	_, _, discard := Inspect(t.Context(), input, packet.StructureDiscard, nil)
+	if !slices.ContainsFunc(discard, func(d diag.Diagnostic) bool {
+		return d.Code == diag.SourceInvalid && strings.Contains(d.Detail, "unclosed marked-content")
+	}) {
+		t.Fatalf("observation did not refuse the malformed drawing program: %+v", discard)
+	}
+	_, _, preserve := Inspect(t.Context(), input, packet.StructurePreserve, nil)
+	if len(preserve) != 1 || preserve[0].Code != diag.SourceInvalid || strings.Contains(preserve[0].Message, `"structure": "discard"`) {
+		t.Fatalf("failed observation supplied a discard hint: %+v", preserve)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/resoltico/pdfconcat/internal/compose"
@@ -24,8 +26,8 @@ type buildOutcome struct {
 	diagnostics []diag.Diagnostic
 }
 
-func build(c context.Context, j packet.Plan, composition *composition, roles files.Roles) buildOutcome {
-	out := buildOutcome{output: outcome.Output{Path: j.Output()}}
+func build(c context.Context, j packet.Plan, composition *composition, roles files.Roles) (out buildOutcome) {
+	out = buildOutcome{output: outcome.Output{Path: j.Output()}}
 	layout, assembly := composition.layout, composition.assembly
 	var pages []compose.Page
 	for _, part := range assembly.Parts {
@@ -45,7 +47,7 @@ func build(c context.Context, j packet.Plan, composition *composition, roles fil
 		out.diagnostics = append(out.diagnostics, ioDiagnostic(diag.OutputWriteFailed, err, j.Output()))
 		return out
 	}
-	defer staged.Abort()
+	defer abortStage(staged, packet.OutputDestination, j.Output(), &out.diagnostics)
 	hash := sha256.New()
 	counter := &countWriter{Writer: staged}
 	assembly.Fonts = embedded
@@ -61,23 +63,33 @@ func build(c context.Context, j packet.Plan, composition *composition, roles fil
 		out.diagnostics = append(out.diagnostics, pdf.Diagnostic(err))
 		return out
 	}
-	published, findings := verifyAndPublishPDF(c, staged, roles, assembled, layout.TotalPages, assembly)
+	emitted := serializedPDFIdentity{size: counter.n, digest: [sha256.Size]byte(hash.Sum(nil))}
+	published, findings := verifyAndPublishPDF(c, staged, roles, assembled, layout.TotalPages, assembly, emitted)
 	out.diagnostics = append(out.diagnostics, findings...)
 	out.output.Published = published
 	if published {
-		out.output.SHA256 = hex.EncodeToString(hash.Sum(nil))
-		out.output.Bytes = knownCount(counter.n)
+		out.output.SHA256 = hex.EncodeToString(emitted.digest[:])
+		out.output.Bytes = knownCount(emitted.size)
 	}
 	return out
 }
 
-func verifyAndPublishPDF(c context.Context, staged *files.Staged, roles files.Roles, assembled pdf.Assembled, pages int64, assembly pdf.Assembly) (bool, []diag.Diagnostic) {
+func verifyAndPublishPDF(c context.Context, staged *files.Staged, roles files.Roles, assembled pdf.Assembled, pages int64, assembly pdf.Assembly, emitted serializedPDFIdentity) (bool, []diag.Diagnostic) {
 	reader, err := staged.Reader(c)
 	if err != nil {
 		return false, []diag.Diagnostic{ioDiagnostic(diag.OutputInvalid, err, roles.Output)}
 	}
 	if err = assembled.VerifyReader(c, reader, pages, assembly); err != nil {
 		return false, []diag.Diagnostic{pdf.Diagnostic(err)}
+	}
+	// Take a fresh size observation through the same handle before the byte
+	// witness. The PDF verifier's reader was bounded to its earlier length.
+	readback, err := staged.Reader(c)
+	if err == nil {
+		err = verifyStagedBytes(c, readback, emitted)
+	}
+	if err != nil {
+		return false, []diag.Diagnostic{ioDiagnostic(diag.OutputInvalid, err, roles.Output)}
 	}
 	if err = c.Err(); err != nil {
 		return false, []diag.Diagnostic{diag.Report(diag.Interrupted, diag.InterruptedFailure(err.Error()))}
@@ -87,6 +99,53 @@ func verifyAndPublishPDF(c context.Context, staged *files.Staged, roles files.Ro
 		findings = append(findings, publicationDiagnostic(packet.OutputDestination, roles.Output, roles.InputsKnown, published, err))
 	}
 	return published, findings
+}
+
+type serializedPDFIdentity struct {
+	size   int64
+	digest [sha256.Size]byte
+}
+
+// verifyStagedBytes reads a section bounded by Staged.Reader through the owned
+// handle. The expected identity comes from the assembler's writer.
+func verifyStagedBytes(c context.Context, readback io.ReadSeeker, emitted serializedPDFIdentity) error {
+	if err := c.Err(); err != nil {
+		return err
+	}
+	size, err := readback.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("measure staged PDF: %w", err)
+	}
+	if size != emitted.size {
+		return fmt.Errorf("staged PDF has %d bytes, assembler wrote %d", size, emitted.size)
+	}
+	if _, err := readback.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind staged PDF: %w", err)
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, stagedByteReader{context: c, reader: readback})
+	if err != nil {
+		return fmt.Errorf("read staged PDF: %w", err)
+	}
+	if n != emitted.size {
+		return fmt.Errorf("read %d staged PDF bytes, assembler wrote %d", n, emitted.size)
+	}
+	if [sha256.Size]byte(hash.Sum(nil)) != emitted.digest {
+		return errors.New("staged PDF SHA-256 differs from the assembler's output")
+	}
+	return c.Err()
+}
+
+type stagedByteReader struct {
+	context context.Context
+	reader  io.Reader
+}
+
+func (r stagedByteReader) Read(p []byte) (int, error) {
+	if err := r.context.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 type countWriter struct {

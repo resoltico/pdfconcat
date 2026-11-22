@@ -277,6 +277,34 @@ func detachSourceStructure(c context.Context, s *model.Context) ([]diag.PDFLocat
 	return locations, nil
 }
 
+// The reader proved these exact raw edges are invalid tombstones confined to
+// the exclusively discarded root. Remove only those edges before whole-graph
+// policy scanning, after signatures have been checked on the original graph.
+func detachProvedZeroOffsetStructure(s *model.Context) error {
+	if len(s.Read.DiscardedZeroOffsetReferences) == 0 {
+		return nil
+	}
+	cat, err := s.Catalog()
+	if err != nil {
+		return err
+	}
+	for _, reference := range s.Read.DiscardedZeroOffsetReferences {
+		entry := reference.Entry
+		where := sourceSite{ref: reference.Root}.key(reference.Slot)
+		root, err := s.DereferenceDict(reference.Root)
+		if err != nil {
+			return where.wrap(err)
+		}
+		row := s.Table[entry.Object]
+		if cat["StructTreeRoot"] != reference.Root || root[reference.Slot] != *types.NewIndirectRef(entry.Object, entry.Generation) ||
+			row == nil || !row.Free || generation(row) != entry.Generation {
+			return where.wrap(errors.New("proved structure index edge changed before discard"))
+		}
+		delete(root, reference.Slot)
+	}
+	return nil
+}
+
 func admitSourceStructure(c context.Context, s *model.Context, policy packet.StructurePolicy) ([]diag.Diagnostic, error) {
 	cat, e := s.Catalog()
 	if e != nil {

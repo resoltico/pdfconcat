@@ -87,6 +87,9 @@ with strict validation and without source normalization before publication.
 The [structure policy](docs/PDF-POLICY.md#structure-ownership) distinguishes supported
 preserved semantics, untagged content and explicit structure discard. Discard does
 not bypass page, content, encoding, signature, encryption or form safeguards.
+Its [classic-xref exception](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+requires original-file proof that a zero-offset reference belongs exclusively
+to a discarded structure index.
 Source parsing is strict and semantic compatibility validation remains relaxed.
 Every original page-content stream must decode before selection, including
 omitted pages. Truncated/corrupt Flate programs are refused using independent

@@ -58,7 +58,8 @@ func planOptionalContent(c context.Context, s *model.Context, policy packet.Opti
 	if err != nil {
 		return plan, err
 	}
-	if o != nil {
+	switch {
+	case o != nil:
 		if s.XRefTable.Version() < model.V15 {
 			return plan, layerRefusal(site, diag.OptionalContentRefused())
 		}
@@ -87,7 +88,9 @@ func planOptionalContent(c context.Context, s *model.Context, policy packet.Opti
 				return plan, err
 			}
 		}
-	} else if policy == packet.OptionalContentFlattenVisibleContent {
+	case policy != packet.OptionalContentFlattenVisibleContent:
+		return inspectCatalogFreeDefault(c, s, pages, content, nulls)
+	default:
 		wrappers, err := planPageWrappers(c, s, pages, content, nulls)
 		if err != nil {
 			return plan, err
@@ -124,6 +127,33 @@ func planOptionalContent(c context.Context, s *model.Context, policy packet.Opti
 	}
 	plan.removeCatalog = o == nil || plan.emptyCatalog != nil
 	return plan, nil
+}
+
+func inspectCatalogFreeDefault(c context.Context, s *model.Context, pages []pageRef, content pageContentSnapshot, nulls layerNullEvidence) (optionalContentPlan, error) {
+	plan := optionalContentPlan{removeCatalog: true}
+	evidence := newLayerProgramEvidence(s)
+	err := scanLayerGraph(c, s, pages, &plan, layerDetect, evidence)
+	if err == nil {
+		err = detectLayerPagePrograms(c, s, pages, content, evidence)
+	}
+	if !optionalContentRefusal(err) {
+		return plan, err
+	}
+	// Ordinary inputs keep the detection path. A default-policy refusal
+	// can name the opt-in only after the same full proof used by admission.
+	wrappers, proof := planPageWrappers(c, s, pages, content, nulls)
+	if proof == nil && len(wrappers.pages) > 0 {
+		proof = scanLayerGraph(c, s, pages, &optionalContentPlan{wrappers: wrappers}, layerVerify, nil)
+		if proof == nil {
+			page := wrappers.pages[0]
+			site := sourceSite{ref: page.content.ref, page: page.number}.key("Contents")
+			return plan, layerRefusal(site, diag.OptionalWrapperDefaultRefusal(string(packet.OptionalContentFlattenVisibleContent)))
+		}
+	}
+	if proof != nil {
+		return plan, proof
+	}
+	return plan, err
 }
 
 func (p optionalContentPlan) applyForms(c context.Context, s *model.Context, pages []pageRef) (diag.Diagnostic, error) {

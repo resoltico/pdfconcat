@@ -835,3 +835,55 @@ func OptionalContentWrappersRemoved() Explanation {
 func MissingMarkedContentProperty(name string) Explanation {
 	return explain("missing_marked_content_property", fmt.Sprintf("The marked-content operator requires property %q in its resource scope.", name), name)
 }
+
+// OptionalWrapperPreludeReason identifies the failed condition of the prelude proof.
+type OptionalWrapperPreludeReason uint8
+
+// Prelude proof outcomes reported by source admission.
+const (
+	OptionalPreludeAllowed OptionalWrapperPreludeReason = iota
+	OptionalPreludeOperator
+	OptionalPreludeNonidentity
+	OptionalPreludeOrder
+	OptionalPreludeStateUnresolved
+	OptionalPreludeStateIneligible
+	OptionalPreludeStateExtraEntry
+	OptionalPreludeStateNullEntry
+	OptionalPreludeStateInvalidType
+	OptionalPreludeStateInvalidIntent
+)
+
+// OptionalWrapperPrelude renders the failed condition with the original operator address.
+func OptionalWrapperPrelude(operator string, offset int64, reason OptionalWrapperPreludeReason) Explanation {
+	message := fmt.Sprintf("The optional-content wrapper has a disallowed prelude operator %q at decoded byte %d.", operator, offset)
+	switch reason {
+	case OptionalPreludeNonidentity:
+		message += " The matrix must be an exact identity."
+	case OptionalPreludeOrder:
+		message += " Each prelude operator can appear once, with the matrix before the graphics state."
+	case OptionalPreludeStateUnresolved:
+		message += " The graphics-state resource could not be resolved in the effective page resources."
+	case OptionalPreludeStateIneligible:
+		message += " The graphics-state resource must be a dictionary."
+	case OptionalPreludeStateExtraEntry:
+		message += " The graphics state contains an entry other than /RI or /Type."
+	case OptionalPreludeStateNullEntry:
+		message += " The graphics state contains an explicit null entry."
+	case OptionalPreludeStateInvalidType:
+		message += " The graphics state's /Type must be /ExtGState when supplied."
+	case OptionalPreludeStateInvalidIntent:
+		message += " The graphics state requires a valid /RI rendering intent."
+	case OptionalPreludeAllowed, OptionalPreludeOperator:
+	}
+	return explain("optional_wrapper_prelude", message, operator, strconv.FormatInt(offset, 10), strconv.Itoa(int(reason)))
+}
+
+// OptionalWrapperShape describes an operator outside the admitted outer scope.
+func OptionalWrapperShape(operator string, offset int64) Explanation {
+	return explain("optional_wrapper_shape", fmt.Sprintf("Operator %q at decoded byte %d violates the single outer optional-content wrapper profile.", operator, offset), operator, strconv.FormatInt(offset, 10))
+}
+
+// OptionalWrapperDefaultRefusal names the plan setting for a proved wrapper.
+func OptionalWrapperDefaultRefusal(option string) Explanation {
+	return explain("optional_wrapper_default", fmt.Sprintf(`The undeclared page wrapper qualifies for removal with the plan setting "optional_content": %q. The default policy refuses it.`, option), option)
+}

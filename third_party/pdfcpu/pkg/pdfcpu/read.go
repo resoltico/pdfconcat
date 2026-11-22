@@ -210,6 +210,14 @@ func Read(c context.Context, rs io.ReadSeeker, conf *model.Configuration) (*mode
 		return nil, err
 	}
 
+	if ctx.Conf.ZeroOffsetPolicy == model.AdmitDiscardedStructureZeroOffsets && len(ctx.ZeroOffsetEntries) > 0 {
+		zeroAudit := newZeroOffsetStructureAudit(ctx)
+		c = context.WithValue(c, zeroOffsetStructureAuditKey{}, zeroAudit)
+		if err := guardZeroOffsetReferences(c, ctx, ctx.OriginalTrailer, 0); err != nil {
+			return nil, err
+		}
+	}
+
 	// Make all objects explicitly available (load into memory) in corresponding xRefTable entries.
 	// Also decode any involved object streams.
 	if err = dereferenceXRefTable(c, ctx); err != nil {
@@ -439,7 +447,7 @@ func parseXRefTableEntry(xRefTable *model.XRefTable, fields []string, objNr int,
 	}
 
 	if entryType == "n" && objNr > 0 && offset == 0 {
-		if xRefTable.Conf != nil && xRefTable.Conf.ZeroOffsetPolicy == model.AdmitUnreferencedZeroOffsets && literalZeroOffsetEntry(fields, generation) {
+		if xRefTable.Conf != nil && (xRefTable.Conf.ZeroOffsetPolicy == model.AdmitUnreferencedZeroOffsets || xRefTable.Conf.ZeroOffsetPolicy == model.AdmitDiscardedStructureZeroOffsets) && literalZeroOffsetEntry(fields, generation) {
 			// Exists is checked before this function: reserve the effective slot,
 			// including against /Prev. Absence would resurrect an older body.
 			xRefTable.Table[objNr] = &model.XRefTableEntry{Free: true, Offset: new(int64), Generation: &generation}
@@ -4511,6 +4519,12 @@ func dereferenceXRefTable(c context.Context, ctx *model.Context) error {
 	// For each xRefTableEntry assign a Object either by parsing from file or pointing to a decompressed object.
 	if err := dereferenceObjects(c, ctx); err != nil {
 		return err
+	}
+
+	if audit, ok := c.Value(zeroOffsetStructureAuditKey{}).(*zeroOffsetStructureAudit); ok {
+		if err := audit.prove(c, ctx); err != nil {
+			return err
+		}
 	}
 
 	// Identify an optional Version entry in the root object/catalog.

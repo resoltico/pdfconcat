@@ -26,7 +26,7 @@
     },
     {
       "path": "pkg/pdfcpu/model/context.go",
-      "sha256": "f29af829cc9faa1b88d73adc6d19c536ae81fe430f0f81fca7a4b6379251ecb1",
+      "sha256": "cfbc5b0d29947aee600c45500ca89dea709ffc39e4606f3e10db6a910711ded0",
       "upstream_sha256": "281f461ce95d6a67f4c532eaaead4aebcd06d521f45d18f183ea4892d52aec0e"
     },
     {
@@ -71,12 +71,12 @@
     },
     {
       "path": "pkg/pdfcpu/model/zero_offset.go",
-      "sha256": "cb036c4f3d97af9fc94549a810eb29c589399f4c6dc1e4a2dca2f9b4ab877c48",
+      "sha256": "a66c9fdf5ab53dd7d9d426385d9937b7238602e37e7ce043bc948672f860d2f7",
       "upstream_sha256": null
     },
     {
       "path": "pkg/pdfcpu/read.go",
-      "sha256": "a1ec055d2fdbcea7df91e55a27275c7e405b087c28934304e64bf93bbff69f20",
+      "sha256": "f280f7ad9b8abf0e759412295f292e4c3e3dcb30bb8828ce981c904ba09e45b3",
       "upstream_sha256": "2677cca296d7d63f603bc141de938f99cabe466b73d5d279fd434f23e00ca64c"
     },
     {
@@ -101,7 +101,7 @@
     },
     {
       "path": "pkg/pdfcpu/zero_offset.go",
-      "sha256": "03c7f4ef65034f266ee5780bcded8c9e9e46bd95bbc65b189bdbe2ed1304fb43",
+      "sha256": "ac0142767109ac36d24e6ba46b4df74c4fe7437bfeb8518bc50c1fa22597eb38",
       "upstream_sha256": null
     },
     {

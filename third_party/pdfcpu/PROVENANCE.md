@@ -132,3 +132,13 @@ Required resource binding lookup is shared between page resource consolidation
 and PDFConcat admission. Consolidation retains page Properties when a legacy
 Form, including a nested Form, can borrow them from the physical page scope.
 Page-only resource extraction cannot see the Form's named uses.
+
+A separate runtime read policy supports sources whose structure is explicitly
+discarded. The original-reference guard can defer at most two matching
+tombstone references in the top-level index slots. The reader validates the
+effective typed structure root and its K hierarchy, then checks all original
+live object syntax and the effective trailer for external aliases before
+returning typed proof. The second pass uses the original object-read budget.
+The source adapter removes those exact invalid edges before ordinary
+structure discard. Preserve and serialized-output readers do not enable
+this policy.

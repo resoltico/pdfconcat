@@ -186,6 +186,12 @@ derived index normalization; damaged declared semantics remain errors. Source vi
 directives are removed before semantic compatibility validation. Inspection and
 assembly share this path, which returns accumulated findings alongside any failure.
 
+The reader proves that any admitted zero-offset references under explicit
+discard are index edges of the effective catalog's structure root and that the
+hierarchy has no other owner. Admission detaches those edges after checking
+original signature evidence and before scanning the source graph for navigation and
+visibility. [Classic xref input policy](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+
 The adapter resolves page geometry from the validated Kids traversal in linear
 time. Each scoped view owns its effective frame, physical size and inherited
 attributes; null entries inherit, while local zero rotation and empty resources

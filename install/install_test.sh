@@ -1397,5 +1397,106 @@ PY
 then :; else fail 'startup rewrite recovery matrix'; fi
 
 printf '\n'
+if [[ "${platform}" == macos && "${command_name}" == pdfconcat ]]; then
+    begin 'retired managed system advisory recognizes both PATH orders and protects unverified layouts'
+    legacy_engine=${fixture_home}/legacy-engine.sh
+    # Exercise the real recognition and display logic without accessing a host
+    # installation. Fixture ownership and the authenticated helper digest are
+    # supplied at the metadata boundary.
+    sed '$d' "${installer}" > "${legacy_engine}"
+    if env -i HOME="${fixture_home}" PATH="${base_path}" /bin/sh -s -- "${legacy_engine}" > "${work}/out" 2>&1 <<'EOF'
+. "$1"
+umask 022
+identity_kernel=Darwin
+prefix=$HOME/usr/local
+root=$prefix/libexec/pdfconcat
+binary=$HOME/new/pdfconcat
+mkdir -p -m 755 "$HOME/usr" "$prefix" "$prefix/bin" "$prefix/libexec" "$root" "$root/releases" "$root/fixture" "$root/fixture/payload" "$HOME/new"
+chmod 755 "$HOME/usr" "$prefix" "$prefix/bin" "$prefix/libexec" "$root" "$root/releases" "$root/fixture" "$root/fixture/payload" "$HOME/new"
+for candidate in "$binary" "$root/fixture/setup.sh" "$root/fixture/payload/pdfconcat"; do
+    printf '#!/bin/sh\n: > "$HOME/executed"\n' > "$candidate"; chmod 755 "$candidate"
+done
+expected=4cb122a8fdf38ffd2a8fdd5d66615d5f0ab12dbac42ca7bd27cdb28444711ab3
+payload_hash=$(legacy_hash "$root/fixture/payload/pdfconcat")
+printf 'PDFCONCAT-MACOS-1\nversion v0.6.2\narchitecture arm64\nd payload\nf 755 %s payload/pdfconcat\nf 755 %s setup.sh\n' "$payload_hash" "$expected" > "$root/fixture/receipt"
+chmod 644 "$root/fixture/receipt"
+digest=$(legacy_hash "$root/fixture/receipt")
+mv "$root/fixture" "$root/releases/$digest"
+generation=$root/releases/$digest
+ln -s "releases/$digest" "$root/current"
+ln -s "$root/current/payload/pdfconcat" "$prefix/bin/pdfconcat"
+legacy_mac_stat() {
+    if [ "${mock_mutable_parent:-0}" = 1 ] && [ "$1" = '%u %Lp' ] && [ "$2" = "$prefix" ]; then
+        printf '501 775\n'
+        return
+    fi
+    fixture_meta=$(/usr/bin/stat -f "$1" "$2") || return 1
+    case "$1" in '%u '* ) printf '0 %s\n' "${fixture_meta#* }" ;; *) printf '%s\n' "$fixture_meta" ;; esac
+}
+legacy_hash() {
+    if [ "$1" = "$generation/setup.sh" ] && [ "${mock_helper_match:-0}" = 1 ]; then
+        printf '%s\n' "$expected"
+    else
+        fixture_hash=$(/usr/bin/shasum -a 256 < "$1") || return 1
+        printf '%s\n' "${fixture_hash%% *}"
+    fi
+}
+mock_helper_match=1
+PATH="$prefix/bin:$HOME/new:/usr/bin:/bin" report_command_paths "$prefix" > "$HOME/legacy-first"
+PATH="$HOME/new:$prefix/bin:/usr/bin:/bin" report_command_paths "$prefix" > "$HOME/legacy-second"
+grep -q 'current terminal finds another' "$HOME/legacy-first"
+if grep -q 'current terminal finds another' "$HOME/legacy-second"; then exit 1; fi
+for report in "$HOME/legacy-first" "$HOME/legacy-second"; do
+    grep -Fq "Retired managed PDFConcat v0.6.2: $prefix/bin/pdfconcat" "$report"
+    grep -Fq '/blob/v0.6.2/docs/MACOS.md#uninstall-pdfconcat' "$report"
+    grep -Fq "/bin/bash $root/current/setup.sh uninstall" "$report"
+done
+mock_mutable_parent=1
+chmod 775 "$prefix"
+PATH="$HOME/new:$prefix/bin:/usr/bin:/bin" report_command_paths "$prefix" > "$HOME/mutable"
+grep -Fq "candidate: $prefix/bin/pdfconcat" "$HOME/mutable"
+grep -q 'parent directory failed the ownership, permission or ACL checks' "$HOME/mutable"
+grep -q '#uninstall-pdfconcat' "$HOME/mutable"
+if grep -q 'Historical removal command' "$HOME/mutable"; then exit 1; fi
+mock_mutable_parent=0
+legacy_system_advice "$prefix" > "$HOME/root-mutable"
+grep -q 'parent directory failed the ownership, permission or ACL checks' "$HOME/root-mutable"
+if grep -q 'Historical removal command' "$HOME/root-mutable"; then exit 1; fi
+chmod 755 "$prefix"
+printf '#!/bin/sh\nexit 86\n' > "$generation/payload/pdfconcat"
+legacy_system_advice "$prefix" > "$HOME/changed"
+grep -Fq "candidate: $prefix/bin/pdfconcat" "$HOME/changed"
+grep -q 'Receipt version v0.6.2. Executable bytes do not match' "$HOME/changed"
+grep -q '#uninstall-pdfconcat' "$HOME/changed"
+if grep -Eq 'Historical removal command|Retired managed PDFConcat v0.6.2' "$HOME/changed"; then exit 1; fi
+cp "$binary" "$generation/payload/pdfconcat"
+mock_helper_match=0
+legacy_system_advice "$prefix" > "$HOME/unverified"
+grep -q 'Retired managed' "$HOME/unverified"
+if grep -q 'Historical removal command' "$HOME/unverified"; then exit 1; fi
+mock_helper_match=1
+chmod 777 "$generation/setup.sh"
+legacy_system_advice "$prefix" > "$HOME/unsafe"
+grep -q 'Retired managed' "$HOME/unsafe"
+if grep -q 'Historical removal command' "$HOME/unsafe"; then exit 1; fi
+chmod 777 "$root/releases"
+legacy_system_advice "$prefix" > "$HOME/unsafe-parent"
+[ ! -s "$HOME/unsafe-parent" ]
+chmod 755 "$root/releases"
+mv "$generation/receipt" "$generation/receipt.saved"
+legacy_system_advice "$prefix" > "$HOME/receiptless"
+mv "$generation/receipt.saved" "$generation/receipt"
+mv "$prefix/bin/pdfconcat" "$prefix/bin/managed-saved"
+cp "$binary" "$prefix/bin/pdfconcat"
+PATH="$prefix/bin:$HOME/new:/usr/bin:/bin" report_command_paths "$prefix" > "$HOME/unrelated"
+grep -q 'current terminal finds another' "$HOME/unrelated"
+if grep -q 'Retired managed' "$HOME/unrelated"; then exit 1; fi
+legacy_system_advice "$HOME/absent" > "$HOME/no-install"
+[ ! -s "$HOME/no-install" ] && [ ! -s "$HOME/receiptless" ] && [ ! -e "$HOME/executed" ]
+EOF
+    then last_exit=0; else last_exit=$?; fi
+    expect_exit 0 'retired managed advice only observes verified layout and helper'
+fi
+
 if [[ "${failures}" -gt 0 ]]; then printf '%s check(s) failed.\n' "${failures}" >&2; exit 1; fi
 printf 'All installer checks passed.\n'

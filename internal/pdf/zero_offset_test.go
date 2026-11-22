@@ -207,8 +207,10 @@ func TestExceptionalStreamRevisionRefused(t *testing.T) {
 	previous := string(matches[len(matches)-1][1])
 	offset := len(data)
 	exceptional := fmt.Appendf(append([]byte(nil), data...), "xref\n100 1\n0000000000 00000 n \ntrailer\n<< /Size 101 /Root 1 0 R /Prev %s >>\nstartxref\n%d\n%%%%EOF\n", previous, offset)
-	if _, _, _, err := readSource(t.Context(), exceptional, ""); err == nil || !strings.Contains(err.Error(), "exclusively classic") {
-		t.Fatalf("exceptional combined-table proof was assumed: %v", err)
+	for _, policy := range []packet.StructurePolicy{packet.StructurePreserve, packet.StructureDiscard} {
+		if _, _, _, err := readSource(t.Context(), exceptional, policy); err == nil || !strings.Contains(err.Error(), "exclusively classic") {
+			t.Fatalf("exceptional combined-table proof was assumed: %v", err)
+		}
 	}
 }
 func TestReferenceOnOmittedPageStillRefused(t *testing.T) {
@@ -224,5 +226,138 @@ func TestEstablishedXRefFindingSurvivesLaterSignatureRefusal(t *testing.T) {
 	_, _, ds, err := readSource(t.Context(), data, "")
 	if err == nil || diagnostic(err, diag.SourceInvalid).Code != diag.SourceSigned || len(ds) != 1 || ds[0].Code != diag.SourceXRefEntryIgnored {
 		t.Fatalf("later refusal erased established entry evidence: %+v %v", ds, err)
+	}
+}
+
+func TestDiscardProvesOriginalZeroOffsetStructureSlots(t *testing.T) {
+	const owner = "/StructTreeRoot 7 0 R"
+	const root = "<< /Type /StructTreeRoot /ParentTree 6 0 R >>"
+	for _, tc := range []struct {
+		name, body, stream, trailer, catalog string
+		accepted                             bool
+	}{
+		{"exclusive ParentTree", root, "", "", owner, true},
+		{"both slots same tombstone", "<< /Type /StructTreeRoot /ParentTree 6 0 R /IDTree 6 0 R >>", "", "", owner, true},
+		{"wrong generation", "<< /Type /StructTreeRoot /ParentTree 6 1 R >>", "", "", owner, false},
+		{"root aliased", root, "", "", owner + " /Private 7 0 R", false},
+		{"root aliased despite wrong generation", root, "", "", owner + " /Private 7 1 R", false},
+		{"retained and discarded uses", root, "/Private 6 0 R", "", owner, false},
+		{"retained root use", root, "/Private 7 0 R", "", owner, false},
+		{"trailer use", root, "", "/Private 6 0 R", owner, false},
+		{"unreachable named slot", root, "", "", "", false},
+		{"nested false slot", "<< /Type /StructTreeRoot /Private << /ParentTree 6 0 R >> >>", "", "", owner, false},
+		{"untyped root", "<< /ParentTree 6 0 R >>", "", "", owner, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := zeroReferenceFixture(tc.body, tc.stream, tc.trailer, tc.catalog)
+			_, _, _, preserve := readSource(t.Context(), input, packet.StructurePreserve)
+			if preserve == nil {
+				t.Fatal("preserve admitted a referenced zero row")
+			}
+			s, _, ds, err := readSource(t.Context(), input, packet.StructureDiscard)
+			if !tc.accepted {
+				if err == nil || !strings.Contains(err.Error(), "original reference to zero-offset object") {
+					t.Fatalf("missing original-reference refusal: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.Table[6] == nil || !s.Table[6].Free {
+				t.Fatal("effective zero row is no longer a tombstone")
+			}
+			cat, err := s.Catalog()
+			if err != nil || cat["StructTreeRoot"] != nil {
+				t.Fatalf("structure survived: %v", err)
+			}
+			slots := map[string]bool{}
+			discarded := false
+			for _, d := range ds {
+				switch d.Code {
+				case diag.SourceStructureRemoved:
+					discarded = true
+				case diag.SourceXRefStructureReferenceDiscarded:
+					if d.PDFLocation == nil || d.PDFLocation.Object != 7 {
+						t.Fatal(d)
+					}
+					slots[d.PDFLocation.Path] = true
+				case diag.SourceXRefEntryIgnored:
+					t.Fatal("a referenced row was reported as unreferenced")
+				}
+			}
+			both := tc.name == "both slots same tombstone"
+			if !discarded || !slots["ParentTree"] || slots["IDTree"] != both {
+				t.Fatal(ds)
+			}
+		})
+	}
+}
+
+func TestDiscardZeroOffsetStructureUsesOnlyEffectiveRevisions(t *testing.T) {
+	const owner = "/StructTreeRoot 7 0 R"
+	root := "<< /Type /StructTreeRoot /ParentTree 6 0 R >>"
+	older := zeroReferenceFixture(root, "", "", owner)
+	olderLive := appendClassicRevision(older, "valid")
+	for _, tc := range []struct {
+		name  string
+		input []byte
+		zero  bool
+	}{
+		{"new version is live", olderLive, false},
+		{"new tombstone shadows old body", appendClassicRevision(olderLive, "zero"), true},
+		{"free row is not this exception", appendClassicRevision(older, "free"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _, err := readSource(t.Context(), tc.input, packet.StructureDiscard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(s.Read.DiscardedZeroOffsetReferences) != 0) != tc.zero {
+				t.Fatalf("effective reference proof: %+v", s.Read.DiscardedZeroOffsetReferences)
+			}
+			if tc.zero && !s.Table[6].Free {
+				t.Fatal("older definition was resurrected")
+			}
+		})
+	}
+}
+
+func TestDiscardZeroOffsetAllowsOnlyExclusiveHierarchyBacklinks(t *testing.T) {
+	for _, tc := range []struct {
+		name, additionalCatalog, childParent, extra string
+		accepted                                    bool
+	}{
+		{"internal parent backlink", "", "7 0 R", "", true},
+		{"wrong-generation parent backlink", "", "7 9 R", "", false},
+		{"child aliased from catalog", "/Witness 8 0 R", "7 0 R", "", false},
+		{"child aliased from unreachable object", "", "7 0 R", "/Probe 8 0 R", false},
+		{"extra unreachable index reference", "", "7 0 R", "/ParentTree 6 0 R", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := zeroReferenceFixture("<< /Type /StructTreeRoot /K 8 0 R /ParentTree 6 0 R >>", "", "",
+				"/StructTreeRoot 7 0 R "+tc.additionalCatalog)
+			matches := regexp.MustCompile(`startxref\s+([0-9]+)\s+%%EOF`).FindAllSubmatch(base, -1)
+			previous := string(matches[len(matches)-1][1])
+			child := len(base)
+			data := fmt.Appendf(base, "8 0 obj\n<< /Type /StructElem /S /Document /P %s >>\nendobj\n", tc.childParent)
+			extra := len(data)
+			data = fmt.Appendf(data, "9 0 obj\n<< %s >>\nendobj\n", tc.extra)
+			offset := len(data)
+			data = fmt.Appendf(data, "xref\n8 2\n%010d 00000 n \n%010d 00000 n \ntrailer\n<< /Size 10 /Root 1 0 R /Prev %s >>\nstartxref\n%d\n%%%%EOF\n", child, extra, previous, offset)
+			_, _, ds, err := readSource(t.Context(), data, packet.StructureDiscard)
+			if (err == nil) != tc.accepted {
+				t.Fatalf("admission mismatch: %v, %v", err, ds)
+			}
+		})
+	}
+}
+
+func TestProvedZeroOffsetDiscardKeepsOriginalSignatureRefusal(t *testing.T) {
+	input := zeroReferenceFixture("<< /Type /StructTreeRoot /ParentTree 6 0 R /Private << /Type /Sig >> >>", "", "",
+		"/StructTreeRoot 7 0 R")
+	_, _, findings, err := readSource(t.Context(), input, packet.StructureDiscard)
+	if err == nil || diagnostic(err, diag.SourceInvalid).Code != diag.SourceSigned || len(findings) != 0 {
+		t.Fatalf("signature priority changed: %v, %v", err, findings)
 	}
 }

@@ -855,3 +855,59 @@ func assertRetainedNamedFormProperty(t *testing.T, path string, nested bool) {
 		t.Fatalf("required property missing in effective output scope: %v, %v", note, err)
 	}
 }
+
+func TestOptionalContentPreludeAndDiscardedZeroOffsetsBuildTogether(t *testing.T) {
+	dir := t.TempDir()
+	source, output := filepath.Join(dir, "source.pdf"), filepath.Join(dir, "packet.pdf")
+	doc := pdffixture.Plain("combined proofs")
+	insertEntry(doc, 1, "/StructTreeRoot 6 0 R /MarkInfo << /Marked true >>")
+	doc.Objs[2] = bytes.Replace(doc.Objs[2], []byte("/Font"), []byte("/Properties << /Layer "+layerGroup+
+		" >> /ExtGState << /GS << /RI /Perceptual >> >> /Font"), 1)
+	doc.Objs[3] = layerStream("", "1 0 0 1 0 0 cm\n/GS gs\n/OC /Layer BDC\n"+layerColor+"\nEMC")
+	doc.Objs = append(doc.Objs, []byte("<< /Type /StructTreeRoot /ParentTree 7 0 R /IDTree 8 0 R >>"), []byte("null"), []byte("null"))
+	input := doc.Bytes()
+	for _, number := range []int{7, 8} {
+		at := bytes.Index(input, fmt.Appendf(nil, "%d 0 obj\n", number))
+		row := fmt.Appendf(nil, "%010d 00000 n ", at)
+		if at <= 0 || bytes.Count(input, row) != 1 {
+			t.Fatal("missing unique xref fixture row")
+		}
+		input = bytes.Replace(input, row, []byte("0000000000 00000 n "), 1)
+	}
+	if err := os.WriteFile(source, input, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []app.Operation{app.Check, app.Build} {
+		result := app.Execute(t.Context(), app.Request{
+			Operation: op, WorkingDir: dir, InspectionWorkers: 1, Output: output,
+			Fitting: packet.DefaultFitPolicy(packet.Size{Width: 400, Height: 600}),
+			Input: app.Declared{Declaration: packet.Declaration{
+				Structure: packet.StructureDiscard, OptionalContent: packet.OptionalContentFlattenVisibleContent,
+				Items: []packet.Item{&packet.SourceItem{Path: source}},
+			}},
+		})
+		if result.Status != "ok" || result.Output.Published != (op == app.Build) {
+			t.Fatal(result.Diagnostics)
+		}
+		codes := map[diag.Code]int{}
+		for _, finding := range result.Diagnostics {
+			codes[finding.Code]++
+		}
+		if codes[diag.SourceOptionalContentWrappersRemoved] != 1 || codes[diag.SourceStructureRemoved] != 1 ||
+			codes[diag.SourceXRefStructureReferenceDiscarded] != 2 || codes[diag.SourceXRefEntryIgnored] != 0 {
+			t.Fatal(result.Diagnostics)
+		}
+	}
+	if !bytes.Equal(input, readPDF(t, source)) {
+		t.Fatal("source bytes changed")
+	}
+	qpdfCheck(t, output)
+	s, err := api.ReadContextFile(t.Context(), output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := s.Catalog()
+	if err != nil || catalog["OCProperties"] != nil || catalog["StructTreeRoot"] != nil {
+		t.Fatalf("discarded catalog edges survived: %v", err)
+	}
+}

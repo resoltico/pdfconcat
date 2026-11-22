@@ -228,6 +228,9 @@ type ReadContext struct {
 	// MismatchedObjectHeaders records effective xref identities whose body
 	// header names a different object. Unused alias rows can be tolerated.
 	MismatchedObjectHeaders map[types.IndirectRef]types.IndirectRef
+
+	// DiscardedZeroOffsetReferences holds at most the two proved root slots.
+	DiscardedZeroOffsetReferences []ZeroOffsetStructureReference
 }
 
 func newReadContext(rs io.ReadSeeker) (*ReadContext, error) {

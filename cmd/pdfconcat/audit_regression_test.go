@@ -181,3 +181,26 @@ func TestMissingMarkedContentPropertyRefusedWithSourceAttribution(t *testing.T) 
 		}
 	}
 }
+
+func TestWrapperPreludeRefusalIncludesResolvedReasonAndLocation(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "prelude.pdf")
+	const drawing = "1 0 0 1 0 0 cm\n/GS gs\n/OC /Layer BDC\n0 0 10 10 re f\nEMC"
+	doc := pdffixture.EncodedPages("wrapper prelude", []pdffixture.EncodedStream{{Data: []byte(drawing)}})
+	doc.Objs[3] = bytes.Replace(doc.Objs[3], []byte("/Font"), []byte("/Properties << /Layer << /Type /OCG /Name (Layer) >> >> /Font"), 1)
+	if err := doc.WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"version":10,"optional_content":"flatten-visible-content","items":[{"source":"prelude.pdf"}]}`
+	result, code, raw := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
+	if code != 2 || len(result.Diagnostics) != 1 {
+		t.Fatal(raw)
+	}
+	d := result.Diagnostics[0]
+	if d.Code.String() != "source_optional_content" || d.File != source || d.PDFLocation == nil ||
+		d.PDFLocation.Page != 1 || d.PDFLocation.Path != "Contents" ||
+		!strings.Contains(d.Message, `"gs" at decoded byte 19`) ||
+		!strings.Contains(d.Message, "resource could not be resolved") {
+		t.Fatal(raw)
+	}
+}

@@ -83,6 +83,10 @@ func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins)
 	for _, p := range pages {
 		selected[p.ref] = true
 	}
+	links, err := linksBeforeProjection(c, s, pages, origins)
+	if err != nil {
+		return nil, err
+	}
 	forest, err := readOutlineForest(c, s)
 	if err != nil {
 		return nil, err
@@ -119,6 +123,9 @@ func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins)
 		return keep, e
 	}, nil, true)
 	if err != nil {
+		return nil, err
+	}
+	if err := pruneProjectedLinks(c, s, links); err != nil {
 		return nil, err
 	}
 	keys := make([]string, 0, len(named))

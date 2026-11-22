@@ -14,7 +14,7 @@ import (
 )
 
 func TestGoldenResultsAndReport(t *testing.T) {
-	plan := `{"version":9,"items":[{"page":{"size":"100x200pt"},"count":2}]}`
+	plan := `{"version":10,"items":[{"page":{"size":"100x200pt"},"count":2}]}`
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -79,7 +79,7 @@ func TestGoldenUsageText(t *testing.T) {
 
 func TestFittingOverrideAdmissionAndRoutes(t *testing.T) {
 	dir := t.TempDir()
-	input := `{"version":9,"fitting":{"target":"A4","tolerance":"1pt"},"items":[{"page":{}}]}`
+	input := `{"version":10,"fitting":{"target":"A4","tolerance":"1pt"},"items":[{"page":{}}]}`
 	path := filepath.Join(dir, "plan.json")
 	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestFittingOverrideAdmissionAndRoutes(t *testing.T) {
 			}
 		})
 	}
-	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--fit-to=A4"}, `{"version":9,"fitting":{"target":"A4","tolerance":-1},"items":[{"page":{}}]}`)
+	r, exit, _ := invokeJSON(t, []string{"check", "--plan", "-", "--fit-to=A4"}, `{"version":10,"fitting":{"target":"A4","tolerance":-1},"items":[{"page":{}}]}`)
 	if exit != 2 || r.Fitting != nil || len(r.Diagnostics) != 1 || r.Diagnostics[0].Location.Ref != "/fitting/tolerance" {
 		t.Fatalf("override bypassed authored plan admission: %+v", r)
 	}

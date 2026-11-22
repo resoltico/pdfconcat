@@ -652,6 +652,24 @@ func processDictKeys(c context.Context, line *string, level, maxDepth, validatio
 	return d, nil
 }
 
+type dictionaryNullObserverKey struct{}
+
+// WithDictionaryNullObserver captures explicit dictionary nulls before the
+// parser applies PDF's normal null-is-absent semantics. The observer must not
+// modify the dictionary.
+func WithDictionaryNullObserver(c context.Context, observe func(types.Dict, string)) context.Context {
+	if observe == nil {
+		return c
+	}
+	return context.WithValue(c, dictionaryNullObserverKey{}, observe)
+}
+
+// DictionaryNullObserver returns the optional syntax observer for this read.
+func DictionaryNullObserver(c context.Context) func(types.Dict, string) {
+	observe, _ := c.Value(dictionaryNullObserverKey{}).(func(types.Dict, string))
+	return observe
+}
+
 func parseDict(c context.Context, line *string, level, maxDepth, validationMode int, repair bool) (types.Dict, error) {
 	if line == nil || len(*line) == 0 {
 		return nil, errNoDictionary
@@ -682,8 +700,12 @@ func parseDict(c context.Context, line *string, level, maxDepth, validationMode 
 	if err != nil {
 		return nil, err
 	}
+	observeNull := DictionaryNullObserver(c)
 	for key, val := range d {
 		if val == nil {
+			if observeNull != nil {
+				observeNull(d, key)
+			}
 			delete(d, key)
 		}
 	}

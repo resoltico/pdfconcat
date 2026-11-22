@@ -75,10 +75,12 @@ PDFConcat supplies no password interface and does not create encrypted output.
 Encrypted sources (including empty-password encryption), signature values,
 catalog permission structures, timestamps, dynamic forms and known
 content-dropping page-tree shapes are refused. Empty unsigned signature fields
-remain supported. Signatures are not authenticated. Optional-content bindings
-are refused by default. A plan can explicitly admit a [proved visible Form
-layer](docs/PDF-POLICY.md#optional-content) and remove its controls. This
-admission requires whole-source proof and retains the general source safeguards.
+remain supported. Signatures are not authenticated. PDFConcat removes proved-empty
+optional-content settings by default. A plan can opt in to removing controls for
+a proved always-visible Form layer or a proved bare undeclared page wrapper.
+Other confirmed visibility bindings and operators are refused. The
+[optional-content policy](docs/PDF-POLICY.md#optional-content) specifies the
+whole-source proof and the checks on reopened output.
 Viewer directives are removed from imported catalogs after original-file checks;
 this does not sanitize retained content. Serialized output is checked separately
 with strict validation and without source normalization before publication.

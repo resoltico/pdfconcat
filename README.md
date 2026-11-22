@@ -1,15 +1,12 @@
 # PDFConcat
 
-PDFConcat combines existing PDFs and selected pages into one ordered document.
-Merge whole files directly, or use a reusable JSON plan to select pages and add
-separators, simple text inserts, navigation and page numbers. Check a proposed
-assembly before building and save a report with input file hashes and
-source-to-output page mappings.
+PDFConcat combines PDFs and selected pages into one ordered document. Merge
+whole files directly or use a JSON plan for selections, dividers, linked
+contents and page numbers. Check the packet before building and save a report
+with input SHA-256 hashes and source-to-output page mappings.
 
-Source pages keep their original sizes unless you request fitting. Generated text
-uses bundled Noto Sans or a supplied static TrueType/OpenType CFF1 font for Latin,
-Greek and Cyrillic. The program needs no external PDF tools, font installation or
-configuration directory at runtime.
+The standalone CLI uses bundled Noto Sans and runs without external PDF tools,
+font installation or a configuration directory.
 
 - [Understand the scope](#scope-and-boundaries)
 - [Install and verify](#install)
@@ -22,43 +19,25 @@ configuration directory at runtime.
 
 ## Scope and boundaries
 
-The core job is to select, order and combine existing PDF pages into one output.
-Plans, checks and reports support repeatable, inspectable assembly. Handling page
-geometry, links, bookmarks and incompatible inputs is part of correct merging,
-subject to the [PDF policy](docs/PDF-POLICY.md). Merging does not promise lossless
-preservation of every source document feature.
+Plans can insert blanks for odd-page starts, organize sections with title
+dividers and bookmarks, and add linked contents, page numbers and document
+metadata. Generated pages can form the whole output. Each generated text page
+holds one styled block with wrapping and overflow controls. Bundled Noto Sans
+and supported static TrueType or OpenType CFF1 fonts render Latin, Greek and
+Cyrillic. Linked contents can span several pages. Prepare richer layouts in
+another authoring tool and include them as source PDFs.
 
-Assembly aids belong in PDFConcat when they organize the material, help readers
-navigate it or prepare its presentation:
+Source pages keep their geometry unless you request fitting. Fitting transforms
+pages outside the selected tolerance and remaps supported local destinations.
+The source policy governs which links, bookmarks, tags and other PDF structures
+can be carried into the output. PDFConcat removes proved-empty optional-content
+settings by default. Plans can opt in to removing proved always-visible Form
+controls or bare undeclared whole-page wrappers while retaining the artwork.
+[PDF policy](docs/PDF-POLICY.md)
 
-- Blanks and odd-page starts separate material and control physical page order.
-- Sections, bookmarks, title dividers, linked contents, selective page numbering and authored metadata
-  identify material and help readers navigate the combined document.
-- Fitting moves pages outside the absolute tolerance onto the target sheet and maps supported local destinations.
-  Matching pages keep their native frames. Transformed pages have additional
-  [compatibility limits](docs/PDF-POLICY.md#fitting).
-- Simple text pages supply covers, separators, explanatory notes and other
-  inserts. They support custom fonts, colors, backgrounds, positioning,
-  alignment, wrapping and overflow controls.
-
-Text-page authoring is limited to one styled text block on each declared page.
-Plans containing only generated pages are supported. Plans can also opt in to removing a [proved visible Form layer](docs/PDF-POLICY.md#optional-content).
-Text wraps within its block but does not flow onto additional pages. Linked
-contents has its own automatic pagination. Rich text, tables, image placement,
-multiple text columns, general-purpose document templates, Markdown/HTML
-conversion and editing or reflowing source-page text are outside the product's
-scope. Assemble PDFs prepared in another authoring tool when you need those layouts.
-
-Appending, automatic interleaving and PDF stdin/stdout are relevant merge
-workflows. PDFConcat can combine an existing PDF and additional inputs into a
-different output, and plans can specify an interleaved order explicitly. It does
-not update input files, interleave automatically or read/write PDF streams. See
-the [comparison](#pdfconcat-or-the-pdfcpu-cli) for these workflow differences.
-
-PDFConcat's purpose does not include general PDF editing, OCR, redaction, repair,
-sanitization, encryption management or form filling. Source validation supports
-assembly; it is not a universal PDF preflight service. See [limits](#limits) for
-the current input, fidelity and publication constraints.
+To extend an existing PDF, include it as the first source and choose a separate
+output. Use separate source items to specify an interleaved order. PDF sources
+and output are files. The CLI accepts a JSON plan on stdin.
 
 ## Install
 
@@ -197,7 +176,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -240,7 +219,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -286,7 +265,7 @@ PDF and report publication are separate operations. A stdout write failure retur
 exit 1 and leaves already-published files saved; inspect publication facts before
 retrying. See [results, reports and exit codes](docs/CLI.md#output).
 
-Plans use format v9. Results and reports use format v10. Print their schemas with:
+Print the current plan and result schemas with these commands.
 
 ```sh
 pdfconcat schema plan
@@ -302,117 +281,83 @@ diagnostics and publication facts.
 
 ## PDFConcat or the pdfcpu CLI?
 
-PDFConcat assembles packets with plans, layout checks and source-to-output
-reports. Its engine is [pdfcpu](https://github.com/pdfcpu/pdfcpu) with a
-[documented local patch](third_party/pdfcpu/PROVENANCE.md). The standalone
-[pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4)
-offers merge modes and broader PDF editing commands.
-
-**●** marks built-in support, which can involve several commands. The notes
-describe the applicable limits. **—** marks the absence of a dedicated built-in
-equivalent.
+PDFConcat uses [pdfcpu](https://github.com/pdfcpu/pdfcpu) with a
+[documented local patch](third_party/pdfcpu/PROVENANCE.md). Compare its packet
+workflows with the standalone [pdfcpu CLI v0.16.4](https://github.com/pdfcpu/pdfcpu/releases/tag/v0.16.4).
+A command name identifies the standalone workflow. Some tasks use several
+commands. A dash indicates no dedicated built-in workflow.
 
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
-| --- | :---: | :---: |
-| Merge PDFs in a chosen order | ● | ● |
-| Append PDFs by updating the existing destination [1] | ● | — |
-| Automatically interleave two PDFs: A1, B1, A2, B2, … [2] | ● | — |
-| Read PDF input from stdin for merging [1] | ● | — |
-| Write merged PDF output to stdout [1] | ● | — |
-| Select, repeat or reorder source pages [2] | ● | ● |
-| Keep source pages at their original sizes | ● | ● |
-| Insert blank pages | ● | ● |
-| Preserve imported source bookmarks [3] | ● | ● |
-| Create bookmarks [3] | ● | ● |
-| Preserve supported source structure tags when merging [7] | — | ● |
-| Fit pages to a chosen paper size [8] | ● | ● |
-| Automatically keep sheets within a size tolerance when fitting | — | ● |
-| Generate simple text pages from JSON | ● | ● |
-| Generate Latin, Greek and Cyrillic text with a bundled font [4] | ● | ● |
-| Add physical page numbers [5] | ● | ● |
-| Describe sources, selections and assembly aids in one JSON plan | — | ● |
-| Define nested sections and title dividers in that plan | — | ● |
-| Automatically pad sections to start on odd pages | — | ● |
-| Generate linked contents from sections and final page numbers | — | ● |
-| Validate PDF structure without creating a PDF [6] | ● | ● |
-| Check a packet plan's text layout without creating a PDF [6] | — | ● |
-| Report input SHA-256 hashes and source-to-output page ranges [6] | — | ● |
-| Split a PDF into multiple output files in one command | ● | — |
-| Apply general text, image or PDF stamps and watermarks | ● | — |
-| Opt in to flatten a proved always-visible Form layer during merging [9] | — | ● |
-| Encrypt, decrypt and manage PDF passwords | ● | — |
-| Fill interactive forms | ● | — |
+| --- | --- | --- |
+| Merge PDFs in a chosen order | [`merge`](https://pdfcpu.io/core/merge/) | Direct operands or plan |
+| Append by updating an existing PDF | `merge --mode append` | — |
+| Automatically alternate pages from two PDFs | `merge --mode zip` [1] | — |
+| Read a PDF from stdin while merging | One input in `merge` create mode [1] | — |
+| Write the merged PDF to stdout | `merge` create or zip mode [1] | — |
+| Select, repeat or reorder source pages | [`collect`](https://pdfcpu.io/core/collect/), then `merge` for multiple inputs | Source ranges and separate occurrences in a plan [1] |
+| Keep source pages at their original sizes | `merge` | Default assembly |
+| Insert blank pages | [`pages insert`](https://pdfcpu.io/getting_started/usage/#page) or `merge --divider` | `--blank` or a plan page |
+| Preserve imported source bookmarks | `merge` with bookmarks enabled [2] | Retains supported bookmarks in each occurrence [2] |
+| Create bookmarks | `merge` or [`bookmarks import`](https://pdfcpu.io/bookmarks/bookmarks_import/) [2] | Titled plan sections [2] |
+| Preserve supported source structure tags when merging | — [2] | Default structure policy [2] |
+| Fit pages to a chosen paper size | [`resize`](https://pdfcpu.io/core/resize/) [3] | `--fit-to` or plan fitting [3] |
+| Keep sheets automatically within a fitting tolerance | — | Per-side absolute tolerance [3] |
+| Generate simple text pages from JSON | [`create`](https://pdfcpu.io/create/create/) | Plan text pages |
+| Generate Latin, Greek and Cyrillic text with a bundled font | `create` with Roboto Regular from the configuration font store [4] | Bundled Noto Sans |
+| Paint page numbers | [Text stamps](https://pdfcpu.io/core/stamp/) | Plan numbering with physical or consecutive counts |
+| Describe sources, selections and assembly aids in one JSON plan | — | Plan |
+| Define nested sections and title dividers in a plan | — | Plan groups and dividers |
+| Automatically pad sections to start on odd pages | — | Plan odd starts |
+| Generate linked contents from sections and resolved page numbers | — | Plan contents item |
+| Validate source PDFs without writing PDF output | [`validate`](https://pdfcpu.io/getting_started/usage/#document) | `check` within the assembly policy [5] |
+| Check a packet plan's text layout without writing PDF output | — | `check` |
+| Report input SHA-256 hashes and source-to-output page ranges | — | `--report` [5] |
+| Split a PDF into multiple output files in one command | [`split`](https://pdfcpu.io/core/split/) | — |
+| Apply general text, image or PDF stamps and watermarks | [`stamp`](https://pdfcpu.io/core/stamp/) and `watermark` | — |
+| Remove proved always-visible Form controls or bare undeclared whole-page wrappers | — | Plan opt-in [6] |
+| Encrypt, decrypt and change PDF passwords | [Security commands](https://pdfcpu.io/getting_started/piping/) | — |
+| Fill interactive forms | [`form fill`](https://pdfcpu.io/form/form_fill/) | — |
 
-1. **Append and PDF streams.** pdfcpu `merge --mode append` updates a file
-   destination. Create mode accepts one PDF from stdin and can write to stdout.
-   Zip accepts two file inputs and can write to stdout. PDFConcat accepts JSON
-   plans on stdin and uses files for PDF inputs and output. To extend a PDF with
-   PDFConcat, list it first and choose a different output path.
-2. **Page selection and interleaving.** pdfcpu's `collect` uses page expressions
-   for selection, repetition and reordering. Its zip mode interleaves two inputs
-   below PDF 2.0 and appends any remaining pages after one input runs out.
-   PDFConcat uses ascending, non-overlapping ranges within each source item.
-   Use separate items to repeat, reorder or explicitly alternate pages. The
-   [selection limits](docs/PLAN.md#source-selections), including partial selection
-   of forms, still apply.
-3. **Bookmarks.** With default configuration, pdfcpu file merges wrap source
-   bookmarks under filenames. Use `--bookmarks --bookmark-mode preserve` to
-   keep source bookmark roots. Zip drops source bookmarks. When merging stdin,
-   pdfcpu retains the first input's outline and omits later input outlines.
-   The `bookmarks import` command accepts explicit page targets and styles.
-   PDFConcat creates bookmarks from titled plan sections, targeting their first
-   non-padding page, and retains source bookmarks beneath the nearest authored
-   section. It prunes local navigation to omitted pages and applies its
-   [source policy](docs/PDF-POLICY.md#source-policy).
-4. **Bundled fonts.** Both tools include a font for Latin, Greek and Cyrillic.
-   pdfcpu installs Roboto Regular into its filesystem configuration font store.
-   Select `Roboto-Regular` for generated text and keep filesystem configuration
-   enabled. PDFConcat uses bundled Noto Sans directly.
-5. **Page numbers.** pdfcpu text stamps support current/total page numbers and an
-   offset. PDFConcat supports physical or consecutive counting, start offsets,
-   kind filters, inherited item suppression and six positions. Padding is never
-   painted; it occupies a physical position but consumes no consecutive number.
-   Contents labels and PDF PageLabels use the same resolved numbering.
-6. **Plan checks and reports.** pdfcpu validates PDF structures and validates
-   JSON during `create`; `info --json` reports document properties. PDFConcat
-   provides a separate `check` command for planned layout and generated-text
-   overflow, plus an assembly report with input hashes and page mappings.
-   `check` can write a report when requested; a successful check does not
-   guarantee a later build or publication.
-7. **Structure tags.** The standalone pdfcpu merge command excludes source
-   structure trees. PDFConcat preserves supported source tags by default and
-   reports structural coverage. [pdfcpu merge](https://pdfcpu.io/core/merge/),
+1. **Merge inputs and order.** pdfcpu zip alternates two file inputs below
+   PDF 2.0 and emits the remainder of the longer input. PDFConcat uses ascending,
+   non-overlapping ranges within each source item. Separate items can repeat,
+   reorder or alternate selections. [pdfcpu merge and piping](https://pdfcpu.io/getting_started/piping/) ·
+   [PDFConcat selection rules](docs/PLAN.md#source-selections)
+2. **Bookmarks and structure.** pdfcpu file merges wrap source bookmarks under
+   filenames by default. Use `--bookmarks --bookmark-mode preserve` to retain
+   the input roots. Zip drops source outlines, and create mode with a stdin PDF
+   carries only the first input's outline. pdfcpu merge omits source structure
+   trees. PDFConcat places retained source outlines under the nearest authored
+   section and preserves supported source tags under its default policy.
+   [pdfcpu merge](https://pdfcpu.io/core/merge/) ·
+   [pdfcpu stdin merge implementation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/merge.go) ·
+   [PDFConcat sections](docs/PLAN.md#sections-title-dividers-and-odd-starts) ·
    [PDFConcat structure policy](docs/PLAN.md#structure)
-8. **Fitting.** pdfcpu `resize` can enforce a sheet orientation and can rotate
-   content for best fit. PDFConcat fitting preserves the displayed orientation,
-   keeps frames within the requested tolerance, and remaps supported local
-   destinations on transformed pages. [pdfcpu resize](https://pdfcpu.io/core/resize/),
+3. **Fitting.** pdfcpu resize can enforce a sheet orientation and can rotate the
+   content for best fit. PDFConcat uses the requested target orientation,
+   preserves the artwork's displayed orientation and remaps supported local
+   destinations on transformed pages. [pdfcpu resize](https://pdfcpu.io/core/resize/) ·
    [PDFConcat fitting policy](docs/PDF-POLICY.md#fitting)
-9. **Visibility layers.** PDFConcat accepts the opt-in through a plan and verifies
-   the source before removing its layer controls. The policy covers the
-   [supported always-visible Form profile](docs/PDF-POLICY.md#optional-content).
-
-pdfcpu v0.16.4 sources include
-[document commands](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/document.go),
-[merge streams](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/cli/document_exec.go),
-[merge inputs and zip restrictions](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/merge.go),
-[bookmark merge modes](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/merge.go),
-[page operations](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/pages.go),
-[resize parameters](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/model/resize.go),
-[stamps and bookmarks](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/content_usage.go),
-[font initialization](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/model/configuration.go),
-[JSON creation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/create.go),
-[form filling](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/forms.go),
-[encryption and passwords](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/cmd/pdfcpu/security.go) and
-[PDF info fields](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/pdfcpu/info.go).
+4. **Bundled fonts.** pdfcpu installs Roboto Regular into its filesystem
+   configuration font store. Select `Roboto-Regular` for generated text and
+   keep filesystem configuration enabled. PDFConcat embeds Noto Sans directly.
+   [pdfcpu configuration](https://pdfcpu.io/getting_started/config_dir/#user-fonts)
+5. **Checks and reports.** pdfcpu `info --json` reports document properties.
+   PDFConcat `check` inspects a planned assembly, including generated-text
+   layout, and can save the full assembly report. Results distinguish the check
+   from successful publication. [pdfcpu piping and outputs](https://pdfcpu.io/getting_started/piping/) ·
+   [PDFConcat results and reports](docs/CLI.md#reports-and-committed-state)
+6. **Visibility layers.** Both PDFConcat plan policies remove proved-empty
+   optional-content settings and report a warning. The `flatten-visible-content`
+   opt-in also admits the two proved profiles listed in the table.
+   [PDFConcat visibility policy](docs/PDF-POLICY.md#optional-content)
 
 ## Limits
 
-Supported source structure is preserved by default and meaningful generated text
-is tagged. Untagged inputs remain usable, with honest coverage diagnostics;
-blank and artifact-only pages are neutral. Explicit structure discard produces
-untagged output. This does not certify PDF/UA. See
-[structure policy](docs/PLAN.md#document-identity-time-and-structure).
+PDFConcat preserves supported source structure by default and tags meaningful
+generated text. The result reports structural coverage. Blank and artifact-only
+pages are neutral for coverage. Explicit structure discard produces untagged
+output. See the [structure policy](docs/PLAN.md#structure).
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
 - Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).

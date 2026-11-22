@@ -12,7 +12,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Signature values, catalog permission structures or document timestamps | Refuse `source_signed`; signatures are not authenticated |
 | Empty unsigned signature fields, including null values | Keep |
 | `NeedsRendering true` | Refuse `source_dynamic_form` |
-| Visibility layers or orphan optional-content bindings | Refuse `source_optional_content` by default. A plan can opt in to [one proved visible Form layer](#optional-content) |
+| Visibility layers or orphan optional-content bindings | Refuse outside the [admitted optional-content profiles](#optional-content) with `source_optional_content` |
 | Broken page tree or missing/malformed page contents | Refuse `source_damaged` before semantic validation |
 | No recognizable PDF header | Refuse `source_not_pdf`; scanning follows the pinned parser, including displaced headers |
 | Initial absent, denied or nonregular input | Invalid `source_input_invalid`; unexpected read errors remain failed |
@@ -45,33 +45,60 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 ### Optional content
 
 PDFConcat checks reachable layer bindings in the whole original PDF, including
-pages omitted by selection. This covers group and membership dictionaries,
-layer state actions, visibility properties on annotations and XObjects, and
-alternate-image visibility. Direct null and live indirect null values count as
-absent in visibility slots. An empty catalog dictionary and malformed visibility
-references are refused. Staged output is parsed and checked for surviving layer
-bindings before publication.
+pages omitted by selection. It also refuses confirmed optional marked operators
+in page content and known drawing programs, including inline visibility
+properties and property names that cannot resolve in a known resource scope.
+The relevant operators are `BDC` and `DP` with an `/OC` tag. Ordinary marks
+can also use that tag. This bounded detection leaves comments,
+strings and inline-image data opaque.
+Ordinary sources can use drawing programs outside the strict transformation
+profiles, including Forms that use page resources. Direct null and live indirect
+null count as absent in optional visibility slots. Required configuration values
+must resolve to the types specified below.
 
-The plan setting `"optional_content": "flatten-visible-forms"` allows removal
-of a single proved always-visible Form layer. The default is `"refuse"`, which
-also applies to direct CLI operands. The supported profile has one group and one
-default configuration. Default refusal suggests the opt-in conditionally when
-the group and configuration pass the static profile checks. The opt-in
-still requires the full proof below. BaseState must be absent or ON. An explicit ON list
-may contain the single registered group. Usage is either absent or has explicit
-ON declarations for View, Print and Export with a foreground or background
-PageElement descriptor.
-Any usage applications must match the supported View, Print and Export events
-and the same group. The only supported intent is View. Layer order entries, alternate
-configurations, conditional usage and interactive state changes are refused.
+Under either plan policy and with direct CLI operands, PDFConcat removes
+proved-empty `OCProperties` from PDF 1.5 and later. The catalog must explicitly
+supply an empty `OCGs` array and a `D` dictionary whose only entries, if any,
+are empty `ON`, `Order` or `RBGroups` arrays. Live indirect values are supported
+when the subtree has no other reachable owner. The original graph and drawing
+programs must be free of optional-content bindings, operators and state changes.
+The edit removes the catalog edge and reports `source_optional_content_empty_removed`.
 
-The proof checks the original Form owners and drawing programs, including
-resources on pages outside the selection. It refuses membership expressions,
-optional marked content, scripts, other visibility bindings and unsupported
-roles or streams. The edit removes the catalog entry and the proved Form
-visibility bindings. It preserves the appearance of Form artwork retained after
-page selection. The layer's identity and controls are lost, and the result warns
-once per affected source, even when the selected pages omit that artwork.
+The plan opt-in `"optional_content": "flatten-visible-content"` admits two
+additional profiles:
+
+- A registered always-visible Form layer with one group and one default
+  configuration. The base state is absent or ON. An ON list may contain that
+  group. Supported Usage applies explicit ON settings for View, Print and Export
+  with a foreground or background PageElement descriptor. Usage applications
+  must match those events and that group. The supported intent is View. The
+  proof covers original Form owners and drawing programs. Composition removes
+  the catalog and Form visibility bindings and warns with
+  `source_optional_content_flattened`. The default refusal gives a conditional
+  opt-in hint for a registered Form candidate when its layer settings qualify
+  and inspection finds no conflicting binding or optional marked operator.
+  The opt-in still requires full drawing-program proof.
+- A PDF 1.5 or later page wrapped by one outer `/OC /Name BDC` and matching final
+  `EMC`, with absent or null catalog layer settings. The named effective page
+  resource must be a bare OCG with only `Type` and a text `Name`. PDFConcat proves
+  the binding's uses across the original document, including inherited resources
+  and ordinary marked content. The edit masks the four wrapper tokens and
+  removes the named binding. It preserves stream order, unrelated drawing
+  bytes, and ordinary marked content. Composition reports
+  `source_optional_content_wrappers_removed` once per affected source.
+
+Layer state changes, membership expressions, opaque drawing mechanisms, and
+unproved bindings or sharing are refused. An empty declaration with an
+undeclared wrapper is refused. The warnings describe the planned edit. Artwork
+is retained when the corresponding pages are selected.
+
+PDFConcat checks encoded page streams across backend validation. It reopens
+the serialized stage to check the catalog, reachable graph, and confirmed
+optional marked operators before publication. For normalized wrappers it also
+requires lexical proof on affected physical pages and their drawing descendants,
+including fitting Forms. Work is bounded per program under the decoded-size
+limits. Repeated physical pages can reuse a proof when they share the same
+serialized stream sequence, while each resource scope is still checked.
 
 ### Admission and viewer settings
 
@@ -155,10 +182,23 @@ is checked without counting its per-row control byte as decoded page content.
 Validated final caches are retained for backend reuse. Raw bytes, filter
 declarations and dictionaries stay unchanged.
 
-The staged serialized output receives the same encoding check before publication.
-This establishes bounded encoding decodability and strict Flate integrity, not
-complete content-operator grammar, resource validity, PDF conformance or universal
-preflight prediction. Merge/optimization or later backend operations can still fail.
+The staged output receives the same encoding check before publication. The check
+covers bounded decoding and Flate integrity. Merge and optimization can still
+fail on content or resources outside these checks.
+
+### Drawing programs and resource bindings
+
+The drawing-program reader uses exact byte counts for supported unfiltered
+device-color images and explicit PDF 2.0 inline-image lengths. When both counts
+are available, they must agree. Payload bytes stay opaque. Cases without a
+provable byte count use a bounded lexical search that refuses ambiguous image
+endings.
+
+Check and Build resolve named `BDC` and `DP` properties in the effective drawing
+scope. A missing required property produces a located `source_invalid` finding.
+An invoked Form uses its explicit resource dictionary when present. A Form
+without its own resources uses the page scope, including when invoked from
+another Form. Resource pruning preserves page properties needed by these Forms.
 
 ### Structural rejection rules
 
@@ -246,6 +286,8 @@ not rewritten.
 Conflicting targets for the same key in a name tree and legacy dictionary are
 refused. A destination outside its source page tree is omitted. An unusable GoTo
 action also loses its own Next chain; valid siblings in a Next array remain.
+A Link made targetless by projection is removed from the page and its tagged
+object references are dropped. An originally targetless Link is retained.
 
 The adapter preserves raw literal/hex bytes, compares and sorts bytewise, and
 emits hex without text transcoding. Before merging, destination structures are

@@ -163,6 +163,13 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 			continue
 		}
 		key := findingKey{code: d.Code, file: d.File, identity: d.Identity}
+		// Only these finding families carry equivalent navigation evidence
+		// from occurrence inspection and actual assembly.
+		observedNavigation := (d.Code == diag.SourceNavigationRemoved || d.Code == diag.SourceURIBaseRemoved) &&
+			(d.Identity.Phase == "source_observation" || d.Identity.Phase == "assembly")
+		if observedNavigation {
+			key.identity.Phase = ""
+		}
 		if d.Location != nil {
 			key.location = *d.Location
 			key.hasLocation = true
@@ -178,6 +185,10 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 			seen[key] = map[string]bool{}
 			output = append(output, d)
 			output[index].Items = nil
+		} else if observedNavigation && d.Identity.Phase == "assembly" && output[index].Identity.Phase != "assembly" {
+			items := output[index].Items
+			output[index] = d
+			output[index].Items = items
 		}
 		for _, item := range d.Items {
 			if !seen[key][item] {

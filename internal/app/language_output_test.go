@@ -47,7 +47,7 @@ func TestAuthoredLanguageSelectsSerializedGlyphs(t *testing.T) {
 			if tag != "" {
 				metadata = fmt.Sprintf(`"metadata":{"language":%q},`, tag)
 			}
-			plan := []byte(`{"version":9,` + metadata + `"page_defaults":{"size":"A4"},"items":[{"page":{"text":{"value":"ş"}}},{"title":"ş","divider":{},"items":[{"page":{}}]},{"contents":{"title":"ş"}}]}`)
+			plan := []byte(`{"version":10,` + metadata + `"page_defaults":{"size":"A4"},"items":[{"page":{"text":{"value":"ş"}}},{"title":"ş","divider":{},"items":[{"page":{}}]},{"contents":{"title":"ş"}}]}`)
 			r := app.Execute(t.Context(), app.Request{InspectionWorkers: 2, Operation: app.Build, Input: app.PlanBytes{Data: plan}, WorkingDir: dir, Output: "language.pdf"})
 			if r.Status != "ok" {
 				t.Fatal(r.Diagnostics)

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"slices"
 
 	"path/filepath"
 
@@ -78,6 +79,19 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 				return result, err
 			}
 			occurrence := part.Occurrence.Facts
+			if len(origins.wrapperPages) > 0 {
+				physical := part.FirstPage
+				for _, span := range occurrence.Selection {
+					first, _ := slices.BinarySearch(origins.wrapperPages, span.First)
+					for _, page := range origins.wrapperPages[first:] {
+						if page > span.Last {
+							break
+						}
+						result.wrapperPages = append(result.wrapperPages, physical+int64(page-span.First))
+					}
+					physical += int64(span.Last - span.First + 1)
+				}
+			}
 			removed, e := projectSelection(c, s, occurrence.Selection, origins)
 			if e != nil {
 				return result, e
@@ -352,13 +366,13 @@ func cleanCatalog(s *model.Context, version model.Version, needAppearances bool)
 }
 
 // verify owns reopening, panic classification and the serialized output checks.
-func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly, navigation *navigationObservation) (err error) {
+func verify(c context.Context, reader io.ReadSeeker, expected int64, a *Assembly, navigation *navigationObservation, wrapperPages []int64) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = pdfFailure(diag.OutputInvalid, diag.TheComposedPDFCouldNotBeVerified(), fmt.Errorf("%v", value))
 		}
 	}()
-	s, err := readSerializedOutput(c, reader, navigation)
+	s, err := readSerializedOutput(c, reader, navigation, wrapperPages)
 	if err != nil {
 		return pdfFailure(diag.OutputInvalid, diag.TheComposedPDFFailedOutputVerification(), err)
 	}
@@ -433,5 +447,5 @@ func Diagnostic(err error) diag.Diagnostic { return diagnostic(err, diag.Assembl
 
 // Verify checks serialized page count and catalog policy without authored expectations.
 func Verify(c context.Context, data []byte, expected int64) error {
-	return verify(c, bytes.NewReader(data), expected, nil, nil)
+	return verify(c, bytes.NewReader(data), expected, nil, nil, nil)
 }

@@ -318,6 +318,7 @@ func Help(command string) string {
 		b.WriteString(packet.FittingAppearanceDescription() + "\n")
 		b.WriteString(packet.FittingHitAreaDescription() + "\n")
 		b.WriteString("See https://github.com/resoltico/pdfconcat/blob/main/docs/PDF-POLICY.md#fitting\n")
+		fmt.Fprintf(&b, "Plan optional_content accepts %s. %s\n", strings.Join(packet.OptionalContentRefuse.Values(), " or "), packet.OptionalContentDescription())
 	}
 	return b.String()
 }

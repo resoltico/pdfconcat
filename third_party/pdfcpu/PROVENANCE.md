@@ -115,3 +115,20 @@ checks headers of active object streams and requires each effective compressed
 entry to match the object number in the selected directory slot before adopting
 the compressed object. Superseded rows and unused directory entries do not
 select objects. Relaxed object-stream reading retains the upstream behavior.
+
+An optional parser observer exposes explicit null dictionary entries before
+normalizing them to absent keys. It applies to classic and compressed objects
+and leaves the returned dictionary and validation behavior intact. PDFConcat
+uses this evidence when qualifying exact optional-content dictionary shapes.
+
+The content reader shares exact inline-image framing with PDFConcat's
+drawing-program scanners. For supported unfiltered device samples it computes
+byte-aligned row lengths. PDF 2.0 explicit lengths also use the shared check,
+while strict PDF 2.0 parsing still requires a length. The reader checks the
+delimiter at the established boundary and retains fallback paths for other
+encodings.
+
+Required resource binding lookup is shared between page resource consolidation
+and PDFConcat admission. Consolidation retains page Properties when a legacy
+Form, including a nested Form, can borrow them from the physical page scope.
+Page-only resource extraction cannot see the Form's named uses.

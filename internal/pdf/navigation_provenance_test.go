@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/oracle"
@@ -261,5 +262,50 @@ func TestNavigationWarningsRepeatOriginalSitesThroughAssemblyAndFitting(t *testi
 				t.Errorf("wrong original file: %+v", finding)
 			}
 		}
+	}
+}
+
+func TestSelectionKeepsIndependentLinkActionsAndOriginalTargetlessLink(t *testing.T) {
+	doc := pdffixture.Pages("selection", 2)
+	navigationEntry(doc, 4, "/Annots [8 0 R 9 0 R 10 0 R]")
+	doc.Objs = append(doc.Objs,
+		[]byte("<< /Subtype /Link /Rect [10 10 20 20] /A << /S /GoTo /D [6 0 R /Fit] /Next << /S /URI /URI (https://example.invalid/dependent) >> >> >>"),
+		[]byte("<< /Subtype /Link /Rect [30 10 40 20] /A << /S /URI /URI (https://example.invalid/primary) /Next [<< /S /GoTo /D [6 0 R /Fit] >> << /S /URI /URI (https://example.invalid/sibling) >>] >> >>"),
+		[]byte("<< /Subtype /Link /Rect [50 10 60 20] >>"))
+	path, _ := selectedPacket(t, doc, []packet.Item{&packet.SourceItem{
+		Ref: "first", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}},
+	}}, nil)
+	result := readPDF(t, path)
+	s, err := readOutput(t.Context(), result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := rawPages(t.Context(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	annots, err := s.DereferenceArray(pages[0].dict["Annots"])
+	if err != nil || len(annots) != 2 {
+		t.Fatalf("expected one independently actionable and one originally targetless Link: %v, %v", annots, err)
+	}
+	primary, err := s.DereferenceDict(annots[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := s.DereferenceDict(primary["A"])
+	if err != nil || action["URI"] != types.StringLiteral("https://example.invalid/primary") {
+		t.Fatalf("primary URI: %v, %v", action, err)
+	}
+	next, err := s.DereferenceArray(action["Next"])
+	if err != nil || len(next) != 1 {
+		t.Fatalf("independent URI sibling: %v, %v", next, err)
+	}
+	sibling, err := s.DereferenceDict(next[0])
+	if err != nil || sibling["URI"] != types.StringLiteral("https://example.invalid/sibling") {
+		t.Fatalf("sibling URI: %v, %v", sibling, err)
+	}
+	targetless, err := s.DereferenceDict(annots[1])
+	if err != nil || targetless["Subtype"] != types.Name("Link") || targetless["A"] != nil || targetless["Dest"] != nil {
+		t.Fatalf("originally targetless Link: %v, %v", targetless, err)
 	}
 }

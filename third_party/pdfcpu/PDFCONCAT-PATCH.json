@@ -30,14 +30,24 @@
       "upstream_sha256": "281f461ce95d6a67f4c532eaaead4aebcd06d521f45d18f183ea4892d52aec0e"
     },
     {
+      "path": "pkg/pdfcpu/model/inline_image_exact.go",
+      "sha256": "71e1f52994721252bc8b08d69fb8fa971f802b9da983689d4c1e50d38c2f9b42",
+      "upstream_sha256": null
+    },
+    {
       "path": "pkg/pdfcpu/model/numeric_roundtrip_test.go",
       "sha256": "8870e26022781ab41b839ffb7a178fe558cafae081ba2717042f3f1b59b3c80c",
       "upstream_sha256": null
     },
     {
       "path": "pkg/pdfcpu/model/parse.go",
-      "sha256": "570329483b4a6881144c9e9fc7882caab64dfecd816e52b0926c03c70922357f",
+      "sha256": "2c2731b884f6792ac59e69c72a348b1b54e96dc2eaa43d19b06826316b5d408a",
       "upstream_sha256": "b053ed6bce569fb71ce6ce43edddd53481f2e5709a2a92d578c2cd2dca24b130"
+    },
+    {
+      "path": "pkg/pdfcpu/model/parseContent.go",
+      "sha256": "45454fba7024ee8bb271bf0b083749cabdf5770f4c01b18e29a04c7ceee2e8e4",
+      "upstream_sha256": "6c818d92dd3c267eec5ddf0d6e681e790ec33e50737a192553c558b25194419c"
     },
     {
       "path": "pkg/pdfcpu/model/parse_common_test.go",
@@ -50,8 +60,13 @@
       "upstream_sha256": "3c9fc2a1833671b30e1de1bc7f61e16eb5b1e568ac8136545aab7f9ba4e358fb"
     },
     {
+      "path": "pkg/pdfcpu/model/resource_missing_reference_test.go",
+      "sha256": "6d61460e5332026d3531cb82c5f6bc30b25f61c3d4d74c18f8abdfee2f1a5150",
+      "upstream_sha256": "1cc20241d7eb3c946a79db19632ed3610d8935eb5f784e0056c7f5ea636f81be"
+    },
+    {
       "path": "pkg/pdfcpu/model/xreftable.go",
-      "sha256": "317e29a66b6e99fb40ac617202239c61c628ea16dc4d1f6388d5a01f0a9adad6",
+      "sha256": "ac68bb13b44bc0d8effc7f88e7f132690cb784d236ff9f7b78967fd6df79a7c8",
       "upstream_sha256": "05433cb1782d3b88efe95b5e66669b6a84026aae944470b1b27742623904413d"
     },
     {
@@ -61,7 +76,7 @@
     },
     {
       "path": "pkg/pdfcpu/read.go",
-      "sha256": "7db62e37aa524818f292b1565c01d665336408d9095afb8263f92908e641898d",
+      "sha256": "a1ec055d2fdbcea7df91e55a27275c7e405b087c28934304e64bf93bbff69f20",
       "upstream_sha256": "2677cca296d7d63f603bc141de938f99cabe466b73d5d279fd434f23e00ca64c"
     },
     {

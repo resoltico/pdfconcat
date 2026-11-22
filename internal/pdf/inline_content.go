@@ -19,9 +19,12 @@ func pdfSpace(ch byte) bool { return strings.ContainsRune("\x00\t\n\f\r ", rune(
 // payload as PDF operators. Every candidate must leave a complete lexical
 // content stream; ambiguous boundaries are refused rather than guessed. The
 // bounded work budget also prevents adversarial binary data causing rescans.
-func inlineTail(c context.Context, rest string, budget *int64, depth int) (string, error) {
+func inlineTail(c context.Context, rest string, budget *int64, depth int, pdf20 bool) (string, error) {
 	if depth > 64 {
 		return "", errors.New("inline image nesting exceeds lexical limit")
+	}
+	if tail, exact, err := model.ExactInlineImageTail(c, rest, false, pdf20); exact || err != nil {
+		return tail, err
 	}
 	// Inline image dictionary operands end at the ID operator.
 	for {
@@ -67,7 +70,7 @@ func inlineTail(c context.Context, rest string, budget *int64, depth int) (strin
 		if *budget < 0 {
 			return "", errors.New("inline image boundary work limit exceeded")
 		}
-		if lexicalDrawingTail(c, tail, budget, depth+1) == nil {
+		if lexicalDrawingTail(c, tail, budget, depth+1, pdf20) == nil {
 			chosen = tail
 			matches++
 			if matches > 1 {
@@ -81,7 +84,7 @@ func inlineTail(c context.Context, rest string, budget *int64, depth int) (strin
 	return chosen, nil
 }
 
-func lexicalDrawingTail(c context.Context, rest string, budget *int64, depth int) error {
+func lexicalDrawingTail(c context.Context, rest string, budget *int64, depth int, pdf20 bool) error {
 	compatibility := 0
 	for len(rest) > 0 {
 		if err := c.Err(); err != nil {
@@ -119,7 +122,7 @@ func lexicalDrawingTail(c context.Context, rest string, budget *int64, depth int
 		rest = rest[n:]
 		if op == "BI" {
 			var err error
-			rest, err = inlineTail(c, rest, budget, depth+1)
+			rest, err = inlineTail(c, rest, budget, depth+1, pdf20)
 			if err != nil {
 				return err
 			}

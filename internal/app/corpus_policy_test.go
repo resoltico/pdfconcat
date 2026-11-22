@@ -64,7 +64,7 @@ func corpusPolicies(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			plan := map[string]any{"version": 9, "output": "packet.pdf", "items": tc.Items}
+			plan := map[string]any{"version": 10, "output": "packet.pdf", "items": tc.Items}
 			if tc.Fit != "" {
 				plan["fitting"] = map[string]any{"target": tc.Fit}
 			}
@@ -149,7 +149,7 @@ func corpusPolicies(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		plan := map[string]any{"version": 9, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": []any{corpusSource("technical-note.pdf"), corpusPage("Pruned Ā Ελληνικά", "pruned.ttf"), corpusPage("Full Ā Ελληνικά", "full.ttf")}}
+		plan := map[string]any{"version": 10, "output": "packet.pdf", "page_defaults": map[string]any{"size": "A4"}, "items": []any{corpusSource("technical-note.pdf"), corpusPage("Pruned Ā Ελληνικά", "pruned.ttf"), corpusPage("Full Ā Ελληνικά", "full.ttf")}}
 		path := filepath.Join(dir, "plan.json")
 		corpusJSON(t, path, plan)
 		r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, Input: app.PlanFile{Path: path}, WorkingDir: dir})

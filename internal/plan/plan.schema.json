@@ -457,10 +457,10 @@
     },
     "optional_content": {
       "default": "refuse",
-      "description": "Refuse PDF visibility layers, or explicitly remove a proved always-visible Form layer and its controls.",
+      "description": "Remove proved-empty visibility settings. The opt-in also removes proved always-visible Form controls or bare undeclared whole-page wrappers.",
       "enum": [
         "refuse",
-        "flatten-visible-forms"
+        "flatten-visible-content"
       ],
       "type": "string"
     },
@@ -546,7 +546,7 @@
       "type": "integer"
     },
     "version": {
-      "const": 9,
+      "const": 10,
       "description": "Plan format version."
     }
   },

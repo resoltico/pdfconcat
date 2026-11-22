@@ -811,8 +811,9 @@ func parseObjectStreamWithBudget(c context.Context, osd *types.ObjectStreamDict,
 
 	// e.g., 10 0 11 25 = 2 Objects: #10 @ offset 0, #11 @ offset 25
 
+	observeNull := model.DictionaryNullObserver(c)
 	decode := func(c context.Context, s string) (types.Object, error) {
-		return compressedObject(c, s, validationMode)
+		return compressedObject(model.WithDictionaryNullObserver(c, observeNull), s, validationMode)
 	}
 	decodeStream := objectStreamDecodeFunc(budget, osd.MaxDecodeBytes)
 	objArray, err := buildObjectArrayForObjectStream(c, osd, objs, fullContent, decodedContent, decode, decodeStream)

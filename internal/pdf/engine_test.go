@@ -52,9 +52,9 @@ func TestInspectionPolicy(t *testing.T) {
 	}{
 		{"signed", func() *pdffixture.Doc { return pdffixture.SignatureValue("signed") }, diag.SourceSigned},
 		{"perms", func() *pdffixture.Doc { return insertEntry(pdffixture.Plain("certified"), 1, "/Perms << >>") }, diag.SourceSigned},
-		{"optional", func() *pdffixture.Doc {
+		{"empty optional content", func() *pdffixture.Doc {
 			return insertEntry(pdffixture.Plain("oc"), 1, "/OCProperties << /OCGs [] /D << /Order [] >> >>")
-		}, diag.SourceOptionalContent},
+		}, diag.SourceOptionalContentEmptyRemoved},
 		{"dynamic", func() *pdffixture.Doc { return insertEntry(pdffixture.Plain("xfa"), 1, "/NeedsRendering true") }, diag.SourceDynamicForm},
 		{"page kids", func() *pdffixture.Doc { return insertEntry(pdffixture.Plain("page"), 3, "/Kids []") }, diag.SourceDamaged},
 		{"page child", func() *pdffixture.Doc { return insertEntry(pdffixture.Plain("page"), 3, "/Kids [3 0 R]") }, diag.SourceDamaged},

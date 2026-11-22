@@ -45,23 +45,23 @@ type OptionalContentPolicy string
 
 // Supported optional-content policies.
 const (
-	OptionalContentRefuse              OptionalContentPolicy = "refuse"
-	OptionalContentFlattenVisibleForms OptionalContentPolicy = "flatten-visible-forms"
+	OptionalContentRefuse                OptionalContentPolicy = "refuse"
+	OptionalContentFlattenVisibleContent OptionalContentPolicy = "flatten-visible-content"
 )
 
 // Values gives the supported authored policies in declaration order.
 func (OptionalContentPolicy) Values() []string {
-	return []string{string(OptionalContentRefuse), string(OptionalContentFlattenVisibleForms)}
+	return []string{string(OptionalContentRefuse), string(OptionalContentFlattenVisibleContent)}
 }
 
 // OptionalContentDescription describes the plan's layer admission boundary.
 func OptionalContentDescription() string {
-	return "Refuse PDF visibility layers, or explicitly remove a proved always-visible Form layer and its controls."
+	return "Remove proved-empty visibility settings. The opt-in also removes proved always-visible Form controls or bare undeclared whole-page wrappers."
 }
 
 // OptionalContentValueMessage explains the accepted layer policy values.
 func OptionalContentValueMessage() string {
-	return "Optional content must be refuse or flatten-visible-forms."
+	return "Optional content must be refuse or flatten-visible-content."
 }
 
 // StructurePolicy controls preservation of source semantics.

@@ -109,10 +109,16 @@ func (a *compositionInspector) program(role compositionProgramRole, object types
 		if !a.certified(&state) {
 			return a.failure(ref, "Matrix")
 		}
+		if role == formProgram {
+			resources = a.pageResources
+		}
 		if stream.Dict["Resources"] != nil {
-			resources, err = a.pdf.DereferenceDict(stream.Dict["Resources"])
+			local, err := a.pdf.DereferenceDict(stream.Dict["Resources"])
 			if err != nil {
 				return err
+			}
+			if local != nil {
+				resources = local
 			}
 		}
 	}
@@ -410,7 +416,7 @@ func (a *compositionInspector) scan(data []byte, resources types.Dict, state com
 			}
 			budget := int64(len(rest))*32 + 1
 			var err error
-			rest, err = inlineTail(a.context, rest, &budget, 0)
+			rest, err = inlineTail(a.context, rest, &budget, 0, a.pdf.PDF20())
 			if err != nil {
 				return a.failure(owner, "Content.BI")
 			}

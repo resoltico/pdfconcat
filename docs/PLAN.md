@@ -1,6 +1,6 @@
-# Plan v9
+# Plan v10
 
-A plan is one UTF-8 JSON object with `version: 9`. Use source objects to select
+A plan is one UTF-8 JSON object with `version: 10`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
@@ -13,7 +13,7 @@ packet; its input paths are relative to the directory where you save the plan.
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -71,7 +71,7 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `9` |
+| `version` | Required integer token `10` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
@@ -80,7 +80,7 @@ composition example uses titled groups and `divider` for that purpose.
 | `page_numbers` | Optional numbering, labels and overlay placement |
 | `metadata` | Optional authored `title`, `author`, `subject`, `language` |
 | `timestamp` | Optional nonnegative UTC Unix seconds, through 253402300799 |
-| `optional_content` | `refuse` (default) or `flatten-visible-forms` |
+| `optional_content` | `refuse` (default) or `flatten-visible-content` |
 | `structure` | `preserve` (default) or explicit `discard` |
 | `$schema` | Optional editor schema URL; ignored string |
 
@@ -127,7 +127,7 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "output": "reordered.pdf",
   "items": [
     { "source": "source.pdf", "pages": [[3, 3]] },
@@ -149,8 +149,10 @@ widgets is `source_selection_form_unsupported`. Full-range forms follow the
 appearance compatibility use the retained selected view, so omitted annotations
 and targets do not create those compatibility refusals.
 
-Local links and destinations to omitted pages are removed within their own
-occurrence; they never jump into a different occurrence of the same source.
+PDFConcat removes local navigation to omitted pages within each source occurrence.
+Local links can target only pages retained in their own occurrence. When removal leaves
+a link annotation without a navigation binding, PDFConcat removes the annotation
+and its tagged object references. Other valid actions on the same link remain.
 Retained source bookmarks preserve their native navigation beneath the
 innermost authored section. Removed navigation produces
 `source_navigation_removed`; an excessive composed outline hierarchy is
@@ -261,14 +263,15 @@ Unfitted source content and geometry remain intact outside the overlay.
 
 ## Optional content
 
-The packet-level `optional_content` setting applies to all source admissions,
-including the full original PDF when the plan selects only some pages. Use
-`"optional_content": "flatten-visible-forms"` to accept removal of the identity
-and controls of a [proved always-visible Form layer](PDF-POLICY.md#optional-content).
-Retained Form artwork stays visible for View, Print and Export. Check and Build
-report a warning identifying the original group and affected items, including
-when an item selects pages without that artwork. Plain sources and generated
-pages work with either policy.
+Both policies remove [proved-empty optional-content settings](PDF-POLICY.md#optional-content)
+and report a source warning. Direct CLI operands use the default `refuse` policy.
+
+Set `"optional_content": "flatten-visible-content"` to opt in to removal of
+proved always-visible Form controls or bare undeclared whole-page wrappers.
+PDFConcat checks the entire original source, including pages outside an item's
+selection. Check and Build identify the original PDF location and affected
+items. The packet preserves the artwork on retained pages and removes the
+admitted visibility controls.
 
 ## Document identity, time and structure
 
@@ -404,7 +407,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
@@ -442,7 +445,7 @@ contents or page-number overlay layout. For example, a generated page can declar
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "items": [{ "page": {
     "size": "A4",
     "text": {
@@ -499,7 +502,7 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 9 is supported; version checks follow the same first-fault order.
+version 10 is supported; version checks follow the same first-fault order.
 
 After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
 `plan_syntax`; supply a JSON plan object.

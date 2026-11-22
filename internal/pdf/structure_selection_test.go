@@ -336,3 +336,26 @@ func TestIndirectStructureBindingsSurviveAssembly(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectedLinkRemovesItsTaggedObjectReference(t *testing.T) {
+	doc := taggedSelectionFixture()
+	navigationEntry(doc, 4, "/Annots [19 0 R]")
+	doc.Objs[11] = bytes.Replace(doc.Objs[11], []byte("/K 0"), []byte("/K [0 << /Type /OBJR /Pg 4 0 R /Obj 19 0 R >>]"), 1)
+	doc.Objs[10] = bytes.Replace(doc.Objs[10], []byte("2 [14 0 R]"), []byte("2 [14 0 R] 3 12 0 R"), 1)
+	doc.Objs = append(doc.Objs, []byte("<< /Type /Annot /Subtype /Link /Rect [10 10 20 20] /P 4 0 R /Dest [6 0 R /Fit] /StructParent 3 >>"))
+	fit := packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400})
+	path, _ := selectedPacket(t, doc, []packet.Item{
+		&packet.SourceItem{Ref: "first", Path: "source", Selection: []packet.PageRange{{First: 1, Last: 1}}},
+		&packet.SourceItem{Ref: "target", Path: "source", Selection: []packet.PageRange{{First: 2, Last: 2}}},
+	}, fit)
+	raw := readPDF(t, path)
+	if err := Verify(t.Context(), raw, 2); err != nil {
+		t.Fatal(err)
+	}
+	tools := oracle.RequireTools(t)
+	json, err := exec.CommandContext(t.Context(), tools.QPDF, "--json", path).Output()
+	if err != nil || bytes.Contains(json, []byte(`"/OBJR"`)) || bytes.Contains(json, []byte(`"/Link"`)) ||
+		!bytes.Contains(json, []byte("semantic0")) || !bytes.Contains(json, []byte("semantic1")) {
+		t.Fatalf("projection lost retained structure or preserved a dead Link: %v\n%s", err, json)
+	}
+}

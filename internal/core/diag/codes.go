@@ -238,6 +238,13 @@ var (
 	ReportInspectionFailed              = define("report_inspection_failed", Error, Failed, "The report destination could not be inspected")
 )
 
+var (
+	// SourceOptionalContentEmptyRemoved reports planned removal of an empty catalog declaration.
+	SourceOptionalContentEmptyRemoved = define("source_optional_content_empty_removed", Warning, NoClass, "composition removes proved-empty optional-content settings")
+	// SourceOptionalContentWrappersRemoved reports planned removal of whole-page wrappers.
+	SourceOptionalContentWrappersRemoved = define("source_optional_content_wrappers_removed", Warning, NoClass, "composition removes proved undeclared whole-page visibility wrappers and preserves retained artwork")
+)
+
 // New constructs a diagnostic using its fixed registry severity.
 func New(code Code, message string, items ...string) Diagnostic {
 	definition := code.definition

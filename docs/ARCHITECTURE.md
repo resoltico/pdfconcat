@@ -11,7 +11,7 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/app` | Acquisition, original input reservation, inspection, composition, digest rechecks and publication ordering |
 | `internal/core` | Typed declarations, semantic validation, owned traversal, layout, vocabulary and domain facts |
 | `internal/core/diag`, `internal/core/outcome` | Diagnostic definitions, outcome precedence, summary caps and complete execution facts |
-| `internal/plan` | Strict, located plan v9 decoding with an explicit native path resolver |
+| `internal/plan` | Strict, located plan decoding with an explicit native path resolver |
 | `internal/compose` | Measured generated pages, contents and numbering |
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
@@ -139,9 +139,10 @@ Both producers share semantic admission and aggregate text/node limits.
 Private source sites retain full source refs, original page ordinals and paths.
 Admission captures catalogue/navigation sites before backend normalization;
 selection/assembly carry typed change evidence before pruning or renumbering.
-Only the existing PDFLocation projection crosses the diagnostic boundary.
-Distinct findings survive until result coalescing; no producer deduplicates
-solely by warning code/message.
+`PDFLocation` projects that provenance at the diagnostic boundary. Result
+coalescing merges equivalent navigation findings across inspection and assembly,
+prefers assembly evidence and combines consuming item references. It preserves
+distinct findings before applying summary caps.
 
 Inspection, composition and build proceed only while preceding processing stages
 have no errors. Build runs only for `Build` requests. After admission, projection
@@ -204,9 +205,13 @@ Output verification uses strict validation without source normalization and
 checks catalog policy before validation. A shared validation boundary checks page
 order, live content-stream references and encoded bytes before and after
 validation. Source admission and serialized output also check every page-content
-encoding. Flate EOF/checksum checks use the standard library alongside backend
-stage/predictor decoders and same-context budgets. Validated decoded caches are
-immutable; original encoded data is retained.
+encoding. Flate EOF and checksum checks use the standard library alongside
+backend stage and predictor decoders and same-context budgets. Validated decoded
+caches are immutable. The marked-content observer resolves required properties in
+the effective drawing scope. Backend resource pruning preserves page properties
+used by Forms that borrow the page scope. Drawing-program scans and the backend
+resource parser share the exact inline-image boundary helper.
+See [drawing-program policy](PDF-POLICY.md#drawing-programs-and-resource-bindings).
 
 Validation notices are evidence; their message text does not select policy.
 Diagnostic wrappers preserve backend detail and PDF locations. Result coalescing
@@ -245,14 +250,17 @@ bytes before publication.
 
 ### Optional-content admission
 
-The PDF adapter scans effective source and serialized output roots for visibility
-bindings. The typed plan can allow a single visible Form profile. The default
-refusal offers the opt-in when the catalog and group pass static profile checks.
-Opt-in admission additionally checks reachable owners and bounded drawing
-programs before selection, then removes the proved dictionary entries after
-source validation. Fresh assembly admission repeats the proof against the
-inspected source digest. Staged verification checks the raw graph for remaining
-visibility bindings.
+The PDF adapter checks reachable visibility bindings and observes drawing
+programs. It proves the [admitted profiles](PDF-POLICY.md#optional-content) against
+the original source before selection. Source admission applies empty-settings
+and page-wrapper edits before semantic validation and removes proved Form layer
+bindings after validation. The page-content witness includes the approved
+wrapper edits.
+
+Fresh assembly admission repeats the proof against the inspected source digest.
+Staged verification checks the reopened graph and drawing programs. For a
+normalized wrapper, it also checks the selected physical output pages and their
+drawing descendants in their effective resource scopes.
 
 See [fitting policy](PDF-POLICY.md#fitting), [forward accuracy](PDF-POLICY.md#forward-fitting-accuracy)
 and [text execution](PDF-POLICY.md#text-execution-context) for the supported

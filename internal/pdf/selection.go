@@ -82,7 +82,7 @@ func InspectReader(c context.Context, reader io.ReadSeeker, digest [32]byte, siz
 		}
 	}
 	if len(requests) == 0 {
-		uri, e := uriBaseWarnings(c, s, origins, false)
+		uri, e := inspectExternalActions(c, s, origins)
 		ds = append(ds, uri...)
 		if e != nil {
 			return facts, occurrences, append(ds, diagnostic(e, diag.SourceInvalid))
@@ -151,20 +151,14 @@ func analyzeSelection(c context.Context, s *model.Context, origins sourceOrigins
 		ds = append(ds, d)
 		return facts, ds
 	}
-	removed, err := projectSelection(c, view, ranges, origins)
+	projection, err := projectSelection(c, view, ranges, origins, false)
 	if err != nil {
 		d := diagnostic(err, diag.SourceInvalid)
 		ds = append(ds, d)
 		return facts, ds
 	}
-	ds = append(ds, navigationDiagnostics(removed)...)
-	uri, e := uriBaseWarnings(c, view, origins, false)
-	ds = append(ds, uri...)
-	if e != nil {
-		d := diagnostic(e, diag.SourceInvalid)
-		ds = append(ds, d)
-		return facts, ds
-	}
+	ds = append(ds, navigationDiagnostics(projection.removed)...)
+	ds = append(ds, projection.external...)
 	geometries, e := pageGeometries(c, view)
 	if e != nil {
 		d := diagnostic(e, diag.SourceInvalid)
@@ -307,23 +301,23 @@ func selectionView(c context.Context, s *model.Context) (*model.Context, error) 
 
 // projectSelection keeps original page identities and materializes inherited
 // attributes before replacing their ancestors. It is used on isolated contexts.
-func projectSelection(c context.Context, s *model.Context, ranges []packet.PageRange, origins sourceOrigins) ([]navigationChange, error) {
+func projectSelection(c context.Context, s *model.Context, ranges []packet.PageRange, origins sourceOrigins, assembly bool) (navigationProjection, error) {
 	ranges, err := selectionRanges(ranges, s.PageCount)
 	if err != nil {
-		return nil, err
+		return navigationProjection{}, err
 	}
 	if wholeSelection(ranges, s.PageCount) {
-		return pruneNavigation(c, s, origins)
+		return pruneNavigation(c, s, origins, assembly)
 	}
 	geometries, err := pageGeometries(c, s)
 	if err != nil {
-		return nil, err
+		return navigationProjection{}, err
 	}
 	selected := []pageRef{}
 	for _, span := range ranges {
 		for number := span.First; number <= span.Last; number++ {
 			if err := c.Err(); err != nil {
-				return nil, err
+				return navigationProjection{}, err
 			}
 			geometry := geometries[number-1]
 			d, attrs := geometry.dict, geometry.attrs
@@ -342,7 +336,7 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	}
 	root, err := s.Pages()
 	if err != nil {
-		return nil, err
+		return navigationProjection{}, err
 	}
 	var makeTree func([]pageRef, types.IndirectRef) (types.Dict, error)
 	makeTree = func(pages []pageRef, parent types.IndirectRef) (types.Dict, error) {
@@ -374,7 +368,7 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	}
 	tree, err := makeTree(selected, *root)
 	if err != nil {
-		return nil, err
+		return navigationProjection{}, err
 	}
 	s.Table[root.ObjectNumber.Value()].Object = tree
 	s.PageCount = len(selected)
@@ -382,12 +376,12 @@ func projectSelection(c context.Context, s *model.Context, ranges []packet.PageR
 	s.PageThumbs = map[int]types.IndirectRef{}
 	s.URIs = map[int]map[string]string{}
 	s.Valid = false
-	removed, err := pruneNavigation(c, s, origins)
+	projection, err := pruneNavigation(c, s, origins, assembly)
 	if err != nil {
-		return nil, err
+		return navigationProjection{}, err
 	}
 	// Omitted pages remain private objects; selection is composition, not redaction.
-	return removed, nil
+	return projection, nil
 }
 
 // originalSelectionPage projects a selected view's location back to its input.

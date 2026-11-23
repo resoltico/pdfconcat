@@ -154,6 +154,7 @@ var (
 	SourceNavigationRemoved             = define("source_navigation_removed", Warning, NoClass, "navigation to omitted source pages was removed for affected occurrences")
 	SourceOutlineDepthUnsupported       = define("source_outline_depth_unsupported", Error, Invalid, "authored sections and imported bookmarks exceed the supported outline hierarchy")
 	SourceFormUnsupported               = define("source_form_unsupported", Error, Invalid, "nonempty forms require identical resolved DR/DA/Q representations")
+	SourceRelativeActionContext         = define("source_relative_action_context", Warning, NoClass, "a retained relative external action can resolve differently at the packet location")
 	SourceURIBaseRemoved                = define("source_uri_base_removed", Warning, NoClass, "source URI Base is removed; retained relative actions may resolve differently")
 	OutputRequired                      = define("output_required", Error, Invalid, "build requires an output destination")
 	PlanUnreadable                      = define("plan_unreadable", Error, Failed, "plan file or stdin could not be read")

@@ -148,3 +148,35 @@ func TestHelpTopicsMatchCommandFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestInvocationPreservesCommandAndOffendingArgument(t *testing.T) {
+	for _, tc := range []struct {
+		args                         []string
+		command, code, item, message string
+		json                         bool
+	}{
+		{[]string{"build", "\xff.pdf", "--json"}, "build", "usage_invalid_value", "argv:1", "valid UTF-8", true},
+		{[]string{"check", "--plan", "--", "\xff.pdf", "--json"}, "check", "usage_invalid_value", "argv:3", "valid UTF-8", true},
+		{[]string{"check", "--", "\xff.pdf", "--json"}, "check", "usage_invalid_value", "argv:2", "valid UTF-8", false},
+		{[]string{"other", "\xff.pdf", "--json"}, "", "usage_invalid_value", "argv:1", "valid UTF-8", false},
+		{[]string{"check", "--base-dir", "here", "source.pdf"}, "check", "usage_conflict", "argv:1", "requires --plan -", false},
+		{[]string{"check", "--plan=file.json", "--base-dir=here"}, "check", "usage_conflict", "argv:2", "requires --plan -", false},
+		{[]string{"build", "--plan", "file.json", "source.pdf", "--json"}, "build", "usage_conflict", "argv:3", "cannot be combined", true},
+		{[]string{"check", "source.pdf", "--plan", "file.json"}, "check", "usage_conflict", "argv:2", "cannot be combined", false},
+		{[]string{"build", "--blank", "--plan=file.json"}, "build", "usage_conflict", "argv:2", "cannot be combined", false},
+		{[]string{"build", "--plan=file.json", "--blank"}, "build", "usage_conflict", "argv:2", "cannot be combined", false},
+		{[]string{"schema", "plan", "result"}, "", "usage_invalid_value", "argv:2", "accepts one selector", false},
+		{[]string{"schema", "unknown", "result"}, "", "usage_invalid_value", "argv:1", "requires plan or result", false},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			command, failure := cli.Parse(tc.args)
+			if failure == nil || len(failure.Diagnostics) != 1 || failure.Status != "invalid" || failure.Command != tc.command || command.JSON != tc.json {
+				t.Fatalf("wrong invocation context: %+v / %+v", command, failure)
+			}
+			d := failure.Diagnostics[0]
+			if d.Code.String() != tc.code || len(d.Items) != 1 || d.Items[0] != tc.item || !strings.Contains(d.Message, tc.message) {
+				t.Fatalf("wrong argument attribution: %+v", d)
+			}
+		})
+	}
+}

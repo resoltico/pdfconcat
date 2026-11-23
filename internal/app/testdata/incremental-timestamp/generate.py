@@ -1,6 +1,7 @@
 """Generate the synthetic timestamp reproduction and effective-xref controls."""
 from pathlib import Path
 import sys
+import zlib
 
 pdf = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
 page = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents %d 0 R%s >>"
@@ -35,17 +36,22 @@ prev = append_revision({
     5: stream(b"0 0 0 rg 50 50 20 20 re f"), 6: stream(b"0 0 1 rg 75 75 30 30 re f"),
 },7)
 original = bytes(pdf)
-timestamp_revision = append_revision({
+timestamp_objects = {
     1: b"<< /Type /Catalog /Pages 2 0 R /AcroForm 7 0 R >>",
     4: page % (6,b" /Annots [8 0 R]"),
     7: b"<< /Fields [8 0 R] /SigFlags 3 >>",
     8: b"<< /Type /Annot /Subtype /Widget /FT /Sig /T (Signature1) /F 132 /Rect [0 0 0 0] /P 4 0 R /V 9 0 R >>",
     9: b"<< /Type /DocTimeStamp /Filter /Adobe.PPKLite /SubFilter /ETSI.RFC3161 /ByteRange [0 1111111111 2222222222 3333333333] /Contents <00000000> >>",
-},10,prev)
-start = pdf.index(b"<00000000>")
-end = start + len(b"<00000000>")
-for placeholder, number in [(b"1111111111",start),(b"2222222222",end),(b"3333333333",len(pdf)-end)]:
-    pdf[:] = pdf.replace(placeholder,b"%010d" % number)
+}
+
+def fill_byte_range():
+    start = pdf.index(b"<00000000>")
+    end = start + len(b"<00000000>")
+    for placeholder, number in [(b"1111111111",start),(b"2222222222",end),(b"3333333333",len(pdf)-end)]:
+        pdf[:] = pdf.replace(placeholder,b"%010d" % number)
+
+timestamp_revision = append_revision(timestamp_objects,10,prev)
+fill_byte_range()
 if len(sys.argv) != 2:
     raise SystemExit("Usage: python3 generate.py OUTPUT_DIRECTORY")
 directory = Path(sys.argv[1])
@@ -68,3 +74,19 @@ append_revision({
     8: b"null",
 }, 10, timestamp_revision, freed=(9,))
 (directory / "superseded-timestamp.pdf").write_bytes(pdf)
+
+
+# Model the invisible iText timestamp with a fresh, compressed Form on
+# the final revision. Keep the genuinely appearance-free fixture above.
+pdf[:] = original
+empty_appearance = stream(zlib.compress(b"")).replace(
+    b" >>", b" /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 0 0]"
+    b" /Matrix [1 0 0 1 0 0] /Resources << >> /Filter /FlateDecode >>", 1,
+)
+append_revision(timestamp_objects | {
+    1: timestamp_objects[1][:-2] + b"/Extensions << /ESIC << /BaseVersion /1.7 /ExtensionLevel 5 >> >> >>",
+    8: timestamp_objects[8][:-2] + b"/AP << /N 10 0 R >> >>",
+    10: empty_appearance,
+},11,prev)
+fill_byte_range()
+(directory / "compressed-empty-appearance.pdf").write_bytes(pdf)

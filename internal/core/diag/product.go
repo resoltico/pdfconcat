@@ -6,6 +6,7 @@ package diag
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // AContentsTitleHasAWordWiderThanItsColumn renders the core-owned explanation.
@@ -819,6 +820,24 @@ func URIBaseEvidence(object, generation int64, path string, assembly bool) Expla
 		stage = "Assembly"
 	}
 	return explain("uri_base_removed", fmt.Sprintf("%s found a retained relative action. URI Base at source object %d %d %s is omitted.", stage, object, generation, path), strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10), path)
+}
+
+// RelativeActionUsesPacketLocation explains a dependency on document location.
+func RelativeActionUsesPacketLocation() Explanation {
+	return explain("relative_action_context", "A retained relative external action can resolve differently at the packet location.")
+}
+
+// RelativeActionContextEvidence identifies the observed action and file specification slots.
+func RelativeActionContextEvidence(kind string, filenameKeys []string, assembly bool) Explanation {
+	stage := "Inspection"
+	if assembly {
+		stage = "Assembly"
+	}
+	message := fmt.Sprintf("%s found a retained relative %s action.", stage, kind)
+	if len(filenameKeys) != 0 {
+		message = fmt.Sprintf("%s The file specification uses /%s for relative paths.", message, strings.Join(filenameKeys, ", /"))
+	}
+	return explain("relative_action_context_evidence", message, append([]string{kind}, filenameKeys...)...)
 }
 
 // OptionalContentEmptyRemoved describes the planned removal of empty settings.

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
+
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
@@ -315,5 +317,56 @@ func TestWarningNavigationSurvivesLaterStructureFitFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRelativeExternalActionFileSpecification(t *testing.T) {
+	for _, tc := range []struct {
+		name, action, path, slot string
+		warn                     bool
+	}{
+		{"implicit URI", "/S /URI /URI (missing-annex.pdf)", "A.URI", "", true},
+		{"simple remote file", "/S /GoToR /F (missing-annex.pdf) /D [0 /Fit]", "A.F", "", true},
+		{"effective UF", "/S /GoToR /F << /F (/absolute.pdf) /UF (missing-annex.pdf) >> /D [0 /Fit]", "A.F", "/UF", true},
+		{"effective F", "/S /GoToR /F << /F (missing-annex.pdf) >> /D [0 /Fit]", "A.F", "/F", true},
+		{"absolute UF", "/S /GoToR /F << /F (relative.pdf) /UF (/absolute.pdf) >> /D [0 /Fit]", "", "", false},
+		{"URL file system", "/S /GoToR /F << /FS /URL /F (/missing-annex.pdf) /UF (https://example.invalid/absolute.pdf) >> /D [0 /Fit]", "A.F", "/F", true},
+		{"absolute URL file system", "/S /GoToR /F << /FS /URL /F (https://example.invalid/absolute.pdf) /UF (relative.pdf) >> /D [0 /Fit]", "", "", false},
+		{"legacy Unix", "/S /GoToR /F << /Type /Filespec /Unix (missing-annex.pdf) >> /D [0 /Fit]", "A.F", "/Unix", true},
+		{"legacy DOS", "/S /GoToR /F << /Type /Filespec /DOS (missing-annex.pdf) >> /D [0 /Fit]", "A.F", "/DOS", true},
+		{"legacy Mac", "/S /GoToR /F << /Type /Filespec /Mac (missing-annex.pdf) >> /D [0 /Fit]", "A.F", "/Mac", true},
+		{"multiple relative legacy candidates", "/S /GoToR /F << /Unix (unix.pdf) /Mac (/absolute.pdf) /DOS (dos.pdf) >> /D [0 /Fit]", "A.F", "/DOS, /Unix for", true},
+		{"absolute legacy candidates", "/S /GoToR /F << /Unix (/docs/unix.pdf) /DOS (/c/docs/dos.pdf) /Mac (/Disk/docs/mac.pdf) >> /D [0 /Fit]", "", "", false},
+		{"absolute canonical filename takes precedence", "/S /GoToR /F << /F (/absolute.pdf) /Unix (relative.pdf) >> /D [0 /Fit]", "", "", false},
+		{"empty canonical filename", "/S /GoToR /F << /F () /Unix (relative.pdf) >> /D [0 /Fit]", "A.F", "/Unix", true},
+		{"absolute URL ignores legacy slots", "/S /GoToR /F << /FS /URL /F (https://example.invalid/absolute.pdf) /Unix (relative.pdf) >> /D [0 /Fit]", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.URILink("external", "original", "", false)
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("/S /URI /URI (original) /IsMap false"), []byte(tc.action), 1)
+			// The output-free whole-source inspection also runs the observer.
+			ds := warningFindings(t, d)
+			found := warningCode(ds, diag.SourceRelativeActionContext)
+			if !tc.warn {
+				if len(found) != 0 {
+					t.Fatal(found)
+				}
+				return
+			}
+			if len(found) != 1 || tc.slot != "" && !strings.Contains(found[0].Detail, tc.slot) {
+				t.Fatalf("relative action: %v", found)
+			}
+			warningLocation(t, found[0], 6, 1, tc.path)
+		})
+	}
+}
+
+func TestRelativeExternalActionLegacyFallbackIsLimitedToPDF1(t *testing.T) {
+	d := pdffixture.Plain("PDF 2.0")
+	d.Version = "2.0"
+	s := parsedFixture(t, d)
+	keys, relative := relativeRemoteFile(s, types.Dict{"Unix": types.StringLiteral("annex.pdf")})
+	if relative || len(keys) != 0 {
+		t.Fatalf("PDF 2.0 selected legacy filenames: %v", keys)
 	}
 }

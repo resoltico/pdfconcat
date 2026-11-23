@@ -26,9 +26,17 @@ import (
 )
 
 func TestIncrementalTimestampDiscard(t *testing.T) {
+	for _, fixture := range []string{"incremental-timestamp.pdf", "compressed-empty-appearance.pdf"} {
+		t.Run(fixture, func(t *testing.T) {
+			verifyIncrementalTimestampDiscard(t, fixture)
+		})
+	}
+}
+
+func verifyIncrementalTimestampDiscard(t *testing.T, fixture string) {
+	t.Helper()
 	dir := t.TempDir()
-	fixture := "testdata/incremental-timestamp/incremental-timestamp.pdf"
-	before, err := os.ReadFile(fixture)
+	before, err := os.ReadFile(filepath.Join("testdata", "incremental-timestamp", fixture))
 	if err != nil {
 		t.Fatal(err)
 	}

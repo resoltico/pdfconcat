@@ -58,3 +58,52 @@ func TestNavigationFindingsReconcileAcrossAssemblyBeforeCaps(t *testing.T) {
 		}
 	}
 }
+
+func TestExternalActionFindingsKeepOriginalNextSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name, catalog string
+		code          diag.Code
+	}{
+		{"implicit base", "", diag.SourceRelativeActionContext},
+		{"explicit base", " /URI << /Base (https://example.invalid/source/) >>", diag.SourceURIBaseRemoved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.pdf")
+			d := pdffixture.NavigationPages("projection", false, false)
+			d.Objs[0] = bytes.Replace(d.Objs[0], []byte("/Pages 2 0 R"), []byte("/Pages 2 0 R"+tc.catalog), 1)
+			ref := len(d.Objs) - 1
+			d.Objs[ref] = bytes.Replace(d.Objs[ref], []byte("/Dest [6 0 R /Fit]"), []byte("/A << /S /URI /URI (https://example.invalid/) /Next [<< /S /GoTo /D [6 0 R /Fit] >> << /S /URI /URI (missing-annex.pdf) >>] >>"), 1)
+			if err := d.WriteFile(source); err != nil {
+				t.Fatal(err)
+			}
+			selection := []packet.PageRange{{First: 1, Last: 1}}
+			items := []packet.Item{&packet.SourceItem{Ref: "first", Path: source, Selection: selection}, &packet.SourceItem{Ref: "again", Path: source, Selection: selection}}
+			for _, op := range []app.Operation{app.Check, app.Build} {
+				request := app.Request{Operation: op, WorkingDir: dir, InspectionWorkers: 1, Input: app.Declared{Declaration: packet.Declaration{Items: items}}}
+				if op == app.Build {
+					request.Output = "packet.pdf"
+				}
+				r := app.Execute(t.Context(), request)
+				if r.Status != "ok" {
+					t.Fatal(r.Diagnostics)
+				}
+				matches := 0
+				for _, d := range r.Diagnostics {
+					if d.Code != diag.SourceURIBaseRemoved && d.Code != diag.SourceRelativeActionContext {
+						continue
+					}
+					matches++
+					if d.Code != tc.code || d.File != source || d.PDFLocation == nil || d.PDFLocation.Page != 1 ||
+						d.PDFLocation.Path != "A.Next[1].URI" || !slices.Equal(d.Items, []string{"first", "again"}) ||
+						strings.Contains(d.Detail, "Assembly") != (op == app.Build) {
+						t.Fatalf("%s action provenance: %+v", op, d)
+					}
+				}
+				if matches != 1 {
+					t.Fatalf("%s findings: %v", op, r.Diagnostics)
+				}
+			}
+		})
+	}
+}

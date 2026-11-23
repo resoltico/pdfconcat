@@ -19,10 +19,11 @@ type retainedTarget struct {
 	key        string
 	value      types.Object
 	site, edge sourceSite
+	route      navigationRoute
 }
 
 // Resolve the owning slot before observers or the backend can interpret it.
-func visitRetainedTarget(s *model.Context, d types.Dict, key string, site, edge sourceSite, visit func(retainedTarget) (bool, error)) (bool, error) {
+func visitRetainedTarget(s *model.Context, d types.Dict, key string, site, edge sourceSite, route navigationRoute, visit func(retainedTarget) (bool, error)) (bool, error) {
 	value, err := navigationValue(s, d[key], site)
 	if err != nil {
 		return false, err
@@ -38,7 +39,7 @@ func visitRetainedTarget(s *model.Context, d types.Dict, key string, site, edge 
 			return false, site.wrap(refuse(diag.SourceUnsupported, diag.InvalidLocalGoToDestination()))
 		}
 	}
-	return visit(retainedTarget{d, key, value, site, edge})
+	return visit(retainedTarget{d, key, value, site, edge, route})
 }
 
 // retainedObjects follows semantic edges that survive catalog cleanup. Private
@@ -104,10 +105,15 @@ func inspectRetainedDestinations(c context.Context, s *model.Context, pages []pa
 // observation, so shared routes see the same input and dependent actions are
 // pruned without obscuring another incoming edge's evidence.
 func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, annotation func(types.Dict, sourceSite) error, target func(retainedTarget) (bool, error), action func(types.Dict, sourceSite, types.Name) error, prune bool) error {
+	return walkRetainedWithRoutes(c, s, origins, annotation, target, action, prune, nil)
+}
+
+func walkRetainedWithRoutes(c context.Context, s *model.Context, origins sourceOrigins, annotation func(types.Dict, sourceSite) error, target func(retainedTarget) (bool, error), action func(types.Dict, sourceSite, types.Name) error, prune bool, routes *navigationRouteWalk) error {
 	type visit struct {
 		object     types.Object
 		role       string
 		site, edge sourceSite
+		route      navigationRoute
 		replace    func(types.Object)
 	}
 	type node struct {
@@ -138,12 +144,16 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 	if _, e := navigationValue(s, outline["Last"], outlineSite.key("Last")); e != nil {
 		return e
 	}
-	pending := []visit{{object: outline["First"], role: "outlines", site: outlineSite.key("First")}, {object: form["Fields"], role: "fields", site: formSite.key("Fields")}, {object: cat["Pages"], role: "pages", site: base.key("Pages")}}
+	pending := []visit{
+		{object: outline["First"], role: "outlines", site: outlineSite.key("First"), route: routes.key(routes.key(navigationRootRoute, "Outlines"), "First")},
+		{object: form["Fields"], role: "fields", site: formSite.key("Fields"), route: routes.key(routes.key(navigationRootRoute, "AcroForm"), "Fields")},
+		{object: cat["Pages"], role: "pages", site: base.key("Pages"), route: routes.key(navigationRootRoute, "Pages")},
+	}
 	var edits, cleanups []func()
 	if prune && form == nil && cat["AcroForm"] != nil {
 		edits = append(edits, func() { delete(cat, "AcroForm") })
 	}
-	seen := map[node]bool{}
+	seen := map[node]navigationRoute{}
 	arrayEdits := map[node]*actionArrayEdit{}
 	for len(pending) > 0 {
 		current := pending[len(pending)-1]
@@ -181,7 +191,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 							edits = append(edits, func() { delete(d, "SD") })
 						}
 					}
-					keep, e := visitRetainedTarget(s, d, "D", site.key("D"), current.edge, target)
+					keep, e := visitRetainedTarget(s, d, "D", site.key("D"), current.edge, routes.key(current.route, "D"), target)
 					if e != nil {
 						return e
 					}
@@ -198,13 +208,18 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 		ref, indirect := current.object.(types.IndirectRef)
 		identity := node{ref, current.role, site.page}
 		if indirect {
-			if seen[identity] {
+			if first, repeated := seen[identity]; repeated {
+				if routes != nil && value != nil {
+					// The incoming edge still owns this subtree. Record it
+					// before skipping the expansion already seen at first.
+					routes.aliases = append(routes.aliases, navigationAlias{incoming: current.route, first: first, role: current.role})
+				}
 				if edit := arrayEdits[identity]; edit != nil && current.replace != nil {
 					edit.owners = append(edit.owners, current.replace)
 				}
 				continue
 			}
-			seen[identity] = true
+			seen[identity] = current.route
 		}
 		if array, ok := value.(types.Array); ok {
 			var edit *actionArrayEdit
@@ -239,7 +254,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 						edit.changed = true
 					}
 				}
-				pending = append(pending, visit{object: array[i], role: current.role, site: childSite, edge: childSite, replace: replace})
+				pending = append(pending, visit{object: array[i], role: current.role, site: childSite, edge: childSite, route: routes.index(current.route, i), replace: replace})
 			}
 			continue
 		}
@@ -249,7 +264,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 		}
 		follow := func(key, role string) {
 			edge := site.key(key)
-			pending = append(pending, visit{object: d[key], role: role, site: edge, edge: edge, replace: func(o types.Object) {
+			pending = append(pending, visit{object: d[key], role: role, site: edge, edge: edge, route: routes.key(current.route, key), replace: func(o types.Object) {
 				if o == nil {
 					delete(d, key)
 				} else {
@@ -257,8 +272,8 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 				}
 			}})
 		}
-		push := func(o types.Object, role string, where sourceSite) {
-			pending = append(pending, visit{object: o, role: role, site: where})
+		push := func(o types.Object, role string, where sourceSite, route navigationRoute) {
+			pending = append(pending, visit{object: o, role: role, site: where, route: route})
 		}
 		var subtype types.Object
 		if current.role == "annotation" || current.role == "fields" {
@@ -282,7 +297,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 		case "fields":
 			follow("Kids", "fields")
 			if subtype == types.Name("Widget") {
-				push(current.object, "annotation", site)
+				push(current.object, "annotation", site, current.route)
 			} else {
 				follow("AA", "additionalActions")
 			}
@@ -299,7 +314,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 				follow("Parent", "annotation")
 			}
 			if subtype == types.Name("Link") {
-				keep, e := visitRetainedTarget(s, d, "Dest", site.key("Dest"), sourceSite{}, target)
+				keep, e := visitRetainedTarget(s, d, "Dest", site.key("Dest"), sourceSite{}, routes.key(current.route, "Dest"), target)
 				if e != nil {
 					return e
 				}
@@ -317,7 +332,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 					return e
 				}
 			}
-			keep, e := visitRetainedTarget(s, d, "Dest", site.key("Dest"), sourceSite{}, target)
+			keep, e := visitRetainedTarget(s, d, "Dest", site.key("Dest"), sourceSite{}, routes.key(current.route, "Dest"), target)
 			if e != nil {
 				return e
 			}
@@ -325,7 +340,7 @@ func walkRetained(c context.Context, s *model.Context, origins sourceOrigins, an
 				edits = append(edits, func() { delete(d, "Dest") })
 			}
 			follow("A", "action")
-			push(d["Next"], "outlines", site.key("Next"))
+			push(d["Next"], "outlines", site.key("Next"), routes.key(current.route, "Next"))
 			follow("First", "outlines")
 		case "additionalActions":
 			keys := make([]string, 0, len(d))

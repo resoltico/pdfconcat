@@ -36,13 +36,18 @@ settings by default. Plans can opt in to removing proved always-visible Form
 controls or bare undeclared whole-page wrappers while retaining the artwork.
 [PDF policy](docs/PDF-POLICY.md)
 
+Check and Build warn when a retained relative URI or remote GoTo action can
+resolve differently from the assembled packet's location.
+[Navigation warnings](docs/PDF-POLICY.md#destination-byte-identity)
+
 Direct inputs and default plans refuse populated signature state. To create an
 unsigned packet while delivering the originals separately, set
 `"signatures": "discard"` at the top level of the plan and run
 `pdfconcat check --plan FILE`. With this opt-in, PDFConcat can remove supported
 signatures and document timestamps and preserve supported visible marks as
-static artwork.
-Use the originals to authenticate signatures. [Signature policy](docs/PLAN.md#signatures)
+static artwork. A printable signature widget with a zero-area rectangle can
+qualify when each available appearance passes the empty-appearance checks.
+Use the originals to authenticate signatures. [Signature policy](docs/PDF-POLICY.md#signatures)
 
 To extend an existing PDF, include it as the first source and choose a separate
 output. Use separate source items to specify an interleaved order. PDF sources
@@ -286,8 +291,9 @@ pdfconcat schema result
 
 The same executable and effective plan, source and font bytes produce identical
 PDF bytes across rebuilds. Output paths and the current clock do not affect
-them. Dates are absent unless supplied by `timestamp` or the effective
-`SOURCE_DATE_EPOCH`; see [document identity and time](docs/PLAN.md#document-identity-time-and-structure).
+them. The output's creation and modification dates use `timestamp`, with
+`SOURCE_DATE_EPOCH` as a fallback.
+[Document identity and time](docs/PLAN.md#document-identity-time-and-structure)
 The [CLI reference](docs/CLI.md) covers stdin plans, argument handling, exit codes,
 diagnostics and publication facts.
 
@@ -338,11 +344,12 @@ commands. A dash indicates no dedicated built-in workflow.
    Separate items can repeat, reorder or alternate selections. [pdfcpu merge and piping](https://pdfcpu.io/getting_started/piping/) ·
    [PDFConcat selection rules](docs/PLAN.md#source-selections)
 2. **Bookmarks and structure.** pdfcpu file merges wrap source bookmarks under
-   filenames by default. Use `--bookmarks --bookmark-mode preserve` to retain
-   the input roots. Zip drops source outlines, and create mode with a stdin PDF
-   carries only the first input's outline. pdfcpu merge omits source structure
-   trees. PDFConcat places retained source outlines under the nearest authored
-   section and preserves supported source tags under its default policy.
+   filenames by default. With bookmarks enabled, use `--bookmark-mode preserve`
+   to keep the input bookmark trees directly. Zip drops source outlines, and
+   create mode with a stdin PDF carries only the first input's outline. pdfcpu
+   merge omits source structure trees. PDFConcat places retained source
+   outlines under the nearest authored section and preserves supported source
+   tags under its default policy.
    [pdfcpu merge](https://pdfcpu.io/core/merge/) ·
    [pdfcpu stdin merge implementation](https://github.com/pdfcpu/pdfcpu/blob/v0.16.4/pkg/api/merge.go) ·
    [PDFConcat sections](docs/PLAN.md#sections-title-dividers-and-odd-starts) ·

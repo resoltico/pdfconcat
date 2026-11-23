@@ -43,6 +43,10 @@ func (p *signatureDiscard) planWidgets(c context.Context, s *model.Context, page
 	}
 	seen := map[types.IndirectRef]bool{}
 	evidence := newLayerProgramEvidence(s)
+	empty := emptySignatureAppearanceProof{
+		decoder: drawingDecoder{exactFlate: true},
+		proved:  map[types.IndirectRef]bool{},
+	}
 	for i, page := range pages {
 		if err := c.Err(); err != nil {
 			return err
@@ -68,7 +72,7 @@ func (p *signatureDiscard) planWidgets(c context.Context, s *model.Context, page
 				return signatureUnsupported(at, diag.SignatureOwnership)
 			}
 			seen[ref] = true
-			drawing, err := planSignatureDrawing(c, s, &program, page, widget.dict, at)
+			drawing, err := planSignatureDrawing(c, s, &program, &empty, page, widget.dict, at)
 			if err != nil {
 				return err
 			}
@@ -164,7 +168,7 @@ func proveSignatureStacking(c context.Context, s *model.Context, kept types.Arra
 	return nil
 }
 
-func planSignatureDrawing(c context.Context, s *model.Context, program *layerPrograms, page pageRef, widget types.Dict, at sourceSite) (signatureDrawing, error) {
+func planSignatureDrawing(c context.Context, s *model.Context, program *layerPrograms, empty *emptySignatureAppearanceProof, page pageRef, widget types.Dict, at sourceSite) (signatureDrawing, error) {
 	rect, err := readRectangle(s, widget["Rect"])
 	if err != nil {
 		return signatureDrawing{}, at.key("Rect").wrap(err)
@@ -183,12 +187,8 @@ func planSignatureDrawing(c context.Context, s *model.Context, program *layerPro
 	}
 	if rect.Width() == 0 || rect.Height() == 0 {
 		if f&model.AnnPrint != 0 {
-			live, err := hasLiveSignatureAppearance(s, widget)
-			if err != nil {
-				return signatureDrawing{}, at.key("AP").wrap(err)
-			}
-			if live {
-				return signatureDrawing{}, signatureUnsupported(at.key("Rect"), diag.SignatureDegeneratePrint)
+			if err := empty.checkWidget(c, s, program, page, widget, at); err != nil {
+				return signatureDrawing{}, err
 			}
 		}
 		return signatureDrawing{}, nil
@@ -196,11 +196,7 @@ func planSignatureDrawing(c context.Context, s *model.Context, program *layerPro
 	if f&model.AnnPrint == 0 || f&(model.AnnNoView|model.AnnNoZoom|model.AnnNoRotate|model.AnnToggleNoView) != 0 {
 		return signatureDrawing{}, signatureUnsupported(at.key("F"), diag.SignatureVisibility)
 	}
-	pageSite := sourceSite{ref: page.ref, page: at.page, path: "Object"}
-	if err := requireAbsentSignatureSlots(s, page.dict, pageSite, diag.SignatureCompositing, "Group"); err != nil {
-		return signatureDrawing{}, err
-	}
-	if err := requireAbsentSignatureSlots(s, widget, at, diag.SignatureCompositing, "BM", "CA", "ca"); err != nil {
+	if err := checkSignatureCompositing(s, page, widget, at); err != nil {
 		return signatureDrawing{}, err
 	}
 	mkSite := at.key("MK")
@@ -222,21 +218,8 @@ func planSignatureDrawing(c context.Context, s *model.Context, program *layerPro
 			return signatureDrawing{}, signatureUnsupported(rotationSite, diag.SignatureAppearance)
 		}
 	}
-	cat, err := s.Catalog()
-	if err != nil {
+	if err := checkSignatureRegeneration(s); err != nil {
 		return signatureDrawing{}, err
-	}
-	form, err := s.DereferenceDict(cat["AcroForm"])
-	if err != nil {
-		return signatureDrawing{}, err
-	}
-	formSite := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], sourceOrigins{}).key("NeedAppearances")
-	regenerate, err := signatureSlot(s, form["NeedAppearances"], formSite, diag.SignatureAppearance)
-	if err != nil {
-		return signatureDrawing{}, err
-	}
-	if regenerate != nil && regenerate != types.Boolean(false) {
-		return signatureDrawing{}, signatureUnsupported(formSite, diag.SignatureAppearance)
 	}
 	ap, err := s.DereferenceDict(widget["AP"])
 	if err != nil || ap["N"] == nil {
@@ -307,35 +290,32 @@ func planSignatureDrawing(c context.Context, s *model.Context, program *layerPro
 	return signatureDrawing{raw: raw, art: signatureArtwork{page: at.page, box: *rect, placement: placement, appearance: digest}}, nil
 }
 
-// Some viewers paint rollover or down appearances when a printable
-// widget has no normal appearance. Check every available appearance
-// before concluding that a degenerate widget contributes no ink.
-func hasLiveSignatureAppearance(s *model.Context, widget types.Dict) (bool, error) {
-	ap, err := s.DereferenceDict(widget["AP"])
+func checkSignatureCompositing(s *model.Context, page pageRef, widget types.Dict, at sourceSite) error {
+	pageSite := sourceSite{ref: page.ref, page: at.page, path: "Object"}
+	if err := requireAbsentSignatureSlots(s, page.dict, pageSite, diag.SignatureCompositing, "Group"); err != nil {
+		return err
+	}
+	return requireAbsentSignatureSlots(s, widget, at, diag.SignatureCompositing, "BM", "CA", "ca")
+}
+
+func checkSignatureRegeneration(s *model.Context) error {
+	cat, err := s.Catalog()
 	if err != nil {
-		return false, err
+		return err
 	}
-	for _, key := range []string{"N", "R", "D"} {
-		value, err := s.Dereference(ap[key])
-		if err != nil {
-			return false, err
-		}
-		switch value := value.(type) {
-		case types.StreamDict:
-			return true, nil
-		case types.Dict:
-			for _, state := range slices.Sorted(maps.Keys(value)) {
-				appearance, err := s.Dereference(value[state])
-				if err != nil {
-					return false, err
-				}
-				if _, live := appearance.(types.StreamDict); live {
-					return true, nil
-				}
-			}
-		}
+	form, err := s.DereferenceDict(cat["AcroForm"])
+	if err != nil {
+		return err
 	}
-	return false, nil
+	formSite := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], sourceOrigins{}).key("NeedAppearances")
+	regenerate, err := signatureSlot(s, form["NeedAppearances"], formSite, diag.SignatureAppearance)
+	if err != nil {
+		return err
+	}
+	if regenerate != nil && regenerate != types.Boolean(false) {
+		return signatureUnsupported(formSite, diag.SignatureAppearance)
+	}
+	return nil
 }
 
 func finiteSignatureMatrix(m matrix.Matrix) bool {

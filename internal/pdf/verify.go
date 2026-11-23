@@ -92,6 +92,9 @@ func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *n
 	if err = detectLayerPagePrograms(c, s, pages, before, evidence); err != nil {
 		return nil, err
 	}
+	if err = checkOutputSignatures(c, s, signatures != nil); err != nil {
+		return nil, err
+	}
 	if navigation != nil {
 		if err = navigation.verify(c, s); err != nil {
 			return nil, err
@@ -104,9 +107,6 @@ func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *n
 		if err = inspectRetainedDestinations(c, s, pages, false); err != nil {
 			return nil, err
 		}
-	}
-	if err = checkOutputSignatures(c, s, signatures != nil); err != nil {
-		return nil, err
 	}
 	if signatures != nil {
 		if err = signatures.verify(c, s, pages, before, false); err != nil {

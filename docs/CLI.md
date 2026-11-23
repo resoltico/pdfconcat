@@ -22,9 +22,8 @@ with these direct items.
 
 `pdfconcat COMMAND --help` (or `-h`) and `pdfconcat help COMMAND` show the same
 command topic. Bare `help` and root `--help` list commands. `--version` is also
-accepted. Help is plain text. Options interleave with operands; `--` ends option parsing. A path
-such as `./--blank` is always a source. Operand pointers are `argv:N`, zero-based
-including the command but excluding the executable.
+accepted. Help is plain text. Options interleave with operands. `--` ends
+option parsing, and a path such as `./--blank` is always a source.
 
 | Option | Meaning |
 | --- | --- |
@@ -47,6 +46,12 @@ A separate required value cannot be a recognized option token (including
 file like an option, use `--report=--json` or `--report ./--json`. A literal
 `--` can be an option value; it ends options only when encountered between
 options or operands.
+
+Argument diagnostics use `argv:N`, with the command at `argv:0`. Mixing a plan
+and direct inputs points to the argument that creates the conflict. A disallowed
+base directory points to `--base-dir`. For `schema`, the first selector must be
+`plan` or `result`. The diagnostic for surplus selectors points to the first
+extra argument.
 
 Direct input arguments refuse populated signature state. If you deliver the
 original separately and want an unsigned copy, set `"signatures": "discard"` in
@@ -458,10 +463,13 @@ explicitly reported repairs cause a separate `source_unsupported` refusal.
 Navigation warnings identify changed bindings and their affected items. Build
 combines equivalent inspection and assembly findings, using assembly evidence
 when available. Distinct definitions and actions retain their own findings,
-including matching entries in the destination dictionary and name tree. A URI
-Base warning requires a retained relative action and a nonempty source Base.
-See [PDF policy](PDF-POLICY.md#destination-byte-identity) for selection and action
-pruning.
+including matching entries in the destination dictionary and name tree.
+`source_relative_action_context` identifies retained relative URI and remote
+GoTo actions that may resolve differently at the packet location. A retained
+relative URI with a nonempty source Base reports `source_uri_base_removed`.
+Check reports these findings even without an output path. Their PDF locations
+identify the action's original binding slot. See the [external action
+policy](PDF-POLICY.md#external-action-context).
 
 Check rename warnings identify known source scopes and definitions as
 predictions. Build reports the original and assigned names. Layout findings
@@ -505,6 +513,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_navigation_removed` | warning | — | navigation to omitted source pages was removed for affected occurrences |
 | `source_outline_depth_unsupported` | error | invalid | authored sections and imported bookmarks exceed the supported outline hierarchy |
 | `source_form_unsupported` | error | invalid | nonempty forms require identical resolved DR/DA/Q representations |
+| `source_relative_action_context` | warning | — | a retained relative external action can resolve differently at the packet location |
 | `source_uri_base_removed` | warning | — | source URI Base is removed; retained relative actions may resolve differently |
 | `output_required` | error | invalid | build requires an output destination |
 | `plan_unreadable` | error | failed | plan file or stdin could not be read |

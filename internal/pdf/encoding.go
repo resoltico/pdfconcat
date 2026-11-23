@@ -36,8 +36,9 @@ func (r contentReader) Read(p []byte) (int, error) {
 // length/predictor under its resource budget. PNG prediction adds at most one
 // framing byte per decoded byte; TIFF/no prediction adds none.
 type drawingDecoder struct {
-	encoded bytes.Reader
-	flate   io.ReadCloser
+	exactFlate bool
+	encoded    bytes.Reader
+	flate      io.ReadCloser
 }
 
 func (d *drawingDecoder) strictFlate(c context.Context, encoded []byte, decoded int, parms types.Dict) error {
@@ -69,6 +70,9 @@ func (d *drawingDecoder) strictFlate(c context.Context, encoded []byte, decoded 
 	}
 	if n > limit {
 		return filter.ErrDecodeLimitExceeded
+	}
+	if d.exactFlate && (d.encoded.Len() != 0 || n != int64(decoded)) {
+		return errors.New("expected one complete Flate member matching the decoded length")
 	}
 	return closeErr
 }

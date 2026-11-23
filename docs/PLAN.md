@@ -157,8 +157,10 @@ and its tagged object references. Other valid actions on the same link remain.
 Retained source bookmarks preserve their native navigation beneath the
 innermost authored section. Removed navigation produces
 `source_navigation_removed`; an excessive composed outline hierarchy is
-`source_outline_depth_unsupported`. URI and remote targets remain outside local
-page selection. This is neither a sanitizer nor a universal PDF-fidelity claim.
+`source_outline_depth_unsupported`. Retained relative URI and remote GoTo
+actions can resolve differently at the packet location. See
+[external action context](PDF-POLICY.md#external-action-context) for the warnings
+and the source URI Base policy.
 
 ## Sections, title dividers and odd starts
 

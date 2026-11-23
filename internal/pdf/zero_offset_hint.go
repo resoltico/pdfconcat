@@ -23,7 +23,7 @@ func proveZeroOffsetDiscardHint(c context.Context, reader io.ReadSeeker, policie
 	if err := c.Err(); err != nil {
 		return err
 	}
-	probe := &discardHintReader{ReadSeeker: reader}
+	probe := &observedReadSeeker{ReadSeeker: reader}
 	if _, err := probe.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -56,6 +56,12 @@ func proveZeroOffsetDiscardHint(c context.Context, reader io.ReadSeeker, policie
 	if canceled := c.Err(); canceled != nil {
 		return canceled
 	}
+	// A source proof can already have classified the acquisition failure
+	// and attached its location. Keep that richer diagnosis through replay.
+	var readFailure *policyError
+	if errors.As(err, &readFailure) && readFailure.finding.Code == diag.SourceUnreadable {
+		return err
+	}
 	if probe.err != nil {
 		return probe.err
 	}
@@ -65,14 +71,14 @@ func proveZeroOffsetDiscardHint(c context.Context, reader io.ReadSeeker, policie
 	return structureAt(pdfFailure(diag.SourceInvalid, diag.ProvedZeroOffsetDiscardHint(), refusal), *location)
 }
 
-// A failed read or seek is an acquisition failure during the probe. Distinguish
-// it from the ordinary PDF refusals that leave the preserve diagnostic intact.
-type discardHintReader struct {
+// observedReadSeeker preserves native read and seek errors when a parser
+// also reports syntax failures. EOF can be ordinary parser lookahead.
+type observedReadSeeker struct {
 	io.ReadSeeker
 	err error
 }
 
-func (r *discardHintReader) Read(p []byte) (int, error) {
+func (r *observedReadSeeker) Read(p []byte) (int, error) {
 	n, err := r.ReadSeeker.Read(p)
 	if err != nil && !errors.Is(err, io.EOF) && r.err == nil {
 		r.err = err
@@ -80,7 +86,7 @@ func (r *discardHintReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (r *discardHintReader) Seek(offset int64, whence int) (int64, error) {
+func (r *observedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	n, err := r.ReadSeeker.Seek(offset, whence)
 	if err != nil && r.err == nil {
 		r.err = err

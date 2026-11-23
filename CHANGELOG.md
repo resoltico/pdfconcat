@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-23
+
+- Admit printable degenerate signature widgets whose local Form appearances decode to only PDF whitespace and comments. [Signature policy](docs/PDF-POLICY.md#signatures)
+- Locate the affected signature appearance and distinguish nonempty content, damaged encoding, malformed stream boundaries and lookahead limits. [Signature policy](docs/PDF-POLICY.md#signatures)
+- Warn when retained relative URI or remote GoTo actions may resolve differently from the packet location. [Command line](docs/CLI.md)
+- Report relative-action warnings at their original source slots after page selection and action pruning.
+- Verify each local destination's owning route and shared action links before publishing the staged PDF. [Architecture](docs/ARCHITECTURE.md#pdf-validation-boundary)
+- Keep the known command when a later argument contains invalid UTF-8. Locate conflicting inputs, disallowed base directories and surplus schema selectors.
+
 ## [0.20.0] - 2026-11-23
 
 - Update plan version tokens to 11. Plan v10 now fails with `plan_version_unsupported`. [Plan](docs/PLAN.md)

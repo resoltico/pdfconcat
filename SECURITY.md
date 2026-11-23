@@ -61,10 +61,12 @@ execution.
 PDFConcat is for trusted local files. It is not a sandbox or sanitizer. Malformed
 or highly compressed PDFs can exhaust memory/CPU or trigger fatal runtime limits;
 ordinary panic recovery cannot cover those failures. Use OS resource limits for
-untrusted/large inputs. PDFConcat does not execute or verify network destinations
-or active scripts embedded in source PDFs, but retained page/annotation actions
-may execute in a PDF viewer. Removing document-level scripts/attachments is not
-sanitization.
+untrusted/large inputs. Retained page and annotation actions can execute in a PDF
+viewer. PDFConcat leaves target lookup and script execution to that viewer.
+Removing document-level scripts and attachments provides no sanitization
+guarantee. Relative external action warnings identify location dependence in
+the original action operands. See the
+[external action policy](docs/PDF-POLICY.md#external-action-context).
 
 Recognized encrypted sources are refused before backend password validation,
 key derivation or decryption. Header/xref/trailer parsing still runs first and

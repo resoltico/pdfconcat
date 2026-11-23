@@ -70,14 +70,24 @@ func localTarget(value types.Object, named map[string]destination, pages map[typ
 	return ok && target.page > 0, nil
 }
 
-func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins) ([]navigationChange, error) {
+type navigationProjection struct {
+	removed  []navigationChange
+	external []diag.Diagnostic
+}
+
+func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins, assembly bool) (navigationProjection, error) {
+	var result navigationProjection
+	actions, err := newExternalActionObserver(s, origins, assembly)
+	if err != nil {
+		return result, err
+	}
 	named, err := readDestinations(c, s)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	pages, err := rawPages(c, s)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	selected := map[types.IndirectRef]bool{}
 	for _, p := range pages {
@@ -85,13 +95,12 @@ func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins)
 	}
 	links, err := linksBeforeProjection(c, s, pages, origins)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	forest, err := readOutlineForest(c, s)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	changes := []navigationChange{}
 	for name, d := range named {
 		if original, ok := origins.destinations[name]; ok {
 			d.sites = original.sites
@@ -118,15 +127,15 @@ func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins)
 				change.target = binding.site
 				change.action = true
 			}
-			changes = append(changes, change)
+			result.removed = append(result.removed, change)
 		}
 		return keep, e
-	}, nil, true)
+	}, actions.visit, true)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	if err := pruneProjectedLinks(c, s, links); err != nil {
-		return nil, err
+		return result, err
 	}
 	keys := make([]string, 0, len(named))
 	for key := range named {
@@ -140,19 +149,19 @@ func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins)
 			original := origins.destinations[key]
 			if original.page > 0 {
 				for _, site := range d.sites {
-					changes = append(changes, navigationChange{site: site, targetPage: original.page, name: key})
+					result.removed = append(result.removed, navigationChange{site: site, targetPage: original.page, name: key})
 				}
 			}
 		}
 	}
 	cat, err := s.Catalog()
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	delete(cat, "Dests")
 	names, err := navigationContainer[types.Dict](s, cat["Names"], catalogSite(s).key("Names"))
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	if _, present := names["Dests"]; present {
 		names = maps.Clone(names)
@@ -161,11 +170,12 @@ func pruneNavigation(c context.Context, s *model.Context, origins sourceOrigins)
 	}
 	delete(s.Names, "Dests")
 	if err := rebuildDestinations(c, s, named); err != nil {
-		return nil, err
+		return result, err
 	}
 	forest, _ = pruneOutlineForest(forest)
 	if err := installOutlineForest(c, s, forest); err != nil {
-		return nil, err
+		return result, err
 	}
-	return changes, nil
+	result.external = actions.findings
+	return result, nil
 }

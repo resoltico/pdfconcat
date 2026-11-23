@@ -399,3 +399,34 @@ func TestDefaultSignatureRefusalOffersConditionalPlanGuidance(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptySignatureAppearanceReasonInTextAndJSON(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "printable.pdf")
+	d := pdffixture.SignatureArtwork()
+	d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+	if err := d.WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	plan := fmt.Sprintf(`{"version":11,"signatures":"discard","items":[{"source":%q}]}`, filepath.ToSlash(source))
+	args := []string{"check", "--plan", "-"}
+	result, exit, _ := invokeJSON(t, args, plan)
+	if exit != 2 || len(result.Diagnostics) != 1 {
+		t.Fatalf("JSON refusal exit %d: %v", exit, result.Diagnostics)
+	}
+	finding := result.Diagnostics[0]
+	if finding.Code.String() != "source_signature_discard_unsupported" ||
+		!strings.Contains(finding.Message, "decoded appearance contains more than PDF whitespace and comments") ||
+		finding.PDFLocation == nil || finding.PDFLocation.Object != 6 || finding.PDFLocation.Path != "Object.AP.N" ||
+		!strings.Contains(finding.Detail, "PDF object 8 with generation 0") {
+		t.Fatalf("JSON refusal lost its reason or appearance site: %+v", finding)
+	}
+	var text, stderr bytes.Buffer
+	if exit := run(args, strings.NewReader(plan), &text, &stderr); exit != 2 {
+		t.Fatalf("text refusal exit %d: %s", exit, stderr.String())
+	}
+	for _, want := range []string{finding.Message, finding.PDFLocation.Path, finding.Detail} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("text refusal lacks %q: %s", want, stderr.String())
+		}
+	}
+}

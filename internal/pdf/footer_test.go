@@ -433,7 +433,7 @@ func TestFooterOverflowAdviceRetainsPartContextAcrossPhysicalViews(t *testing.T)
 					if e != nil {
 						t.Fatal(e)
 					}
-					if _, err = projectSelection(t.Context(), s, []packet.PageRange{{First: 2, Last: 2}}, origins); err != nil {
+					if _, err = projectSelection(t.Context(), s, []packet.PageRange{{First: 2, Last: 2}}, origins, false); err != nil {
 						t.Fatal(err)
 					}
 				}

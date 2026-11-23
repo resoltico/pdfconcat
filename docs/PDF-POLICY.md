@@ -41,7 +41,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Catalog `PageLayout`, `PageMode`, `ViewerPreferences` | Remove before semantic validation, with `source_viewer_settings_removed` per entry |
 | Document Info and catalog-level XMP | Replace/remove. Read PDF 2.0 direct trailer Info without allocating an object number. Metadata attached to retained pages or other objects may remain |
 | Page/annotation actions and scripts | Keep; PDFConcat does not execute them or verify network targets |
-| Catalog URI Base | Remove and warn that retained relative actions may resolve differently |
+| Relative external actions and catalog URI Base | Keep retained action operands, remove the source Base and warn about location dependence. See [external action context](#external-action-context). |
 
 ### Optional content
 
@@ -281,11 +281,16 @@ or other resource remains available to its surviving owners. Conflicting or
 unproved ownership causes refusal, including a retained structure binding.
 Structure discard, when independently selected, applies its own rules.
 
-A genuinely Hidden widget can be removed without ink. A non-Hidden printable
-widget with a degenerate rectangle and a live normal, rollover or down
-appearance is refused because some viewers paint it in print mode. Degenerate
-widgets with no available appearance can qualify, including no-appearance
-timestamps.
+A genuinely Hidden widget can be removed without ink. For a non-Hidden
+printable widget with zero width or height, each available normal, rollover
+and down appearance state must be a local Form with only PDF whitespace and
+comments. The proof accepts unfiltered streams or one complete Flate member
+with default settings and no trailing encoded bytes. It checks the original
+stream length and looks ahead at most 4 KiB from the declared end for complete
+`endstream` and `endobj` tokens. Painted or unproved appearances are refused
+because some viewers can paint them in print mode. No-appearance timestamps
+can also qualify.
+
 A visible widget must paint in both normal screen and print modes. PDFConcat
 maps the selected normal Form appearance to the widget rectangle using its
 bounding box and matrix, then adds the artwork above the original page content.
@@ -359,6 +364,23 @@ renumbering cannot overwrite those source addresses. Warning production follows
 retained routes (including independent Next siblings), without fetching targets.
 One traversal maps the final page references, then balanced name
 trees and the legacy Dests dictionary are rebuilt.
+
+### External action context
+
+Check and Build warn when a retained relative URI or remote GoTo action can
+resolve differently at the packet location. The output keeps the action operands
+and omits the source catalog URI Base. For a relative URI with a nonempty source
+Base, `source_uri_base_removed` reports that loss. Other retained relative URI
+or remote GoTo actions report `source_relative_action_context`. Warnings locate
+the original operand slot before action-array pruning. This check works without
+an output path and leaves target lookup to the PDF reader.
+
+A remote GoTo warning can identify the selected filename entry. Ordinary file
+specifications prefer `/UF`, falling back to `/F` when `/UF` is absent. The check
+treats a leading `/` as absolute on every host. URL file specifications prefer
+`/F`, fall back to `/UF` when `/F` is absent, and use URI resolution rules. For
+ordinary PDF 1.x file specifications with an absent or empty selected filename,
+the warning lists relative candidates in the `/DOS`, `/Mac` and `/Unix` entries.
 
 ## Forms, fitting and catalog
 

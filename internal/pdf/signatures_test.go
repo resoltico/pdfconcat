@@ -5,9 +5,13 @@ package pdf
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"hash/adler32"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -352,8 +356,8 @@ func TestDegenerateSignatureWidgetPrintBoundary(t *testing.T) {
 				return
 			}
 			detail := admissionError(t, ds)
-			if !strings.Contains(detail.Message, "print mode") || detail.PDFLocation == nil ||
-				detail.PDFLocation.Page != 1 || detail.PDFLocation.Object != 6 || detail.PDFLocation.Path != "Object.Rect" {
+			if !strings.Contains(detail.Message, "decoded appearance") || detail.PDFLocation == nil ||
+				detail.PDFLocation.Page != 1 || detail.PDFLocation.Object != 6 || !strings.HasPrefix(detail.PDFLocation.Path, "Object.AP.") {
 				t.Fatalf("missing original widget location or print reason: %v", detail)
 			}
 		})
@@ -433,6 +437,199 @@ func TestXFAWidgetOwnershipAndInheritedFlagsResolveLiveNull(t *testing.T) {
 			}
 			if tc.want == diag.SourceXfaRemoved && diag.Outcome(ds) != "ok" {
 				t.Fatal(ds)
+			}
+		})
+	}
+}
+
+// Two stored DEFLATE blocks split a single PDF comment. The second
+// block's inverted length ends with LF, immediately before "endstream".
+func storedAppearanceComment(t *testing.T) []byte {
+	t.Helper()
+	left := []byte("%")
+	const secondLength = 0xf500
+	right := []byte("endstream " + strings.Repeat("X", secondLength-len("endstream ")))
+	block := func(data []byte, last byte, length uint16, payload []byte) []byte {
+		data = append(data, last)
+		data = binary.LittleEndian.AppendUint16(data, length)
+		data = binary.LittleEndian.AppendUint16(data, ^length)
+		return append(data, payload...)
+	}
+	content := append(bytes.Clone(left), right...)
+	raw := block([]byte{0x78, 0x01}, 0, 1, left)
+	raw = block(raw, 1, secondLength, right)
+	raw = binary.BigEndian.AppendUint32(raw, adler32.Checksum(content))
+	reader, err := zlib.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, readErr := io.ReadAll(reader)
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if readErr != nil || !bytes.Equal(decoded, content) || !bytes.Contains(raw, []byte("\nendstream ")) {
+		t.Fatalf("fixture must decode into a single comment and contain a physical token collision: %v", readErr)
+	}
+	return raw
+}
+
+func TestDegenerateSignatureEmptyAppearanceProof(t *testing.T) {
+	// An exact eight-byte zlib member for the empty program.
+	emptyFlate := []byte{0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01}
+	badChecksum := bytes.Clone(emptyFlate)
+	badChecksum[len(badChecksum)-1] ^= 1
+	const form = "/Type /XObject /Subtype /Form /BBox [0 0 0 0] /Matrix [1 0 0 1 0 0] /Resources << >>"
+	const flate = " /Filter /FlateDecode"
+	const paint = "0 1 0 rg 10 10 50 30 re f\n"
+	for _, tc := range []struct {
+		name, attributes, program, entries string
+		alternate                          []byte
+		accept                             bool
+	}{
+		{"raw empty", form, "", "/N 8 0 R", nil, true},
+		{"opaque Flate token collision", form + flate, string(storedAppearanceComment(t)), "/N 8 0 R", nil, true},
+		{"PDF trivia in a nonzero box", strings.Replace(form, "[0 0 0 0]", "[0 0 100 60]", 1), "\x00\t\f\r\n% q Q\r% EOF comment", "/N 8 0 R", nil, true},
+		{"empty Flate with explicit defaults", form + flate + " /DecodeParms << /Predictor 1 /Colors 1 /Columns 1 /BitsPerComponent 8 >>", string(emptyFlate), "/N 8 0 R", nil, true},
+		{"live null", form, "", "/N 9 0 R", []byte("null"), true},
+		{"paint after comment", form, "% note\r" + paint, "/N 8 0 R", nil, false},
+		{"operand only", form, "42", "/N 8 0 R", nil, false},
+		{"operator only", form, "q Q", "/N 8 0 R", nil, false},
+		{"truncated Flate", form + flate, string(emptyFlate[:len(emptyFlate)-1]), "/N 8 0 R", nil, false},
+		{"bad checksum", form + flate, string(badChecksum), "/N 8 0 R", nil, false},
+		{"trailing Flate member", form + flate, string(emptyFlate) + string(emptyFlate), "/N 8 0 R", nil, false},
+		{"trailing byte", form + flate, string(emptyFlate) + "\x00", "/N 8 0 R", nil, false},
+		{"unsupported filter", form + " /Filter /ASCIIHexDecode", ">", "/N 8 0 R", nil, false},
+		{"nondefault Flate parameters", form + flate + " /DecodeParms << /Predictor 2 >>", string(emptyFlate), "/N 8 0 R", nil, false},
+		{"nonlocal Form", form + " /Ref << /F (external.pdf) /Page 0 >>", "", "/N 8 0 R", nil, false},
+		{"painted rollover", form, "", "/N 8 0 R /R 9 0 R", admissionStream(form, paint), false},
+		{"painted down appearance", form, "", "/N 8 0 R /D 9 0 R", admissionStream(form, paint), false},
+		{"unselected painted state", form, "", "/N << /Off 8 0 R /On 9 0 R >>", admissionStream(form, paint), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("/AP << /N 8 0 R >>"), []byte("/AS /Off /AP << "+tc.entries+" >>"), 1)
+			d.Objs[7] = admissionStream(tc.attributes, tc.program)
+			if tc.alternate != nil {
+				d.Objs = append(d.Objs, tc.alternate)
+			}
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			if tc.accept {
+				if diag.Outcome(ds) != "ok" {
+					t.Fatal(ds)
+				}
+				admissionFinding(t, ds, diag.SourceSignatureDiscarded)
+				return
+			}
+			finding := admissionError(t, ds)
+			if finding.Code != diag.SourceSignatureDiscardUnsupported || finding.PDFLocation == nil ||
+				finding.PDFLocation.Object != 6 || finding.PDFLocation.Page != 1 || !strings.HasPrefix(finding.PDFLocation.Path, "Object.AP.") {
+				t.Fatalf("expected located print refusal: %+v", finding)
+			}
+		})
+	}
+}
+
+func TestDegenerateSignatureAppearancePhysicalBoundary(t *testing.T) {
+	empty := string([]byte{0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01})
+	const paint = "0 1 0 rg 10 10 50 30 re f\n"
+	for _, tc := range []struct {
+		name, length, start, data, ending string
+		flate, accept                     bool
+	}{
+		{"raw empty without extra EOL", "0", "\n", "", "endstream", false, true},
+		{"raw includes EOL", "10", "\n", "% comment\n", "endstream", false, true},
+		{"Flate with CRLF", "8", "\r\n", empty, "\r\nendstream", true, true},
+		{"Flate with live indirect length", "9 0 R", "\n", empty, "endstream", true, true},
+		{"short raw hides paint", "1", "\n", " " + paint, "\nendstream", false, false},
+		{"zero length repaired to trivia", "0", "\n", "% ignored", "\nendstream", false, false},
+		{"short Flate hides member", "8", "\n", empty + empty, "\nendstream", true, false},
+		{"incomplete endstream token", "8", "\n", empty, "\nendstreamJ", true, false},
+		{"junk after endstream", "8", "\n", empty, "\nendstream\nignored", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+			encoding := ""
+			if tc.flate {
+				encoding = " /Filter /FlateDecode"
+			}
+			d.Objs[7] = fmt.Appendf(nil, "<< /Type /XObject /Subtype /Form /BBox [0 0 100 60] /Length %s%s >>\nstream%s%s%s",
+				tc.length, encoding, tc.start, tc.data, tc.ending)
+			if tc.length == "9 0 R" {
+				d.Objs = append(d.Objs, []byte("8"))
+			}
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			if tc.accept {
+				if diag.Outcome(ds) != "ok" {
+					t.Fatal(ds)
+				}
+				admissionFinding(t, ds, diag.SourceSignatureDiscarded)
+				return
+			}
+			finding := admissionError(t, ds)
+			if finding.Code != diag.SourceSignatureDiscardUnsupported || finding.PDFLocation == nil ||
+				finding.PDFLocation.Object != 6 || finding.PDFLocation.Page != 1 || !strings.HasPrefix(finding.PDFLocation.Path, "Object.AP.") {
+				t.Fatalf("expected located print refusal: %+v", finding)
+			}
+		})
+	}
+}
+
+func TestDegenerateSignatureAppearanceIndirectSubtype(t *testing.T) {
+	for _, tc := range []struct {
+		subtype, reference string
+		accept             bool
+	}{
+		{"/Form", "9 0 R", true},
+		{"/Form", "9 1 R", false},
+		{"/Image", "9 0 R", false},
+		{"(Form)", "9 0 R", false},
+	} {
+		t.Run(tc.subtype+" "+tc.reference, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+			d.Objs[7] = admissionStream("/Type /XObject /Subtype "+tc.reference+" /BBox [0 0 0 0]", "")
+			d.Objs = append(d.Objs, []byte(tc.subtype))
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			if tc.accept {
+				if diag.Outcome(ds) != "ok" {
+					t.Fatal(ds)
+				}
+				admissionFinding(t, ds, diag.SourceSignatureDiscarded)
+			} else {
+				finding := admissionError(t, ds)
+				if finding.PDFLocation == nil {
+					t.Fatalf("expected an original source location: %+v", finding)
+				}
+			}
+		})
+	}
+}
+
+func TestDegenerateSignatureAppearanceRefusalReasons(t *testing.T) {
+	empty := string([]byte{0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01})
+	const form = "/Type /XObject /Subtype /Form /BBox [0 0 100 60]"
+	for _, tc := range []struct {
+		name, attributes, program, closing string
+		message                            string
+	}{
+		{"decoded content", form, "0 0 20 20 re f", "endstream", "decoded appearance contains more than PDF whitespace and comments"},
+		{"damaged encoding", form + " /Filter /FlateDecode", empty[:len(empty)-1] + "\x02", "endstream", "damaged encoding"},
+		{"closing scan limit", form + " /Filter /FlateDecode", empty, "endstream %" + strings.Repeat("x", diag.SignatureAppearanceClosingLookaheadBytes) + "\n", "4096-byte closing-token lookahead limit"},
+		{"malformed closing token", form + " /Filter /FlateDecode", empty, "endstreamJ %" + strings.Repeat("x", diag.SignatureAppearanceClosingLookaheadBytes) + "\n", "malformed closing tokens"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("/AP << /N 8 0 R >>"), []byte("/AS /Proof /AP << /N << /Proof 8 0 R >> >>"), 1)
+			d.Objs[7] = fmt.Appendf(nil, "<< %s /Length %d >>\nstream\n%s\n%s", tc.attributes, len(tc.program), tc.program, tc.closing)
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			finding := admissionError(t, ds)
+			if finding.Code != diag.SourceSignatureDiscardUnsupported || !strings.Contains(finding.Message, tc.message) ||
+				finding.PDFLocation == nil || finding.PDFLocation.Object != 6 || finding.PDFLocation.Page != 1 ||
+				finding.PDFLocation.Path != `Object.AP.N["Proof"]` || !strings.Contains(finding.Detail, "PDF object 8 with generation 0") {
+				t.Fatalf("unexpected reason or appearance site: %+v", finding)
 			}
 		})
 	}

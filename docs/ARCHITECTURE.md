@@ -236,6 +236,15 @@ used by Forms that borrow the page scope. Drawing-program scans and the backend
 resource parser share the exact inline-image boundary helper.
 See [drawing-program policy](PDF-POLICY.md#drawing-programs-and-resource-bindings).
 
+Strict reopening compares named destination definitions, local action targets
+and their owning routes with the composed graph. Routes use ordered page,
+annotation and outline edges, plus the keys and indices of action slots. The
+verifier looks up each typed edge under its parent route in the captured table.
+For a shared subtree, it verifies each repeated incoming edge against the route
+of the subtree's first expansion. Selection observes retained relative external
+actions before editing the owning slots, preserving the source locations used
+by inspection and assembly warnings.
+
 Validation notices are evidence; their message text does not select policy.
 Diagnostic wrappers preserve backend detail and PDF locations. Result coalescing
 merges only equivalent findings and unions their consuming item references.

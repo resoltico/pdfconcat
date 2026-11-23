@@ -93,7 +93,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 					physical += int64(span.Last - span.First + 1)
 				}
 			}
-			removed, e := projectSelection(c, s, occurrence.Selection, origins)
+			projection, e := projectSelection(c, s, occurrence.Selection, origins, true)
 			if e != nil {
 				return result, e
 			}
@@ -102,20 +102,16 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 					return result, err
 				}
 			}
-			for _, d := range navigationDiagnostics(removed) {
+			for _, d := range navigationDiagnostics(projection.removed) {
 				d.File = part.Source
 				d.Items = []string{part.Ref}
 				d.Identity.Phase = "assembly"
 				result.Diagnostics = append(result.Diagnostics, d)
 			}
-			uri, e := uriBaseWarnings(c, s, origins, true)
-			for _, d := range uri {
+			for _, d := range projection.external {
 				d.File = part.Source
 				d.Items = []string{part.Ref}
 				result.Diagnostics = append(result.Diagnostics, d)
-			}
-			if e != nil {
-				return result, e
 			}
 			needAppearances = needAppearances || inspected.NeedAppearances
 		} else {
@@ -180,7 +176,7 @@ func Assemble(c context.Context, a Assembly, w io.Writer) (result Assembled, err
 			allDests[name] = d
 		}
 		if part.Source != "" {
-			e = observeNavigation(c, s, detached, func(owner navigationOwner, found observedNavigation) error {
+			e = observeNavigation(c, s, detached, nil, func(owner navigationOwner, found observedNavigation, _ navigationRoute) error {
 				if !found.symbolic {
 					found.value.page += int(part.FirstPage) - 1
 				}

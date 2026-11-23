@@ -11,15 +11,22 @@ import (
 // SignatureDiscardReason identifies a failed ownership or fidelity proof.
 type SignatureDiscardReason string
 
+// SignatureAppearanceClosingLookaheadBytes bounds the physical closing-token proof.
+const SignatureAppearanceClosingLookaheadBytes = 4 << 10
+
 // Signature discard proof failures.
 const (
-	SignatureOwnership       SignatureDiscardReason = "ownership"
-	SignaturePermissions     SignatureDiscardReason = "permissions"
-	SignatureVisibility      SignatureDiscardReason = "visibility"
-	SignatureDegeneratePrint SignatureDiscardReason = "degenerate_print"
-	SignatureAppearance      SignatureDiscardReason = "appearance"
-	SignatureCompositing     SignatureDiscardReason = "compositing"
-	SignatureContentBoundary SignatureDiscardReason = "content_boundary"
+	SignatureOwnership              SignatureDiscardReason = "ownership"
+	SignaturePermissions            SignatureDiscardReason = "permissions"
+	SignatureVisibility             SignatureDiscardReason = "visibility"
+	SignatureDegeneratePrint        SignatureDiscardReason = "degenerate_print"
+	SignatureAppearanceNonTrivia    SignatureDiscardReason = "appearance_non_trivia"
+	SignatureAppearanceEncoding     SignatureDiscardReason = "appearance_encoding"
+	SignatureAppearanceBoundary     SignatureDiscardReason = "appearance_boundary"
+	SignatureAppearanceClosingLimit SignatureDiscardReason = "appearance_closing_limit"
+	SignatureAppearance             SignatureDiscardReason = "appearance"
+	SignatureCompositing            SignatureDiscardReason = "compositing"
+	SignatureContentBoundary        SignatureDiscardReason = "content_boundary"
 )
 
 // SignatureDiscardUnsupported explains why signature normalization was refused.
@@ -33,7 +40,15 @@ func SignatureDiscardUnsupported(reason SignatureDiscardReason) Explanation {
 	case SignatureVisibility:
 		message = "The signature widget's normal screen and print visibility cannot be preserved as page artwork."
 	case SignatureDegeneratePrint:
-		message = "The printable signature widget has a degenerate rectangle and an appearance that can still paint in print mode."
+		message = "The printable signature widget has a degenerate rectangle and an appearance whose lack of ink cannot be proved in print mode."
+	case SignatureAppearanceNonTrivia:
+		message = "The printable signature widget has a degenerate rectangle and its decoded appearance contains more than PDF whitespace and comments."
+	case SignatureAppearanceEncoding:
+		message = "The printable degenerate signature widget has an appearance with damaged encoding or extra encoded data."
+	case SignatureAppearanceBoundary:
+		message = "The printable degenerate signature widget has an appearance with an unproved stream length or malformed closing tokens."
+	case SignatureAppearanceClosingLimit:
+		message = fmt.Sprintf("The signature appearance reaches the %d-byte closing-token lookahead limit.", SignatureAppearanceClosingLookaheadBytes)
 	case SignatureAppearance:
 		message = "The signature widget has no provably selected static normal appearance."
 	case SignatureCompositing:
@@ -44,6 +59,12 @@ func SignatureDiscardUnsupported(reason SignatureDiscardReason) Explanation {
 		message = "The source signature state cannot be discarded safely."
 	}
 	return explain("signature_discard_unsupported", message, string(reason))
+}
+
+// SignatureAppearanceObject identifies the stream referenced by the located appearance slot.
+func SignatureAppearanceObject(object, generation int64) Explanation {
+	return explain("signature_appearance_object", fmt.Sprintf("The appearance slot references PDF object %d with generation %d.", object, generation),
+		strconv.FormatInt(object, 10), strconv.FormatInt(generation, 10))
 }
 
 // SourceSignatureDiscardGuidance describes how to check eligibility for an unsigned copy.

@@ -165,7 +165,7 @@ func coalesce(input []diag.Diagnostic) []diag.Diagnostic {
 		key := findingKey{code: d.Code, file: d.File, identity: d.Identity}
 		// Only these finding families carry equivalent navigation evidence
 		// from occurrence inspection and actual assembly.
-		observedNavigation := (d.Code == diag.SourceNavigationRemoved || d.Code == diag.SourceURIBaseRemoved) &&
+		observedNavigation := (d.Code == diag.SourceNavigationRemoved || d.Code == diag.SourceURIBaseRemoved || d.Code == diag.SourceRelativeActionContext) &&
 			(d.Identity.Phase == "source_observation" || d.Identity.Phase == "assembly")
 		if observedNavigation {
 			key.identity.Phase = ""

@@ -30,7 +30,67 @@ func ownerOf(d types.Dict, key string) navigationOwner {
 
 type navigationObservation struct {
 	named    map[string]namedDestinationValue
-	bindings []observedNavigation
+	bindings []routedNavigation
+	routes   map[navigationRouteStep]navigationRoute
+	aliases  []navigationAlias
+}
+
+type routedNavigation struct {
+	route navigationRoute
+	observedNavigation
+}
+
+type navigationRoute int
+
+// Zero is reserved for a route absent from the captured table.
+const navigationRootRoute navigationRoute = 1
+
+type navigationEdgeKind uint8
+
+const (
+	navigationDictionaryKey navigationEdgeKind = iota
+	navigationArrayIndex
+)
+
+type navigationRouteStep struct {
+	parent navigationRoute
+	kind   navigationEdgeKind
+	key    string
+	index  int
+}
+
+type navigationAlias struct {
+	incoming navigationRoute
+	first    navigationRoute
+	role     string
+}
+
+// The capture owns interning. Reopening gets a fresh walk that only looks up
+// steps in the captured table and records its own incoming edges.
+type navigationRouteWalk struct {
+	table   map[navigationRouteStep]navigationRoute
+	aliases []navigationAlias
+	capture bool
+}
+
+func (w *navigationRouteWalk) key(parent navigationRoute, key string) navigationRoute {
+	return w.child(navigationRouteStep{parent: parent, kind: navigationDictionaryKey, key: key})
+}
+
+func (w *navigationRouteWalk) index(parent navigationRoute, index int) navigationRoute {
+	return w.child(navigationRouteStep{parent: parent, kind: navigationArrayIndex, index: index})
+}
+
+func (w *navigationRouteWalk) child(step navigationRouteStep) navigationRoute {
+	if w == nil || step.parent == 0 {
+		return 0
+	}
+	route := w.table[step]
+	if route == 0 && w.capture {
+		route = navigationRootRoute + 1 + navigationRoute(len(w.table))
+		w.table[step] = route
+	}
+	return route
 }
 
 type namedDestinationValue struct {
@@ -49,12 +109,12 @@ func (d explicitDestination) value(page int) destinationValue {
 	return destinationValue{page: page, operands: d.tail().PDFString()}
 }
 
-func observeNavigation(c context.Context, s *model.Context, named map[string]destination, target func(navigationOwner, observedNavigation) error) error {
+func observeNavigation(c context.Context, s *model.Context, named map[string]destination, routes *navigationRouteWalk, target func(navigationOwner, observedNavigation, navigationRoute) error) error {
 	origins, err := sourceOriginsFor(c, s)
 	if err != nil {
 		return err
 	}
-	return walkRetained(c, s, origins, nil, func(binding retainedTarget) (bool, error) {
+	return walkRetainedWithRoutes(c, s, origins, nil, func(binding retainedTarget) (bool, error) {
 		o, site := binding.value, binding.site
 		if o == nil {
 			return true, nil
@@ -81,16 +141,21 @@ func observeNavigation(c context.Context, s *model.Context, named map[string]des
 			_, isName := o.(types.Name)
 			observed = observedNavigation{nameToken: isName, value: destinationValue{page: d.page, operands: d.tail.PDFString()}, name: name, symbolic: true}
 		}
-		return true, target(ownerOf(binding.owner, binding.key), observed)
-	}, nil, false)
+		return true, target(ownerOf(binding.owner, binding.key), observed, binding.route)
+	}, nil, false, routes)
 }
 
 func captureOutputNavigation(c context.Context, s *model.Context, imported map[navigationOwner]observedNavigation, definitions map[string]destination) (navigationObservation, error) {
+	routes := &navigationRouteWalk{table: map[navigationRouteStep]navigationRoute{}, capture: true}
+	return observeOutputNavigation(c, s, imported, definitions, routes)
+}
+
+func observeOutputNavigation(c context.Context, s *model.Context, imported map[navigationOwner]observedNavigation, definitions map[string]destination, routes *navigationRouteWalk) (navigationObservation, error) {
 	named, err := readDestinations(c, s)
 	if err != nil {
 		return navigationObservation{}, err
 	}
-	result := navigationObservation{named: map[string]namedDestinationValue{}}
+	result := navigationObservation{named: map[string]namedDestinationValue{}, routes: routes.table}
 	for name, d := range named {
 		if d.page < 1 {
 			return navigationObservation{}, errors.New("named destination target is not a physical page of the document")
@@ -108,29 +173,31 @@ func captureOutputNavigation(c context.Context, s *model.Context, imported map[n
 		}
 	}
 	remaining := maps.Clone(imported)
-	err = observeNavigation(c, s, named, func(owner navigationOwner, found observedNavigation) error {
+	err = observeNavigation(c, s, named, routes, func(owner navigationOwner, found observedNavigation, route navigationRoute) error {
 		if expected, known := imported[owner]; known {
 			if expected != found {
 				return errors.New("composed local destination differs from its occurrence target")
 			}
 			delete(remaining, owner)
 		}
-		result.bindings = append(result.bindings, found)
+		result.bindings = append(result.bindings, routedNavigation{route, found})
 		return nil
 	})
 	if err == nil && len(remaining) != 0 {
 		err = errors.New("composed local navigation lost an imported binding")
 	}
+	result.aliases = routes.aliases
 	return result, err
 }
 
 func (expected navigationObservation) verify(c context.Context, s *model.Context) error {
-	actual, err := captureOutputNavigation(c, s, nil, nil)
+	actual, err := observeOutputNavigation(c, s, nil, nil, &navigationRouteWalk{table: expected.routes})
 	if err != nil {
 		return err
 	}
-	if !maps.Equal(expected.named, actual.named) || !slices.Equal(expected.bindings, actual.bindings) {
-		return errors.New("reopened local navigation differs from the composed destinations")
+	if !maps.Equal(expected.named, actual.named) || !slices.Equal(expected.bindings, actual.bindings) ||
+		!slices.Equal(expected.aliases, actual.aliases) {
+		return errors.New("reopened local navigation differs from the composed destinations or their owning routes")
 	}
 	return nil
 }

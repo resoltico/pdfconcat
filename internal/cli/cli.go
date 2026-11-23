@@ -59,6 +59,9 @@ func Parse(args []string) (Command, *app.Result) {
 	}
 	for i, arg := range args {
 		if !utf8.ValidString(arg) || strings.ContainsRune(arg, 0) {
+			if i > 0 && operationHint(args[0]) != "" {
+				c.Name = args[0]
+			}
 			return failure("usage_invalid_value", "Arguments must be valid UTF-8 without NUL.", i)
 		}
 	}
@@ -107,8 +110,11 @@ func Parse(args []string) (Command, *app.Result) {
 			c.Help = true
 			return c, nil
 		}
-		if len(args) != 2 || args[1] != "plan" && args[1] != "result" {
+		if len(args) < 2 || args[1] != "plan" && args[1] != "result" {
 			return failure("usage_invalid_value", "schema requires plan or result.", 1)
+		}
+		if len(args) > 2 {
+			return failure("usage_invalid_value", "schema accepts one selector.", 2)
 		}
 		c.Schema = args[1]
 		return c, nil
@@ -124,7 +130,7 @@ func Parse(args []string) (Command, *app.Result) {
 		return c, nil
 	}
 	fitting := packet.DefaultFitPolicy(packet.Size{})
-	toleranceIndex := 0
+	var toleranceIndex, planIndex, baseDirIndex int
 	seen := map[string]bool{}
 	positional := false
 	for i := 1; i < len(args); i++ {
@@ -147,6 +153,7 @@ func Parse(args []string) (Command, *app.Result) {
 				return failure("usage_conflict", "Option may be used only once: "+spec.name, i)
 			}
 			seen[spec.name] = true
+			optionIndex := i
 			if spec.value != "" {
 				if !equals {
 					next, ok := separateValueIndex(args, i)
@@ -164,11 +171,11 @@ func Parse(args []string) (Command, *app.Result) {
 			}
 			switch spec.name {
 			case "--plan":
-				c.Plan = value
+				c.Plan, planIndex = value, optionIndex
 			case "--output":
 				c.Output = value
 			case "--base-dir":
-				c.BaseDir = value
+				c.BaseDir, baseDirIndex = value, optionIndex
 			case "--fit-to":
 				size, err := packet.ParseSize(value, false)
 				if err != nil {
@@ -210,10 +217,10 @@ func Parse(args []string) (Command, *app.Result) {
 		return c, nil
 	}
 	if c.Plan != "" && len(c.Operands) > 0 {
-		return failure("usage_conflict", "--plan cannot be combined with PDF operands or --blank.", 0)
+		return failure("usage_conflict", "--plan cannot be combined with PDF operands or --blank.", max(planIndex, c.Operands[0].Index))
 	}
 	if c.BaseDir != "" && c.Plan != "-" {
-		return failure("usage_conflict", "--base-dir requires --plan -.", 0)
+		return failure("usage_conflict", "--base-dir requires --plan -.", baseDirIndex)
 	}
 	if c.Plan == "" && len(c.Operands) == 0 {
 		return failure("usage_missing_input", "Give --plan FILE|- or at least one PDF path or --blank.", 0)

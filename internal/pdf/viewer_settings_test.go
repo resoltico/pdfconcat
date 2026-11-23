@@ -20,35 +20,58 @@ import (
 )
 
 func TestSourceViewerSettingsAreOmittedBeforeValidation(t *testing.T) {
-	for _, entry := range []string{
-		"/PageLayout /SinglePage", "/PageLayout /PDLayoutDontCare", "/PageLayout 42",
-		"/PageMode /UseOutlines", "/PageMode /Unknown",
-		"/ViewerPreferences << /HideToolbar true >>", "/ViewerPreferences (invalid)",
-		"/PageLayout 6 0 R", "/ViewerPreferences 6 0 R",
+	for _, setting := range []struct{ key, actual string }{
+		{"PageLayout", "/SinglePage"},
+		{"PageMode", "/UseOutlines"},
+		{"ViewerPreferences", "<< /HideToolbar true >>"},
 	} {
-		t.Run(entry, func(t *testing.T) {
-			doc := insertEntry(pdffixture.Plain("viewer"), 1, entry)
-			doc.Objs = append(doc.Objs, []byte("<< /HideToolbar true >>"))
-			data := doc.Bytes()
-			original := bytes.Clone(data)
-			facts, _, ds := pdf.Inspect(t.Context(), data, "", nil)
-			if status := diag.Outcome(ds); status != "ok" || facts.Pages != 1 || len(ds) != 1 || ds[0].Code != diag.SourceViewerSettingsRemoved {
-				t.Fatalf("facts %+v diagnostics %+v", facts, ds)
-			}
-			if ds[0].PDFLocation == nil || ds[0].PDFLocation.Object != 1 || ds[0].PDFLocation.Path == "" {
-				t.Fatalf("missing finding location: %+v", ds)
-			}
-			if !bytes.Equal(data, original) || facts.SHA256 != sha256.Sum256(original) {
-				t.Fatal("normalization changed source bytes or identity")
-			}
-		})
-	}
-	// PDF null is equivalent to an absent dictionary entry; it requires no repair.
-	for _, key := range []string{"PageLayout", "PageMode", "ViewerPreferences"} {
-		_, _, ds := pdf.Inspect(t.Context(), insertEntry(pdffixture.Plain("null"), 1, "/"+key+" null").Bytes(), "", nil)
-		if status := diag.Outcome(ds); status != "ok" {
-			t.Fatal(ds)
+		for _, tc := range []struct {
+			name, raw, object string
+			warn              bool
+		}{
+			{"absent", "", "", false},
+			{"direct null", "null", "", false},
+			{"live null", "6 0 R", "null", false},
+			{"direct value", setting.actual, "", true},
+			{"indirect value", "6 0 R", setting.actual, true},
+			{"malformed value", "(invalid)", "", true},
+			{"undefined reference", "6 0 R", "", true},
+			{"wrong generation to null", "6 1 R", "null", true},
+		} {
+			t.Run(setting.key+"/"+tc.name, func(t *testing.T) {
+				doc := pdffixture.Plain("viewer")
+				if tc.raw != "" {
+					insertEntry(doc, 1, "/"+setting.key+" "+tc.raw)
+				}
+				if tc.object != "" {
+					doc.Objs = append(doc.Objs, []byte(tc.object))
+				}
+				data := doc.Bytes()
+				original := bytes.Clone(data)
+				facts, _, ds := pdf.Inspect(t.Context(), data, "", nil)
+				if status := diag.Outcome(ds); status != "ok" || facts.Pages != 1 {
+					t.Fatalf("facts %+v diagnostics %+v", facts, ds)
+				}
+				if !bytes.Equal(data, original) || facts.SHA256 != sha256.Sum256(original) {
+					t.Fatal("normalization changed source bytes or identity")
+				}
+				if tc.warn {
+					want := diag.PDFLocation{Object: 1, Path: "Catalog." + setting.key}
+					if len(ds) != 1 || ds[0].Code != diag.SourceViewerSettingsRemoved || ds[0].PDFLocation == nil || *ds[0].PDFLocation != want {
+						t.Fatalf("expected one warning at %+v, got %+v", want, ds)
+					}
+				} else if len(ds) != 0 {
+					t.Fatalf("absent setting produced findings: %+v", ds)
+				}
+			})
 		}
+	}
+	doc := insertEntry(pdffixture.Plain("mixed"), 1, "/PageLayout 6 0 R /ViewerPreferences null /PageMode /UseNone")
+	doc.Objs = append(doc.Objs, []byte("null"))
+	_, _, ds := pdf.Inspect(t.Context(), doc.Bytes(), "", nil)
+	want := diag.PDFLocation{Object: 1, Path: "Catalog.PageMode"}
+	if len(ds) != 1 || ds[0].Code != diag.SourceViewerSettingsRemoved || ds[0].PDFLocation == nil || *ds[0].PDFLocation != want {
+		t.Fatalf("expected only the real setting at %+v, got %+v", want, ds)
 	}
 }
 

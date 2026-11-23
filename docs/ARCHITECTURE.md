@@ -16,7 +16,7 @@ provided. The framework-free packet model lives in `internal/core` (package
 | `internal/typeset` | Font value parsing, shaping, wrapping, placement and embedding preparation |
 | `internal/pdf` | PDF graph admission, selection, assembly, serialization and strict output verification from acquired bytes |
 | `internal/files` | Native path semantics, regular-file acquisition, private snapshot storage and staged publication |
-| `internal/wire` | Result v10 projection, streamed report encoding and schema |
+| `internal/wire` | Result v11 projection, streamed report encoding and schema |
 | `internal/legal` | Embedded license notices |
 | `internal/oracle`, `internal/pdffixture` | Test-only independent observations and synthetic PDFs |
 
@@ -144,7 +144,10 @@ whether it took effect independently of later cleanup and durability errors.
 Private source sites retain full source refs, original page ordinals and paths.
 Admission captures catalogue/navigation sites before backend normalization;
 selection/assembly carry typed change evidence before pruning or renumbering.
-`PDFLocation` projects that provenance at the diagnostic boundary. Result
+`PDFLocation` projects that provenance at the diagnostic boundary. Core
+diagnostics own the signature-discard counts used for wording and finding
+identity. The wire adapter projects the counts in summary JSON and full reports.
+Result
 coalescing merges equivalent navigation findings across inspection and assembly,
 prefers assembly evidence and combines consuming item references. It preserves
 distinct findings before applying summary caps.

@@ -105,3 +105,20 @@ func TestDistinctConsumersPrecedeSummaryCap(t *testing.T) {
 		t.Fatal("normalization mutated the uncapped input")
 	}
 }
+
+func TestSignatureDiscardIdentityUsesCounts(t *testing.T) {
+	first := diag.SignatureDiscarded(diag.SignatureDiscardCounts{Widgets: 1, DocumentTimestamps: 1})
+	first.File, first.Items = "source.pdf", []string{"/items/0"}
+	same := diag.SignatureDiscarded(diag.SignatureDiscardCounts{Widgets: 1, DocumentTimestamps: 1})
+	same.File, same.Items = first.File, []string{"/items/1"}
+	same.Detail = "Different rendering."
+	other := diag.SignatureDiscarded(diag.SignatureDiscardCounts{Widgets: 1, SignatureValues: 1})
+	other.File, other.Items, other.Detail = first.File, []string{"/items/2"}, first.Detail
+	r := outcome.New("check")
+	r.Diagnostics = []diag.Diagnostic{first, same, other}
+	full := r.Full()
+	if len(full.Diagnostics) != 2 || !reflect.DeepEqual(full.Diagnostics[0].Items, []string{"/items/0", "/items/1"}) ||
+		!reflect.DeepEqual(full.Diagnostics[1].Items, []string{"/items/2"}) {
+		t.Fatalf("signature counts did not determine finding identity: %+v", full.Diagnostics)
+	}
+}

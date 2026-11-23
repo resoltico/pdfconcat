@@ -37,21 +37,21 @@ func Render(w, stderr io.Writer, r app.Result, asJSON bool) error {
 }
 
 func renderFinal(w, stderr io.Writer, r app.Result, asJSON bool) error {
-	summary := result.ProjectSummary(r)
 	if asJSON {
-		return JSON(w, summary)
+		return JSON(w, result.ProjectSummary(r))
 	}
-	rows, omitted := previewRows(r, summary.Report)
-	if _, err := fmt.Fprintf(w, "%s %s\n", summary.Command, summary.Status); err != nil {
+	report := r.Report
+	rows, omitted := previewRows(r, report)
+	if _, err := fmt.Fprintf(w, "%s %s\n", r.Command, r.Status); err != nil {
 		return err
 	}
-	if summary.Pages != nil && summary.Pages.Total != nil {
-		if _, err := fmt.Fprintf(w, "Pages: %d\n", *summary.Pages.Total); err != nil {
+	if r.Pages != nil && r.Pages.Total != nil {
+		if _, err := fmt.Fprintf(w, "Pages: %d\n", *r.Pages.Total); err != nil {
 			return err
 		}
 	}
-	if summary.Output != nil {
-		if _, err := fmt.Fprintf(w, "Output: %s (published: %t)\n", strconv.Quote(summary.Output.Path), summary.Output.Published); err != nil {
+	if r.Output != nil {
+		if _, err := fmt.Fprintf(w, "Output: %s (published: %t)\n", strconv.Quote(r.Output.Path), r.Output.Published); err != nil {
 			return err
 		}
 	}
@@ -61,22 +61,23 @@ func renderFinal(w, stderr io.Writer, r app.Result, asJSON bool) error {
 		}
 	}
 	if omitted > 0 {
-		if _, err := fmt.Fprintf(w, "%d more preview rows; %s\n", omitted, reportHint(summary.Report)); err != nil {
+		if _, err := fmt.Fprintf(w, "%d more preview rows; %s\n", omitted, reportHint(report)); err != nil {
 			return err
 		}
 	}
-	for _, d := range summary.Diagnostics {
-		if _, err := fmt.Fprintln(stderr, diagnosticText(d, summary.Report)); err != nil {
+	findings, diagnosticsOmitted := r.CappedDiagnostics()
+	for _, d := range findings {
+		if _, err := fmt.Fprintln(stderr, diagnosticText(d, report)); err != nil {
 			return err
 		}
 	}
-	if summary.DiagnosticsOmitted > 0 {
-		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; %s\n", summary.DiagnosticsOmitted, reportHint(summary.Report)); err != nil {
+	if diagnosticsOmitted > 0 {
+		if _, err := fmt.Fprintf(stderr, "%d more diagnostics; %s\n", diagnosticsOmitted, reportHint(report)); err != nil {
 			return err
 		}
 	}
-	if summary.Report != nil {
-		if _, err := fmt.Fprintf(w, "Report: %s (written: %t)\n", strconv.Quote(summary.Report.Path), summary.Report.Written); err != nil {
+	if report != nil {
+		if _, err := fmt.Fprintf(w, "Report: %s (written: %t)\n", strconv.Quote(report.Path), report.Written); err != nil {
 			return err
 		}
 	}
@@ -84,7 +85,7 @@ func renderFinal(w, stderr io.Writer, r app.Result, asJSON bool) error {
 }
 
 // reportHint describes access to uncapped details using actual report visibility.
-func reportHint(report *result.Report) string {
+func reportHint(report *outcome.Report) string {
 	if report == nil {
 		return "use --report for full details."
 	}
@@ -95,7 +96,7 @@ func reportHint(report *result.Report) string {
 }
 
 // diagnosticText keeps each diagnostic on one terminal-safe line.
-func diagnosticText(d app.Diagnostic, report *result.Report) string {
+func diagnosticText(d app.Diagnostic, report *outcome.Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s: %s", d.Severity, d.Code, printableMessage(d.Message))
 	if location := d.PDFLocation; location != nil {
@@ -167,7 +168,7 @@ func printableMessage(message string) string {
 	return b.String()
 }
 
-func previewRows(r app.Result, report *result.Report) ([]string, int) {
+func previewRows(r app.Result, report *outcome.Report) ([]string, int) {
 	var rows []string
 	pages := func(span *[2]int64) string {
 		if span == nil {

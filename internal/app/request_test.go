@@ -57,10 +57,10 @@ func schemaValid(t *testing.T, value any) {
 	}
 }
 func code(value any, want string) bool {
-	var ds []app.Diagnostic
+	var ds []exchange.Diagnostic
 	switch r := value.(type) {
 	case app.Result:
-		ds = r.Diagnostics
+		ds = exchange.Project(r).Diagnostics
 	case exchange.Result:
 		ds = r.Diagnostics
 	default:

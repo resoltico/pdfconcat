@@ -47,8 +47,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if command.JSON {
 			return render(*failure)
 		}
-		for _, d := range Summary(*failure).Diagnostics {
-			if _, err := fmt.Fprintln(stderr, diagnosticText(d, Summary(*failure).Report)); err != nil {
+		findings, _ := failure.Full().CappedDiagnostics()
+		for _, d := range findings {
+			if _, err := fmt.Fprintln(stderr, diagnosticText(d, nil)); err != nil {
 				return 1
 			}
 		}

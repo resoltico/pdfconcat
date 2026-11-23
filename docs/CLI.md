@@ -1,4 +1,4 @@
-# Command line and result v10
+# Command line and result v11
 
 PDFConcat combines PDFs directly or follows a JSON assembly plan. Plans add page
 selections, sections, navigation and simple text inserts; see the
@@ -113,12 +113,13 @@ saved processing facts do not imply that the final stdout summary was delivered.
 In text mode, usage errors print diagnostics and a help hint on stderr, with
 empty stdout. For build, check and version, an exact `--json` before the option
 delimiter selects JSON even when argument parsing fails. A `--` consumed as an
-option's required value is not that delimiter. The first error and its location
-are retained.
+option's required value is not that delimiter. The parser reports the first
+fault it encounters while reading arguments. Checks that require the complete
+invocation run after parsing.
 
 ```json
 {
-  "format_version": 10,
+  "format_version": 11,
   "command": "build",
   "status": "ok",
   "output": {
@@ -180,6 +181,28 @@ Diagnostics include severity, stable code, free-form English message and, when k
 file, consumer pointers and plan location. Locations have zero-based byte offset,
 one-based byte line/column and JSON pointer. Stdin uses a virtual file label.
 Messages may change; branch on code/status rather than matching their prose.
+
+Result v11 applies to `check`, `build`, full reports and `version --json`.
+Plans use version 11.
+Only `source_signature_discarded` carries `signature_discard`. All seven counts
+are nonnegative integers and include zero.
+
+| Member | What it counts |
+| --- | --- |
+| `populated_signature_fields` | Removed populated signature fields, including those containing timestamps |
+| `widgets` | Removed widgets owned by those fields |
+| `signature_values` | Removed non-timestamp signature dictionaries, including permission-associated signatures |
+| `document_timestamps` | Removed signature dictionaries classified by `/DocTimeStamp` or `/ETSI.RFC3161` |
+| `permission_structures` | Removed `/Perms` dictionaries |
+| `validation_stores` | Removed `/DSS` and catalog `/VRI` entries |
+| `signature_flag_entries` | Removed `/SigFlags` entries |
+
+A shared value dictionary is counted once. The counts describe one successfully
+normalized source and cover all its consuming items. Use the complete
+`--report` for uncapped findings and item references. The warning can survive
+a later failure. Consult command status and `output.published` separately.
+The counts record PDF state removed during admission. Authentication and
+certificate validation require the original.
 
 Text diagnostics include the source or font file, plan line/column and JSON
 pointer when known, plus consuming item pointers. Paths and pointers are quoted;
@@ -278,7 +301,7 @@ contents item or padding span:
 
 ```json
 {
-  "format_version": 10,
+  "format_version": 11,
   "command": "check",
   "status": "ok",
   "output": null,
@@ -574,6 +597,7 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_structure_destination` | error | invalid | retained PDF structure destination cannot be preserved |
 | `source_output_incompatible` | error | invalid | retained annotations lack appearances required by the effective PDF 2.0 output |
 | `fit_annotation_unsupported` | error | invalid | fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame |
+| `fit_annotation_viewer_dependent` | warning | — | viewers can differ in NoRotate annotation placement or orientation when fitting bakes page rotation |
 | `fit_form_unsupported` | error | invalid | a widget transforms or its page ownership is unresolved or conflicting while other pages transform |
 | `assembly_failed` | error | failed | PDF/text backend failed during assembly or shaping (including recovered panics) |
 | `output_write_failed` | error | failed | writing the staged output failed (disk full, permissions) |

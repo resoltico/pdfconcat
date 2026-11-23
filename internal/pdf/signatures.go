@@ -165,17 +165,17 @@ type signatureDiscard struct {
 	evidence signatureEvidence
 	// Only these proved owners can disappear. Any surviving reference to
 	// one of them stops admission before unreachable objects are freed.
-	removed                                                    map[uintptr]bool
-	exclusive                                                  map[types.IndirectRef]bool
-	changedFields                                              map[types.IndirectRef]map[signatureOwnerEdge]bool
-	widgets                                                    map[types.IndirectRef]*formFieldNode
-	owners                                                     []referenceRoot
-	fieldNames                                                 map[string]bool
-	edits                                                      []func()
-	artwork                                                    []signatureArtwork
-	first                                                      *diag.PDFLocation
-	fields, values, timestamps, permissions, validation, flags int
-	seenValues                                                 map[uintptr]bool
+	removed       map[uintptr]bool
+	exclusive     map[types.IndirectRef]bool
+	changedFields map[types.IndirectRef]map[signatureOwnerEdge]bool
+	widgets       map[types.IndirectRef]*formFieldNode
+	owners        []referenceRoot
+	fieldNames    map[string]bool
+	edits         []func()
+	artwork       []signatureArtwork
+	first         *diag.PDFLocation
+	counts        diag.SignatureDiscardCounts
+	seenValues    map[uintptr]bool
 }
 
 func (p *signatureDiscard) note(site sourceSite) {
@@ -242,9 +242,9 @@ func (p *signatureDiscard) value(c context.Context, s *model.Context, o types.Ob
 		return site.wrap(err)
 	}
 	if kind == "DocTimeStamp" || subFilter == "ETSI.RFC3161" {
-		p.timestamps++
+		p.counts.DocumentTimestamps++
 	} else {
-		p.values++
+		p.counts.SignatureValues++
 	}
 	p.note(site)
 	return nil
@@ -387,7 +387,7 @@ func (p *signatureDiscard) removeField(c context.Context, s *model.Context, node
 	if err := p.removeNode(s, node); err != nil {
 		return err
 	}
-	p.fields++
+	p.counts.PopulatedSignatureFields++
 	p.note(node.site)
 	return nil
 }
@@ -462,7 +462,7 @@ func (p *signatureDiscard) planCatalog(c context.Context, s *model.Context, cat 
 			if ref, ok := raw.(types.IndirectRef); ok {
 				p.exclusive[ref] = true
 			}
-			p.permissions++
+			p.counts.PermissionStructures++
 		case "DSS", "VRI":
 			if err := checkSignatureValidationStore(c, s, key, d, site); err != nil {
 				return err
@@ -471,7 +471,7 @@ func (p *signatureDiscard) planCatalog(c context.Context, s *model.Context, cat 
 				return err
 			}
 			p.removed[layerDictIdentity(d)] = true
-			p.validation++
+			p.counts.ValidationStores++
 		}
 		p.note(site)
 		p.edits = append(p.edits, func() { delete(cat, key) })
@@ -493,10 +493,10 @@ func (p *signatureDiscard) planForm(c context.Context, s *model.Context, cat typ
 	if err != nil {
 		return err
 	}
-	if flags == nil && p.fields == 0 {
+	if flags == nil && p.counts.PopulatedSignatureFields == 0 {
 		return nil
 	}
-	if p.fields > 0 && xfa != (sourceSite{}) {
+	if p.counts.PopulatedSignatureFields > 0 && xfa != (sourceSite{}) {
 		return signatureUnsupported(xfa, diag.SignatureVisibility)
 	}
 	if ref, ok := cat["AcroForm"].(types.IndirectRef); ok {
@@ -509,13 +509,13 @@ func (p *signatureDiscard) planForm(c context.Context, s *model.Context, cat typ
 		if !ok || n < 0 || n > 3 {
 			return signatureUnsupported(flagsSite, diag.SignaturePermissions)
 		}
-		p.flags++
+		p.counts.SignatureFlagEntries++
 		p.note(flagsSite)
 	}
 	if reduced {
 		updated["Fields"] = fields
 	}
-	if p.fields > 0 {
+	if p.counts.PopulatedSignatureFields > 0 {
 		order, err := s.DereferenceArray(form["CO"])
 		if err != nil {
 			return err
@@ -613,10 +613,9 @@ func (p *signatureDiscard) apply(c context.Context, s *model.Context, pages []pa
 			return nil, diag.Diagnostic{}, err
 		}
 	}
-	d := diag.Report(diag.SourceSignatureDiscarded, diag.SignatureStateDiscarded())
+	p.counts.Widgets = len(p.widgets)
+	d := diag.SignatureDiscarded(p.counts)
 	d.PDFLocation = p.first
-	d.Identity.Phase = "source_observation"
-	diag.AttachEvidence(&d, diag.SignatureDiscardEvidence(p.fields, len(p.widgets), p.values, p.timestamps, p.permissions, p.validation, p.flags))
 	return p.artwork, d, nil
 }
 
@@ -648,7 +647,7 @@ func (p *signatureDiscard) verifyEncodedContent(c context.Context, s *model.Cont
 // an indirect edge to it. Scripts and untargeted form actions do not supply
 // sufficient evidence of noninterference.
 func (p *signatureDiscard) checkFormActions(c context.Context, s *model.Context) error {
-	if p.fields == 0 {
+	if p.counts.PopulatedSignatureFields == 0 {
 		return nil
 	}
 	return objectLocations(c, s, false, func(d types.Dict, loc diag.PDFLocation) error {

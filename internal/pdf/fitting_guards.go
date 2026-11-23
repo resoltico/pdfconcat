@@ -122,32 +122,33 @@ func fittingOwnership(c context.Context, s *model.Context, pages []pageGeometry,
 	return ds, nil
 }
 
-func fittingFindings(c context.Context, s *model.Context, pages []pageGeometry, plans fittingPlan, origins sourceOrigins) ([]diag.Diagnostic, error) {
+func fittingFindings(c context.Context, s *model.Context, pages []pageGeometry, plans fittingPlan, origins sourceOrigins) ([]diag.Diagnostic, diag.AnnotationIssue, error) {
 	if !anyTransform(plans) {
-		return nil, nil
+		return nil, diag.AnnotationIssue{}, nil
 	}
 	composition, err := fittingCompositionFindings(c, s, pages, plans)
 	if err != nil {
-		return nil, err
+		return nil, diag.AnnotationIssue{}, err
 	}
 	ds, err := fittingOwnership(c, s, pages, plans, origins)
 	if err != nil {
-		return nil, err
+		return nil, diag.AnnotationIssue{}, err
 	}
 	ds = append(ds, composition...)
-	issue, err := annotationFittingIssue(c, s, pages, plans)
+	issue, advisory, err := fittingAnnotationFindings(c, s, pages, plans)
 	if err != nil {
-		return nil, err
+		return nil, diag.AnnotationIssue{}, err
 	}
 	if issue.Present() {
 		d := diag.Report(diag.FitAnnotationUnsupported, diag.FittingAnnotationRefusal(issue))
 		d.PDFLocation = &issue.Site
 		ds = append(ds, d)
 	}
+	ds = append(ds, advisory...)
 	warnings, err := fittingPrintWarnings(s, pages, plans)
 	if err != nil {
-		return nil, err
+		return nil, diag.AnnotationIssue{}, err
 	}
 	ds = append(ds, warnings...)
-	return ds, nil
+	return ds, issue, nil
 }

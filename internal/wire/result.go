@@ -22,7 +22,7 @@ import (
 var Schema []byte
 
 // WireVersion is the result and version wire contract.
-const WireVersion = 10
+const WireVersion = 11
 
 // Output records publication separately from trailing errors.
 type Output struct {
@@ -117,7 +117,7 @@ type Result struct {
 	Pages              *Pages               `json:"pages"`
 	Fitting            *Fitting             `json:"fitting"`
 	PageNumbers        *packet.PageNumbers  `json:"page_numbers"`
-	Diagnostics        []diag.Diagnostic    `json:"diagnostics"`
+	Diagnostics        []Diagnostic         `json:"diagnostics"`
 	DiagnosticsOmitted int                  `json:"diagnostics_omitted"`
 	Report             *Report              `json:"report"`
 	Parts              []Part               `json:"parts,omitzero"`
@@ -155,14 +155,16 @@ func Project(input outcome.Result) Result {
 
 // ProjectSummary renders only summary fields of an ordered result.
 func ProjectSummary(r outcome.Result) Result {
+	findings, omitted := r.CappedDiagnostics()
+	r.Diagnostics = findings
 	result := projectHeader(r)
 	result.Parts, result.Sections = nil, nil
-	result.Diagnostics, result.DiagnosticsOmitted = r.CappedDiagnostics()
+	result.DiagnosticsOmitted = omitted
 	return result
 }
 
 func projectHeader(r outcome.Result) Result {
-	result := Result{FormatVersion: WireVersion, Metadata: r.Metadata, Timestamp: r.Timestamp, Numbering: r.Numbering, Command: r.Command, Status: r.Status, PageNumbers: r.PageNumbers, Diagnostics: r.Diagnostics, Parts: []Part{}, Sections: []Section{}}
+	result := Result{FormatVersion: WireVersion, Metadata: r.Metadata, Timestamp: r.Timestamp, Numbering: r.Numbering, Command: r.Command, Status: r.Status, PageNumbers: r.PageNumbers, Diagnostics: projectDiagnostics(r.Diagnostics), Parts: []Part{}, Sections: []Section{}}
 	if r.Fitting != nil {
 		result.Fitting = &Fitting{Target: r.Fitting.Target, Tolerance: r.Fitting.Tolerance}
 	}

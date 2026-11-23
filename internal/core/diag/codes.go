@@ -107,34 +107,35 @@ type Definition struct {
 
 // Location identifies a zero-based byte offset and one-based byte line/column.
 type Location struct {
-	File   string `json:"file"`
-	Line   int    `json:"line"`
-	Column int    `json:"column"`
-	Offset int64  `json:"offset"`
-	Ref    string `json:"pointer"`
+	File   string
+	Line   int
+	Column int
+	Offset int64
+	Ref    string
 }
 
 // PDFLocation identifies a PDF object, page or dictionary entry when known.
 // Zero page/object numbers mean that attribution is unavailable.
 type PDFLocation struct {
-	Object int    `json:"object,omitzero"`
-	Page   int    `json:"page,omitzero"`
-	Path   string `json:"path,omitempty"`
+	Object int
+	Page   int
+	Path   string
 }
 
 // Diagnostic is a located error or warning with its consuming plan entries.
 type Diagnostic struct {
-	Identity     FindingIdentity `json:"-"`
-	AuthoredRef  string          `json:"-"` // Plan setting implicated by a measured finding.
-	Severity     Severity        `json:"severity"`
-	Code         Code            `json:"code"`
-	Message      string          `json:"message"`
-	Detail       string          `json:"detail,omitempty"`
-	PDFLocation  *PDFLocation    `json:"pdf_location,omitempty"`
-	File         string          `json:"file,omitempty"`
-	Items        []string        `json:"items,omitempty"`
-	ItemsOmitted int             `json:"items_omitted"`
-	Location     *Location       `json:"location,omitempty"`
+	signatureDiscard *SignatureDiscardCounts
+	Identity         FindingIdentity
+	AuthoredRef      string // Plan setting implicated by a measured finding.
+	Severity         Severity
+	Code             Code
+	Message          string
+	Detail           string
+	PDFLocation      *PDFLocation
+	File             string
+	Items            []string
+	ItemsOmitted     int
+	Location         *Location
 }
 
 // Registry returns a copy so callers cannot change the public code definitions.
@@ -215,6 +216,7 @@ var (
 	SourceStructureDestination          = define("source_structure_destination", Error, Invalid, "retained PDF structure destination cannot be preserved")
 	SourceOutputIncompatible            = define("source_output_incompatible", Error, Invalid, "retained annotations lack appearances required by the effective PDF 2.0 output")
 	FitAnnotationUnsupported            = define("fit_annotation_unsupported", Error, Invalid, "fitting requires appearances for FreeText, Text icons, Caret, captioned Lines, rotated NoRotate or boundary-crossing artwork; interactive hit areas must stay inside the source frame")
+	FitAnnotationViewerDependent        = define("fit_annotation_viewer_dependent", Warning, NoClass, "viewers can differ in NoRotate annotation placement or orientation when fitting bakes page rotation")
 	FitFormUnsupported                  = define("fit_form_unsupported", Error, Invalid, "a widget transforms or its page ownership is unresolved or conflicting while other pages transform")
 	AssemblyFailed                      = define("assembly_failed", Error, Failed, "PDF/text backend failed during assembly or shaping (including recovered panics)")
 	OutputWriteFailed                   = define("output_write_failed", Error, Failed, "writing the staged output failed (disk full, permissions)")

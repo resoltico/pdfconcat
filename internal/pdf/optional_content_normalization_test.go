@@ -311,10 +311,13 @@ func TestOptionalContentChecksOmittedPageAndDrawingPrograms(t *testing.T) {
 				d.Objs[1] = []byte("<< /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>")
 				page := fmt.Appendf(nil, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << %s >> /Contents 7 0 R", tc.resource)
 				if tc.name == "appearance" {
-					page = append(page, " /Annots [<< /Type /Annot /Subtype /Square /Rect [0 0 20 20] /AP << /N 6 0 R >> >>]"...)
+					page = append(page, " /Annots [8 0 R]"...)
 				}
 				d.Objs = append(d.Objs, append(page, " >>"...),
 					layerTestStream(tc.stream, []byte(residual)), layerTestStream("", []byte(tc.page)))
+				if tc.name == "appearance" {
+					d.Objs = append(d.Objs, []byte("<< /Type /Annot /Subtype /Square /Rect [0 0 20 20] /AP << /N 6 0 R >> >>"))
+				}
 				raw := d.Bytes()
 				_, _, findings := InspectReader(t.Context(), bytes.NewReader(raw), [32]byte{}, int64(len(raw)), SourcePolicies{}, []SelectionRequest{
 					{Item: "first only", Pages: []packet.PageRange{{First: 1, Last: 1}}},

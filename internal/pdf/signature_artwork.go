@@ -187,7 +187,14 @@ func planSignatureDrawing(c context.Context, s *model.Context, program *layerPro
 	}
 	if rect.Width() == 0 || rect.Height() == 0 {
 		if f&model.AnnPrint != 0 {
-			if err := empty.checkWidget(c, s, program, page, widget, at); err != nil {
+			// A blank widget contributes no artwork to composite with the page.
+			if err := checkSignatureRegeneration(s); err != nil {
+				return signatureDrawing{}, err
+			}
+			if err := checkSignatureWidgetTransparencyTypes(s, widget, at); err != nil {
+				return signatureDrawing{}, err
+			}
+			if err := empty.checkWidget(c, s, program, widget, at); err != nil {
 				return signatureDrawing{}, err
 			}
 		}
@@ -290,12 +297,40 @@ func planSignatureDrawing(c context.Context, s *model.Context, program *layerPro
 	return signatureDrawing{raw: raw, art: signatureArtwork{page: at.page, box: *rect, placement: placement, appearance: digest}}, nil
 }
 
+var signatureWidgetTransparencyKeys = [...]string{"BM", "CA", "ca"}
+
 func checkSignatureCompositing(s *model.Context, page pageRef, widget types.Dict, at sourceSite) error {
 	pageSite := sourceSite{ref: page.ref, page: at.page, path: "Object"}
 	if err := requireAbsentSignatureSlots(s, page.dict, pageSite, diag.SignatureCompositing, "Group"); err != nil {
 		return err
 	}
-	return requireAbsentSignatureSlots(s, widget, at, diag.SignatureCompositing, "BM", "CA", "ca")
+	return requireAbsentSignatureSlots(s, widget, at, diag.SignatureCompositing, signatureWidgetTransparencyKeys[:]...)
+}
+
+func checkSignatureWidgetTransparencyTypes(s *model.Context, widget types.Dict, at sourceSite) error {
+	// ISO 32000-2 Table 166 declares annotation BM as a name and CA/ca as
+	// numbers. The backend's markup opacity check does not cover widgets.
+	for _, key := range signatureWidgetTransparencyKeys {
+		site := at.key(key)
+		value, err := signatureSlot(s, widget[key], site, diag.SignatureTransparencySetting)
+		if err != nil {
+			return err
+		}
+		switch value.(type) {
+		case nil:
+			continue
+		case types.Name:
+			if key == "BM" {
+				continue
+			}
+		case types.Integer, types.Float:
+			if key != "BM" {
+				continue
+			}
+		}
+		return signatureUnsupported(site, diag.SignatureTransparencySetting)
+	}
+	return nil
 }
 
 func checkSignatureRegeneration(s *model.Context) error {
@@ -308,12 +343,12 @@ func checkSignatureRegeneration(s *model.Context) error {
 		return err
 	}
 	formSite := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], sourceOrigins{}).key("NeedAppearances")
-	regenerate, err := signatureSlot(s, form["NeedAppearances"], formSite, diag.SignatureAppearance)
+	regenerate, err := signatureSlot(s, form["NeedAppearances"], formSite, diag.SignatureRegeneration)
 	if err != nil {
 		return err
 	}
 	if regenerate != nil && regenerate != types.Boolean(false) {
-		return signatureUnsupported(formSite, diag.SignatureAppearance)
+		return signatureUnsupported(formSite, diag.SignatureRegeneration)
 	}
 	return nil
 }

@@ -32,7 +32,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 10
+          "const": 11
         },
         "command": {
           "enum": [
@@ -350,7 +350,7 @@
       ],
       "properties": {
         "format_version": {
-          "const": 10
+          "const": 11
         },
         "command": {
           "const": "version"
@@ -572,6 +572,71 @@
         "pdf_location": {
           "description": "Optional known PDF evidence. For source findings, objects and owning pages refer to the original source before selection/merging. Paths are anchored to the source object/enclosing container; document-level sites need not have an owning page.",
           "$ref": "#/$defs/pdfLocation"
+        },
+        "signature_discard": {
+          "$ref": "#/$defs/signatureDiscardCounts"
+        }
+      },
+      "if": {
+        "properties": {
+          "code": {
+            "const": "source_signature_discarded"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "signature_discard"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "signature_discard"
+          ]
+        }
+      }
+    },
+    "signatureDiscardCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "populated_signature_fields",
+        "widgets",
+        "signature_values",
+        "document_timestamps",
+        "permission_structures",
+        "validation_stores",
+        "signature_flag_entries"
+      ],
+      "properties": {
+        "populated_signature_fields": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "widgets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "signature_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "document_timestamps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "permission_structures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "validation_stores": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "signature_flag_entries": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

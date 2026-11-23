@@ -491,6 +491,7 @@ func TestDegenerateSignatureEmptyAppearanceProof(t *testing.T) {
 		{"PDF trivia in a nonzero box", strings.Replace(form, "[0 0 0 0]", "[0 0 100 60]", 1), "\x00\t\f\r\n% q Q\r% EOF comment", "/N 8 0 R", nil, true},
 		{"empty Flate with explicit defaults", form + flate + " /DecodeParms << /Predictor 1 /Colors 1 /Columns 1 /BitsPerComponent 8 >>", string(emptyFlate), "/N 8 0 R", nil, true},
 		{"live null", form, "", "/N 9 0 R", []byte("null"), true},
+		{"shared trivia in all states", form, "% blank", "/N << /Off 8 0 R /On 8 0 R >> /R 8 0 R /D 8 0 R", nil, true},
 		{"paint after comment", form, "% note\r" + paint, "/N 8 0 R", nil, false},
 		{"operand only", form, "42", "/N 8 0 R", nil, false},
 		{"operator only", form, "q Q", "/N 8 0 R", nil, false},
@@ -501,12 +502,16 @@ func TestDegenerateSignatureEmptyAppearanceProof(t *testing.T) {
 		{"unsupported filter", form + " /Filter /ASCIIHexDecode", ">", "/N 8 0 R", nil, false},
 		{"nondefault Flate parameters", form + flate + " /DecodeParms << /Predictor 2 >>", string(emptyFlate), "/N 8 0 R", nil, false},
 		{"nonlocal Form", form + " /Ref << /F (external.pdf) /Page 0 >>", "", "/N 8 0 R", nil, false},
+		{"appearance Form's own group", form + " /Group << /S /Transparency >>", "", "/N 8 0 R", nil, false},
+		{"external appearance stream", form + " /F (external.pdf)", "", "/N 8 0 R", nil, false},
 		{"painted rollover", form, "", "/N 8 0 R /R 9 0 R", admissionStream(form, paint), false},
 		{"painted down appearance", form, "", "/N 8 0 R /D 9 0 R", admissionStream(form, paint), false},
 		{"unselected painted state", form, "", "/N << /Off 8 0 R /On 9 0 R >>", admissionStream(form, paint), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := pdffixture.SignatureArtwork()
+			admissionEntry(d, 3, "/Group << /S /Transparency /CS /DeviceRGB >>")
+			admissionEntry(d, 6, "/BM /Multiply /CA 0.5 /ca 0.25")
 			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
 			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("/AP << /N 8 0 R >>"), []byte("/AS /Off /AP << "+tc.entries+" >>"), 1)
 			d.Objs[7] = admissionStream(tc.attributes, tc.program)
@@ -525,6 +530,130 @@ func TestDegenerateSignatureEmptyAppearanceProof(t *testing.T) {
 			if finding.Code != diag.SourceSignatureDiscardUnsupported || finding.PDFLocation == nil ||
 				finding.PDFLocation.Object != 6 || finding.PDFLocation.Page != 1 || !strings.HasPrefix(finding.PDFLocation.Path, "Object.AP.") {
 				t.Fatalf("expected located print refusal: %+v", finding)
+			}
+			switch tc.name {
+			case "paint after comment":
+				if !strings.Contains(finding.Message, "decoded appearance") || finding.PDFLocation.Path != "Object.AP.N" {
+					t.Fatalf("paint should fail the stream proof: %+v", finding)
+				}
+			case "bad checksum":
+				if !strings.Contains(finding.Message, "damaged encoding") || finding.PDFLocation.Path != "Object.AP.N" {
+					t.Fatalf("encoding should fail the stream proof: %+v", finding)
+				}
+			}
+		})
+	}
+}
+
+func TestPrintableDegenerateSignatureRegeneration(t *testing.T) {
+	for _, tc := range []struct {
+		name, setting, appearance, flags string
+		want                             bool
+	}{
+		{"absent setting and AP", "", "", "4", true},
+		{"false setting and null AP", "/NeedAppearances false", "/AP 9 0 R", "4", true},
+		{"live null setting and state", "/NeedAppearances 9 0 R", "/AP << /N << /Off 9 0 R >> >>", "4", true},
+		{"active with a live AP", "/NeedAppearances true", "/AP << /N 8 0 R >>", "4", false},
+		{"active without AP", "/NeedAppearances true", "", "4", false},
+		{"active with all states null", "/NeedAppearances true", "/AP << /N << /Off 9 0 R >> /R 9 0 R /D 9 0 R >>", "4", false},
+		{"wrong setting generation", "/NeedAppearances 9 1 R", "", "4", false},
+		{"unproved setting", "/NeedAppearances (unknown)", "", "4", false},
+		{"active with hidden widget", "/NeedAppearances true", "", "6", true},
+		{"active with nonprint widget", "/NeedAppearances true", "", "0", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			d.Objs[0] = []byte("<< /Type /Catalog /Pages 2 0 R /AcroForm 10 0 R >>")
+			d.Objs[5] = fmt.Appendf(nil, "<< /Type /Annot /Subtype /Widget /FT /Sig /T (sample) /V 7 0 R /P 3 0 R /Rect [0 0 0 0] /F %s %s >>", tc.flags, tc.appearance)
+			d.Objs[7] = admissionStream("/Type /XObject /Subtype /Form /BBox [0 0 0 0]", "% blank")
+			d.Objs = append(d.Objs, []byte("null"), fmt.Appendf(nil, "<< /Fields [6 0 R] %s >>", tc.setting))
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			if tc.want {
+				admissionFinding(t, ds, diag.SourceSignatureDiscarded)
+				if diag.Outcome(ds) != "ok" {
+					t.Fatal(ds)
+				}
+				return
+			}
+			finding := admissionError(t, ds)
+			if finding.Code != diag.SourceSignatureDiscardUnsupported || !strings.Contains(finding.Message, "regeneration") ||
+				finding.PDFLocation == nil || *finding.PDFLocation != (diag.PDFLocation{Object: 10, Path: "NeedAppearances"}) {
+				t.Fatalf("expected form-level regeneration refusal: %+v", finding)
+			}
+		})
+	}
+}
+
+func TestPrintableDegenerateSignatureTransparencySettings(t *testing.T) {
+	for _, tc := range []struct {
+		name, entries, indirect, badKey string
+	}{
+		{"direct settings", "/BM /Multiply /CA 0.5 /ca 1", "", ""},
+		{"indirect blend mode", "/BM 9 0 R", "/Screen", ""},
+		{"indirect alpha", "/CA 9 0 R /ca 9 0 R", "0.25", ""},
+		{"direct null settings", "/BM null /CA null /ca null", "", ""},
+		{"indirect null settings", "/BM 9 0 R /CA 9 0 R /ca 9 0 R", "null", ""},
+		{"blend number", "/BM 42", "", "BM"},
+		{"blend array", "/BM [/Multiply /Normal]", "", "BM"},
+		{"indirect blend number", "/BM 9 0 R", "42", "BM"},
+		{"stroking alpha string", "/CA (wrong)", "", "CA"},
+		{"indirect stroking alpha string", "/CA 9 0 R", "(wrong)", "CA"},
+		{"nonstroking alpha string", "/ca (wrong)", "", "ca"},
+		{"indirect nonstroking alpha string", "/ca 9 0 R", "(wrong)", "ca"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+			d.Objs[7] = admissionStream("/Type /XObject /Subtype /Form /BBox [0 0 0 0]", "% blank")
+			admissionEntry(d, 6, tc.entries)
+			if tc.indirect != "" {
+				d.Objs = append(d.Objs, []byte(tc.indirect))
+			}
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			if tc.badKey == "" {
+				admissionFinding(t, ds, diag.SourceSignatureDiscarded)
+				if diag.Outcome(ds) != "ok" {
+					t.Fatal(ds)
+				}
+				return
+			}
+			want := diag.PDFLocation{Object: 6, Page: 1, Path: "Object." + tc.badKey}
+			if diag.Outcome(ds) != "invalid" ||
+				!slices.ContainsFunc(ds, func(d diag.Diagnostic) bool {
+					return d.Code == diag.SourceSignatureDiscardUnsupported && d.PDFLocation != nil && *d.PDFLocation == want &&
+						strings.Contains(d.Message, "malformed")
+				}) || slices.ContainsFunc(ds, func(d diag.Diagnostic) bool { return d.Code == diag.SourceSignatureDiscarded }) {
+				t.Fatalf("expected malformed setting refusal at %+v, got %+v", want, ds)
+			}
+		})
+	}
+}
+
+func TestSignatureCompositingAndRetainedGroupAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name, entry, path string
+		object            int
+		degenerate        bool
+		want              diag.Code
+	}{
+		{"visible page group", "/Group << /S /Transparency /CS /DeviceRGB >>", "Object.Group", 3, false, diag.SourceSignatureDiscardUnsupported},
+		{"visible blend mode", "/BM /Multiply", "Object.BM", 6, false, diag.SourceSignatureDiscardUnsupported},
+		{"visible stroking alpha", "/CA 0.5", "Object.CA", 6, false, diag.SourceSignatureDiscardUnsupported},
+		{"visible nonstroking alpha", "/ca 0.5", "Object.ca", 6, false, diag.SourceSignatureDiscardUnsupported},
+		{"invalid retained page group", "/Group << /S /Unknown >>", "", 3, true, diag.SourceInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.SignatureArtwork()
+			admissionEntry(d, tc.object, tc.entry)
+			if tc.degenerate {
+				d.Objs[5] = bytes.Replace(d.Objs[5], []byte("[75 85 175 145]"), []byte("[0 0 0 0]"), 1)
+				d.Objs[7] = admissionStream("/Type /XObject /Subtype /Form /BBox [0 0 0 0]", "")
+			}
+			_, _, ds := inspectSignatures(t, d, SourcePolicies{Signatures: packet.SignaturesDiscard})
+			finding := admissionError(t, ds)
+			if finding.Code != tc.want || tc.path != "" &&
+				(finding.PDFLocation == nil || *finding.PDFLocation != (diag.PDFLocation{Object: tc.object, Page: 1, Path: tc.path})) {
+				t.Fatalf("unexpected compositing decision: %+v", finding)
 			}
 		})
 	}

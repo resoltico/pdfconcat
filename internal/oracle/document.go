@@ -208,6 +208,42 @@ func (d *Document) PageCount() int { return len(d.pages) }
 // PageObjects returns the object reference of each page in order.
 func (d *Document) PageObjects() []string { return slices.Clone(d.pages) }
 
+// PageTransparencyGroup resolves the given page's own Group entry.
+func (d *Document) PageTransparencyGroup(page int) any {
+	return d.deref(d.dict(d.pages[page-1])["/Group"])
+}
+
+// FittingForm follows the Do binding in the fitted page's placement stream.
+func (d *Document) FittingForm(page int) (map[string]any, error) {
+	owner := d.dict(d.pages[page-1])
+	resources := asMap(d.effective(owner, "/Resources"))
+	xobjects := d.dict(resources["/XObject"])
+	streams := d.list(owner["/Contents"])
+	if streams == nil {
+		streams = []any{owner["/Contents"]}
+	}
+	for _, raw := range streams {
+		ref, ok := reference(raw)
+		if !ok {
+			return nil, fmt.Errorf("page %d Contents is not a stream reference", page)
+		}
+		object := strings.ReplaceAll(strings.TrimSuffix(ref, " R"), " ", ",")
+		data, _, err := run(d.tools.QPDF, "--show-object="+object, "--filtered-stream-data", d.Path)
+		if err != nil {
+			return nil, err
+		}
+		op := strings.Fields(data)
+		if len(op) != 11 || op[0] != "q" || op[7] != "cm" || op[9] != "Do" || op[10] != "Q" {
+			continue
+		}
+		form := d.dict(xobjects[op[8]])
+		if form["/Subtype"] == "/Form" {
+			return form, nil
+		}
+	}
+	return nil, fmt.Errorf("page %d has no Form bound to its fitting placement", page)
+}
+
 // Attachments is the number of embedded files qpdf finds.
 func (d *Document) Attachments() int { return d.attachments }
 

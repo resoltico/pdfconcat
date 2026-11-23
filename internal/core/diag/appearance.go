@@ -35,6 +35,11 @@ type AnnotationIssue struct {
 // Present reports whether an incompatibility was established.
 func (i AnnotationIssue) Present() bool { return i.Kind != NoAnnotationIssue }
 
+// PageAnnotationMustBeIndirect describes an invalid page annotation slot.
+func PageAnnotationMustBeIndirect() Explanation {
+	return explain("page_annotation_must_be_indirect", "A page annotation must be an indirect reference to an annotation dictionary.")
+}
+
 // FittingAnnotationRefusal owns each complete product sentence and remedy.
 func FittingAnnotationRefusal(issue AnnotationIssue) Explanation {
 	var text string
@@ -59,6 +64,13 @@ func FittingAnnotationRefusal(issue AnnotationIssue) Explanation {
 		panic("unknown annotation incompatibility")
 	}
 	return explain("annotation_fitting", text, strconv.Itoa(int(issue.Kind)), strconv.Itoa(issue.Page), issue.Subtype)
+}
+
+// FittingAnnotationViewerDependence describes the NoRotate portability advisory.
+func FittingAnnotationViewerDependence(subtype string) Explanation {
+	return explain("fitting_annotation_viewer_dependence", fmt.Sprintf(
+		"Use original page sizes to keep the source's viewer-dependent behavior, since viewers can differ in the placement or orientation of the %s annotation after fitting bakes page rotation.",
+		strconv.QuoteToASCII(subtype)), subtype)
 }
 
 // PDF20AnnotationRefusal owns the output-version incompatibility explanation.

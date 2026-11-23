@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,7 +27,7 @@ import (
 )
 
 func TestIncrementalTimestampDiscard(t *testing.T) {
-	for _, fixture := range []string{"incremental-timestamp.pdf", "compressed-empty-appearance.pdf"} {
+	for _, fixture := range []string{"incremental-timestamp.pdf", "compressed-empty-appearance.pdf", "grouped-empty-appearance.pdf"} {
 		t.Run(fixture, func(t *testing.T) {
 			verifyIncrementalTimestampDiscard(t, fixture)
 		})
@@ -87,6 +88,9 @@ func verifyIncrementalTimestampDiscard(t *testing.T, fixture string) {
 			t.Fatalf("timestamp removal changed page %d", page)
 		}
 	}
+	if fixture == "grouped-empty-appearance.pdf" {
+		verifyGroupedTimestampPages(t, tools, dir, input, output, before)
+	}
 
 	// Re-encode the effective document independently as xref and object streams.
 	streamed := filepath.Join(dir, "streamed.pdf")
@@ -111,6 +115,78 @@ func verifyIncrementalTimestampDiscard(t *testing.T, fixture string) {
 		t.Fatalf("discard warnings for repeated source: %d", warnings)
 	}
 	checkSignatureOutput(t, tools, result.Output.Path)
+}
+
+func verifyGroupedTimestampPages(t *testing.T, tools oracle.Tools, dir, input, kept string, original []byte) {
+	t.Helper()
+	changed := filepath.Join(dir, "changed.pdf")
+	mutant := bytes.Replace(original, []byte("0 0 1 rg"), []byte("1 0 0 rg"), 1)
+	if err := os.WriteFile(changed, mutant, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if sameSignatureRaster(rasterSignaturePage(t, tools.PDFToPPM, input, 2, false),
+		rasterSignaturePage(t, tools.PDFToPPM, changed, 2, false)) {
+		t.Fatal("screen comparison accepted a changed page mark")
+	}
+	t.Run("print", func(t *testing.T) {
+		gs, err := exec.LookPath("gs")
+		if err != nil {
+			t.Skip("Ghostscript is unavailable for print raster comparison")
+		}
+		for _, page := range []int{1, 2} {
+			if !sameSignatureRaster(rasterSignaturePrint(t, gs, input, page), rasterSignaturePrint(t, gs, kept, page)) {
+				t.Fatalf("grouped timestamp removal changed print page %d", page)
+			}
+		}
+		if sameSignatureRaster(rasterSignaturePrint(t, gs, input, 2), rasterSignaturePrint(t, gs, changed, 2)) {
+			t.Fatal("print comparison accepted a changed page mark")
+		}
+	})
+	plan := fmt.Appendf(nil, `{"version":%d,"signatures":"discard","fitting":{"target":"400x400pt"},"items":[{"source":"source.pdf"}]}`, app.PlanVersion)
+	r := app.Execute(t.Context(), app.Request{InspectionWorkers: 1, Operation: app.Build, WorkingDir: dir, Output: "fit.pdf", Input: app.PlanBytes{Data: plan}})
+	if r.Status != "ok" || !r.Output.Published {
+		t.Fatalf("fit: %v", r.Diagnostics)
+	}
+	checkSignatureOutput(t, tools, r.Output.Path)
+	wantGroup := map[string]any{"/S": "/Transparency", "/CS": "/DeviceRGB", "/I": true}
+	for _, path := range []string{kept, r.Output.Path} {
+		doc, err := oracle.Load(tools, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := doc.PageTransparencyGroup(2); !reflect.DeepEqual(got, wantGroup) {
+			t.Fatalf("page 2 Group = %v, want %v", got, wantGroup)
+		}
+		if path == r.Output.Path {
+			form, err := doc.FittingForm(2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, found := form["/Group"]; found {
+				t.Fatalf("fitting Do binds a transparency Form: %v", form)
+			}
+		}
+	}
+	img := rasterSignaturePage(t, tools.PDFToPPM, r.Output.Path, 2, false)
+	// The 595 × 842 pt source is contained in a centered 400 × 400 pt
+	// frame. Its blue mark covers [75,105] on each source axis.
+	if img.Bounds() != image.Rect(0, 0, 400, 400) {
+		t.Fatalf("unexpected fitted canvas: %v", img.Bounds())
+	}
+	var blue image.Rectangle
+	for y := range 400 {
+		for x := range 400 {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if b > 0xffff/2 && r < 0xffff/4 && g < 0xffff/4 {
+				blue = blue.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	want := image.Rect(94, 350, 109, 365)
+	if blue.Empty() || !blue.Min.Sub(want.Min).In(image.Rect(-1, -1, 2, 2)) ||
+		!blue.Max.Sub(want.Max).In(image.Rect(-1, -1, 2, 2)) {
+		t.Fatalf("fitted mark bounds %v, want near %v", blue, want)
+	}
 }
 
 func checkSignatureOutput(t *testing.T, tools oracle.Tools, path string) {

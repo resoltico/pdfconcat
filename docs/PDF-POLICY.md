@@ -25,6 +25,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Unsupported structure or fidelity boundary | Refuse `source_unsupported` |
 | Unexpected backend failure, including recovered panics | Fail `source_processing_failed`; this does not establish source invalidity |
 | Content, ordinary annotations and links | Keep through upstream merge, subject to the limits below |
+| Direct dictionaries in page `Annots` arrays | Refuse `source_invalid` at the original page and array slot |
 | AcroForm field-tree members | Require dictionaries at each `Fields` and `Kids` array entry. Null members are invalid |
 | Static AcroForm fields | Require compatible resolved `/DR`, form-level `/DA` and `/Q`; otherwise `source_form_unsupported` |
 | Later nonempty forms | Backend may namespace fields even when original names do not collide; build reports actual mappings |
@@ -38,7 +39,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Source page labels and output intents | Remove with warnings; authored numbering generates output labels; no PDF/A/PDF/X claim |
 | Catalog `OpenAction`/`AA` and JavaScript name tree | Remove with warning |
 | Embedded-files index and catalog `AF` | Remove with warning; page FileAttachment annotations remain |
-| Catalog `PageLayout`, `PageMode`, `ViewerPreferences` | Remove before semantic validation, with `source_viewer_settings_removed` per entry |
+| Catalog `PageLayout`, `PageMode`, `ViewerPreferences` | Remove before semantic validation, with `source_viewer_settings_removed` per non-null entry or unresolved reference |
 | Document Info and catalog-level XMP | Replace/remove. Read PDF 2.0 direct trailer Info without allocating an object number. Metadata attached to retained pages or other objects may remain |
 | Page/annotation actions and scripts | Keep; PDFConcat does not execute them or verify network targets |
 | Relative external actions and catalog URI Base | Keep retained action operands, remove the source Base and warn about location dependence. See [external action context](#external-action-context). |
@@ -116,9 +117,15 @@ Inspection and assembly use this same admission path; assembly rereads and check
 each original digest before admission. Findings already collected survive a later
 validation failure.
 
+Page `Annots` arrays must refer indirectly to annotation dictionaries.
+Direct dictionaries are refused at their original page and array slot before
+selection. An absent or null `Annots` entry remains optional. Live-null
+references within an array follow the usual null handling.
+
 Source viewer directives do not govern the composed document. Their catalog
-entries are removed whether their values are valid, invalid, direct or indirect;
-PDF null is equivalent to absence. Only the catalog references are removed, so
+entries are removed whether their values are valid, invalid, direct or indirect.
+Direct and live indirect PDF null are equivalent to absence. Undefined and
+wrong-generation references still produce a warning. Only the catalog references are removed, so
 objects shared with retained content remain intact. This includes the nonstandard
 `/PageLayout /PDLayoutDontCare`. Removal does not excuse parse failures or
 whole-source refusals, including signatures in otherwise discarded objects.
@@ -288,8 +295,12 @@ comments. The proof accepts unfiltered streams or one complete Flate member
 with default settings and no trailing encoded bytes. It checks the original
 stream length and looks ahead at most 4 KiB from the declared end for complete
 `endstream` and `endobj` tokens. Painted or unproved appearances are refused
-because some viewers can paint them in print mode. No-appearance timestamps
-can also qualify.
+because some viewers can paint them in print mode. With no ink to convert, the
+page's transparency group is preserved. A widget's blend mode entry must
+be a name and its alpha entries must be numbers. Absent entries and nulls
+are allowed. Widgets without an appearance can also qualify.
+An active or unprovable `NeedAppearances` setting causes a refusal at that
+AcroForm entry, even when a printable degenerate widget has no appearance.
 
 A visible widget must paint in both normal screen and print modes. PDFConcat
 maps the selected normal Form appearance to the widget rectangle using its
@@ -301,7 +312,8 @@ visibility that depends on interaction, zoom or rotation are refused. Rollover
 and pressed appearances are discarded with the widget.
 
 Each inspected source with removed state reports one
-`source_signature_discarded` warning, naming all consuming items. A fresh
+`source_signature_discarded` warning, naming all consuming items and carrying
+[typed counts](CLI.md#output). A fresh
 check of the staged PDF verifies signature state and the artwork on retained
 physical pages before publication, including fitted clip bounds and placement.
 A flattened mark in a source PDF is ordinary page content. Authenticate the
@@ -485,6 +497,9 @@ determines the scale, placement and clipping. Source-invisible page artwork
 stays clipped in the new margins. Content remains vector/text inside a Form
 XObject; hidden objects may remain in the file. This is not redaction. Staged
 output verification checks Form stream encodings as well as page Contents.
+The fitted page retains its original transparency group. Its ordinary
+placement Form preserves the source clip and painting resources, including
+transparency groups authored on nested Forms and soft masks.
 
 Pattern scale, phase and orientation follow the source artwork. Original pattern
 matrices and shared/nested resources are retained in their own coordinate spaces.
@@ -498,6 +513,10 @@ mapping and orientation when page rotation is baked. Existing appearance streams
 and their resources remain shared safely; wrappers preserve source clipping and
 page-resource fallback. NoRotate (implicit for Text annotations) pivots about
 the original upper-left corner; NoZoom remains a viewer magnification rule.
+Fitting a rotated page with a potentially visible NoRotate annotation and a
+usable normal appearance reports `fit_annotation_viewer_dependent` at the
+source annotation. Viewer placement or orientation can vary when rotation is
+baked. Use original page sizes to retain the source's viewer-dependent behavior.
 FreeText callouts and insets transform, but its default/rich-text style strings
 remain authored. Subsequent appearance regeneration after editing is viewer-dependent.
 
@@ -517,8 +536,11 @@ a zero-width or zero-height Rect has no display area and is retained without a
 normal appearance. This exemption does not apply to Text icons or path annotations.
 
 Interactive regions include Links, activation actions (A), and annotation AA
-pointer/focus triggers E, X, D, U, Fo and Bl. NoView annotations have no on-screen
-hit area. ReadOnly also disables user interaction for non-widget annotations;
+pointer/focus triggers E, X, D, U, Fo and Bl. ToggleNoView annotations can become
+visible on screen through events such as hover, even with NoView set. Fitting
+accounts for that visibility in the advisory and interactive bounds check.
+NoView alone suppresses the on-screen hit area. ReadOnly disables user interaction
+for non-widget annotations;
 Widgets use field flags; fitting requires proved kept widget ownership. ReadOnly does not
 waive appearance requirements or clipping. Page-lifecycle actions alone do not
 create an interactive area. Appearance clipping still applies to printed artwork. Supply reviewed normal appearances for the

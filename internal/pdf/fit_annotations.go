@@ -153,15 +153,19 @@ func annotationTransform(s *model.Context, d types.Dict, rect types.Rectangle, m
 		}
 		flags = int(v)
 	}
-	subtype, err := s.Dereference(d["Subtype"])
+	subtype, err := nameValue(s, d["Subtype"])
 	if err != nil {
 		return m, err
 	}
-	if flags&int(model.AnnNoRotate) == 0 && subtype != types.Name("Text") {
+	if !annotationNoRotate(flags, subtype) {
 		return m, nil
 	}
 	anchor := m.Transform(types.Point{X: rect.LL.X, Y: rect.UR.Y})
 	return matrix.CalcTransformMatrix(scale, scale, 0, 1, anchor.X-scale*rect.LL.X, anchor.Y-scale*rect.UR.Y), nil
+}
+
+func annotationNoRotate(flags int, subtype types.Name) bool {
+	return flags&int(model.AnnNoRotate) != 0 || subtype == "Text"
 }
 
 func fitAnnotations(c context.Context, s *model.Context, page, resources types.Dict, box types.Rectangle, m matrix.Matrix, scale float64) error {

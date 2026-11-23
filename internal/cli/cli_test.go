@@ -155,10 +155,24 @@ func TestInvocationPreservesCommandAndOffendingArgument(t *testing.T) {
 		command, code, item, message string
 		json                         bool
 	}{
+		{[]string{"che\xffck", "--json"}, "", "usage_invalid_value", "argv:0", "valid UTF-8", false},
 		{[]string{"build", "\xff.pdf", "--json"}, "build", "usage_invalid_value", "argv:1", "valid UTF-8", true},
 		{[]string{"check", "--plan", "--", "\xff.pdf", "--json"}, "check", "usage_invalid_value", "argv:3", "valid UTF-8", true},
 		{[]string{"check", "--", "\xff.pdf", "--json"}, "check", "usage_invalid_value", "argv:2", "valid UTF-8", false},
-		{[]string{"other", "\xff.pdf", "--json"}, "", "usage_invalid_value", "argv:1", "valid UTF-8", false},
+		{[]string{"other", "\xff.pdf", "--json"}, "", "usage_unknown_command", "argv:0", "Unknown command: other", false},
+		{[]string{"--other", "\xff.pdf", "--json"}, "", "usage_unknown_option", "argv:0", "Unknown root option: --other", false},
+		{[]string{"check", "--unknown-option", "\xff.pdf", "--json"}, "check", "usage_unknown_option", "argv:1", "Unknown option: --unknown-option", true},
+		{[]string{"check", "\xff.pdf", "--unknown-option", "--json"}, "check", "usage_invalid_value", "argv:1", "valid UTF-8", true},
+		{[]string{"check", "--report=", "\xff.pdf", "--json"}, "check", "usage_invalid_value", "argv:1", "must not be empty", true},
+		{[]string{"check", "--json", "--json", "\xff.pdf"}, "check", "usage_conflict", "argv:2", "may be used only once", true},
+		{[]string{"check", "--plan", "--report=\xff", "--json"}, "check", "usage_missing_value", "argv:1", "--plan needs", true},
+		{[]string{"build", "-o", "\xff.pdf", "--bad", "--json"}, "build", "usage_invalid_value", "argv:2", "valid UTF-8", true},
+		{[]string{"check", "--plan=\xff", "--json"}, "check", "usage_invalid_value", "argv:1", "valid UTF-8", true},
+		{[]string{"check", "--report", "bad\x00name", "--json"}, "check", "usage_invalid_value", "argv:2", "without NUL", true},
+		{[]string{"--help", "\xff"}, "", "usage_conflict", "argv:1", "Root help accepts no other arguments", false},
+		{[]string{"licenses", "\xff"}, "", "usage_conflict", "argv:1", "licenses accepts no arguments", false},
+		{[]string{"help", "\xff", "extra"}, "", "usage_invalid_value", "argv:1", "valid UTF-8", false},
+		{[]string{"help", "other", "\xff"}, "", "usage_unknown_command", "argv:1", "Unknown help command: other", false},
 		{[]string{"check", "--base-dir", "here", "source.pdf"}, "check", "usage_conflict", "argv:1", "requires --plan -", false},
 		{[]string{"check", "--plan=file.json", "--base-dir=here"}, "check", "usage_conflict", "argv:2", "requires --plan -", false},
 		{[]string{"build", "--plan", "file.json", "source.pdf", "--json"}, "build", "usage_conflict", "argv:3", "cannot be combined", true},
@@ -167,6 +181,9 @@ func TestInvocationPreservesCommandAndOffendingArgument(t *testing.T) {
 		{[]string{"build", "--plan=file.json", "--blank"}, "build", "usage_conflict", "argv:2", "cannot be combined", false},
 		{[]string{"schema", "plan", "result"}, "", "usage_invalid_value", "argv:2", "accepts one selector", false},
 		{[]string{"schema", "unknown", "result"}, "", "usage_invalid_value", "argv:1", "requires plan or result", false},
+		{[]string{"schema", "unknown", "\xff"}, "", "usage_invalid_value", "argv:1", "requires plan or result", false},
+		{[]string{"schema", "plan", "\xff"}, "", "usage_invalid_value", "argv:2", "accepts one selector", false},
+		{[]string{"schema", "\xff", "plan"}, "", "usage_invalid_value", "argv:1", "valid UTF-8", false},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			command, failure := cli.Parse(tc.args)

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-23
+
+- Update JSON clients to result v11. Signature-discard findings now include seven typed counts. Plans still use v11. [CLI output](docs/CLI.md#output)
+- Refuse direct annotation dictionaries in page annotation arrays and report their original slots in Check and Build. [PDF policy](docs/PDF-POLICY.md#admission-and-viewer-settings)
+- Discard proved-empty printable degenerate widgets while preserving page transparency. Refuse active appearance regeneration even without an AP entry. [Policy](docs/PDF-POLICY.md#signatures)
+- Preserve page transparency and knockout behavior during fitting. [Fitting policy](docs/PDF-POLICY.md#fitting)
+- Warn when baking rotation can change NoRotate display, including hover-only annotations. Refuse hover-enabled hit areas crossing the source frame. [Fitting policy](docs/PDF-POLICY.md#fitting)
+- Report the first argument fault the CLI encounters, even when a later argument contains invalid UTF-8. [CLI output](docs/CLI.md#output)
+- Treat live indirect null viewer settings as absent and omit their removal warnings. [Policy](docs/PDF-POLICY.md#admission-and-viewer-settings)
+
 ## [0.21.0] - 2026-11-23
 
 - Admit printable degenerate signature widgets whose local Form appearances decode to only PDF whitespace and comments. [Signature policy](docs/PDF-POLICY.md#signatures)

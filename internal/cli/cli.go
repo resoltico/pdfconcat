@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/resoltico/pdfconcat/internal/app"
 	packet "github.com/resoltico/pdfconcat/internal/core"
@@ -57,17 +56,15 @@ func Parse(args []string) (Command, *app.Result) {
 		r := InvocationFailure(operationHint(c.Name), kind, message, fmt.Sprintf("argv:%d", index))
 		return c, &r
 	}
-	for i, arg := range args {
-		if !utf8.ValidString(arg) || strings.ContainsRune(arg, 0) {
-			if i > 0 && operationHint(args[0]) != "" {
-				c.Name = args[0]
-			}
-			return failure("usage_invalid_value", "Arguments must be valid UTF-8 without NUL.", i)
-		}
+	encodingFailure := func(index int) (Command, *app.Result) {
+		return failure(InvalidValue, "Arguments must be valid UTF-8 without NUL.", index)
 	}
 	if len(args) == 0 {
 		c.Help = true
 		return c, nil
+	}
+	if !validInvocationText(args[0]) {
+		return encodingFailure(0)
 	}
 	switch args[0] {
 	case "--help", "-h":
@@ -80,21 +77,23 @@ func Parse(args []string) (Command, *app.Result) {
 		c.Name = "version"
 	case "help":
 		c.Help = true
+		if len(args) == 1 {
+			return c, nil
+		}
+		topic := args[1]
+		if !validInvocationText(topic) {
+			return encodingFailure(1)
+		}
+		if topic == "--help" || topic == "-h" {
+			topic = "help"
+		}
+		if !knownCommand(topic) {
+			return failure("usage_unknown_command", "Unknown help command: "+topic, 1)
+		}
 		if len(args) > 2 {
 			return failure("usage_conflict", "help accepts at most one command.", 2)
 		}
-		if len(args) == 2 {
-			c.Name = args[1]
-			if c.Name == "--help" || c.Name == "-h" {
-				c.Name = "help"
-				return c, nil
-			}
-			if !knownCommand(c.Name) {
-				unknown := c.Name
-				c.Name = ""
-				return failure("usage_unknown_command", "Unknown help command: "+unknown, 1)
-			}
-		}
+		c.Name = topic
 		return c, nil
 	default:
 		if strings.HasPrefix(args[0], "-") {
@@ -106,6 +105,9 @@ func Parse(args []string) (Command, *app.Result) {
 		c.Name = args[0]
 	}
 	if c.Name == "schema" {
+		if len(args) > 1 && !validInvocationText(args[1]) {
+			return encodingFailure(1)
+		}
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 			c.Help = true
 			return c, nil
@@ -135,6 +137,9 @@ func Parse(args []string) (Command, *app.Result) {
 	positional := false
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
+		if !validInvocationText(arg) {
+			return encodingFailure(i)
+		}
 		if !positional && arg == "--" {
 			positional = true
 			continue
@@ -162,6 +167,9 @@ func Parse(args []string) (Command, *app.Result) {
 					}
 					i = next
 					value = args[i]
+					if !validInvocationText(value) {
+						return encodingFailure(i)
+					}
 				}
 				if value == "" {
 					return failure("usage_invalid_value", spec.name+" must not be empty.", i)

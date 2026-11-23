@@ -217,6 +217,9 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	if e = detachProvedZeroOffsetStructure(s); e != nil {
 		return s, origins, ds, e
 	}
+	if e = checkSourceAnnotationReferences(c, s, pages); e != nil {
+		return s, origins, ds, e
+	}
 	if e = inspectRetainedDestinations(c, s, pages, true); e != nil {
 		return s, origins, ds, e
 	}
@@ -307,10 +310,18 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	// Remove only source viewer directives, after inspecting the original graph.
 	// Other discarded catalog structures still require their own validation.
 	for _, key := range []string{"PageLayout", "PageMode", "ViewerPreferences"} {
-		if _, present := cat[key]; !present {
+		raw := cat[key]
+		delete(cat, key)
+		if raw == nil {
 			continue
 		}
-		delete(cat, key)
+		// An undefined reference can dereference to nil too. Only an exact
+		// live reference can establish an indirect null.
+		if ref, ok := raw.(types.IndirectRef); ok && liveReference(s, ref) {
+			if value, err := s.Dereference(ref); err == nil && value == nil {
+				continue
+			}
+		}
 		d := diag.Report(diag.SourceViewerSettingsRemoved, diag.SourceViewerSettingsAreOmittedFromComposedOutput())
 		d.PDFLocation = &diag.PDFLocation{Object: s.Root.ObjectNumber.Value(), Path: "Catalog." + key}
 		ds = append(ds, d)
@@ -671,10 +682,6 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins, policy 
 		}
 	}
 	facts.PDF20AppearanceIssue, err = appearanceIssue(c, s)
-	if err != nil {
-		return facts, ds, err
-	}
-	facts.AnnotationFittingIssue, err = annotationFittingIssue(c, s, geometries, facts.fitting)
 	if err != nil {
 		return facts, ds, err
 	}

@@ -38,7 +38,7 @@ controls or bare undeclared whole-page wrappers while retaining the artwork.
 
 Check and Build warn when a retained relative URI or remote GoTo action can
 resolve differently from the assembled packet's location.
-[Navigation warnings](docs/PDF-POLICY.md#destination-byte-identity)
+[Navigation warnings](docs/PDF-POLICY.md#external-action-context)
 
 Direct inputs and default plans refuse populated signature state. To create an
 unsigned packet while delivering the originals separately, set
@@ -173,9 +173,10 @@ integer-rounded A4 sheets, or `--fit-tolerance 0pt` to require exact dimensions.
 Matching pages keep their native geometry. Other pages are scaled proportionally
 and centered on the target, preserving visible clipping and the text layout.
 Annotation appearances, interactive hit areas, forms and internal destinations
-can restrict transformations. For remedies, see the
-[fitting policy](docs/PDF-POLICY.md#fitting). Omit `--fit-to` in direct mode to
-keep the source sizes.
+can restrict transformations. Check and Build warn when baking page rotation
+can affect how viewers position or orient a `NoRotate` annotation. Omit
+`--fit-to` in direct mode to keep the source sizes.
+[Fitting policy](docs/PDF-POLICY.md#fitting)
 
 For a first run without preparing any input PDFs, create one blank A4 page in a
 writable folder where `blank-a4.pdf` does not already exist:
@@ -273,9 +274,12 @@ all following arguments as paths. Quote paths containing spaces in your shell.
 
 `--report FILE` requests a full JSON assembly report from either command. When
 destination rules permit, a failed check or build can also save a report. Rejected
-command-line arguments produce no report. Reports record input SHA-256 hashes,
-page mappings and uncapped diagnostics. Their `page_sizes` runs contain selected
-original page ranges, observed source dimensions and expected output dimensions.
+command-line arguments produce no report. Reports keep uncapped diagnostics
+and record input SHA-256 hashes and page mappings when known. The
+`source_signature_discarded` finding includes typed counts for the removed
+signatures, document timestamps and related state. The `page_sizes` runs contain
+selected original page ranges, observed source dimensions and expected output
+dimensions.
 See [source page-size reports](docs/CLI.md#selected-source-page-size-runs).
 
 PDF and report publication are separate operations. A stdout write failure returns
@@ -307,7 +311,7 @@ commands. A dash indicates no dedicated built-in workflow.
 
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
 | --- | --- | --- |
-| Merge PDFs in a chosen order | [`merge`](https://pdfcpu.io/core/merge/) | Direct operands or plan |
+| Compose source PDFs in a chosen order | [`merge`](https://pdfcpu.io/core/merge/) with two or more inputs | Direct operands or plan with one or more sources |
 | Rewrite an existing output PDF with appended pages | `merge --mode append` | — |
 | Automatically alternate pages from two PDFs | `merge --mode zip` [1] | — |
 | Read a PDF from stdin while merging | One `-` input in `merge` create mode [1] | — |
@@ -358,11 +362,14 @@ commands. A dash indicates no dedicated built-in workflow.
    content rotation by default in that mode. Set `rotate:off` to keep the artwork's
    displayed orientation. PDFConcat uses the requested target orientation,
    preserves the artwork's displayed orientation and remaps supported local
-   destinations on transformed pages. [pdfcpu resize](https://pdfcpu.io/core/resize/) ·
+   destinations on transformed pages. It warns when baking rotation can affect
+   how viewers position or orient a `NoRotate` annotation.
+   [pdfcpu resize](https://pdfcpu.io/core/resize/) ·
    [PDFConcat fitting policy](docs/PDF-POLICY.md#fitting)
-4. **Bundled fonts.** pdfcpu installs Roboto Regular into its filesystem
-   configuration font store. Select `Roboto-Regular` for generated text and
-   keep filesystem configuration enabled. PDFConcat embeds Noto Sans directly.
+4. **Bundled fonts.** pdfcpu's automatic configuration seeds Roboto Regular
+   when its configuration font directory has no non-hidden files. Use
+   `Roboto-Regular` when it is available in that store. PDFConcat embeds
+   Noto Sans directly.
    [pdfcpu configuration](https://pdfcpu.io/getting_started/config_dir/#user-fonts)
 5. **Checks and reports.** pdfcpu `info --json` reports document properties.
    PDFConcat `check` inspects a planned assembly, including generated-text
@@ -375,8 +382,9 @@ commands. A dash indicates no dedicated built-in workflow.
    page wrappers with the supported graphics-state prelude.
    [PDFConcat visibility policy](docs/PDF-POLICY.md#optional-content)
 7. **Signature discard.** The PDFConcat plan policy retains supported visible
-   marks as static artwork in the packet. Its report identifies affected inputs.
-   Use the originals for signature authentication.
+   marks as static artwork in the packet. Its report identifies affected inputs
+   and counts the removed signature values, timestamps and related state. Use
+   the originals for signature authentication.
    [pdfcpu merge options](https://pdfcpu.io/core/merge/) ·
    [PDFConcat signature policy](docs/PDF-POLICY.md#signatures)
 

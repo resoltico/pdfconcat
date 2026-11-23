@@ -98,7 +98,7 @@ func TestFittingOverrideAdmissionAndRoutes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, exit, data := invokeJSON(t, append([]string{"check"}, tc.args...), tc.stdin)
-			if exit != 0 || r.FormatVersion != 10 || r.Fitting == nil || r.Fitting.Tolerance != tc.tolerance ||
+			if exit != 0 || r.FormatVersion != 11 || r.Fitting == nil || r.Fitting.Tolerance != tc.tolerance ||
 				r.Fitting.Target.Width != 595.2755905511812 || r.Fitting.Target.Height != 841.8897637795276 {
 				t.Fatalf("exit=%d %s", exit, data)
 			}

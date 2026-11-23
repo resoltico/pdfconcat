@@ -76,7 +76,7 @@ func TestViewerSettingFindingsSurviveCorePlansBuildsAndReports(t *testing.T) {
 				if e = json.Unmarshal(saved, &decoded); e != nil {
 					t.Fatal(e)
 				}
-				encodedActual, e := json.Marshal(r.Diagnostics)
+				encodedActual, e := json.Marshal(exchange.Project(r).Diagnostics)
 				if e != nil {
 					t.Fatal(e)
 				}

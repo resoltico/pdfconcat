@@ -83,10 +83,18 @@ empty_appearance = stream(zlib.compress(b"")).replace(
     b" >>", b" /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 0 0]"
     b" /Matrix [1 0 0 1 0 0] /Resources << >> /Filter /FlateDecode >>", 1,
 )
-append_revision(timestamp_objects | {
+compressed_objects = timestamp_objects | {
     1: timestamp_objects[1][:-2] + b"/Extensions << /ESIC << /BaseVersion /1.7 /ExtensionLevel 5 >> >> >>",
     8: timestamp_objects[8][:-2] + b"/AP << /N 10 0 R >> >>",
     10: empty_appearance,
-},11,prev)
+}
+append_revision(compressed_objects, 11, prev)
 fill_byte_range()
 (directory / "compressed-empty-appearance.pdf").write_bytes(pdf)
+
+pdf[:] = original
+append_revision(compressed_objects | {
+    4: page % (6, b" /Annots [8 0 R] /Group << /S /Transparency /CS /DeviceRGB /I true >>"),
+}, 11, prev)
+fill_byte_range()
+(directory / "grouped-empty-appearance.pdf").write_bytes(pdf)

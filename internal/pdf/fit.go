@@ -62,7 +62,7 @@ func fitGeometries(c context.Context, s *model.Context, geometries []pageGeometr
 	if err := bindFitting(geometries, plans); err != nil {
 		return err
 	}
-	findings, e := fittingFindings(c, s, geometries, plans, origins)
+	findings, _, e := fittingFindings(c, s, geometries, plans, origins)
 	if e != nil {
 		return e
 	}
@@ -106,10 +106,8 @@ func applyFitting(c context.Context, s *model.Context, geometries []pageGeometry
 		}
 		// A Form establishes the original default coordinate space for patterns and
 		// an unescapable BBox clip. Do not rewrite shared/nested resources or matrices.
+		// The original transparency Group stays on the page that owns it.
 		extra := types.Dict{"Type": types.Name("XObject"), "Subtype": types.Name("Form"), "BBox": box.Array(), "Resources": clonedDirectDict(attrs.Resources)}
-		if group := page.dict["Group"]; group != nil {
-			extra["Group"] = group.Clone()
-		}
 		form, err := addStream(s, data, extra)
 		if err != nil {
 			return err

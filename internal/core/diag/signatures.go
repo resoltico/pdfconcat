@@ -25,6 +25,8 @@ const (
 	SignatureAppearanceBoundary     SignatureDiscardReason = "appearance_boundary"
 	SignatureAppearanceClosingLimit SignatureDiscardReason = "appearance_closing_limit"
 	SignatureAppearance             SignatureDiscardReason = "appearance"
+	SignatureRegeneration           SignatureDiscardReason = "regeneration"
+	SignatureTransparencySetting    SignatureDiscardReason = "transparency_setting"
 	SignatureCompositing            SignatureDiscardReason = "compositing"
 	SignatureContentBoundary        SignatureDiscardReason = "content_boundary"
 )
@@ -51,6 +53,10 @@ func SignatureDiscardUnsupported(reason SignatureDiscardReason) Explanation {
 		message = fmt.Sprintf("The signature appearance reaches the %d-byte closing-token lookahead limit.", SignatureAppearanceClosingLookaheadBytes)
 	case SignatureAppearance:
 		message = "The signature widget has no provably selected static normal appearance."
+	case SignatureRegeneration:
+		message = "The form requests appearance regeneration or its regeneration setting cannot be proved inactive."
+	case SignatureTransparencySetting:
+		message = "The signature widget has a malformed blend mode or alpha setting."
 	case SignatureCompositing:
 		message = "The signature widget could render differently as page artwork because of stacking or compositing."
 	case SignatureContentBoundary:
@@ -79,15 +85,38 @@ func XFAWithoutStaticFields() Explanation {
 	return explain("xfa_without_static_fields", "The source contains XFA form content without a usable static form. Supply a PDF with a static form rendition.")
 }
 
-// SignatureStateDiscarded describes the effect on the composed copy.
-func SignatureStateDiscarded() Explanation {
-	return explain("signature_state_discarded", "Composition discards the listed source signature state. Any retained signature mark becomes static page artwork. Use the original for authentication.")
+// SignatureDiscardCounts records the removed state of one admitted source.
+type SignatureDiscardCounts struct {
+	PopulatedSignatureFields int
+	Widgets                  int
+	SignatureValues          int
+	DocumentTimestamps       int
+	PermissionStructures     int
+	ValidationStores         int
+	SignatureFlagEntries     int
 }
 
-// SignatureDiscardEvidence reports the kinds and counts of source state removed.
-func SignatureDiscardEvidence(fields, widgets, signatures, timestamps, permissions, validation, flags int) Explanation {
-	return explain("signature_discard_evidence", fmt.Sprintf("Counts of removed state are populated signature fields (%d), widgets (%d), signature values (%d), document timestamps (%d), permission structures (%d), validation stores (%d) and signature flag entries (%d).", fields, widgets, signatures, timestamps, permissions, validation, flags),
-		strconv.Itoa(fields), strconv.Itoa(widgets), strconv.Itoa(signatures), strconv.Itoa(timestamps), strconv.Itoa(permissions), strconv.Itoa(validation), strconv.Itoa(flags))
+// SignatureDiscard returns the typed counts carried by a discard finding.
+func (d Diagnostic) SignatureDiscard() (SignatureDiscardCounts, bool) {
+	if d.signatureDiscard == nil {
+		return SignatureDiscardCounts{}, false
+	}
+	return *d.signatureDiscard, true
+}
+
+// SignatureDiscarded reports the effect on the composed copy with its evidence.
+func SignatureDiscarded(counts SignatureDiscardCounts) Diagnostic {
+	d := Report(SourceSignatureDiscarded, explain("signature_state_discarded",
+		"Composition discards the listed source signature state. Any retained signature mark becomes static page artwork. Use the original for authentication."))
+	d.Identity.Phase = "source_observation"
+	d.signatureDiscard = &counts
+	number := strconv.Itoa
+	AttachEvidence(&d, explain("signature_discard_evidence",
+		fmt.Sprintf("Counts of removed state are populated signature fields (%d), widgets (%d), signature values (%d), document timestamps (%d), permission structures (%d), validation stores (%d) and signature flag entries (%d).",
+			counts.PopulatedSignatureFields, counts.Widgets, counts.SignatureValues, counts.DocumentTimestamps, counts.PermissionStructures, counts.ValidationStores, counts.SignatureFlagEntries),
+		number(counts.PopulatedSignatureFields), number(counts.Widgets), number(counts.SignatureValues), number(counts.DocumentTimestamps),
+		number(counts.PermissionStructures), number(counts.ValidationStores), number(counts.SignatureFlagEntries)))
+	return d
 }
 
 // UndefinedXFAReference explains a broken reference in the original XFA declaration.

@@ -13,12 +13,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 
 	packet "github.com/resoltico/pdfconcat/internal/core"
 	"github.com/resoltico/pdfconcat/internal/core/diag"
 	"github.com/resoltico/pdfconcat/internal/oracle"
+	"github.com/resoltico/pdfconcat/internal/pdf"
 	"github.com/resoltico/pdfconcat/internal/pdffixture"
 )
 
@@ -62,6 +65,63 @@ func fitOutput(t *testing.T, doc *pdffixture.Doc, target packet.Size, repeats in
 		}
 	}
 	return path
+}
+
+func TestFitPreservesPageTransparency(t *testing.T) {
+	tools := oracle.RequireTools(t)
+	const group = "<< /S /Transparency /CS /DeviceRGB /I true /K true >>"
+	for _, tc := range []struct {
+		name, entry, extra string
+		scale              float64
+		grouped            bool
+	}{
+		{"knockout recentered", "/Group " + group, "", 1, true},
+		{"indirect knockout scaled", "/Group 7 0 R", group, .5, true},
+		{"ungrouped", "", "", 1, false},
+		{"live null group", "/Group 7 0 R", "null", 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := pdffixture.FitMarks("")
+			doc.Objs[2] = fmt.Appendf(nil, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 430] /CropBox [20 30 420 430] /Rotate 90 /Resources << /ExtGState << /Alpha 6 0 R >> >> /Contents 4 0 R %s >>", tc.entry)
+			// Overlapping objects exercise knockout against an earlier mark.
+			const art = "0.1 0.2 0.7 rg 20 30 90 85 re f q /Alpha gs 0.9 0.2 0.15 rg 35 35 155 130 re f 0.23 0.8 0.48 rg 85 60 155 140 re f Q"
+			doc.Objs[3] = fmt.Appendf(nil, "<< /Length %d >>\nstream\n%s\nendstream", len(art), art)
+			doc.Objs = append(doc.Objs, []byte("<< /Type /ExtGState /ca 0.6 /BM /Multiply >>"))
+			if tc.extra != "" {
+				doc.Objs = append(doc.Objs, []byte(tc.extra))
+			}
+			source := filepath.Join(t.TempDir(), "source.pdf")
+			if err := doc.WriteFile(source); err != nil {
+				t.Fatal(err)
+			}
+			if err := tools.Check(source); err != nil {
+				t.Fatal(err)
+			}
+			output := fitOutput(t, doc, packet.Size{Width: 400 * tc.scale, Height: 480 * tc.scale}, 1)
+			fitCompareSheet(t, source, output, tc.scale, int(40*tc.scale))
+			actual, err := oracle.Load(tools, output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want any
+			if tc.grouped {
+				want = map[string]any{"/S": "/Transparency", "/CS": "/DeviceRGB", "/I": true, "/K": true}
+			}
+			if got := actual.PageTransparencyGroup(1); !reflect.DeepEqual(got, want) {
+				t.Fatalf("fitted page Group = %v, want %v", got, want)
+			}
+			form, err := actual.FittingForm(1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := form["/Group"]; exists {
+				t.Fatalf("the page's Do invokes a transparency Form: %v", form)
+			}
+			if got, want := form["/BBox"], []any{float64(20), float64(30), float64(420), float64(430)}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("fitting Form BBox = %v, want %v", got, want)
+			}
+		})
+	}
 }
 
 // Source rasterization at the independently calculated fit scale supplies the
@@ -393,6 +453,85 @@ func TestFitAppearanceViewerFlagsAndTextException(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestFitNoRotateAdvisoryEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, subtype   string
+		rotation, flags int
+		appearance      bool
+		want            diag.Code
+	}{
+		{"screen only", "Square", 90, 16, true, diag.FitAnnotationViewerDependent},
+		{"print only", "Square", 180, 52, true, diag.FitAnnotationViewerDependent},
+		{"Text is implicitly NoRotate", "Text", 270, 0, true, diag.FitAnnotationViewerDependent},
+		{"Invisible standard annotation", "Square", 90, 17, true, diag.FitAnnotationViewerDependent},
+		{"rotation absent", "Square", 0, 16, true, diag.Code{}},
+		{"annotation rotates with page", "Square", 90, 4, true, diag.Code{}},
+		{"hidden despite print flag", "Square", 90, 22, true, diag.Code{}},
+		{"neither screen nor print", "Square", 90, 48, true, diag.Code{}},
+		{"hover-only visibility", "Square", 90, 304, true, diag.FitAnnotationViewerDependent},
+		{"hidden despite hover flag", "Square", 90, 306, true, diag.Code{}},
+		{"missing normal appearance", "Square", 90, 16, false, diag.FitAnnotationUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.FitAnnotation(tc.subtype, "", tc.appearance, tc.rotation, tc.flags)
+			fit := packet.DefaultFitPolicy(packet.Size{Width: 100, Height: 200})
+			_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []pdf.SelectionRequest{{Item: "fit", Fitting: fit}})
+			if tc.want != (diag.Code{}) && !slices.ContainsFunc(ds, func(d diag.Diagnostic) bool {
+				return d.Code == tc.want && d.PDFLocation != nil && d.PDFLocation.Object == 6 && d.PDFLocation.Page == 1
+			}) {
+				t.Fatalf("want %s at source annotation: %v", tc.want, ds)
+			}
+			wantStatus := diag.OK
+			if tc.want == diag.FitAnnotationUnsupported {
+				wantStatus = diag.StatusInvalid
+			}
+			if codePresent(ds, diag.FitAnnotationViewerDependent) != (tc.want == diag.FitAnnotationViewerDependent) || diag.Outcome(ds) != wantStatus {
+				t.Fatalf("unexpected fitting finding: %v", ds)
+			}
+		})
+	}
+	t.Run("contained hover link", func(t *testing.T) {
+		d := pdffixture.FitAnnotation("Link", "/A << /S /URI /URI (https://example.invalid) >>", true, 90, 304)
+		d.Objs[5] = bytes.Replace(d.Objs[5], []byte("/Rect [10 10 90 90]"), []byte("/Rect [15 20 45 50]"), 1)
+		fit := packet.DefaultFitPolicy(packet.Size{Width: 100, Height: 200})
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []pdf.SelectionRequest{{Item: "fit", Fitting: fit}})
+		if diag.Outcome(ds) != diag.OK || !codePresent(ds, diag.FitAnnotationViewerDependent) {
+			t.Fatalf("contained hover link must qualify with an advisory: %v", ds)
+		}
+	})
+	t.Run("missing selected normal state", func(t *testing.T) {
+		d := pdffixture.FitAnnotation("Square", "", true, 90, 16)
+		d.Objs[5] = bytes.Replace(d.Objs[5], []byte("/N 7 0 R"), []byte("/N << /Other 7 0 R >>"), 1)
+		fit := packet.DefaultFitPolicy(packet.Size{Width: 100, Height: 200})
+		_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []pdf.SelectionRequest{{Item: "fit", Fitting: fit}})
+		if diag.Outcome(ds) != diag.StatusInvalid || codePresent(ds, diag.FitAnnotationViewerDependent) {
+			t.Fatalf("unusable normal state must refuse without an advisory: %v", ds)
+		}
+	})
+}
+
+func TestSourceAnnotationNullSlotsDuringFitting(t *testing.T) {
+	for _, tc := range []struct{ name, entry string }{
+		{"absent Annots", ""},
+		{"direct null Annots", "/Annots null"},
+		{"live-null Annots", "/Annots 6 0 R"},
+		{"live-null array member", "/Annots [6 0 R]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := pdffixture.Plain("annotation null")
+			d.Objs = append(d.Objs, []byte("null"))
+			if tc.entry != "" {
+				insertEntry(d, 3, tc.entry)
+			}
+			fit := packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 500})
+			_, _, ds := pdf.Inspect(t.Context(), d.Bytes(), packet.StructureDiscard, []pdf.SelectionRequest{{Item: "fit", Fitting: fit}})
+			if diag.Outcome(ds) != diag.OK || codePresent(ds, diag.FitAnnotationViewerDependent) {
+				t.Fatalf("null annotation slot changed admission: %v", ds)
+			}
+		})
 	}
 }
 

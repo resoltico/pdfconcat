@@ -109,7 +109,7 @@ func TestJSONAndTextOutcomes(t *testing.T) {
 	if !strings.Contains(b.String(), "build failed") || !strings.Contains(b.String(), "source_unreadable") {
 		t.Fatal(b.String())
 	}
-	validate(t, exchange.Version{FormatVersion: 10, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
+	validate(t, exchange.Version{FormatVersion: 11, Command: "version", Version: "devel", Go: "go1.27.3", Platform: "linux/amd64"})
 }
 
 func TestTextDiagnosticContextAndSafeCharacters(t *testing.T) {
@@ -264,7 +264,7 @@ func TestPDFDiagnosticDetailsAreSafeAndRemainInJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	validate(t, decoded)
-	if len(decoded.Diagnostics) != 1 || decoded.Diagnostics[0].Detail != d.Detail || decoded.Diagnostics[0].PDFLocation == nil || *decoded.Diagnostics[0].PDFLocation != *d.PDFLocation {
+	if len(decoded.Diagnostics) != 1 || decoded.Diagnostics[0].Detail != d.Detail || decoded.Diagnostics[0].PDFLocation == nil || *decoded.Diagnostics[0].PDFLocation != exchange.PDFLocation(*d.PDFLocation) {
 		t.Fatalf("JSON lost backend evidence: %+v", decoded)
 	}
 }

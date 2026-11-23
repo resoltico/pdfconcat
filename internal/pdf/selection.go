@@ -188,7 +188,7 @@ func analyzeSelection(c context.Context, s *model.Context, origins sourceOrigins
 	// Publish complete metric knowledge before any later compatibility/rehearsal refusal.
 	selectedFacts := selected.OccurrenceFacts
 	facts = &selectedFacts
-	selectedFacts.fitFindings, e = fittingFindings(c, view, geometries, selectedFacts.fitting, origins)
+	selectedFacts.fitFindings, selectedFacts.AnnotationFittingIssue, e = fittingFindings(c, view, geometries, selectedFacts.fitting, origins)
 	if e != nil {
 		d := diagnostic(e, diag.SourceInvalid)
 		ds = append(ds, d)

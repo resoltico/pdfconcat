@@ -53,6 +53,7 @@ func TestFittingReadOnlyInteractionAndAppearance(t *testing.T) {
 		}{
 			// Table165: Print=4, NoView=32, ReadOnly=64, Locked=128.
 			{"ReadOnly", 68, true}, {"ordinary", 4, false}, {"NoView", 36, true}, {"Locked", 132, false},
+			{"ToggleNoView", 288, false}, {"HiddenToggleNoView", 290, true}, {"ReadOnlyToggleNoView", 352, true},
 		} {
 			t.Run(shape.subtype+"/"+actionName+"/"+flags.name, func(t *testing.T) {
 				doc := boundaryActionAnnotation(shape.subtype, shape.event, flags.value, true)

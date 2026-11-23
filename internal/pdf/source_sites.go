@@ -31,6 +31,29 @@ type sourceOrigins struct {
 	catalog             map[string]sourceSite
 }
 
+// Check page-owned entries before selection or navigation pruning changes their indexes.
+func checkSourceAnnotationReferences(c context.Context, s *model.Context, pages []pageRef) error {
+	for i, page := range pages {
+		if err := c.Err(); err != nil {
+			return err
+		}
+		site := sourceSite{ref: page.ref, page: i + 1}.key("Annots")
+		annots, err := navigationContainer[types.Array](s, page.dict["Annots"], site)
+		if err != nil {
+			return err
+		}
+		for j, item := range annots {
+			if err := c.Err(); err != nil {
+				return err
+			}
+			if _, direct := item.(types.Dict); direct {
+				return site.index(j).wrap(refuse(diag.SourceInvalid, diag.PageAnnotationMustBeIndirect()))
+			}
+		}
+	}
+	return nil
+}
+
 func sourceOriginsFor(c context.Context, s *model.Context) (sourceOrigins, error) {
 	pages, e := rawPages(c, s)
 	if e != nil {

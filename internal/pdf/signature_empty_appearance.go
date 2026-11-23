@@ -17,14 +17,13 @@ import (
 )
 
 // Successful stream proofs can be reused at other widgets in the same
-// source. Widget-specific settings and every appearance reference are
-// checked independently of the stream cache.
+// source. Every appearance reference is checked independently of the stream cache.
 type emptySignatureAppearanceProof struct {
 	decoder drawingDecoder
 	proved  map[types.IndirectRef]bool
 }
 
-func (p *emptySignatureAppearanceProof) checkWidget(c context.Context, s *model.Context, program *layerPrograms, page pageRef, widget types.Dict, at sourceSite) error {
+func (p *emptySignatureAppearanceProof) checkWidget(c context.Context, s *model.Context, program *layerPrograms, widget types.Dict, at sourceSite) error {
 	bad := signatureUnsupported(at.key("Rect"), diag.SignatureDegeneratePrint)
 	value, err := signatureSlot(s, widget["AP"], at.key("AP"), diag.SignatureDegeneratePrint)
 	if err != nil || value == nil {
@@ -34,19 +33,12 @@ func (p *emptySignatureAppearanceProof) checkWidget(c context.Context, s *model.
 	if !ok {
 		return bad
 	}
-	checkedSettings := false
 	prove := func(raw, value types.Object, where sourceSite) error {
 		if err := c.Err(); err != nil {
 			return err
 		}
 		if value == nil {
 			return nil
-		}
-		if !checkedSettings {
-			if checkSignatureCompositing(s, page, widget, at) != nil || checkSignatureRegeneration(s) != nil {
-				return signatureAppearanceRefused(where, raw, diag.SignatureDegeneratePrint)
-			}
-			checkedSettings = true
 		}
 		stream, ok := value.(types.StreamDict)
 		if !ok {

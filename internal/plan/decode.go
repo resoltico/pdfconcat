@@ -28,7 +28,7 @@ import (
 const MaxBytes = 64 << 20
 
 // Version is the supported plan exchange contract.
-const Version = 10
+const Version = 11
 
 // Schema is the editor-facing plan JSON Schema.
 //
@@ -303,6 +303,13 @@ func (p *decoder) document(base string, overrides []packet.PlanOverrides) (packe
 				err = p.fail(diag.PlanValue, "timestamp must be Unix seconds from 0 through 253402300799.")
 			}
 			draft.Timestamp = &n
+		case packet.SignaturePolicyMember:
+			var value string
+			value, err = p.text()
+			draft.Signatures = packet.SignaturePolicy(value)
+			if err == nil && !slices.Contains(draft.Signatures.Values(), value) {
+				err = p.fail(diag.PlanValue, packet.SignaturesValueMessage())
+			}
 		case "optional_content":
 			var value string
 			value, err = p.text()

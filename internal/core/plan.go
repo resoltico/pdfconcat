@@ -34,6 +34,7 @@ type Plan struct {
 	timestamp       *int64
 	structure       StructurePolicy
 	optionalContent OptionalContentPolicy
+	signatures      SignaturePolicy
 	output          string
 	fitting         *FitPolicy
 	pageNumbers     *PageNumbers
@@ -300,6 +301,9 @@ func (p Plan) Timestamp() *int64 { return copyValue(p.timestamp) }
 // Structure is the admitted structure policy.
 func (p Plan) Structure() StructurePolicy { return p.structure }
 
+// Signatures gives the effective source signature policy.
+func (p Plan) Signatures() SignaturePolicy { return p.signatures }
+
 // OptionalContent gives the effective PDF visibility-layer policy.
 func (p Plan) OptionalContent() OptionalContentPolicy { return p.optionalContent }
 
@@ -338,7 +342,7 @@ func (p Plan) Declaration() Declaration {
 	if p.declaration != nil {
 		return cloneDeclaration(*p.declaration)
 	}
-	return Declaration{Metadata: p.Metadata(), Timestamp: p.Timestamp(), Structure: p.Structure(), Output: p.Output(), Fitting: p.Fitting(), PageNumbers: p.PageNumbers(), PageDefaults: p.PageDefaults(), Items: p.Items()}
+	return Declaration{Metadata: p.Metadata(), Timestamp: p.Timestamp(), Structure: p.Structure(), OptionalContent: p.OptionalContent(), Signatures: p.Signatures(), Output: p.Output(), Fitting: p.Fitting(), PageNumbers: p.PageNumbers(), PageDefaults: p.PageDefaults(), Items: p.Items()}
 }
 
 func dividerRef(ref Ref) Ref { return ref + "/divider" }

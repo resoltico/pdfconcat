@@ -21,7 +21,9 @@ type sourceSite struct {
 	path string
 }
 type sourceOrigins struct {
+	xfa                 sourceSite
 	wrapperPages        []int
+	signatureArtwork    []signatureArtwork
 	undefinedReferences map[types.IndirectRef]types.IndirectRef
 	pages               map[types.IndirectRef]int
 	annotations         map[types.IndirectRef]int
@@ -156,7 +158,7 @@ func captureCatalogSites(s *model.Context, origins sourceOrigins) (map[string]so
 	for _, item := range []struct {
 		parent   string
 		children []string
-	}{{"Names", []string{"JavaScript", "EmbeddedFiles"}}, {"AcroForm", []string{"XFA", "NeedAppearances", "Fields"}}, {"URI", []string{"Base"}}} {
+	}{{"Names", []string{"JavaScript", "EmbeddedFiles"}}, {"AcroForm", []string{"NeedAppearances", "Fields"}}, {"URI", []string{"Base"}}} {
 		site := base.key(item.parent).anchor(cat[item.parent], origins)
 		for _, key := range item.children {
 			result[item.parent+"."+key] = site.key(key)

@@ -22,7 +22,7 @@ import (
 // VerifyAssembly checks reopened serialized facts against the resolved contract,
 // before publication. It does not substitute producer caches for output facts.
 func VerifyAssembly(c context.Context, data []byte, expected int64, a Assembly) error {
-	return verify(c, bytes.NewReader(data), expected, &a, nil, nil)
+	return verify(c, bytes.NewReader(data), expected, &a, nil, nil, nil)
 }
 
 // VerifyReader checks the staged output against the assembly and its navigation.
@@ -30,7 +30,7 @@ func (built Assembled) VerifyReader(c context.Context, reader io.ReadSeeker, exp
 	if built.navigation == nil {
 		return refuse(diag.OutputInvalid, diag.TheComposedPDFCouldNotBeVerified())
 	}
-	return verify(c, reader, expected, &a, built.navigation, built.wrapperPages)
+	return verify(c, reader, expected, &a, built.navigation, built.wrapperPages, built.signatures)
 }
 
 func verifyDocumentFacts(c context.Context, s *model.Context, a Assembly) error {

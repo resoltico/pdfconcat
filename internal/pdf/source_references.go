@@ -42,12 +42,12 @@ func walkReferences(c context.Context, s *model.Context, origins sourceOrigins, 
 			if !liveReference(s, v) {
 				return undefined(v, site)
 			}
-			if !seen[v] {
-				if checkLive != nil {
-					if err := checkLive(v, site); err != nil {
-						return types.IndirectRef{}, err
-					}
+			if checkLive != nil {
+				if err := checkLive(v, site); err != nil {
+					return types.IndirectRef{}, err
 				}
+			}
+			if !seen[v] {
 				seen[v] = true
 				pending = append(pending, referenceRoot{value: v, site: site.anchor(v, origins)})
 			}

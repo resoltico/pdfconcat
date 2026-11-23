@@ -64,6 +64,33 @@ func OptionalContentValueMessage() string {
 	return "Optional content must be refuse or flatten-visible-content."
 }
 
+// SignaturePolicy governs admission of source signature state.
+type SignaturePolicy string
+
+// SignaturePolicyMember names the signature policy in an authored plan.
+const SignaturePolicyMember = "signatures"
+
+// Signature policy values for authored and typed plans.
+const (
+	SignaturesRefuse  SignaturePolicy = "refuse"
+	SignaturesDiscard SignaturePolicy = "discard"
+)
+
+// Values returns the supported signature policy values in plan order.
+func (SignaturePolicy) Values() []string {
+	return []string{string(SignaturesRefuse), string(SignaturesDiscard)}
+}
+
+// SignaturesDescription describes the signature policy in the plan schema.
+func SignaturesDescription() string {
+	return "Refuse signature state or discard supported signature state when composing a copy."
+}
+
+// SignaturesValueMessage explains the accepted signature policy values.
+func SignaturesValueMessage() string {
+	return "signatures must be refuse or discard."
+}
+
 // StructurePolicy controls preservation of source semantics.
 type StructurePolicy string
 

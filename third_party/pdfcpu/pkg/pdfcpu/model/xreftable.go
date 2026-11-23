@@ -2345,7 +2345,11 @@ func (xRefTable *XRefTable) RequiredResourceBinding(resources types.Dict, name s
 }
 
 func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string, prn PageResourceNames, pageNr int, keepUnused bool) error {
-	if !prn.HasResources(key) {
+	required := prn.HasResources(key)
+	// Device color operators can use these bindings without naming a
+	// resource. The content parser cannot establish that they are unused.
+	implicitColors := key == "ColorSpace" && d[key] != nil
+	if !required && !implicitColors {
 		if keepUnused {
 			return nil
 		}
@@ -2358,6 +2362,9 @@ func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string,
 	}
 	if d1 == nil {
 		d.Delete(key)
+		if !required {
+			return nil
+		}
 		resources := make([]string, 0, len(prn.Resources(key)))
 		for resourceName := range prn.Resources(key) {
 			resources = append(resources, resourceName)
@@ -2378,9 +2385,9 @@ func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string,
 	// Iterate over inherited resource sub dict and remove any entries not required.
 	for k := range d1 {
 		ki := types.Name(k).Value()
-		if !res[ki] && !keepUnused {
+		defaultSpace := implicitColors && (ki == "DefaultGray" || ki == "DefaultRGB" || ki == "DefaultCMYK")
+		if !res[ki] && !keepUnused && !defaultSpace {
 			d1.Delete(k)
-			continue
 		}
 	}
 	// Check for missing resource sub dict entries.
@@ -2397,7 +2404,11 @@ func (xRefTable *XRefTable) consolidateResourceSubDict(d types.Dict, key string,
 			ShowSkipped(s)
 		}
 	}
-	d[key] = d1
+	if len(d1) == 0 {
+		d.Delete(key)
+	} else {
+		d[key] = d1
+	}
 	return nil
 }
 

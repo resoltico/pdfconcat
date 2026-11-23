@@ -193,7 +193,7 @@ func TestOptionalContentWrapperSerializedLexicalGuard(t *testing.T) {
 		if err := scanLayerGraph(t.Context(), s, pages, &optionalContentPlan{}, layerGraphOnly, nil); err != nil {
 			t.Fatalf("negative control has graph evidence: %v", err)
 		}
-		err = verify(t.Context(), bytes.NewReader(d.Bytes()), 1, nil, nil, []int64{1})
+		err = verify(t.Context(), bytes.NewReader(d.Bytes()), 1, nil, nil, []int64{1}, nil)
 		finding := Diagnostic(err)
 		if err == nil || finding.Code != diag.OutputInvalid || finding.PDFLocation == nil {
 			t.Fatalf("stage accepted leftover operators (nested=%t): %v", nested, err)

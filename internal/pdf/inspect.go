@@ -121,6 +121,7 @@ func readSource(c context.Context, data []byte, policy packet.StructurePolicy) (
 type SourcePolicies struct {
 	Structure       packet.StructurePolicy
 	OptionalContent packet.OptionalContentPolicy
+	Signatures      packet.SignaturePolicy
 }
 
 func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePolicies) (s *model.Context, origins sourceOrigins, ds []diag.Diagnostic, err error) {
@@ -157,6 +158,7 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 		return s, origins, ds, pdfFailure(diag.SourceProcessingFailed, diag.ThePDFBackendCouldNotBeInitialized(), err)
 	}
 	conf.ValidationMode = model.ValidationStrict
+	conf.SkipSignatureCache = policies.Signatures == packet.SignaturesDiscard
 	conf.ZeroOffsetPolicy = model.AdmitUnreferencedZeroOffsets
 	if policies.Structure == packet.StructureDiscard {
 		conf.ZeroOffsetPolicy = model.AdmitDiscardedStructureZeroOffsets
@@ -199,7 +201,17 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	if e != nil {
 		return s, origins, ds, e
 	}
-	if e = originalSignatureChecks(c, s); e != nil {
+	signatureEvidence, signatureFields, e := originalSignatureEvidence(c, s)
+	if policies.Signatures != packet.SignaturesDiscard && c.Err() == nil {
+		if refusal := signatureEvidence.refusal(true); refusal != nil {
+			return s, origins, ds, refusal
+		}
+	}
+	if e != nil {
+		return s, origins, ds, e
+	}
+	xfa, e := observeSourceXFA(c, s, pages, signatureFields)
+	if e != nil {
 		return s, origins, ds, e
 	}
 	if e = detachProvedZeroOffsetStructure(s); e != nil {
@@ -265,11 +277,19 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	if err = checkDocument(c, s, pages); err != nil {
 		return s, origins, ds, err
 	}
+	var signatures signatureDiscard
+	if policies.Signatures == packet.SignaturesDiscard {
+		signatures, err = planSignatureDiscard(c, s, pages, originalContent, signatureEvidence, signatureFields, xfa)
+		if err != nil {
+			return s, origins, ds, err
+		}
+	}
 	origins, err = sourceOriginsFor(c, s)
 	if err != nil {
 		return s, origins, ds, err
 	}
 	origins.undefinedReferences = undefinedReferences
+	origins.xfa = xfa
 	if layers.wrappers != nil {
 		for _, page := range layers.wrappers.pages {
 			origins.wrapperPages = append(origins.wrapperPages, page.number)
@@ -321,6 +341,25 @@ func readSourceReader(c context.Context, reader io.ReadSeeker, policies SourcePo
 	if err = validateObservedEncoding(c, s, observed); err != nil {
 		return s, origins, ds, err
 	}
+	if signatures.first != nil {
+		var finding diag.Diagnostic
+		origins.signatureArtwork, finding, err = signatures.apply(c, s, pages, observed)
+		if err != nil {
+			return s, origins, ds, err
+		}
+		ds = append(ds, finding)
+		// Validation caches describe the original form. The admitted
+		// context supplies normalized fields and no source signature flags.
+		s.Form, err = s.DereferenceDict(cat["AcroForm"])
+		if err != nil {
+			return s, origins, ds, err
+		}
+		s.SignatureExist, s.AppendOnly = false, false
+		clear(s.Signatures)
+		s.URSignature, s.DSS = nil, nil
+		s.CertifiedSigObjNr, s.URSignatureIncrement = 0, 0
+	}
+	s.SkipSignatureCache = false
 	if layers.group != (types.IndirectRef{}) {
 		finding, e := layers.applyForms(c, s, pages)
 		if e != nil {
@@ -371,26 +410,6 @@ func checkDocument(c context.Context, s *model.Context, pages []pageRef) error {
 				return refuse(diag.SourceInvalid, diag.WidgetRectMustContainFourCoordinates())
 			}
 		}
-		fieldType, e := nameValue(s, d["FT"])
-		if e != nil {
-			return e
-		}
-		if fieldType == types.Name("Sig") {
-			value, e := s.Dereference(d["V"])
-			if e != nil {
-				return e
-			}
-			if value != nil {
-				return refuse(diag.SourceSigned, diag.APopulatedSignatureFieldIsUnsupportedBecauseCompositionCannotPreserve())
-			}
-		}
-		kind, e := nameValue(s, d["Type"])
-		if e != nil {
-			return e
-		}
-		if kind == types.Name("Sig") || kind == types.Name("DocTimeStamp") {
-			return refuse(diag.SourceSigned, diag.TheSourceDeclaresASignatureOrTimestampValueWhoseAssurance())
-		}
 		for key := range d {
 			decoded, e := types.DecodeName(key)
 			if e == nil && decoded != key {
@@ -404,22 +423,6 @@ func checkDocument(c context.Context, s *model.Context, pages []pageRef) error {
 	cat, err := s.Catalog()
 	if err != nil {
 		return err
-	}
-	for _, policy := range []struct {
-		key     string
-		code    diag.Code
-		message diag.Explanation
-	}{
-		{"Perms", diag.SourceSigned, diag.CatalogPermissionStructuresRefused()},
-		{"DocTimeStamp", diag.SourceSigned, diag.DocumentTimestampsRefused()},
-	} {
-		value, e := s.Dereference(cat[policy.key])
-		if e != nil {
-			return e
-		}
-		if value != nil {
-			return refuse(policy.code, policy.message)
-		}
 	}
 	rendering, e := s.Dereference(cat["NeedsRendering"])
 	if e != nil {
@@ -589,8 +592,8 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins, policy 
 	if err != nil {
 		return facts, ds, err
 	}
-	if form["XFA"] != nil {
-		add(diag.SourceXfaRemoved, diag.XFAWillBeRemovedStaticFieldsRemain(), origins.catalogEntry("AcroForm.XFA", base.key("AcroForm").anchor(catalog["AcroForm"], origins).key("XFA")))
+	if origins.xfa != (sourceSite{}) {
+		add(diag.SourceXfaRemoved, diag.XFAWillBeRemovedStaticFieldsRemain(), origins.xfa)
 	}
 	rendering, err := s.Dereference(form["NeedAppearances"])
 	if err != nil {
@@ -611,7 +614,7 @@ func observe(c context.Context, s *model.Context, origins sourceOrigins, policy 
 	}
 	if facts.HasFields {
 		signature := types.Dict{"DR": form["DR"], "DA": form["DA"], "Q": form["Q"]}
-		facts.FormDefaultsDigest, err = resourceIdentity(s, signature)
+		facts.FormDefaultsDigest, err = resourceIdentity(c, s, signature)
 		if err != nil {
 			return facts, ds, err
 		}

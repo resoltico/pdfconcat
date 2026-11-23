@@ -127,7 +127,7 @@ func TestPDFUAMachineFixture(t *testing.T) {
 		t.Fatal(findings)
 	}
 	occurrence := &Occurrence{File: &facts, Facts: views[0]}
-	assembly := Assembly{Metadata: &packet.Metadata{Title: &title, Language: &lang}, Structure: packet.StructurePreserve, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 450, Height: 600}), Parts: []Part{
+	assembly := Assembly{Metadata: &packet.Metadata{Title: &title, Language: &lang}, SourcePolicies: SourcePolicies{Structure: packet.StructurePreserve}, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 450, Height: 600}), Parts: []Part{
 		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "first", Source: path}, Pages: 1, FirstPage: 1, LastPage: 1}, Occurrence: occurrence, Input: pdffixture.SourceInput(out.Bytes())},
 		{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Ref: "repeat", Source: path}, Pages: 1, FirstPage: 2, LastPage: 2}, Occurrence: occurrence, Input: pdffixture.SourceInput(out.Bytes())},
 	}}

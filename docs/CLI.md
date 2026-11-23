@@ -48,6 +48,13 @@ file like an option, use `--report=--json` or `--report ./--json`. A literal
 `--` can be an option value; it ends options only when encountered between
 options or operands.
 
+Direct input arguments refuse populated signature state. If you deliver the
+original separately and want an unsigned copy, set `"signatures": "discard"` in
+a [plan](PLAN.md#signatures) and run `pdfconcat check --plan FILE` to see whether
+the source qualifies. The refusal includes this guidance in text and JSON.
+Build reports whether it published the PDF. See the
+[signature policy](PDF-POLICY.md#signatures).
+
 ## Build, check and fitting
 
 `build` needs output from `-o` or the plan. `check` does not need an output path.
@@ -410,7 +417,7 @@ limit, use a program that writes each filename as a separate JSON element.
     printf '%s\n' 'No PDF files in chapters/.' >&2
     exit 1
   fi
-  jq -n '{version: 10, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
+  jq -n '{version: 11, items: ($ARGS.positional | map({source: .}))}' --args "${chapters[@]}" > plan.json ) &&
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -424,7 +431,7 @@ encoding. A leading BOM is accepted.
 $items = [string[]]@(Get-ChildItem chapters -File | Where-Object { $_.Extension -ieq '.pdf' } | ForEach-Object { 'chapters/' + $_.Name })
 if ($items.Count -eq 0) { throw 'no PDF files in chapters/' }
 [Array]::Sort($items, [StringComparer]::Ordinal)
-@{ version = 10; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
+@{ version = 11; items = @($items | ForEach-Object { @{ source = $_ } }) } | ConvertTo-Json -Depth 5 | Set-Content plan.json -Encoding utf8
 pdfconcat build --plan plan.json -o book.pdf
 ```
 
@@ -479,7 +486,7 @@ status `invalid`; a processing failure selects `failed`.
 structure index and identifies the matching classic xref row. It accompanies
 the structure-discard warning. Check and Build keep `source_invalid` and
 exit 2 under preserve when a proved unwritten structure index prevents
-admission. The refusal can name the v10 discard setting and locate the
+admission. The refusal can name the plan discard setting and locate the
 proved index. [Classic xref input policy](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
 
 ## Diagnostic codes
@@ -544,8 +551,10 @@ Warning class is empty (shown as —); warnings never select an error outcome.
 | `source_viewer_settings_removed` | warning | — | source catalog PageLayout, PageMode or ViewerPreferences removed before validation |
 | `source_damaged` | error | invalid | broken page tree, missing/malformed content streams, or validation changing page order or encoded contents |
 | `source_encrypted` | error | invalid | encrypted, including empty-password encryption |
+| `source_signature_discard_unsupported` | error | invalid | signature state cannot be discarded with proved ownership and appearance fidelity |
+| `source_signature_discarded` | warning | — | supported source signature state is discarded during composition |
 | `source_signed` | error | invalid | signature value, catalog permission structures (`/Perms`) or document timestamp |
-| `source_dynamic_form` | error | invalid | source requests NeedsRendering true |
+| `source_dynamic_form` | error | invalid | source requests NeedsRendering true or contains XFA without a usable static form |
 | `source_optional_content` | error | invalid | optional content is present outside the admitted policy |
 | `source_optional_content_flattened` | warning | — | composition removes the proved layer's visibility controls and preserves the appearance of retained Form artwork |
 | `fit_geometry_unsupported` | error | invalid | the required fitting affine lacks finite usable geometry or supported forward-placement accuracy |

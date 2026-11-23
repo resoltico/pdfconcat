@@ -72,12 +72,16 @@ can fail before that refusal; this does not remove parser/resource risks.
 The backend retains its format-specific cryptographic implementations, but
 PDFConcat supplies no password interface and does not create encrypted output.
 
-Encrypted sources (including empty-password encryption), signature values,
-catalog permission structures, timestamps, dynamic forms and known
-content-dropping page-tree shapes are refused. Empty unsigned signature fields
-remain supported. Signatures are not authenticated. PDFConcat removes proved-empty
-optional-content settings by default. A plan can opt in to removing controls for
-a proved always-visible Form layer or a proved bare undeclared page wrapper.
+Dynamic forms, XFA without a usable static form and known content-dropping
+page-tree shapes are refused. Populated signature values, catalog permissions and
+document timestamps are refused by default. A plan can explicitly
+[discard supported signature state](docs/PDF-POLICY.md#signatures). PDFConcat
+preserves eligible marks as static page artwork. Signature authentication
+requires the original and a separate validator.
+
+PDFConcat removes proved-empty optional-content settings by default. A plan can
+opt in to removing controls for a proved always-visible Form layer or a proved
+bare undeclared page wrapper.
 Other confirmed visibility bindings and operators are refused. The
 [optional-content policy](docs/PDF-POLICY.md#optional-content) specifies the
 whole-source proof and the checks on reopened output.

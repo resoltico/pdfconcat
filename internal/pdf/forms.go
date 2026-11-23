@@ -4,11 +4,13 @@
 package pdf
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -57,6 +59,293 @@ func nameValue(s *model.Context, o types.Object) (types.Name, error) {
 	return name, nil
 }
 
+type formFieldNode struct {
+	dict   types.Dict
+	ref    types.IndirectRef
+	site   sourceSite
+	member sourceSite
+	kind   types.Name
+	name   string
+	widget bool
+	kids   []*formFieldNode
+}
+
+func formFieldTree(c context.Context, s *model.Context, form types.Dict) ([]*formFieldNode, error) {
+	seen := map[uintptr]bool{}
+	origins, err := sourceOriginsFor(c, s)
+	if err != nil {
+		return nil, err
+	}
+	cat, err := s.Catalog()
+	if err != nil {
+		return nil, err
+	}
+	base := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], origins).key("Fields").anchor(form["Fields"], origins)
+	var collect func(types.Object, types.Name, sourceSite, int) ([]*formFieldNode, error)
+	collect = func(raw types.Object, inherited types.Name, site sourceSite, depth int) ([]*formFieldNode, error) {
+		if raw == nil {
+			return nil, nil
+		}
+		if depth > 64 {
+			return nil, site.wrap(refuse(diag.SourceUnsupported, diag.FormFieldTreeExceedsTheSupportedDepthOf()))
+		}
+		list, err := s.DereferenceArray(raw)
+		if err != nil {
+			return nil, site.wrap(err)
+		}
+		var result []*formFieldNode
+		for i, item := range list {
+			if err := c.Err(); err != nil {
+				return nil, err
+			}
+			at := site.index(i)
+			ref, indirect := item.(types.IndirectRef)
+			if indirect {
+				if !liveReference(s, ref) {
+					return nil, at.wrap(refuse(diag.SourceInvalid, diag.AFormFieldReferenceIsMissingFreeOrHasThe()))
+				}
+			}
+			d, err := s.DereferenceDict(item)
+			if err != nil || d == nil {
+				return nil, at.wrap(refuse(diag.SourceInvalid, diag.FormFieldMemberRequiresDictionary()))
+			}
+			member := at
+			at = at.anchor(item, origins)
+			id := layerDictIdentity(d)
+			if seen[id] {
+				return nil, at.wrap(refuse(diag.SourceInvalid, diag.FormFieldTreeRepeatsANode()))
+			}
+			seen[id] = true
+			kind, err := nameValue(s, d["FT"])
+			if err != nil {
+				return nil, at.wrap(err)
+			}
+			if kind == "" {
+				kind = inherited
+			}
+			subtype, err := nameValue(s, d["Subtype"])
+			if err != nil {
+				return nil, at.wrap(err)
+			}
+			name, err := textValue(s, d["T"])
+			if err != nil {
+				return nil, at.key("T").wrap(err)
+			}
+			kids, err := collect(d["Kids"], kind, at.key("Kids").anchor(d["Kids"], origins), depth+1)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, &formFieldNode{dict: d, ref: ref, site: at, member: member, kind: kind, name: name, widget: subtype == "Widget", kids: kids})
+		}
+		return result, nil
+	}
+	return collect(form["Fields"], "", base, 0)
+}
+
+// Observe the original catalog edge before validation can drop an empty
+// AcroForm. Admission, normalization and warnings share this observation.
+func observeSourceXFA(c context.Context, s *model.Context, pages []pageRef, roots []*formFieldNode) (sourceSite, error) {
+	cat, err := s.Catalog()
+	if err != nil {
+		return sourceSite{}, err
+	}
+	form, err := s.DereferenceDict(cat["AcroForm"])
+	if err != nil {
+		return sourceSite{}, err
+	}
+	raw := form["XFA"]
+	if raw == nil {
+		return sourceSite{}, nil
+	}
+	site := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], sourceOrigins{})
+	xfaSite := site.key("XFA")
+	if err := checkXFAReference(s, raw, xfaSite); err != nil {
+		return sourceSite{}, err
+	}
+	xfa, err := s.Dereference(raw)
+	if err != nil {
+		return sourceSite{}, xfaSite.wrap(err)
+	}
+	if xfa == nil {
+		// The optional slot is absent in PDF semantics. Mask only this
+		// catalog edge so backend validation also sees absence.
+		delete(form, "XFA")
+		return sourceSite{}, nil
+	}
+	if entries, ok := xfa.(types.Array); ok {
+		for i, entry := range entries {
+			if err := c.Err(); err != nil {
+				return sourceSite{}, err
+			}
+			if err := checkXFAReference(s, entry, xfaSite.index(i)); err != nil {
+				return sourceSite{}, err
+			}
+		}
+	}
+	if ref, ok := form["Fields"].(types.IndirectRef); ok && !liveReference(s, ref) {
+		return sourceSite{}, site.key("Fields").wrap(refuse(diag.SourceInvalid, diag.AFormFieldReferenceIsMissingFreeOrHasThe()))
+	}
+	usable, err := hasUsableStaticWidget(c, s, pages, roots)
+	if err != nil {
+		return sourceSite{}, err
+	}
+	if !usable {
+		return sourceSite{}, xfaSite.wrap(refuse(diag.SourceDynamicForm, diag.XFAWithoutStaticFields()))
+	}
+	return xfaSite, nil
+}
+
+func checkXFAReference(s *model.Context, raw types.Object, site sourceSite) error {
+	if ref, ok := raw.(types.IndirectRef); ok && !liveReference(s, ref) {
+		return site.wrap(refuse(diag.SourceInvalid,
+			diag.UndefinedXFAReference(int64(ref.ObjectNumber.Value()), int64(ref.GenerationNumber.Value()))))
+	}
+	return nil
+}
+
+func formSlotValue(s *model.Context, raw types.Object, site sourceSite) (types.Object, error) {
+	if ref, ok := raw.(types.IndirectRef); ok && !liveReference(s, ref) {
+		return nil, site.wrap(refuse(diag.SourceInvalid, diag.AFormFieldReferenceIsMissingFreeOrHasThe()))
+	}
+	value, err := s.Dereference(raw)
+	return value, site.wrap(err)
+}
+
+func xfaFieldFlags(s *model.Context, raw types.Object, site sourceSite, inherited int) (int, error) {
+	value, err := formSlotValue(s, raw, site)
+	if err != nil || value == nil {
+		return inherited, err
+	}
+	flags, ok := value.(types.Integer)
+	if !ok {
+		return 0, site.wrap(fmt.Errorf("form field or widget flags must be an integer, got %T", value))
+	}
+	return flags.Value(), nil
+}
+
+// Resolve absence first and compare the original reference when an owner
+// exists. Equivalent dictionaries do not establish the same ownership.
+func formOwnerMatches(s *model.Context, raw types.Object, expected types.IndirectRef, allowAbsent bool, site sourceSite) (bool, error) {
+	owner, err := formSlotValue(s, raw, site)
+	if err != nil {
+		return false, err
+	}
+	if owner == nil {
+		return allowAbsent, nil
+	}
+	return raw == expected, nil
+}
+
+func formParentMatches(s *model.Context, node *formFieldNode, parent types.IndirectRef) (bool, error) {
+	return formOwnerMatches(s, node.dict["Parent"], parent, parent == (types.IndirectRef{}), node.site.key("Parent"))
+}
+
+// XFA can coexist with a static form when at least one ordinary data widget
+// is usable on a page.
+func hasUsableStaticWidget(c context.Context, s *model.Context, pages []pageRef, roots []*formFieldNode) (bool, error) {
+	widgets := map[types.IndirectRef]*formFieldNode{}
+	var collect func([]*formFieldNode, types.IndirectRef, int) error
+	collect = func(nodes []*formFieldNode, parent types.IndirectRef, inheritedFlags int) error {
+		for _, node := range nodes {
+			if err := c.Err(); err != nil {
+				return err
+			}
+			owned, err := formParentMatches(s, node, parent)
+			if err != nil {
+				return err
+			}
+			if !owned {
+				continue
+			}
+			flags, err := xfaFieldFlags(s, node.dict["Ff"], node.site.key("Ff"), inheritedFlags)
+			if err != nil {
+				return err
+			}
+			if len(node.kids) > 0 {
+				if node.ref == (types.IndirectRef{}) {
+					continue
+				}
+				if err := collect(node.kids, node.ref, flags); err != nil {
+					return err
+				}
+				continue
+			}
+			if !node.widget || node.ref == (types.IndirectRef{}) {
+				continue
+			}
+			switch node.kind {
+			case "Tx", "Ch":
+			case "Btn":
+				const pushbuttonFieldFlag = 1 << 16
+				if flags&pushbuttonFieldFlag != 0 {
+					continue
+				}
+			default:
+				continue
+			}
+			widgets[node.ref] = node
+		}
+		return nil
+	}
+	if err := collect(roots, types.IndirectRef{}, 0); err != nil || len(widgets) == 0 {
+		return false, err
+	}
+
+	geometry, err := geometriesForPages(c, s, pages)
+	if err != nil {
+		return false, err
+	}
+	memberships := map[types.IndirectRef]int{}
+	visible := map[types.IndirectRef]bool{}
+	for i, page := range pages {
+		if err := c.Err(); err != nil {
+			return false, err
+		}
+		annots, err := s.DereferenceArray(page.dict["Annots"])
+		if err != nil {
+			return false, err
+		}
+		for _, obj := range annots {
+			if err := c.Err(); err != nil {
+				return false, err
+			}
+			ref, _ := obj.(types.IndirectRef)
+			node := widgets[ref]
+			if node == nil {
+				continue
+			}
+			memberships[ref]++
+			owned, err := formOwnerMatches(s, node.dict["P"], page.ref, true, node.site.key("P"))
+			if err != nil {
+				return false, err
+			}
+			if !owned {
+				continue
+			}
+			flags, err := xfaFieldFlags(s, node.dict["F"], node.site.key("F"), 0)
+			if err != nil {
+				return false, err
+			}
+			if model.AnnotationFlags(flags)&(model.AnnHidden|model.AnnNoView|model.AnnToggleNoView) != 0 {
+				continue
+			}
+			rect, err := readRectangle(s, node.dict["Rect"])
+			if err != nil {
+				return false, node.site.key("Rect").wrap(err)
+			}
+			frame := geometry[i].box
+			visible[ref] = max(rect.LL.X, frame.LL.X) < min(rect.UR.X, frame.UR.X) &&
+				max(rect.LL.Y, frame.LL.Y) < min(rect.UR.Y, frame.UR.Y)
+		}
+	}
+	for ref, shown := range visible {
+		if shown && memberships[ref] == 1 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 	cat, err := s.Catalog()
 	if err != nil {
@@ -66,92 +355,31 @@ func fields(c context.Context, s *model.Context) ([]fieldRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	roots, err := s.DereferenceArray(form["Fields"])
+	roots, err := formFieldTree(c, s, form)
 	if err != nil {
 		return nil, err
 	}
-	origins, e := sourceOriginsFor(c, s)
-	if e != nil {
-		return nil, e
-	}
-	base := catalogSite(s).key("AcroForm").anchor(cat["AcroForm"], origins).key("Fields").anchor(form["Fields"], origins)
 	var result []fieldRecord
-	seen := map[types.IndirectRef]bool{}
-	var visit func(types.Object, string, types.Object, sourceSite, int) (bool, error)
-	visit = func(o types.Object, prefix string, ft types.Object, site sourceSite, depth int) (bool, error) {
-		if err := c.Err(); err != nil {
-			return false, err
-		}
-		if depth > 64 {
-			return false, site.wrap(refuse(diag.SourceUnsupported, diag.FormFieldTreeExceedsTheSupportedDepthOf()))
-		}
-		if ref, ok := o.(types.IndirectRef); ok {
-			if !liveReference(s, ref) {
-				return false, site.wrap(refuse(diag.SourceInvalid, diag.AFormFieldReferenceIsMissingFreeOrHasThe()))
-			}
-			if seen[ref] {
-				return false, site.wrap(refuse(diag.SourceInvalid, diag.FormFieldTreeRepeatsANode()))
-			}
-			seen[ref] = true
-		}
-		resolved, err := s.Dereference(o)
-		if err != nil {
-			return false, site.wrap(err)
-		}
-		// A live reference can resolve to null. A field array member,
-		// unlike an optional dictionary entry, must denote a node.
-		d, ok := resolved.(types.Dict)
-		if !ok || d == nil {
-			return false, site.wrap(refuse(diag.SourceInvalid, diag.FormFieldMemberRequiresDictionary()))
-		}
-		site = site.anchor(o, origins)
-		own, err := textValue(s, d["T"])
-		if err != nil {
-			return false, err
-		}
+	var visit func(*formFieldNode, string, bool)
+	visit = func(node *formFieldNode, prefix string, root bool) {
 		name := prefix
-		if own != "" {
+		if node.name != "" {
 			if name != "" {
 				name += "."
 			}
-			name += own
-		}
-		ownType, e := s.Dereference(d["FT"])
-		if e != nil {
-			return false, e
-		}
-		if ownType != nil {
-			ft = ownType
-		}
-		value, err := s.Dereference(d["V"])
-		if err != nil {
-			return false, err
-		}
-		if ft == types.Name("Sig") && value != nil {
-			return false, refuse(diag.SourceSigned, diag.SignatureValuesAreNotSupportedUnsignedSignatureFieldsAreAllowed())
-		}
-		kids, err := s.DereferenceArray(d["Kids"])
-		if err != nil {
-			return false, err
+			name += node.name
 		}
 		hasFields := false
-		kidSite := site.key("Kids").anchor(d["Kids"], origins)
-		for i, kid := range kids {
-			named, err := visit(kid, name, ft, kidSite.index(i), depth+1)
-			if err != nil {
-				return false, err
-			}
-			hasFields = hasFields || named
+		for _, kid := range node.kids {
+			visit(kid, name, false)
+			hasFields = hasFields || kid.name != ""
 		}
-		if (own != "" || depth == 0 && ft != nil) && !hasFields {
-			result = append(result, fieldRecord{name: name, dict: d, site: site.key("T")})
+		if (node.name != "" || root && node.kind != "") && !hasFields {
+			result = append(result, fieldRecord{name: name, dict: node.dict, site: node.site.key("T")})
 		}
-		return own != "", nil
 	}
-	for i, root := range roots {
-		if _, err = visit(root, "", nil, base.index(i), 0); err != nil {
-			return nil, err
-		}
+	for _, root := range roots {
+		visit(root, "", true)
 	}
 	return result, nil
 }
@@ -189,63 +417,81 @@ func qualifiedName(s *model.Context, d types.Dict) (string, error) {
 	return strings.Join(names, "."), nil
 }
 
-// resourceIdentity refuses broader merging rather than repairing resources.
-func resourceIdentity(s *model.Context, o types.Object) (string, error) {
-	var b bytes.Buffer
+// resourceIdentity compares encoded resource semantics across object tables.
+// Memoized indirect subgraphs keep work proportional to the encoded graph,
+// even when the same font data is referenced through many resource paths.
+func resourceIdentity(c context.Context, s *model.Context, root types.Object) (string, error) {
+	type digest = [sha256.Size]byte
 	active := map[types.IndirectRef]bool{}
-	var visit func(types.Object, int) error
-	visit = func(o types.Object, depth int) error {
+	memo := map[types.IndirectRef]digest{}
+	var visit func(types.Object, int) (digest, error)
+	visit = func(o types.Object, depth int) (digest, error) {
+		if err := c.Err(); err != nil {
+			return digest{}, err
+		}
 		if depth > 64 {
-			return refuse(diag.SourceFormUnsupported, diag.FormDefaultResourcesAreNestedTooDeeplyForCompatibilityComparison())
+			return digest{}, refuse(diag.SourceFormUnsupported, diag.FormDefaultResourcesAreNestedTooDeeplyForCompatibilityComparison())
 		}
 		if ref, ok := o.(types.IndirectRef); ok {
 			if active[ref] {
-				return refuse(diag.SourceFormUnsupported, diag.CyclicFormDefaultResourcesAreUnsupportedForCompatibilityComparison())
+				return digest{}, refuse(diag.SourceFormUnsupported, diag.CyclicFormDefaultResourcesAreUnsupportedForCompatibilityComparison())
 			}
-			active[ref] = true
+			if sum, ok := memo[ref]; ok {
+				return sum, nil
+			}
 			resolved, err := s.Dereference(ref)
 			if err != nil {
-				return err
+				return digest{}, err
 			}
-			err = visit(resolved, depth+1)
+			active[ref] = true
+			sum, err := visit(resolved, depth+1)
 			delete(active, ref)
+			if err == nil {
+				memo[ref] = sum
+			}
+			return sum, err
+		}
+		hash := sha256.New()
+		child := func(value types.Object) error {
+			sum, err := visit(value, depth+1)
+			if err == nil {
+				hash.Write(sum[:])
+			}
 			return err
 		}
 		switch v := o.(type) {
 		case types.Dict:
-			keys := make([]string, 0, len(v))
-			for key := range v {
-				keys = append(keys, key)
-			}
-			slices.Sort(keys)
-			b.WriteByte('{')
-			for _, key := range keys {
-				fmt.Fprintf(&b, "%q:", key)
-				if err := visit(v[key], depth+1); err != nil {
-					return err
+			hash.Write([]byte{'d'})
+			for _, key := range slices.Sorted(maps.Keys(v)) {
+				hash.Write(binary.AppendUvarint(nil, uint64(len(key))))
+				hash.Write([]byte(key))
+				if err := child(v[key]); err != nil {
+					return digest{}, err
 				}
 			}
-			b.WriteByte('}')
 		case types.Array:
-			b.WriteByte('[')
-			for _, child := range v {
-				if err := visit(child, depth+1); err != nil {
-					return err
+			hash.Write([]byte{'a'})
+			for _, value := range v {
+				if err := child(value); err != nil {
+					return digest{}, err
 				}
 			}
-			b.WriteByte(']')
 		case types.StreamDict:
-			if err := visit(v.Dict, depth+1); err != nil {
-				return err
+			hash.Write([]byte{'s'})
+			if err := child(v.Dict); err != nil {
+				return digest{}, err
 			}
-			fmt.Fprintf(&b, "stream:%x:%x;", v.Raw, v.Content)
+			hash.Write(v.Raw)
 		default:
-			fmt.Fprintf(&b, "%T:%#v;", o, o)
+			hash.Write(fmt.Appendf(nil, "v%T:%#v", o, o))
 		}
-		return nil
+		var sum digest
+		copy(sum[:], hash.Sum(nil))
+		return sum, nil
 	}
-	if err := visit(o, 0); err != nil {
+	sum, err := visit(root, 0)
+	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(b.Bytes())), nil
+	return hex.EncodeToString(sum[:]), nil
 }

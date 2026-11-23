@@ -262,7 +262,7 @@ func corpusWorkflows(t *testing.T, cli string) {
 		}
 		corpusCopy(t, "testdata/corpus/business-report.pdf", filepath.Join(old, "inputs/leaf/report.pdf"))
 		corpusCopy(t, "../typeset/fontdata/NotoSans-Regular.ttf", filepath.Join(old, "inputs/fonts/title.ttf"))
-		plan := map[string]any{"version": 10, "dir": "inputs", "output": "packet.pdf", "items": []any{map[string]any{"title": "Scoped Ā Ελληνικά", "dir": "leaf", "divider": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": "fonts/title.ttf"}}}, "items": []any{corpusSource("report.pdf", [2]int{2, 3})}}}}
+		plan := map[string]any{"version": 11, "dir": "inputs", "output": "packet.pdf", "items": []any{map[string]any{"title": "Scoped Ā Ελληνικά", "dir": "leaf", "divider": map[string]any{"size": "A4", "text": map[string]any{"font": map[string]any{"file": "fonts/title.ttf"}}}, "items": []any{corpusSource("report.pdf", [2]int{2, 3})}}}}
 		corpusJSON(t, filepath.Join(old, "plan.json"), plan)
 		moved := filepath.Join(root, "Packet space Ā Ελληνικά")
 		if err := os.Rename(old, moved); err != nil {
@@ -451,7 +451,7 @@ func TestCorpusSourceRefresh(t *testing.T) {
 	closing := corpusSection("Closing", corpusSource("book.pdf", [2]int{12, 12}))
 	closing["start_on"] = "odd"
 	path := filepath.Join(dir, "plan.json")
-	corpusJSON(t, path, map[string]any{"version": 10, "output": "ignored.pdf", "items": []any{map[string]any{"contents": map[string]any{}}, corpusSection("Opening", corpusSource("evolving.pdf")), closing}})
+	corpusJSON(t, path, map[string]any{"version": 11, "output": "ignored.pdf", "items": []any{map[string]any{"contents": map[string]any{}}, corpusSection("Opening", corpusSource("evolving.pdf")), closing}})
 
 	hashes := map[string]bool{}
 	for _, tc := range []struct{ Pages, Total, Padding, Closing int }{{2, 5, 4, 5}, {3, 5, 0, 5}, {4, 7, 6, 7}} {

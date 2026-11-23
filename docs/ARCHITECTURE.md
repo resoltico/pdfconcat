@@ -61,9 +61,9 @@ and one sealed input variant:
 - `PlanBytes{Data, Label, BaseDir}` decodes supplied bytes; `Label` supplies display
   provenance, and `BaseDir` resolves relative to `WorkingDir` when supplied.
 - `Declared{Declaration}` supplies source, page, contents, section, directory,
-  style, metadata, fitting, numbering, structure, and optional-content settings
-  without JSON. Core semantic admission clones and validates the declaration
-  before native resolution.
+  style, metadata, fitting, numbering, structure, optional-content and signature
+  settings without JSON. Core semantic admission clones and validates the
+  declaration before native resolution.
 - `Items` contains `SourceItem{Ref, Path}` and `BlankItem{Ref}` values. Each ref
   must be nonempty and unique within the request.
 
@@ -120,11 +120,11 @@ Both producers share semantic admission and aggregate text/node limits.
 1. Admission resolves roles and acquires/decodes a plan or direct items.
 2. Inspection loads fonts and checks text, then inspects distinct sources with
    the explicit positive `InspectionWorkers` budget. It merges findings in
-   first-use order. Inspection and assembly re-admission use the same structure
-   and optional-content policies. Source security and page checks precede
-   semantic detachment or narrowly validated index normalization. Coverage
-   analysis retains a witness of uncovered content and accounts for structure
-   ownership.
+   first-use order. Inspection and assembly re-admission use the same structure,
+   optional-content and signature policies. Source security and page checks
+   precede semantic detachment or narrowly validated index normalization.
+   Coverage analysis retains a witness of uncovered content and accounts for
+   structure ownership.
 3. Composition prepares contents, resolves physical layout, checks compatibility
    and number overlays, and lays out generated text. Findings can identify the
    authored setting responsible for a layout problem.
@@ -196,6 +196,18 @@ discard are index edges of the effective catalog's structure root and that the
 hierarchy has no other owner. Admission detaches those edges after checking
 original signature evidence and before scanning the source graph for navigation and
 visibility. [Classic xref input policy](PDF-POLICY.md#narrow-classic-xref-input-tolerance)
+
+Signature discard is a packet admission policy shared by inspection, re-admission
+and the structure-discard probe. The original graph supplies effective signature
+evidence and is checked for visibility, references, forms, structure and page
+content before widget removal. The adapter observes live XFA on the original form
+before backend normalization. That observation governs the static-form requirement,
+the signature-discard decision and removal warning attribution. Field ownership
+resolves optional absence and compares live owners by their original references.
+The adapter prunes proved field and annotation owners and appends supported normal
+appearances through isolated page graphics state. Selection and fitting consume the
+normalized graph. A separate staged-byte reader checks residual state and effective
+drawing bindings, scope and placement for each retained physical occurrence.
 
 The adapter resolves page geometry from the validated Kids traversal in linear
 time. Each scoped view owns its effective frame, physical size and inherited

@@ -440,6 +440,10 @@ type Configuration struct {
 	// Do not encrypt output files.
 	RemoveEncryption bool
 
+	// SkipSignatureCache disables signature reporting during structural validation.
+	// It does not change form hierarchy or annotation validation.
+	SkipSignatureCache bool
+
 	// Remove existing signatures.
 	RemoveSignatures bool
 }

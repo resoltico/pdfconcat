@@ -36,6 +36,14 @@ settings by default. Plans can opt in to removing proved always-visible Form
 controls or bare undeclared whole-page wrappers while retaining the artwork.
 [PDF policy](docs/PDF-POLICY.md)
 
+Direct inputs and default plans refuse populated signature state. To create an
+unsigned packet while delivering the originals separately, set
+`"signatures": "discard"` at the top level of the plan and run
+`pdfconcat check --plan FILE`. With this opt-in, PDFConcat can remove supported
+signatures and document timestamps and preserve supported visible marks as
+static artwork.
+Use the originals to authenticate signatures. [Signature policy](docs/PLAN.md#signatures)
+
 To extend an existing PDF, include it as the first source and choose a separate
 output. Use separate source items to specify an interleaved order. PDF sources
 and output are files. The CLI accepts a JSON plan on stdin.
@@ -180,7 +188,7 @@ two source PDFs:
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "output": "review-packet.pdf",
   "metadata": { "title": "Review packet", "language": "en" },
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -223,7 +231,7 @@ For an excerpt, save this complete plan as `excerpt.json`, using an
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "output": "excerpt.pdf",
   "items": [{ "source": "appendix.pdf", "pages": [[2, 4], [7, 7]] }]
 }
@@ -294,7 +302,7 @@ commands. A dash indicates no dedicated built-in workflow.
 | Task | pdfcpu CLI v0.16.4 | PDFConcat |
 | --- | --- | --- |
 | Merge PDFs in a chosen order | [`merge`](https://pdfcpu.io/core/merge/) | Direct operands or plan |
-| Append by updating an existing PDF | `merge --mode append` | — |
+| Rewrite an existing output PDF with appended pages | `merge --mode append` | — |
 | Automatically alternate pages from two PDFs | `merge --mode zip` [1] | — |
 | Read a PDF from stdin while merging | One `-` input in `merge` create mode [1] | — |
 | Write the merged PDF to stdout | `merge` create or zip mode [1] | — |
@@ -308,7 +316,7 @@ commands. A dash indicates no dedicated built-in workflow.
 | Keep sheets automatically within a fitting tolerance | — | Per-side absolute tolerance [3] |
 | Generate text pages from JSON | [`create`](https://pdfcpu.io/create/create/) | Plan text pages |
 | Generate Latin, Greek and Cyrillic text with a bundled font | `create` with Roboto Regular from the configuration font store [4] | Bundled Noto Sans |
-| Paint page numbers | [Text stamps](https://pdfcpu.io/core/stamp/) | Plan numbering with physical or consecutive counts |
+| Paint page numbers | [Text stamps](https://pdfcpu.io/core/stamp/) with `%p` | Plan numbering with physical or consecutive counts |
 | Describe sources, selections and assembly aids in one JSON plan | — | Plan |
 | Define nested sections and title dividers in a plan | — | Plan groups and dividers |
 | Automatically pad sections to start on odd pages | — | Plan odd starts |
@@ -319,7 +327,9 @@ commands. A dash indicates no dedicated built-in workflow.
 | Split a PDF into multiple output files in one command | [`split`](https://pdfcpu.io/core/split/) | — |
 | Apply general text, image or PDF stamps and watermarks | [`stamp`](https://pdfcpu.io/core/stamp/) and `watermark` | — |
 | Remove proved always-visible Form controls or bare undeclared whole-page wrappers | — | Plan opt-in [6] |
-| Encrypt, decrypt and change PDF passwords | [Security commands](https://pdfcpu.io/getting_started/piping/) | — |
+| Remove signature state for unsigned output | [`signatures remove`](https://pdfcpu.io/core/sign_remove/) or `merge --rmsig` | [Plan opt-in](docs/PLAN.md#signatures) for supported sources [7] |
+| Validate digital signatures | [`signatures validate`](https://pdfcpu.io/core/sign_validate/) | — |
+| Encrypt, decrypt and change PDF passwords | [Security commands](https://pdfcpu.io/getting_started/usage/#security) | — |
 | Fill interactive forms | [`form fill`](https://pdfcpu.io/form/form_fill/) | — |
 
 1. **Merge inputs and order.** pdfcpu zip alternates pages from two files with
@@ -357,6 +367,11 @@ commands. A dash indicates no dedicated built-in workflow.
    opt-in also admits the two proved profiles listed in the table, including
    page wrappers with the supported graphics-state prelude.
    [PDFConcat visibility policy](docs/PDF-POLICY.md#optional-content)
+7. **Signature discard.** The PDFConcat plan policy retains supported visible
+   marks as static artwork in the packet. Its report identifies affected inputs.
+   Use the originals for signature authentication.
+   [pdfcpu merge options](https://pdfcpu.io/core/merge/) ·
+   [PDFConcat signature policy](docs/PDF-POLICY.md#signatures)
 
 ## Limits
 
@@ -366,7 +381,7 @@ pages are neutral for coverage. Explicit structure discard produces untagged
 output. See the [structure policy](docs/PLAN.md#structure).
 
 - Use trusted local PDFs. Parsing and assembly can exhaust resources; plan limits are not a memory cap. See [security](SECURITY.md) and [plan limits](docs/PLAN.md#strictness-and-limits).
-- Encrypted PDFs (including those opening without a password), populated signatures and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
+- Encrypted PDFs (including those opening without a password) and certain unsafe structures are refused. Retained page actions can still run in a viewer. See the [source policy](docs/PDF-POLICY.md#source-policy).
 - A font selected for drawing must resolve in the effective resource scope. See [drawing programs and resource bindings](docs/PDF-POLICY.md#drawing-programs-and-resource-bindings).
 - Zero-offset classic xref entries have a narrow exception for unreferenced entries and proved references from discarded structure indexes. See [input tolerance](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance).
 - Page selection composes visible pages; it does not redact omitted content or guarantee removal of private objects. See [source selections](docs/PLAN.md#source-selections).

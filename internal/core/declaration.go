@@ -22,6 +22,7 @@ type Declaration struct {
 	Timestamp       *int64
 	Structure       StructurePolicy
 	OptionalContent OptionalContentPolicy
+	Signatures      SignaturePolicy
 	Output, Dir     string
 	Fitting         *FitPolicy
 	PageNumbers     *PageNumbers
@@ -121,6 +122,12 @@ func ValidateDeclaration(d Declaration) (Declaration, []diag.Diagnostic) {
 	}
 	if d.Structure != StructurePreserve && d.Structure != StructureDiscard {
 		return fail(diag.PlanValue, "Structure must be preserve or discard.", "structure")
+	}
+	if d.Signatures == "" {
+		d.Signatures = SignaturesRefuse
+	}
+	if !slices.Contains(d.Signatures.Values(), string(d.Signatures)) {
+		return fail(diag.PlanValue, SignaturesValueMessage(), SignaturePolicyMember)
 	}
 	if d.OptionalContent == "" {
 		d.OptionalContent = OptionalContentRefuse
@@ -420,6 +427,7 @@ func preparePlan(d Declaration) Plan {
 	p.timestamp = copyValue(d.Timestamp)
 	p.structure = d.Structure
 	p.optionalContent = d.OptionalContent
+	p.signatures = d.Signatures
 	p.declaration = &d
 	return p
 }

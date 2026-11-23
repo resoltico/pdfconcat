@@ -149,3 +149,14 @@ reference, the guard reports a typed cause for an optional source-admission
 probe. The cause indicates a top-level index slot on a typed dictionary and
 a matching tombstone generation. The discard reader still establishes the
 effective root, exclusive ownership and allowed uses independently.
+
+PDFConcat enables the runtime-only `Configuration.SkipSignatureCache` for
+explicit signature-discard admission. The backend skips recording signature
+appearance and revision summaries for that pass. It still validates form
+hierarchy, fields and page annotations. PDFConcat owns the original-graph
+inventory, including inherited signature fields and non-widget grouping
+nodes. The default backend signature cache and other operations are unchanged.
+
+Page resource consolidation retains the three default device color space
+bindings. Device color operators use them without a named resource operand,
+so the page resource name scan cannot prove them unused.

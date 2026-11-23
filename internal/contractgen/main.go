@@ -100,6 +100,9 @@ func generated(root string) (map[string][]byte, error) {
 		"$defs/page/properties/text/properties/overflow/enum": packet.Overflow("").Values(),
 	}
 	values["properties/version/const"] = plan.Version
+	values["properties/"+packet.SignaturePolicyMember+"/enum"] = packet.SignaturesRefuse.Values()
+	values["properties/"+packet.SignaturePolicyMember+"/default"] = packet.SignaturesRefuse
+	values["properties/"+packet.SignaturePolicyMember+"/description"] = packet.SignaturesDescription()
 	values["properties/optional_content/enum"] = packet.OptionalContentRefuse.Values()
 	values["properties/optional_content/default"] = packet.OptionalContentRefuse
 	values["properties/optional_content/description"] = packet.OptionalContentDescription()

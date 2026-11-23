@@ -895,5 +895,5 @@ func OptionalWrapperDefaultRefusal(option string) Explanation {
 
 // ProvedZeroOffsetDiscardHint explains the preserve refusal and the packet policy choice.
 func ProvedZeroOffsetDiscardHint() Explanation {
-	return explain("proved_zero_offset_discard_hint", `A structure index refers to an unwritten object. Use a v10 plan with "structure": "discard" only if untagged output for the whole packet is acceptable.`)
+	return explain("proved_zero_offset_discard_hint", `A structure index refers to an unwritten object. Use a v11 plan with "structure": "discard" only if untagged output for the whole packet is acceptable.`)
 }

@@ -1,6 +1,6 @@
-# Plan v10
+# Plan v11
 
-A plan is one UTF-8 JSON object with `version: 10`. Use source objects to select
+A plan is one UTF-8 JSON object with `version: 11`. Use source objects to select
 input pages, page items for extra pages, and groups for sections or
 shared path scopes. For whole files and plain blanks, the CLI also accepts PDF
 operands and `--blank`. See the README for [product scope and boundaries](../README.md#scope-and-boundaries)
@@ -13,7 +13,7 @@ packet; its input paths are relative to the directory where you save the plan.
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "output": "packet.pdf",
   "dir": "inputs",
   "page_defaults": { "size": "A4", "text": { "size": 24 } },
@@ -71,7 +71,7 @@ composition example uses titled groups and `divider` for that purpose.
 
 | Member | Meaning |
 | --- | --- |
-| `version` | Required integer token `10` |
+| `version` | Required integer token `11` |
 | `items` | Required nonempty array of the four item shapes below |
 | `output` | Output PDF; CLI `-o` overrides it |
 | `dir` | Scope for relative paths in top-level items |
@@ -80,6 +80,7 @@ composition example uses titled groups and `divider` for that purpose.
 | `page_numbers` | Optional numbering, labels and overlay placement |
 | `metadata` | Optional authored `title`, `author`, `subject`, `language` |
 | `timestamp` | Optional nonnegative UTC Unix seconds, through 253402300799 |
+| `signatures` | `refuse` (default) or explicit `discard` |
 | `optional_content` | `refuse` (default) or `flatten-visible-content` |
 | `structure` | `preserve` (default) or explicit `discard` |
 | `$schema` | Optional editor schema URL; ignored string |
@@ -127,7 +128,7 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "output": "reordered.pdf",
   "items": [
     { "source": "source.pdf", "pages": [[3, 3]] },
@@ -137,17 +138,17 @@ own ascending selection; a single selection such as `[[3,3],[1,2]]` is refused.
 }
 ```
 
-The entire source is still validated and hashed. Selection cannot hide a
-signature, encryption, damage or another whole-source refusal. The original
-source version still contributes to the output version. Source PageLabels are
-removed. Selection composes visible pages; it is not redaction and does not
-promise that every omitted-page byte or private object is erased.
+PDFConcat validates and hashes the entire source before selection. Every
+whole-source refusal applies even to content on omitted pages. The source version
+contributes to the output version, and source PageLabels are removed. Selection
+composes visible pages and provides no redaction guarantee.
 
-A partial selection of a source with nonempty form fields or any
-widgets is `source_selection_form_unsupported`. Full-range forms follow the
-[form rules](PDF-POLICY.md#forms-fitting-and-catalog). Fitting and effective-PDF-2.0
-appearance compatibility use the retained selected view, so omitted annotations
-and targets do not create those compatibility refusals.
+Partial selection requires the admitted source to have no form fields or
+widgets. Signature discard can make a signature-only form eligible for partial
+selection. If any fields or widgets remain, partial selection returns
+`source_selection_form_unsupported`. Full-range forms follow the
+[form rules](PDF-POLICY.md#forms-fitting-and-catalog). Fitting and PDF 2.0
+appearance compatibility use the retained selected view.
 
 PDFConcat removes local navigation to omitted pages within each source occurrence.
 Local links can target only pages retained in their own occurrence. When removal leaves
@@ -355,6 +356,22 @@ This does not invent semantics, certify PDF/UA, or replace human
 reading-order/accessibility review.
 Source PDF/UA identifiers are never copied to the output.
 
+## Signatures
+
+Set the root member `"signatures": "discard"` to compose a copy from sources
+whose signature state can be removed with proved ownership and appearance
+fidelity. Check and Build apply the setting to the entire source before selection.
+Direct inputs and plans using the default `"signatures": "refuse"` refuse
+populated signatures, catalog permissions and document timestamps.
+
+Use `pdfconcat check --plan FILE` to determine whether a source qualifies.
+`source_signature_discarded` identifies the kinds of state that composition
+omits from each affected source and lists its consuming items. Build reports
+publication separately.
+Any retained signature mark is static page artwork. Keep the original for
+authentication. See the [signature policy](PDF-POLICY.md#signatures) for the
+visibility and form limits.
+
 ## Generated pages and layering
 
 Each `page` item declares a blank or a page with one styled text block; `count`
@@ -415,7 +432,7 @@ can overflow even when its text looks short; give an appropriate width.
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "output": "positioned-text.pdf",
   "items": [{ "page": {
     "size": "A4",
@@ -453,7 +470,7 @@ contents or page-number overlay layout. For example, a generated page can declar
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "items": [{ "page": {
     "size": "A4",
     "text": {
@@ -510,7 +527,7 @@ The decoder stops at the first encountered fault: unknown/wrong-case member,
 duplicate member, null, wrong JSON type, grammar/range error, trailing data,
 invalid UTF-8 or unpaired surrogate. One leading UTF-8 BOM is accepted and counted
 in offsets. Offsets are zero-based; line/column are one-based bytes. Only plan
-version 10 is supported; version checks follow the same first-fault order.
+version 11 is supported; version checks follow the same first-fault order.
 
 After an optional leading UTF-8 BOM, empty or JSON-whitespace-only input is
 `plan_syntax`; supply a JSON plan object.

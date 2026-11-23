@@ -13,6 +13,10 @@ import (
 // withFormResource owns only the dictionaries it changes. The original resource
 // graph remains available for page groups and appearances that omit Resources.
 func withFormResource(s *model.Context, base types.Dict, name string, obj types.Object) (types.Dict, string, error) {
+	return withFormResourceAvoiding(s, base, name, obj, nil)
+}
+
+func withFormResourceAvoiding(s *model.Context, base types.Dict, name string, obj types.Object, invoked map[string]bool) (types.Dict, string, error) {
 	resources := clonedDirectDict(base)
 	xobjects, err := s.DereferenceDict(resources["XObject"])
 	if err != nil {
@@ -20,7 +24,7 @@ func withFormResource(s *model.Context, base types.Dict, name string, obj types.
 	}
 	xobjects = clonedDirectDict(xobjects)
 	prefix := name
-	for suffix := 1; xobjects[name] != nil; suffix++ {
+	for suffix := 1; xobjects[name] != nil || invoked[name]; suffix++ {
 		name = fmt.Sprintf("%s%d", prefix, suffix)
 	}
 	xobjects[name] = obj

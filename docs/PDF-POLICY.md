@@ -9,7 +9,7 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Source feature | Behavior |
 | --- | --- |
 | Encryption, including empty passwords | Refuse `source_encrypted` once the reader recognizes encryption, before password validation/key setup/decryption |
-| Signature values, catalog permission structures or document timestamps | Refuse `source_signed`; signatures are not authenticated |
+| Signature values, catalog permission structures or document timestamps | Refuse `source_signed` by default. A plan can opt in to [signature discard](#signatures). |
 | Empty unsigned signature fields, including null values | Keep |
 | `NeedsRendering true` | Refuse `source_dynamic_form` |
 | Visibility layers or orphan optional-content bindings | Refuse outside the [admitted optional-content profiles](#optional-content) with `source_optional_content` |
@@ -29,7 +29,8 @@ and filesystem boundary is in [SECURITY](../SECURITY.md).
 | Static AcroForm fields | Require compatible resolved `/DR`, form-level `/DA` and `/Q`; otherwise `source_form_unsupported` |
 | Later nonempty forms | Backend may namespace fields even when original names do not collide; build reports actual mappings |
 | `NeedAppearances true` | Keep request and warn that viewers may regenerate appearances |
-| XFA alongside static fields | Remove XFA, keep static form and warn |
+| XFA without a usable static form | Refuse `source_dynamic_form` before form normalization |
+| XFA alongside a usable static form | Remove XFA, keep static fields and warn, subject to the [form rules](#forms). |
 | Named and legacy destinations | Detach, rename collisions per occurrence and rebuild |
 | Destination outside its source page tree | Omit with warning and remove unusable references/actions |
 | Source outlines | Preserve direct/named/GoTo/Next targets per occurrence. Refuse retained PDF 2.0 local structure destinations. PDF null in an optional `/SD` entry counts as absent |
@@ -263,13 +264,51 @@ The source and provenance of the local reader are in
 [`third_party/pdfcpu`](../third_party/pdfcpu/PROVENANCE.md).
 
 
+## Signatures
+
+The latest effective revision governs detection. The default refuses populated
+signature values, document timestamps and catalog permission structures, including
+empty permission dictionaries. A standalone document security store or signature
+flag entry is metadata and does not establish a populated signature. Empty
+unsigned signature fields, including null values, remain interactive. Live
+null references in optional signature metadata slots count as absent.
+
+A plan can opt in to [signature discard](PLAN.md#signatures). The original file
+and its reported digest are preserved. PDFConcat removes proved signature
+fields, their owned widgets, recognized catalog permissions, document timestamps,
+validation stores and signature flags from the composed copy. A shared appearance
+or other resource remains available to its surviving owners. Conflicting or
+unproved ownership causes refusal, including a retained structure binding.
+Structure discard, when independently selected, applies its own rules.
+
+A genuinely Hidden widget can be removed without ink. A non-Hidden printable
+widget with a degenerate rectangle and a live normal, rollover or down
+appearance is refused because some viewers paint it in print mode. Degenerate
+widgets with no available appearance can qualify, including no-appearance
+timestamps.
+A visible widget must paint in both normal screen and print modes. PDFConcat
+maps the selected normal Form appearance to the widget rectangle using its
+bounding box and matrix, then adds the artwork above the original page content.
+Supported Form programs use opaque paths and ordinary text. Composition
+preserves the default device color spaces used by the appearance and original
+page drawing. Competing annotations, unproved blending or transparency, and
+visibility that depends on interaction, zoom or rotation are refused. Rollover
+and pressed appearances are discarded with the widget.
+
+Each inspected source with removed state reports one
+`source_signature_discarded` warning, naming all consuming items. A fresh
+check of the staged PDF verifies signature state and the artwork on retained
+physical pages before publication, including fitted clip bounds and placement.
+A flattened mark in a source PDF is ordinary page content. Authenticate the
+signature or timestamp against the original document.
+
 ## Selected sources and native construction
 
 ### Selection and inspection
 
-Page selection chooses which pages appear in the packet. It is not redaction and
-does not promise to remove every private object or byte associated with omitted
-pages. Partial selection of sources containing form fields or widgets is refused.
+Page selection chooses which visible pages appear in the packet and provides
+no redaction guarantee. Partial selection requires the admitted source to have
+no form fields or widgets. See the [selection rules](PLAN.md#source-selections).
 
 An occurrence is one use of a source in the packet. Inspection validates each
 whole source path once and retains its full hash and byte count, original page
@@ -329,6 +368,14 @@ Multiple nonempty forms are permitted only when their resolved `/DR`, form-level
 `/DA` and `/Q` representations match. Upstream does not generally merge multiple
 form default-resource dictionaries. The Fields array determines nonemptiness.
 An empty form is replaced by a later nonempty form, including its resources.
+
+PDFConcat checks the original AcroForm for XFA before backend form normalization.
+A source with live XFA requires at least one visible data widget bound to one
+page and intersecting its visible frame. A pushbutton or a signature widget
+alone is insufficient. Sources that qualify keep their static fields and report
+`source_xfa_removed`. Live null XFA entries count as absent. Signature discard
+also refuses a source whose populated signature fields would need removal while
+its XFA entry is live.
 
 `check` predicts possible field namespacing. `build` reads actual names from the
 merged parent chains and reports the mappings.

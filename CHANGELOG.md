@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-23
+
+- Update plan version tokens to 11. Plan v10 now fails with `plan_version_unsupported`. [Plan](docs/PLAN.md)
+- Refuse XFA sources without a visible static data widget. Keep the static form in supported hybrid PDFs. [PDF policy](docs/PDF-POLICY.md#source-policy)
+- Set `signatures: discard` to compose copies from supported signed or timestamped PDFs. A warning lists the state removed from each source. [Signature policy](docs/PDF-POLICY.md#signatures)
+- Signature discard keeps supported marks as static artwork and empty signature fields interactive. Keep originals for authentication. [Signature policy](docs/PDF-POLICY.md#signatures)
+- Refuse printable signature widgets with a degenerate rectangle and a live appearance under signature discard. [Signature policy](docs/PDF-POLICY.md#signatures)
+- Default signature refusals explain how to check eligibility for an unsigned copy. [Command line](docs/CLI.md)
+
 ## [0.19.0] - 2026-11-23
 
 - Suggest packet-wide `structure: discard` for a proved unwritten structure index when the source passes discard admission. [PDF policy](docs/PDF-POLICY.md#narrow-classic-xref-input-tolerance)

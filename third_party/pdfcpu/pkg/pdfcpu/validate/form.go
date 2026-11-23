@@ -306,6 +306,9 @@ func detectRectArray(xRefTable *model.XRefTable, d types.Dict, dictName string) 
 }
 
 func cacheSig(xRefTable *model.XRefTable, d types.Dict, dictName string, form bool, objNr, incr int) error {
+	if xRefTable.Conf != nil && xRefTable.Conf.SkipSignatureCache {
+		return nil
+	}
 	ft, _, err := xRefTable.DereferenceNameEntry(d, "FT")
 	if err != nil {
 		return fmt.Errorf("%s.FT: %w", dictName, err)

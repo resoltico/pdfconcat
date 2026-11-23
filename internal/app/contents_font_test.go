@@ -54,7 +54,7 @@ func TestContentsInheritedFontsInSerializedPages(t *testing.T) {
 				}
 				body["font"] = map[string]any{"file": "../fonts/alias.data"}
 			}
-			plan := map[string]any{"version": 10, "page_defaults": map[string]any{"size": "A4", "text": text}, "page_numbers": map[string]any{"mode": "consecutive", "start": 9, "kinds": []string{"page"}}, "items": []any{
+			plan := map[string]any{"version": 11, "page_defaults": map[string]any{"size": "A4", "text": text}, "page_numbers": map[string]any{"mode": "consecutive", "start": 9, "kinds": []string{"page"}}, "items": []any{
 				map[string]any{"numbering": false, "page": map[string]any{"text": map[string]any{"value": "office cover"}}},
 				map[string]any{"dir": "nested", "items": []any{
 					map[string]any{"contents": map[string]any{"title": "Contents office"}, "numbering": false},
@@ -236,7 +236,7 @@ func TestContentsInheritedFontDiagnostics(t *testing.T) {
 
 			page := map[string]any{"page": map[string]any{"size": "A4", "text": map[string]any{"font": "default"}}}
 			items := []any{map[string]any{"contents": map[string]any{"title": tc.title}}, map[string]any{"title": title, "items": []any{page}}}
-			plan := map[string]any{"version": 10, "page_defaults": map[string]any{"text": map[string]any{"font": map[string]any{"file": tc.file}}}, "items": items}
+			plan := map[string]any{"version": 11, "page_defaults": map[string]any{"text": map[string]any{"font": map[string]any{"file": tc.file}}}, "items": items}
 
 			data, e := json.Marshal(plan)
 			if e != nil {

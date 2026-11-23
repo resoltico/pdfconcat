@@ -14,11 +14,11 @@ import (
 )
 
 func readOutput(c context.Context, data []byte) (*model.Context, error) {
-	return readSerializedOutput(c, bytes.NewReader(data), nil, nil)
+	return readSerializedOutput(c, bytes.NewReader(data), nil, nil, nil)
 }
 
 // Check raw reference, catalog, layer and navigation evidence before semantic validation.
-func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *navigationObservation, wrapperPages []int64) (*model.Context, error) {
+func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *navigationObservation, wrapperPages []int64, signatures *signatureStage) (*model.Context, error) {
 	conf, err := configuration()
 	if err != nil {
 		return nil, err
@@ -102,6 +102,14 @@ func readSerializedOutput(c context.Context, reader io.ReadSeeker, navigation *n
 			return nil, err
 		}
 		if err = inspectRetainedDestinations(c, s, pages, false); err != nil {
+			return nil, err
+		}
+	}
+	if err = checkOutputSignatures(c, s, signatures != nil); err != nil {
+		return nil, err
+	}
+	if signatures != nil {
+		if err = signatures.verify(c, s, pages, before, false); err != nil {
 			return nil, err
 		}
 	}

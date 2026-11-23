@@ -34,69 +34,6 @@ func structureAt(err error, location diag.PDFLocation) error {
 	return &structureIntegrityError{location, err}
 }
 
-// All original objects remain subject to signature detection, even when their
-// semantic graph is about to be detached. Unrelated tag attributes need not
-// have name-valued Type/Subtype entries to perform this security inspection.
-func originalSignatureChecks(c context.Context, s *model.Context) error {
-	return objectLocations(c, s, false, func(d types.Dict, loc diag.PDFLocation) error {
-		name := func(o types.Object) (string, error) {
-			v, e := s.Dereference(o)
-			if e != nil {
-				return "", e
-			}
-			n, ok := v.(types.Name)
-			if !ok {
-				return "", nil
-			}
-			return types.DecodeName(string(n))
-		}
-		signed, signatureField := false, false
-		var values []types.Object
-		keys := make([]string, 0, len(d))
-		for key := range d {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		for _, key := range keys {
-			decoded, e := types.DecodeName(key)
-			if e != nil {
-				decoded = key
-			}
-			switch decoded {
-			case "Type", "FT":
-				value, e := name(d[key])
-				if e != nil {
-					return e
-				}
-				if decoded == "Type" && (value == "Sig" || value == "DocTimeStamp") {
-					signed = true
-				}
-				if decoded == "FT" && value == "Sig" {
-					signatureField = true
-				}
-			case "V":
-				values = append(values, d[key])
-			}
-		}
-		if signatureField {
-			for _, value := range values {
-				resolved, e := s.Dereference(value)
-				if e != nil {
-					return e
-				}
-				if resolved != nil {
-					signed = true
-				}
-			}
-		}
-		if signed {
-			err := refuse(diag.SourceSigned, diag.TheSourceDeclaresASignatureOrTimestampWhoseAssuranceComposition())
-			return structureAt(err, loc)
-		}
-		return nil
-	})
-}
-
 // objectLocations retains enclosing indirect identity and direct dictionary
 // paths without following reference cycles. Names/depth are general safeguards;
 // callers collecting discarded metadata may omit name-identity checks.

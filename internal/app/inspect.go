@@ -35,11 +35,10 @@ func (i *inspection) sourceFacts() []packet.SourceFacts {
 }
 
 type sourceUse struct {
-	structure       packet.StructurePolicy
-	optionalContent packet.OptionalContentPolicy
-	path            string
-	leaves          []int
-	requests        []pdf.SelectionRequest
+	policies pdf.SourcePolicies
+	path     string
+	leaves   []int
+	requests []pdf.SelectionRequest
 }
 type sourceInspection struct {
 	identity    files.InputIdentity
@@ -150,7 +149,7 @@ func inspectSource(ctx context.Context, use sourceUse) (out sourceInspection) {
 }
 
 func inspectSnapshot(ctx context.Context, use sourceUse, source *files.Snapshot, input io.ReadSeeker, items []string) sourceInspection {
-	facts, views, ds := pdf.InspectReader(ctx, input, source.Digest(), source.Size(), pdf.SourcePolicies{Structure: use.structure, OptionalContent: use.optionalContent}, use.requests)
+	facts, views, ds := pdf.InspectReader(ctx, input, source.Digest(), source.Size(), use.policies, use.requests)
 	for i := range ds {
 		ds[i].File = use.path
 		if len(ds[i].Items) == 0 {
@@ -168,10 +167,14 @@ func sourceUses(p packet.Plan) []sourceUse {
 		if !ok {
 			slot = len(uses)
 			index[item.Source] = slot
-			uses = append(uses, sourceUse{path: item.Source, structure: p.Structure(), optionalContent: p.OptionalContent()})
+			uses = append(uses, sourceUse{path: item.Source, policies: sourcePolicies(p)})
 		}
 		uses[slot].leaves = append(uses[slot].leaves, item.Index)
 		uses[slot].requests = append(uses[slot].requests, pdf.SelectionRequest{Fitting: fitting, Item: item.Ref, Pages: item.Selection})
 	}
 	return uses
+}
+
+func sourcePolicies(p packet.Plan) pdf.SourcePolicies {
+	return pdf.SourcePolicies{Structure: p.Structure(), OptionalContent: p.OptionalContent(), Signatures: p.Signatures()}
 }

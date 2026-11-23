@@ -108,7 +108,7 @@ func TestURIBaseWarningUsesEstablishedStageInJSONAndText(t *testing.T) {
 func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "blank.pdf")
-	blank := `{"version":10,"page_numbers":{"margin":88,"size":9},"page_defaults":{"text":{"value":"Body"}},"items":[{"page":{"size":"100x100","text":{"value":""}}}]}`
+	blank := `{"version":11,"page_numbers":{"margin":88,"size":9},"page_defaults":{"text":{"value":"Body"}},"items":[{"page":{"size":"100x100","text":{"value":""}}}]}`
 	r, code, raw := invokeJSON(t, []string{"build", "--plan", "-", "-o", out}, blank)
 	if code != 0 || !r.Output.Published {
 		t.Fatal(raw)
@@ -118,7 +118,7 @@ func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 	if code != 2 || !hasDiagnostic(r, "text_overflow") || !strings.Contains(raw, "Page-number exclusion") {
 		t.Fatal(raw)
 	}
-	plan, err := json.Marshal(map[string]any{"version": 10, "page_numbers": map[string]any{"margin": 100, "start": 19},
+	plan, err := json.Marshal(map[string]any{"version": 11, "page_numbers": map[string]any{"margin": 100, "start": 19},
 		"items": []map[string]any{{"source": out}}})
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestNumberedGeneratedBlankAndPhysicalRefusal(t *testing.T) {
 
 func TestAllowedOverflowDistinguishesPhysicalInkAndWrapWidth(t *testing.T) {
 	for _, tc := range []struct{ x, detail string }{{"0", "configured wrap width"}, {"-240", "Glyph ink crosses a physical page edge"}} {
-		plan := `{"version":10,"items":[{"page":{"size":"300x400","text":{"value":"UnbrokenToken","size":16,"width":12,"x":` + tc.x + `,"overflow":"allow"}}}]}`
+		plan := `{"version":11,"items":[{"page":{"size":"300x400","text":{"value":"UnbrokenToken","size":16,"width":12,"x":` + tc.x + `,"overflow":"allow"}}}]}`
 		r, code, raw := invokeJSON(t, []string{"check", "--plan", "-"}, plan)
 		if code != 0 || !hasDiagnostic(r, "text_overflow_allowed") || !strings.Contains(raw, tc.detail) {
 			t.Fatal(raw)
@@ -193,7 +193,7 @@ func TestWrapperPreludeRefusalIncludesResolvedReasonAndLocation(t *testing.T) {
 	if err := doc.WriteFile(source); err != nil {
 		t.Fatal(err)
 	}
-	plan := `{"version":10,"optional_content":"flatten-visible-content","items":[{"source":"prelude.pdf"}]}`
+	plan := `{"version":11,"optional_content":"flatten-visible-content","items":[{"source":"prelude.pdf"}]}`
 	result, code, raw := invokeJSON(t, []string{"check", "--plan", "-", "--base-dir", dir}, plan)
 	if code != 2 || len(result.Diagnostics) != 1 {
 		t.Fatal(raw)
@@ -236,7 +236,7 @@ func TestZeroOffsetDiscardHintCheckAndBuild(t *testing.T) {
 					args = append(args, source)
 				} else {
 					args = append(args, "--plan", "-", "--base-dir", dir)
-					input = fmt.Sprintf(`{"version":10,"structure":%q,"items":[{"source":"index.pdf"}]}`, policy)
+					input = fmt.Sprintf(`{"version":11,"structure":%q,"items":[{"source":"index.pdf"}]}`, policy)
 				}
 				if operation == "build" {
 					args = append(args, "--overwrite", "-o", out)
@@ -264,7 +264,7 @@ func TestZeroOffsetDiscardHintCheckAndBuild(t *testing.T) {
 				d := r.Diagnostics[0]
 				if d.Code.String() != "source_invalid" || d.File != source || len(d.Items) != 1 || d.PDFLocation == nil ||
 					d.PDFLocation.Object != 6 || d.PDFLocation.Path != "ParentTree" ||
-					!strings.Contains(d.Message, `v10 plan with "structure": "discard"`) ||
+					!strings.Contains(d.Message, `v11 plan with "structure": "discard"`) ||
 					!strings.Contains(d.Message, "untagged output for the whole packet") ||
 					!strings.Contains(d.Detail, "original reference to zero-offset object 7") {
 					t.Fatal(raw)
@@ -368,5 +368,34 @@ func TestRequiredFontBindingsUseOriginalDrawingScope(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDefaultSignatureRefusalOffersConditionalPlanGuidance(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "signed.pdf")
+	if err := pdffixture.SignatureValue("signed").WriteFile(source); err != nil {
+		t.Fatal(err)
+	}
+	plan := fmt.Sprintf(`{"version":11,"signatures":"refuse","items":[{"source":%q}]}`, filepath.ToSlash(source))
+	for _, args := range [][]string{{"check", source}, {"check", "--plan", "-"}} {
+		var stdout, stderr bytes.Buffer
+		if exit := run(args, strings.NewReader(plan), &stdout, &stderr); exit != 2 {
+			t.Fatalf("refusal exit %d: %s", exit, stderr.String())
+		}
+		for _, want := range []string{"source_signed", "PDF object 6", "deliver the original separately", "signatures", "discard", "pdfconcat check --plan FILE", "whether the source qualifies"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("text refusal lacks %q: %s", want, stderr.String())
+			}
+		}
+		result, exit, _ := invokeJSON(t, args, plan)
+		if exit != 2 || len(result.Diagnostics) != 1 {
+			t.Fatalf("structured refusal exit %d: %v", exit, result.Diagnostics)
+		}
+		d := result.Diagnostics[0]
+		if d.Code.String() != "source_signed" || d.PDFLocation == nil || d.PDFLocation.Object != 6 ||
+			d.PDFLocation.Path != "Object" || !strings.Contains(d.Detail, `"signatures": "discard"`) ||
+			!strings.Contains(d.Detail, "whether the source qualifies") {
+			t.Fatalf("structured refusal lost reason, guidance or location: %+v", d)
+		}
 	}
 }

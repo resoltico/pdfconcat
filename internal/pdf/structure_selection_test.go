@@ -199,7 +199,7 @@ func TestSerializedCoverageIsCheckedAgainstResolvedExpectation(t *testing.T) {
 	if diag.Outcome(findings) != "ok" {
 		t.Fatal(findings)
 	}
-	expected := Assembly{Structure: packet.StructurePreserve, Coverage: "complete", Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Source: "source.pdf"}, Pages: 1}, Occurrence: &Occurrence{File: &facts, Facts: &facts.OccurrenceFacts}}}}
+	expected := Assembly{SourcePolicies: SourcePolicies{Structure: packet.StructurePreserve}, Coverage: "complete", Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Kind: packet.PartSource, Source: "source.pdf"}, Pages: 1}, Occurrence: &Occurrence{File: &facts, Facts: &facts.OccurrenceFacts}}}}
 	err := VerifyAssembly(t.Context(), readPDF(t, path), 1, expected)
 	if err == nil || Diagnostic(err).Code != diag.OutputInvalid || !strings.Contains(Diagnostic(err).Detail, "coverage") {
 		t.Fatalf("false complete coverage escaped serialized verification: %v", err)

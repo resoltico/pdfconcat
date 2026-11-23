@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,7 +103,7 @@ func TestOptionalContentFaultOnRepeatedPagePreventsPublication(t *testing.T) {
 			Input:      pdffixture.SourceInput(raw),
 		}
 	}
-	assembly := pdf.Assembly{OptionalContent: policy, Fitting: fitting, Parts: []pdf.Part{
+	assembly := pdf.Assembly{SourcePolicies: pdf.SourcePolicies{OptionalContent: policy}, Fitting: fitting, Parts: []pdf.Part{
 		sourced(1, "first", occurrences[0]),
 		{
 			Part: packet.Part{
@@ -188,7 +189,7 @@ func TestStagedByteWitnessRefusesSameSizeDifferentValidPDF(t *testing.T) {
 		}
 	}
 	red, blue := packet.Color{R: 1}, packet.Color{B: 1}
-	assembly := pdf.Assembly{Structure: packet.StructureDiscard, Parts: []pdf.Part{part(1, "first", red), part(2, "second", blue)}}
+	assembly := pdf.Assembly{SourcePolicies: pdf.SourcePolicies{Structure: packet.StructureDiscard}, Parts: []pdf.Part{part(1, "first", red), part(2, "second", blue)}}
 	alternative := assembly
 	alternative.Parts = []pdf.Part{part(1, "first", blue), part(2, "second", red)}
 	var changed bytes.Buffer
@@ -326,6 +327,245 @@ func TestStageCleanupPreservesPrimaryFindingsAndReportsOperation(t *testing.T) {
 			if _, err := os.Stat(stage.Path()); !os.IsNotExist(err) {
 				t.Fatalf("close error prevented cleanup: %v", err)
 			}
+		})
+	}
+}
+
+func TestSignatureStageFaultsPreserveIncumbent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "output.pdf")
+	if err := os.WriteFile(target, []byte("incumbent"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	policies := pdf.SourcePolicies{Signatures: packet.SignaturesDiscard}
+	source := pdffixture.SignatureArtwork()
+	part := func(number int64, reference string, raw []byte) pdf.Part {
+		facts, views, findings := pdf.InspectReader(t.Context(), bytes.NewReader(raw), sha256.Sum256(raw), int64(len(raw)),
+			policies, []pdf.SelectionRequest{{Item: reference}})
+		if hasErrors(findings) || len(views) != 1 || views[0] == nil {
+			t.Fatalf("fixture admission: %v", findings)
+		}
+		return pdf.Part{
+			Part: packet.Part{
+				Leaf:  packet.Leaf{Kind: packet.PartSource, Ref: reference, Source: filepath.Join(dir, reference+".pdf")},
+				Pages: 1, FirstPage: number, LastPage: number,
+				Mapping: []packet.SourceMapping{{SourceFirst: 1, SourceLast: 1, OutputFirst: number}},
+			},
+			Occurrence: &pdf.Occurrence{File: &facts, Facts: views[0]}, Input: pdffixture.SourceInput(raw),
+		}
+	}
+	raw := source.Bytes()
+	hidden := pdffixture.SignatureArtwork()
+	hidden.Objs[5] = bytes.Replace(hidden.Objs[5], []byte("/F 4"), []byte("/F 2"), 1)
+	original := pdf.Assembly{SourcePolicies: policies, Parts: []pdf.Part{
+		part(1, "first", raw), part(2, "repeat", raw), part(3, "hidden", hidden.Bytes()),
+	}}
+	var output bytes.Buffer
+	built, err := pdf.Assemble(t.Context(), original, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := built.VerifyReader(t.Context(), bytes.NewReader(output.Bytes()), 3, original); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*pdffixture.Doc)
+		detail string
+		page   int
+	}{
+		{"residual signature", nil, "declares a signature", 0},
+		{"missing repeated artwork", func(doc *pdffixture.Doc) {
+			doc.Objs[5] = bytes.Replace(doc.Objs[5], []byte("/F 4"), []byte("/F 2"), 1)
+		}, "page 2 signature artwork", 2},
+		{"wrong repeated placement", func(doc *pdffixture.Doc) {
+			doc.Objs[5] = bytes.Replace(doc.Objs[5], []byte("75 85 175 145"), []byte("85 85 185 145"), 1)
+		}, "page 2 signature artwork", 2},
+		{"wrong repeated binding", func(doc *pdffixture.Doc) {
+			doc.Objs[7] = bytes.Replace(doc.Objs[7], []byte("1 0 0 rg"), []byte("0 1 0 rg"), 1)
+		}, "page 2 signature artwork", 2},
+		{"unexpected artwork on another page", func(*pdffixture.Doc) {}, "page 3 signature artwork", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			altered := raw
+			if tc.mutate != nil {
+				doc := pdffixture.SignatureArtwork()
+				tc.mutate(doc)
+				alternate := original
+				alternate.Parts = slices.Clone(original.Parts)
+				slot := tc.page - 1
+				alternate.Parts[slot] = part(int64(tc.page), original.Parts[slot].Ref, doc.Bytes())
+				var data bytes.Buffer
+				other, err := pdf.Assemble(t.Context(), alternate, &data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := other.VerifyReader(t.Context(), bytes.NewReader(data.Bytes()), 3, alternate); err != nil {
+					t.Fatalf("counterexample fails its own expectations: %v", err)
+				}
+				altered = data.Bytes()
+			}
+			stage, err := files.Create(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stage.Abort() })
+			if _, err := stage.Write(altered); err != nil {
+				t.Fatal(err)
+			}
+			roles := files.Roles{Output: target, Overwrite: true, InputsKnown: true}
+			// Give the byte witness the altered bytes' identity to isolate the
+			// independent semantic gate from the separate staged-byte gate.
+			published, ds := verifyAndPublishPDF(t.Context(), stage, roles, built, 3, original, testPDFIdentity(altered))
+			if published || stage.Published() || len(ds) != 1 || ds[0].Code != diag.OutputInvalid ||
+				!strings.Contains(ds[0].Detail, tc.detail) {
+				t.Fatalf("publication = %v, findings = %v", published, ds)
+			}
+			if tc.mutate == nil && strings.Contains(ds[0].Detail, "check --plan") {
+				t.Fatalf("staged refusal included source-admission guidance: %v", ds)
+			}
+			if data, err := os.ReadFile(target); err != nil || string(data) != "incumbent" {
+				t.Fatalf("destination = %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func signatureStageFixture(t *testing.T, raw []byte, fitting *packet.FitPolicy) (pdf.Assembly, pdf.Assembled, []byte) {
+	t.Helper()
+	policies := pdf.SourcePolicies{Signatures: packet.SignaturesDiscard}
+	facts, views, findings := pdf.InspectReader(t.Context(), bytes.NewReader(raw), sha256.Sum256(raw), int64(len(raw)),
+		policies, []pdf.SelectionRequest{{Item: "source", Fitting: fitting}})
+	if hasErrors(findings) || len(views) != 1 || views[0] == nil {
+		t.Fatalf("signature fixture admission: %v", findings)
+	}
+	assembly := pdf.Assembly{SourcePolicies: policies, Fitting: fitting, Parts: []pdf.Part{{
+		Part: packet.Part{
+			Leaf:  packet.Leaf{Kind: packet.PartSource, Ref: "source", Source: "source.pdf"},
+			Pages: 1, FirstPage: 1, LastPage: 1,
+			Mapping: []packet.SourceMapping{{SourceFirst: 1, SourceLast: 1, OutputFirst: 1}},
+		},
+		Occurrence: &pdf.Occurrence{File: &facts, Facts: views[0]}, Input: pdffixture.SourceInput(raw),
+	}}}
+	var data bytes.Buffer
+	built, err := pdf.Assemble(t.Context(), assembly, &data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := built.VerifyReader(t.Context(), bytes.NewReader(data.Bytes()), 1, assembly); err != nil {
+		t.Fatalf("signature fixture failed its own expectations: %v", err)
+	}
+	return assembly, built, data.Bytes()
+}
+
+func refuseSignatureStage(t *testing.T, assembly pdf.Assembly, built pdf.Assembled, data []byte, want string) {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "output.pdf")
+	if err := os.WriteFile(target, []byte("incumbent"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stage, err := files.Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stage.Abort() })
+	if _, err := stage.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	roles := files.Roles{Output: target, Overwrite: true, InputsKnown: true}
+	// Use the altered bytes' own identity to isolate semantic verification.
+	published, ds := verifyAndPublishPDF(t.Context(), stage, roles, built, 1, assembly, testPDFIdentity(data))
+	if published || stage.Published() || len(ds) != 1 || ds[0].Code != diag.OutputInvalid || !strings.Contains(ds[0].Detail, want) {
+		t.Fatalf("publication = %v, findings = %v", published, ds)
+	}
+	if actual, err := os.ReadFile(target); err != nil || string(actual) != "incumbent" {
+		t.Fatalf("destination = %q, %v", actual, err)
+	}
+}
+
+func TestSignatureStageFittedFormGeometry(t *testing.T) {
+	fitting := packet.DefaultFitPolicy(packet.Size{Width: 595, Height: 842})
+	assembly, built, good := signatureStageFixture(t, pdffixture.SignatureArtwork().Bytes(), fitting)
+	const bbox = "/BBox[10.0 20.0 290.0 380.0]"
+	if bytes.Count(good, []byte(bbox)) != 1 {
+		t.Fatal("fitted Form BBox is not unique")
+	}
+	t.Run("clip", func(t *testing.T) {
+		bad := bytes.Replace(good, []byte(bbox), []byte("/BBox[10.0 20.0  40.0  60.0]"), 1)
+		if err := pdf.Verify(t.Context(), bad, 1); err != nil {
+			t.Fatalf("the control must pass general PDF verification: %v", err)
+		}
+		refuseSignatureStage(t, assembly, built, bad, "Form BBox")
+	})
+	t.Run("matrix", func(t *testing.T) {
+		// Shorten the integral BBox operands and omit the optional Type
+		// entry to fit an explicit Matrix without changing any xref offset.
+		start := bytes.Index(good, []byte(bbox))
+		end := start + bytes.Index(good[start:], []byte(">>\nstream\n"))
+		if end < start || !bytes.Contains(good[start:end], []byte("/Type/XObject")) {
+			t.Fatal("could not locate the fitted Form dictionary")
+		}
+		withMatrix := func(translation string) []byte {
+			dict := bytes.Replace(good[start:end], []byte(bbox), []byte("/BBox[10 20 290 380]"), 1)
+			dict = bytes.Replace(dict, []byte("/Type/XObject"), []byte("/Matrix[1 0 0 1 "+translation+" 0]"), 1)
+			if start+len(dict) > end {
+				t.Fatal("the matrix mutation must preserve xref offsets")
+			}
+			out := bytes.Clone(good)
+			copy(out[start:end], dict)
+			copy(out[start+len(dict):end], strings.Repeat(" ", end-start-len(dict)))
+			return out
+		}
+		if err := built.VerifyReader(t.Context(), bytes.NewReader(withMatrix("0")), 1, assembly); err != nil {
+			t.Fatalf("equivalent explicit identity Matrix: %v", err)
+		}
+		bad := withMatrix("9")
+		if err := pdf.Verify(t.Context(), bad, 1); err != nil {
+			t.Fatalf("the control must pass general PDF verification: %v", err)
+		}
+		refuseSignatureStage(t, assembly, built, bad, "identity Matrix")
+	})
+}
+
+func TestSignatureStageDefaultColorSpace(t *testing.T) {
+	fitting := packet.DefaultFitPolicy(packet.Size{Width: 595, Height: 842})
+	for _, tc := range []struct {
+		name       string
+		appearance bool
+	}{
+		{"appearance", true},
+		{"original page", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assembly, built, good := signatureStageFixture(t, pdffixture.SignatureColorArtwork(tc.appearance, false).Bytes(), fitting)
+			if bytes.Count(good, []byte("/Gamma[2 2 2]")) == 0 {
+				t.Fatal("missing default color space")
+			}
+			bad := bytes.ReplaceAll(good, []byte("/Gamma[2 2 2]"), []byte("/Gamma[4 4 4]"))
+			if err := pdf.Verify(t.Context(), bad, 1); err != nil {
+				t.Fatalf("the control must pass general PDF verification: %v", err)
+			}
+			refuseSignatureStage(t, assembly, built, bad, "page 1 signature artwork")
+		})
+	}
+}
+
+func TestSignatureStageHiddenOnlyRejectsUnexpectedArtwork(t *testing.T) {
+	source := pdffixture.SignatureArtwork()
+	visible := source.Bytes()
+	source.Objs[5] = bytes.Replace(source.Objs[5], []byte("/F 4"), []byte("/F 2"), 1)
+	for _, tc := range []struct {
+		name string
+		fit  *packet.FitPolicy
+	}{
+		{"flat", nil},
+		{"fitted", packet.DefaultFitPolicy(packet.Size{Width: 595, Height: 842})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assembly, built, _ := signatureStageFixture(t, source.Bytes(), tc.fit)
+			_, _, unexpected := signatureStageFixture(t, visible, tc.fit)
+			refuseSignatureStage(t, assembly, built, unexpected, "page 1 signature artwork")
 		})
 	}
 }

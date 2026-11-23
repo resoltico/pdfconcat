@@ -477,7 +477,7 @@ func TestStructureAdmissionDiscardKeepsFormBoundaries(t *testing.T) {
 	if !f.HasWidgets || !f.HasFields {
 		t.Fatal("tag cleanup removed form identity")
 	}
-	a := Assembly{Structure: packet.StructureDiscard, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}), Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Ref: "whole", Kind: packet.PartSource, Source: "source.pdf"}}, Occurrence: &Occurrence{File: &f, Facts: views[0]}}}}
+	a := Assembly{SourcePolicies: SourcePolicies{Structure: packet.StructureDiscard}, Fitting: packet.DefaultFitPolicy(packet.Size{Width: 300, Height: 400}), Parts: []Part{{Part: packet.Part{Leaf: packet.Leaf{Ref: "whole", Kind: packet.PartSource, Source: "source.pdf"}}, Occurrence: &Occurrence{File: &f, Facts: views[0]}}}}
 	findings := CheckCompatibility(a).Diagnostics
 	if got := admissionError(t, findings); got.Code != diag.FitFormUnsupported {
 		t.Fatalf("discard bypassed form fitting protection: %+v", got)

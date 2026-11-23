@@ -442,8 +442,7 @@ or a receipt whose digest fails verification. It reports a verified version if
 the executable matches the receipt and prints a removal command only after
 also verifying the removal helper. The advisory only reports findings. If the
 installer gives no removal command, have an administrator inspect the system
-installation before using a removal helper. See the
-[system-managed installation guide](https://github.com/resoltico/pdfconcat/blob/v0.6.2/docs/MACOS.md#uninstall-pdfconcat).
+installation before using a removal helper.
 
 ## Archive names
 

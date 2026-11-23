@@ -136,7 +136,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 		report := filepath.Join(dir, "report.json")
 		cmd := exec.CommandContext(t.Context(), binary, "check", "--plan", "-", "--base-dir", dir, "--report", report, "--json")
 		cmd.Dir = t.TempDir()
-		cmd.Stdin = strings.NewReader(`{"version":10,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
+		cmd.Stdin = strings.NewReader(`{"version":11,"output":"must-not-exist.pdf","items":[{"source":"business-report.pdf"}]}`)
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatal(err, string(raw))
@@ -158,7 +158,7 @@ func corpusCLIContracts(t *testing.T, binary string) {
 func corpusCLIConcurrentPublication(t *testing.T, binary string) {
 	dir := t.ArtifactDir()
 	plan := filepath.Join(dir, "plan.json")
-	corpusJSON(t, plan, map[string]any{"version": 10, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
+	corpusJSON(t, plan, map[string]any{"version": 11, "output": "packet.pdf", "items": []any{corpusGenerated(1000, "A4", "")}})
 	commands := []*exec.Cmd{exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json"), exec.CommandContext(t.Context(), binary, "build", "--plan", plan, "--json")}
 	var outputs, errorsOut [2]bytes.Buffer
 	for n, cmd := range commands {

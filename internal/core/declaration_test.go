@@ -5,6 +5,7 @@ package packet
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -150,5 +151,26 @@ func TestEveryPreparedConstructionRevalidatesAndOwns(t *testing.T) {
 	}
 	if _, ds = Resolve(Plan{}, nil, 0); len(ds) == 0 || diag.Outcome(ds) != diag.StatusFailed {
 		t.Fatal("zero prepared state was plausible")
+	}
+}
+
+func TestTypedSignaturePolicyIsValidated(t *testing.T) {
+	for _, value := range []SignaturePolicy{"", SignaturesRefuse, SignaturesDiscard} {
+		draft := Declaration{Signatures: value, Items: []Item{&SourceItem{Path: "source.pdf"}}}
+		clean, ds := ValidateDeclaration(draft)
+		if len(ds) != 0 {
+			t.Fatal(ds)
+		}
+		want := value
+		if want == "" {
+			want = SignaturesRefuse
+		}
+		if got := preparePlan(clean).Signatures(); got != want {
+			t.Fatalf("effective policy %q, want %q", got, want)
+		}
+	}
+	_, ds := ValidateDeclaration(Declaration{Signatures: "unknown", Items: []Item{&SourceItem{Path: "source.pdf"}}})
+	if len(ds) != 1 || ds[0].Code != diag.PlanValue || !slices.Equal(ds[0].Items, []string{"signatures"}) {
+		t.Fatalf("invalid typed policy: %v", ds)
 	}
 }

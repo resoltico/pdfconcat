@@ -532,6 +532,15 @@
       },
       "type": "object"
     },
+    "signatures": {
+      "default": "refuse",
+      "description": "Refuse signature state or discard supported signature state when composing a copy.",
+      "enum": [
+        "refuse",
+        "discard"
+      ],
+      "type": "string"
+    },
     "structure": {
       "default": "preserve",
       "description": "Preserve supported declared hierarchies, with located warnings for tree-less remnants and proven derived-index corrections. Discard detaches semantic claims before tag validation; general source safety checks remain required.",
@@ -546,7 +555,7 @@
       "type": "integer"
     },
     "version": {
-      "const": 10,
+      "const": 11,
       "description": "Plan format version."
     }
   },

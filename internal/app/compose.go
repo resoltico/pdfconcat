@@ -46,7 +46,7 @@ func composePacket(c context.Context, j packet.Plan, inspected *inspection, oper
 		return out
 	}
 	out.layout = &layout
-	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata(), Timestamp: j.Timestamp(), Structure: j.Structure(), OptionalContent: j.OptionalContent(), Parts: assemblyParts(layout, inspected), Sections: layout.Sections, Fitting: layout.Fitting, NumberLayout: numberLayout}
+	out.assembly = pdf.Assembly{Numbering: layout.Numbering, Metadata: j.Metadata(), Timestamp: j.Timestamp(), SourcePolicies: sourcePolicies(j), Parts: assemblyParts(layout, inspected), Sections: layout.Sections, Fitting: layout.Fitting, NumberLayout: numberLayout}
 	out.diagnostics = append(out.diagnostics, resolvePolicies(out.assembly, operation == Check)...)
 	if hasErrors(out.diagnostics) {
 		return out
